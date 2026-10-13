@@ -433,7 +433,6 @@ export interface StepRun {
   inputs: StepInputs;
   env: NodeJS.ProcessEnv;
   containerName: string;
-  stopProxy: () => Promise<void>;
   audit: FilesystemAuditPaths | undefined;
   /** Whether the tracer attached, read when the audit is prepared. */
   auditAttached: () => boolean;
@@ -443,10 +442,9 @@ export interface StepRun {
 }
 
 /**
- * Everything after the command, whether it ran or not: the runner files
- * written back, the artifact outputs cleared, the reports, and the proxy
- * stopped. None of the calls throws, so the proxy is always stopped. Returns
- * whether a runner file failed the step.
+ * Everything after the command, whether it ran or not, up to stopping the
+ * proxy: the runner files written back, the artifact outputs cleared, and the
+ * reports. Returns whether a runner file failed the step.
  */
 export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<boolean> {
   const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
@@ -527,7 +525,6 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
       annotation,
     });
   }
-  await run.stopProxy();
   return runnerFileFailed;
 }
 
@@ -648,22 +645,30 @@ export async function runSandboxStep(
       envOverrides: mediation?.envOverrides,
     });
   } finally {
-    const runnerFileFailed = await finalizeStep(
-      {
-        inputs,
-        env,
-        containerName,
-        stopProxy,
-        audit,
-        auditAttached: () => auditAttached,
-        mediation,
-        runnerFilesBackingDir,
-        cancelled: cancel.signal.aborted,
-      },
-      deps,
-    );
-    if (runnerFileFailed) process.exitCode = 1;
-    stopListening();
+    // The reports are written not to throw; one that does anyway still leaves
+    // the proxy stopped and the signals released.
+    try {
+      const runnerFileFailed = await finalizeStep(
+        {
+          inputs,
+          env,
+          containerName,
+          audit,
+          auditAttached: () => auditAttached,
+          mediation,
+          runnerFilesBackingDir,
+          cancelled: cancel.signal.aborted,
+        },
+        deps,
+      );
+      if (runnerFileFailed) process.exitCode = 1;
+    } finally {
+      try {
+        await stopProxy();
+      } finally {
+        stopListening();
+      }
+    }
   }
 
   return exitCode;

@@ -74091,7 +74091,7 @@ async function finalizeStep(run, deps) {
 			annotation
 		});
 	}
-	return await run.stopProxy(), runnerFileFailed;
+	return runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {
 	let deps = {
@@ -74159,17 +74159,24 @@ async function runSandboxStep(env, overrides = {}) {
 			envOverrides: mediation?.envOverrides
 		});
 	} finally {
-		await finalizeStep({
-			inputs,
-			env,
-			containerName,
-			stopProxy,
-			audit,
-			auditAttached: () => auditAttached,
-			mediation,
-			runnerFilesBackingDir,
-			cancelled: cancel.signal.aborted
-		}, deps) && (process.exitCode = 1), stopListening();
+		try {
+			await finalizeStep({
+				inputs,
+				env,
+				containerName,
+				audit,
+				auditAttached: () => auditAttached,
+				mediation,
+				runnerFilesBackingDir,
+				cancelled: cancel.signal.aborted
+			}, deps) && (process.exitCode = 1);
+		} finally {
+			try {
+				await stopProxy();
+			} finally {
+				stopListening();
+			}
+		}
 	}
 	return exitCode;
 }
