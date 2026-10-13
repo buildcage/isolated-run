@@ -172,8 +172,8 @@ static __always_inline int mark_file(struct event *e, struct dentry *d, struct v
  * thread that closes the fd or changes directory meanwhile can give another
  * directory.
  */
-static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8 *trunc, u32 bit,
-				    int first)
+static __always_inline u32 append_base(struct event *e, u32 off, int dfd, u8 *n, u8 *trunc,
+				       u32 bit, int first)
 {
 	struct task_struct *t = bpf_get_current_task_btf();
 	struct dentry *d;
@@ -206,6 +206,23 @@ static __always_inline u32 add_base(struct event *e, u32 off, int dfd, u8 *n, u8
 	if (dfd != AT_FDCWD && mark_file(e, d, m))
 		return leaf(e, off, d, n);
 	return walk_path(e, off, first, d, m, n, trunc);
+}
+
+/**
+ * append_base for the first name (@p bit 1) or the second (2), counting the
+ * components it appends in e->mode or e->flags respectively.
+ *
+ * Not inlined, which leaves on_sys_exit smaller and quicker to verify.
+ */
+static __noinline u32 add_base(struct event *e, u32 off, int dfd, u32 bit, int first)
+{
+	u8 n = 0;
+	off = append_base(e, off, dfd, &n, bit == 2 ? &e->trunc2 : &e->truncated, bit, first);
+	if (bit == 2)
+		e->flags = n;
+	else
+		e->mode = n;
+	return off;
 }
 
 static __always_inline u32 path_walk(struct event *e, struct dentry *d, struct vfsmount *mnt)

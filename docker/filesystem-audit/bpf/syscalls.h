@@ -206,28 +206,23 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	}
 	// mode and flags count the base components of the first and second name;
 	// flags holds val1 instead for an op with one name.
-	u8 nb = 0;
 	// An empty string reads as 1 byte, or as 0 before Linux 6.16.
 	if (!call->p1 || (call->empty_dfd && (r == 0 || r == 1))) {
 		// No name (futimens), or an empty one (AT_EMPTY_PATH): the
 		// descriptor's path. One closed by the time the call returned
 		// names nothing, so a change made through it counts in untracked.
 		e->data[0] = 0;
-		off = add_base(e, 1, call->dfd1, &nb, &e->truncated, 1, 0);
-		e->mode = nb;
+		off = add_base(e, 1, call->dfd1, 1, 0);
 		if (!(e->bases & 1)) {
 			if (ret >= 0)
 				bump(&untracked);
 			return;
 		}
 	} else if (r > 1 && e->data[0] != '/') {
-		off = add_base(e, off, call->dfd1, &nb, &e->truncated, 1, e->n1);
-		e->mode = nb;
+		off = add_base(e, off, call->dfd1, 1, e->n1);
 	}
 	if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
-		nb = 0;
-		off = add_base(e, off, call->dfd2, &nb, &e->trunc2, 2, 0);
-		e->flags = nb;
+		off = add_base(e, off, call->dfd2, 2, 0);
 	}
 	e->data_len = off;
 	submit(e);
