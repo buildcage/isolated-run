@@ -20,7 +20,11 @@ import {
 import { failOrWarn } from "../fail-or-warn.ts";
 import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit-paths.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
-import { setFilesystemAuditOutput, uploadFilesystemAuditArtifact } from "./artifact.ts";
+import {
+  filesystemAuditArtifactName,
+  setFilesystemAuditOutput,
+  uploadFilesystemAuditArtifact,
+} from "./artifact.ts";
 import type { CutCause } from "./fold-tree.ts";
 import {
   createAuditSummary,
@@ -173,12 +177,23 @@ export interface StepFilesystemAudit {
 
 const NONE: StepFilesystemAudit = { blocks: () => [] };
 
+export interface ReadStepFilesystemAudit {
+  /** The artifact as it will be once uploaded, for a summary written before
+   *  the upload. */
+  expected: RecordArtifact;
+  /** Uploads the stripped copy, sets the output and returns the artifact as
+   *  it is. Never throws. */
+  upload: () => Promise<RecordArtifact>;
+  /** The audit's Job Summary blocks (see StepFilesystemAudit), their notes
+   *  saying `artifact` of the record. */
+  blocks: (startedAt: number | undefined, artifact: RecordArtifact) => SummaryBlock[];
+}
+
 /**
- * Uploads the recording before the Job Summary is written, so a cut section's
- * notice can say whether the artifact holds the rest. Never throws, so the
- * traffic report that follows is always reached.
+ * Reads the recording. Never throws, so the traffic report that follows is
+ * always reached.
  */
-export async function prepareStepFilesystemAudit(
+export function readStepFilesystemAudit(
   {
     audit,
     attached,
@@ -192,75 +207,9 @@ export async function prepareStepFilesystemAudit(
     failClosed,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
-): Promise<StepFilesystemAudit> {
+): ReadStepFilesystemAudit {
   const deps = { ...realDeps, ...overrides };
-  let artifactName = "";
-  try {
-    if (!audit) return NONE;
-    const options: SummaryOptions = {
-      workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-      home: prefixes(env.HOME, deps.realpath),
-    };
-    // The stripped copy goes beside the recording under the scratch base,
-    // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
-    // new file leaves the root-owned recording in place, so a failed write
-    // never uploads the raw. The post step removes both.
-    const cleanPath = audit.stepPath;
-    let reduced: Reduced | undefined;
-    try {
-      reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
-    } catch (e) {
-      annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
-      return { blocks: () => unreadableSummaryBlocks() };
-    }
-    if (!reduced) {
-      if (!attached) return NONE;
-      annotation.error(
-        "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
-      );
-      process.exitCode = 1;
-      return { blocks: () => unreadableSummaryBlocks() };
-    }
-    const { summary, summaryError } = reduced;
-    if (reduced.written)
-      artifactName =
-        (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
-    const uploaded: RecordArtifact = !upload
-      ? "not-requested"
-      : artifactName
-        ? { name: artifactName }
-        : "upload-failed";
-    const cutNote = (cause?: CutCause): string => filesystemTruncationNote(uploaded, cause);
-    const notice = cutNote();
-    const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
-    const legendNote = filesystemLegendNote(uploaded, `${guide}#reading-the-summary`);
-
-    // The summary and the upload are independent: a render failure must not
-    // also drop the artifact, which is most wanted when the recording is
-    // incomplete.
-    const blocks = (startedAt: number | undefined): SummaryBlock[] => {
-      let rendered: SummaryBlock[];
-      try {
-        if (!summary) throw summaryError;
-        rendered = deps.renderBlocks(summary, {
-          startedAt,
-          priorities: FILESYSTEM_PRIORITIES,
-          cutNote,
-          legendNote,
-          skippedHooksUrl: `${guide}#skipped-hooks`,
-        });
-      } catch (e) {
-        annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
-        return [];
-      }
-      mirrorForDebug(env, deps, audit.outPath, rendered);
-      return withNotices(rendered, () => notice);
-    };
-    return { blocks };
-  } catch (e) {
-    annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
-    return NONE;
-  } finally {
+  const setOutput = (artifactName: string) => {
     try {
       deps.setOutput(artifactName);
     } catch (e) {
@@ -269,7 +218,83 @@ export async function prepareStepFilesystemAudit(
         failClosed,
       )(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
     }
+  };
+  // Nothing to upload, and blocks that say nothing of an artifact.
+  const settled = (result: StepFilesystemAudit): ReadStepFilesystemAudit => ({
+    expected: "not-requested",
+    upload: async () => {
+      setOutput("");
+      return "not-requested";
+    },
+    blocks: (startedAt) => result.blocks(startedAt),
+  });
+  if (!audit) return settled(NONE);
+  const options: SummaryOptions = {
+    workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+    home: prefixes(env.HOME, deps.realpath),
+  };
+  // The stripped copy goes beside the recording under the scratch base,
+  // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
+  // new file leaves the root-owned recording in place, so a failed write
+  // never uploads the raw. The post step removes both.
+  const cleanPath = audit.stepPath;
+  let reduced: Reduced | undefined;
+  try {
+    reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
+  } catch (e) {
+    annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+    return settled({ blocks: () => unreadableSummaryBlocks() });
   }
+  if (!reduced) {
+    if (!attached) return settled(NONE);
+    annotation.error(
+      "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
+    );
+    process.exitCode = 1;
+    return settled({ blocks: () => unreadableSummaryBlocks() });
+  }
+  const { summary, summaryError, written } = reduced;
+  const artifactOf = (name: string): RecordArtifact =>
+    !upload ? "not-requested" : name ? { name } : "upload-failed";
+  const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+  return {
+    expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
+    upload: async () => {
+      let artifactName = "";
+      try {
+        if (written)
+          artifactName =
+            (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
+      } catch (e) {
+        annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
+      }
+      setOutput(artifactName);
+      return artifactOf(artifactName);
+    },
+    // The summary and the upload are independent: a render failure must not
+    // also drop the artifact, which is most wanted when the recording is
+    // incomplete.
+    blocks: (startedAt, artifact) => {
+      const cutNote = (cause?: CutCause): string => filesystemTruncationNote(artifact, cause);
+      let rendered: SummaryBlock[];
+      try {
+        if (!summary) throw summaryError;
+        rendered = deps.renderBlocks(summary, {
+          startedAt,
+          priorities: FILESYSTEM_PRIORITIES,
+          cutNote,
+          legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
+          skippedHooksUrl: `${guide}#skipped-hooks`,
+        });
+      } catch (e) {
+        annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
+        return [];
+      }
+      mirrorForDebug(env, deps, audit.outPath, rendered);
+      const notice = cutNote();
+      return withNotices(rendered, () => notice);
+    },
+  };
 }
 
 interface Reduced extends ReducedRecording {

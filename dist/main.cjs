@@ -68681,9 +68681,12 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 //#endregion
 //#region src/lib/filesystem-audit/artifact.ts
 init_core();
+function filesystemAuditArtifactName(containerName) {
+	return artifactName("buildcage-filesystem-audit", containerName);
+}
 async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact } = {}) {
 	try {
-		let name = artifactName("buildcage-filesystem-audit", containerName);
+		let name = filesystemAuditArtifactName(containerName);
 		return await upload(name, [outPath], (0, node_path.dirname)(outPath), { retentionDays }), console.log(`Uploaded the filesystem audit as ${name}`), name;
 	} catch (e) {
 		annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
@@ -70130,51 +70133,63 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-async function prepareStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$4,
 		...overrides
-	}, artifactName = "";
-	try {
-		if (!audit) return NONE;
-		let options = {
-			workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-			home: prefixes(env.HOME, deps.realpath)
-		}, cleanPath = audit.stepPath, reduced;
+	}, setOutput = (artifactName) => {
 		try {
-			reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
+			deps.setOutput(artifactName);
 		} catch (e) {
-			return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), { blocks: () => unreadableSummaryBlocks() };
+			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
 		}
-		if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, { blocks: () => unreadableSummaryBlocks() }) : NONE;
-		let { summary, summaryError } = reduced;
-		reduced.written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
-		let uploaded = upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested", cutNote = (cause) => filesystemTruncationNote(uploaded, cause), notice = cutNote(), guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`, legendNote = filesystemLegendNote(uploaded, `${guide}#reading-the-summary`);
-		return { blocks: (startedAt) => {
-			let rendered;
+	}, settled = (result) => ({
+		expected: "not-requested",
+		upload: async () => (setOutput(""), "not-requested"),
+		blocks: (startedAt) => result.blocks(startedAt)
+	});
+	if (!audit) return settled(NONE);
+	let options = {
+		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+		home: prefixes(env.HOME, deps.realpath)
+	}, cleanPath = audit.stepPath, reduced;
+	try {
+		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
+	} catch (e) {
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: () => unreadableSummaryBlocks() });
+	}
+	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: () => unreadableSummaryBlocks() })) : settled(NONE);
+	let { summary, summaryError, written } = reduced, artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	return {
+		expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
+		upload: async () => {
+			let artifactName = "";
+			try {
+				written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+			} catch (e) {
+				annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
+			}
+			return setOutput(artifactName), artifactOf(artifactName);
+		},
+		blocks: (startedAt, artifact) => {
+			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
 			try {
 				if (!summary) throw summaryError;
 				rendered = deps.renderBlocks(summary, {
 					startedAt,
 					priorities: FILESYSTEM_PRIORITIES,
 					cutNote,
-					legendNote,
+					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
 					skippedHooksUrl: `${guide}#skipped-hooks`
 				});
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
 			}
-			return audit.outPath, withNotices(rendered, () => notice);
-		} };
-	} catch (e) {
-		return annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`), NONE;
-	} finally {
-		try {
-			deps.setOutput(artifactName);
-		} catch (e) {
-			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+			audit.outPath;
+			let notice = cutNote();
+			return withNotices(rendered, () => notice);
 		}
-	}
+	};
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
 	let writer, written = !1, dropCopy = (e) => {
@@ -74168,7 +74183,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, closeSummary = !0 }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -74178,11 +74193,11 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = closeSummary ? [summaryFooter(actionRepo)] : [], named = closeSummary ? processActivity && rest.length > 0 : processActivity, writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
+	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = [summaryFooter(actionRepo)], named = processActivity && rest.length > 0, writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
 		...rest,
 		...footer
-	], env, annotation, { writeSummaryBlocks }, !0), artifactName = "", reported = !1;
+	], env, annotation, { writeSummaryBlocks }), artifactName = "";
 	if (!report) await writeRest();
 	else {
 		try {
@@ -74196,7 +74211,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 				processActivity: named,
 				failOnBlocked,
 				extraBlocks: [...rest, ...footer]
-			}, trafficArtifact.upload, env), reported = !0;
+			}, trafficArtifact.upload, env);
 		} catch (e) {
 			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
 		}
@@ -74211,29 +74226,14 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
-	return {
-		startedAt: report?.startedAt,
-		reported
-	};
 }
-async function writeLateSummary(blocks, { reported, actionRepo, isAudit, env, annotation }, overrides = {}) {
-	let { readStepLabel } = {
-		...realDeps$1,
-		...overrides
-	};
-	(reported || blocks.length !== 0) && await writeMoreSummary([
-		...reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), !0), isAudit)],
-		...blocks,
-		summaryFooter(actionRepo)
-	], env, annotation, overrides);
-}
-async function writeMoreSummary(blocks, env, annotation, overrides = {}, separateFromExisting = !1) {
+async function writeMoreSummary(blocks, env, annotation, overrides = {}) {
 	let { writeSummaryBlocks } = {
 		...realDeps$1,
 		...overrides
 	};
 	if (blocks.length !== 0) try {
-		await writeSummaryBlocks(blocks, env, { separateFromExisting });
+		await writeSummaryBlocks(blocks, env, { separateFromExisting: !0 });
 	} catch (e) {
 		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
@@ -74297,8 +74297,7 @@ const realDeps = {
 	stopSandboxProxy,
 	runSandboxedCommand,
 	reportStepTraffic,
-	writeLateSummary,
-	prepareStepFilesystemAudit,
+	readStepFilesystemAudit,
 	mediateRunnerOutputFiles,
 	readBackingFile,
 	removeBackingDir,
@@ -74421,7 +74420,7 @@ async function finalizeStep(run, deps) {
 	for (let set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) try {
 		set("");
 	} catch {}
-	let prepareAudit = () => deps.prepareStepFilesystemAudit({
+	let readAudit = deps.readStepFilesystemAudit({
 		audit,
 		attached: run.auditAttached(),
 		upload: inputs.filesystemAuditArtifact.upload,
@@ -74432,7 +74431,8 @@ async function finalizeStep(run, deps) {
 		actionRepo,
 		actionRef: reportActionRef,
 		failClosed: proxyMode !== "audit" && failOnBlocked
-	}), filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await deps.reportStepTraffic({
+	}), artifact = cancelled ? readAudit.expected : await readAudit.upload(), processActivity = audit !== void 0;
+	return await deps.reportStepTraffic({
 		containerName,
 		proxyEngine: inputs.proxyEngine,
 		parameters: {
@@ -74452,21 +74452,9 @@ async function finalizeStep(run, deps) {
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
-		moreBlocks: filesystemReport?.blocks,
-		processActivity,
-		closeSummary: !(cancelled && processActivity)
-	});
-	if (cancelled && processActivity) {
-		let late = await prepareAudit();
-		await deps.writeLateSummary(late.blocks(startedAt), {
-			reported,
-			actionRepo,
-			isAudit: proxyMode === "audit",
-			env,
-			annotation
-		});
-	}
-	return runnerFileFailed;
+		moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
+		processActivity
+	}), cancelled && await readAudit.upload(), runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {
 	let deps = {

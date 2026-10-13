@@ -7,6 +7,11 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "../artifact-upload.ts";
 
+/** The name uploadFilesystemAuditArtifact uploads under. */
+export function filesystemAuditArtifactName(containerName: string): string {
+  return artifactName("buildcage-filesystem-audit", containerName);
+}
+
 /**
  * Upload the recording the tracer already wrote, and return the artifact's
  * name, or undefined on failure. The JSON lines carry absolute paths, so
@@ -20,7 +25,7 @@ export async function uploadFilesystemAuditArtifact(
   { upload = uploadViaActionsArtifact }: { upload?: UploadArtifact } = {},
 ): Promise<string | undefined> {
   try {
-    const name = artifactName("buildcage-filesystem-audit", containerName);
+    const name = filesystemAuditArtifactName(containerName);
     await upload(name, [outPath], dirname(outPath), { retentionDays });
     console.log(`Uploaded the filesystem audit as ${name}`);
     return name;

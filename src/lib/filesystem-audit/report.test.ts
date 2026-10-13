@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
-import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
+import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 import {
   openWriter,
-  prepareStepFilesystemAudit,
+  readStepFilesystemAudit,
   readLines,
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
@@ -90,11 +90,20 @@ async function reportStepFilesystemAudit(
   d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
 ): Promise<void> {
   const { summaries = [], ...overrides } = d;
-  const blocks = (await prepareStepFilesystemAudit(options, overrides)).blocks(options.startedAt);
+  const blocks = await uploadedBlocks(options, overrides);
   if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
 }
 
-describe("prepareStepFilesystemAudit", () => {
+// Uploads first, as a step that ran to the end does, then renders.
+async function uploadedBlocks(
+  options: FilesystemAuditReportOptions & { startedAt?: number },
+  overrides: Partial<FilesystemAuditReportDeps>,
+): Promise<SummaryBlock[]> {
+  const read = readStepFilesystemAudit(options, overrides);
+  return read.blocks(options.startedAt, await read.upload());
+}
+
+describe("readStepFilesystemAudit", () => {
   const base = {
     upload: true,
     retentionDays: 3,
@@ -271,12 +280,10 @@ describe("prepareStepFilesystemAudit", () => {
         .map((r) => JSON.stringify(r))
         .join("\n"),
     });
-    const blocks = (
-      await prepareStepFilesystemAudit(
-        { ...base, audit: AUDIT, annotation: annotation(), env: {} },
-        d,
-      )
-    ).blocks(undefined);
+    const blocks = await uploadedBlocks(
+      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
+      d,
+    );
 
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
       Array(3).fill(
@@ -479,12 +486,10 @@ describe("prepareStepFilesystemAudit", () => {
 
   it("says the rest is not kept when the artifact could not be uploaded", async () => {
     const { deps: d } = deps({ uploadArtifact: async () => undefined });
-    const blocks = (
-      await prepareStepFilesystemAudit(
-        { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-        d,
-      )
-    ).blocks(undefined);
+    const blocks = await uploadedBlocks(
+      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
 
     expect(blocks.find((b) => b.cut !== "keep")?.notice).toContain(
       "the recording could not be uploaded as an artifact, so the rest is not kept",
@@ -671,7 +676,7 @@ describe("prepareStepFilesystemAudit", () => {
   );
 });
 
-describe("prepareStepFilesystemAudit: failures while reading", () => {
+describe("readStepFilesystemAudit: failures while reading", () => {
   const base = {
     upload: true,
     retentionDays: 3,
@@ -766,8 +771,8 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
   });
 });
 
-describe("prepareStepFilesystemAudit: an upload that throws", () => {
-  it("only warns, and still sets the output", async () => {
+describe("readStepFilesystemAudit: an upload that throws", () => {
+  it("only warns, still sets the output, and says the record is not kept", async () => {
     const note = annotation();
     const {
       deps: d,
@@ -794,9 +799,68 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to report the filesystem audit: network down",
+      "Could not upload the filesystem audit artifact: network down",
     );
-    expect(summaries).toEqual([]);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toContain("the full record could not be uploaded");
+    expect(outputs).toEqual([""]);
+  });
+});
+
+describe("readStepFilesystemAudit", () => {
+  const options = {
+    upload: true,
+    retentionDays: 3,
+    containerName: "buildcage-proxy-deadbeef",
+    actionRepo: "buildcage/isolated-run",
+    actionRef: "v2",
+    failClosed: false,
+    attached: true,
+    audit: AUDIT,
+    env: { GITHUB_WORKSPACE: "/work" },
+  };
+
+  // A cancelled step writes the summary first and uploads after it.
+  it("renders before the upload, naming the artifact the upload is to make", async () => {
+    const { deps: d, uploads, outputs } = deps();
+    const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
+
+    expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
+    const text = joinSummaryBlocks(read.blocks(undefined, read.expected));
+    expect(text).toContain(
+      "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact",
+    );
+    expect(uploads).toEqual([]);
+
+    await expect(read.upload()).resolves.toStrictEqual({
+      name: "buildcage-filesystem-audit-deadbeef",
+    });
+    expect(uploads).toHaveLength(1);
+    expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("expects no artifact when none was asked for, or there is no copy to upload", () => {
+    const { deps: d } = deps();
+    expect(
+      readStepFilesystemAudit({ ...options, upload: false, annotation: annotation() }, d).expected,
+    ).toBe("not-requested");
+    const { deps: empty } = deps({ raw: "" });
+    expect(readStepFilesystemAudit({ ...options, annotation: annotation() }, empty).expected).toBe(
+      "upload-failed",
+    );
+  });
+
+  it("uploads nothing and sets the output empty when there is no recording to read", async () => {
+    const { deps: d, uploads, outputs } = deps();
+    const read = readStepFilesystemAudit(
+      { ...options, audit: undefined, annotation: annotation() },
+      d,
+    );
+
+    expect(read.expected).toBe("not-requested");
+    expect(read.blocks(undefined, read.expected)).toStrictEqual([]);
+    await expect(read.upload()).resolves.toBe("not-requested");
+    expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
   });
 });
