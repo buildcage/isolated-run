@@ -23185,6 +23185,96 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	return requireDigest(digest, actionRef);
 }
 //#endregion
+//#region src/core/lib/report/render/fit-step-summary.ts
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotices(blocks, noticeFor) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice: noticeFor(b)
+	});
+}
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
+	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let pos = 0;;) {
+		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
+	}
+	let head = b.head ?? 0;
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+}
+//#endregion
+//#region src/lib/command-summary.ts
+const HTML_BLOCKS = [
+	{
+		start: /^<(?:script|pre|style|textarea)(?:[\s>]|$)/i,
+		ends: (line) => /<\/(?:script|pre|style|textarea)>/i.test(line),
+		closer: "</pre>"
+	},
+	{
+		start: /^<!--/,
+		ends: (line) => line.includes("-->")
+	},
+	{
+		start: /^<\?/,
+		ends: (line) => line.includes("?>"),
+		closer: "?>"
+	},
+	{
+		start: /^<!\[CDATA\[/,
+		ends: (line) => line.includes("]]>"),
+		closer: "]]>"
+	},
+	{
+		start: /^<![A-Za-z]/,
+		ends: (line) => line.includes(">"),
+		closer: ">"
+	}
+], BLOCK_TAG = /^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[\s>]|\/>|$)/i, LONE_TAG = /^(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|<\/[A-Za-z][A-Za-z0-9-]*\s*>)\s*$/, FENCE = /^(`{3,}|~{3,})(.*)$/, CLOSING_FENCE = /^(`{3,}|~{3,})[ \t]*$/, CONTAINER = /^(?:>|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))/, HEADING$1 = /^#{1,6}(?:[ \t]|$)/;
+function commandSummaryClosers(text) {
+	let open, inContainer = !1, inParagraph = !1, afterBlank = !0;
+	for (let raw of text.replace(/^\uFEFF/, "").split(/\r\n|\r|\n/)) {
+		let blank = raw.trim() === "", indent = /^ */.exec(raw)[0].length, line = raw.slice(indent);
+		if (open?.kind === "fence") {
+			let close = indent <= 3 ? CLOSING_FENCE.exec(line) : null;
+			close && close[1][0] === open.marker[0] && close[1].length >= open.marker.length && (open = void 0);
+		} else open?.kind === "html" ? open.block.ends(raw) && (open = void 0) : open?.kind === "until-blank" ? blank && (open = void 0) : blank || (indent === 0 && afterBlank && !CONTAINER.test(line) && (inContainer = !1), indent <= 3 && CONTAINER.test(line) && (inContainer = !0), indent <= 3 && !(inContainer && indent > 0) && !CONTAINER.test(line) && (open = blockStart(line, inParagraph), indent === 0 && open !== void 0 && (inContainer = !1)), inParagraph = open === void 0 && !HEADING$1.test(line));
+		blank && (inParagraph = !1), afterBlank = blank;
+	}
+	let closers = [];
+	return open?.kind === "fence" && closers.push(open.marker), text.includes("<!--") && closers.push("<!-- -->"), open?.kind === "html" && open.block.closer && closers.push(open.block.closer), closers.length === 0 ? "" : `${/[\r\n]$/.test(text) ? "" : "\n"}${closers.join("\n")}\n`;
+}
+function blockStart(line, inParagraph) {
+	let fence = FENCE.exec(line);
+	if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) return {
+		kind: "fence",
+		marker: fence[1]
+	};
+	let block = HTML_BLOCKS.find((b) => b.start.test(line));
+	if (block) return block.ends(line) ? void 0 : {
+		kind: "html",
+		block
+	};
+	if (BLOCK_TAG.test(line) || !inParagraph && LONE_TAG.test(line)) return { kind: "until-blank" };
+}
+function closeCommandSummary(summary) {
+	if (summary.length > 1048576) return summary;
+	let closers = Buffer.from(commandSummaryClosers(summary.toString("utf8")), "utf8");
+	return closers.length === 0 || summary.length + closers.length > 1048576 ? summary : Buffer.concat([summary, closers]);
+}
+//#endregion
 //#region src/core/lib/docker/host-addresses.ts
 function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
 	let found = new Set();
@@ -68604,37 +68694,6 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
-function withNotices(blocks, noticeFor) {
-	return blocks.map((b) => b.cut === "keep" ? b : {
-		...b,
-		notice: noticeFor(b)
-	});
-}
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
-	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
-	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
-	for (let i of order) {
-		let b = blocks[i];
-		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
-	}
-	return out.join("");
-}
-function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
-	if (b.cut === "atomic") return alone;
-	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let pos = 0;;) {
-		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
-		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
-	}
-	let head = b.head ?? 0;
-	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
-}
-//#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
@@ -74267,7 +74326,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 		if (file.variable === "GITHUB_OUTPUT") {
 			let { text, error } = validatedOutputText(read.bytes);
 			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
-		} else content = read.bytes;
+		} else content = closeCommandSummary(read.bytes);
 	}
 	try {
 		deps.writeRunnerFile(file.realPath, content);
