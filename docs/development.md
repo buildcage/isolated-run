@@ -381,8 +381,9 @@ through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`
 `haproxy-universal-config.ts` for `universal`). rolldown bundles it into
 `/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
 
-The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`. These details
-are left out of [AWS access key check](./aws.md):
+The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`, from the
+hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left out of
+[AWS access key check](./aws.md):
 
 - SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
   SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body or spelled other than
