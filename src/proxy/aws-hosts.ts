@@ -48,8 +48,8 @@ export const EC2_HOST = `${apiHost("ec2", "ec2(-fips)?")}|^[a-z0-9-]+\\.ec2\\.am
 // and Outposts endpoints do with no account or access point in front, public
 // or behind a VPC endpoint. Those are matched whole, so a bucket that shares
 // one's first label, as s3-control.s3.us-east-1.amazonaws.com does, still
-// names a resource.
-const S3_SERVICE_HOST = `s3-(accesspoint|control|object-lambda|outposts)(-fips)?(\\.dualstack)?\\.[a-z]+(-[a-z]+)+-[0-9]+\\.${AMAZONAWS_DOMAINS}$`;
+// names a resource: a bucket's next label starts with s3, a region's does not.
+const S3_SERVICE_HOST = `s3-(accesspoint|control|object-lambda|outposts)(-fips)?(\\.dualstack)?(\\.(?!s3)[a-z0-9-]+)?\\.${AMAZONAWS_DOMAINS}$`;
 export const S3_HOST = `^(?!${S3_SERVICE_HOST}|(accesspoint|control)\\.vpce-)(.*\\.)?s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
 export const AWS_RESOURCE_HOST =
   S3_HOST +
