@@ -356,6 +356,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
 │   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
 │   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links
+│   ├── check-alpine-licenses.sh # Fails the image build on an Alpine package that
+│   │                          # licenses/alpine-packages.txt does not cover
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
 │   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
@@ -376,7 +378,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in.
 │                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
-│                              # QuickJS-ng and the s6-overlay family) are copied into both images
+│                              # QuickJS-ng, the s6-overlay family and the Alpine packages in
+│                              # alpine/) are copied into both images, with alpine-packages.txt
+│                              # mapping each installed Alpine package to them
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
