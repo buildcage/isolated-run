@@ -51,6 +51,24 @@ assert_summary_contains() {
   fi
 }
 
+# Whether grep finds a match in a file: assert_file_has|assert_file_lacks
+# <file> <label> <grep args...>
+assert_file_has() {
+  local file="$1" label="$2"
+  shift 2
+  if grep -q "$@" "$file"; then pass "$label"; else fail "$label"; fi
+}
+
+assert_file_lacks() {
+  local file="$1" label="$2"
+  shift 2
+  if grep -q "$@" "$file"; then
+    fail "$label -- found: $(grep -m1 "$@" "$file")"
+  else
+    pass "$label"
+  fi
+}
+
 # A test run neither drops nor rotates a line, so an incomplete report here
 # means the dropped-log count could not be read.
 assert_report_complete() {

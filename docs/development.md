@@ -362,9 +362,10 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── run-isolated.sh        # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
 │   └── buildcage-init.sh      # The sandbox's PID 1: applies the step environment from stdin,
 │                              # runs the step's script, forwards signals and reaps orphans
-├── test/                      # assert-sandbox*.sh + integration-test-*.sh driving dist/main.cjs,
-│                              # and *-scenarios.sh run inside the sandbox as a step's own `run:`.
-│                              # helpers.sh carries what both halves share
+├── test/                      # integration-test-*.sh driving dist/main.cjs, assert-*.sh/.mjs
+│                              # checking what the e2e steps reported, and *-scenarios.sh run
+│                              # inside the sandbox as a step's own `run:`. helpers.sh carries
+│                              # what they share, helpers.mjs its pass/fail for the .mjs ones
 ├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
 │                              # refresh; not used in production or CI
 ├── docs/                      # development.md, security.md, aws.md, filesystem-audit.md, plus

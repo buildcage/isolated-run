@@ -286,76 +286,13 @@ jobs:
             fi
 
       - name: Verify the Job Summary has the filesystem audit
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
         run: |
-          f="${{ runner.temp }}/summary.md"
-          echo "::group::Filesystem audit summary"; cat "$f"; echo "::endgroup::"
+          echo "::group::Filesystem audit summary"; cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"; echo "::endgroup::"
           # The raw recording (before stripping) feeds the committed fixtures.
           echo "::group::Raw recording"; cat "${{ runner.temp }}/raw.jsonl" 2>/dev/null || true; echo "::endgroup::"
-          grep -q "Process Activity" "$f"
-          # The probe writes show as a flagged, command-tagged line under the
-          # workspace, led by its elapsed time (MM:SS.mmm) and a colon.
-          t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
-          grep -qE "^$t(-$t)?: +[RWXMLDArwxmlda!]+ +\S+ +\./probe" "$f" || exit 1
-          # Rows run in the order they were first touched: write, move, delete.
-          w=$(grep -nE ' W +bash +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
-          m=$(grep -nE ' M +mv +\./probe\.txt$' "$f" | head -1 | cut -d: -f1)
-          d=$(grep -nE ' D +rm +\./probe2\.txt$' "$f" | head -1 | cut -d: -f1)
-          [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]
-          # The tables list what ran and how often, and what was touched,
-          # across commands. python3 is a symlink, so it shows as the
-          # versioned file it runs.
-          grep -qE '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$' "$f"
-          grep -qF '| `./A/run.sh` | 1 |' "$f"
-          # Running a program is left to the executed table.
-          if sed -n '/^#### Accessed/,/<details>/p' "$f" | grep -qE '\| [A-Za-z!]*X[A-Za-z!]* \|$'; then exit 1; fi
-          grep -qF '| `./futimens.txt` | WA |' "$f"
-          grep -qF '| `./empty-name.txt` | WA |' "$f"
-          grep -q '<summary>🔍 Process details</summary>' "$f"
-          grep -qE ' WA +python3 +\./futimens\.txt$' "$f"
-          grep -qE ' WA +python3 +\./empty-name\.txt$' "$f"
-          # A subshell's command still counts as the step's. GNU touch then
-          # sets the new file's times through the descriptor; uutils' does not.
-          a=; if touch --version | grep -q 'GNU coreutils'; then a=A; fi
-          grep -qF "| \`./subshell.txt\` | W$a |" "$f"
-          grep -qE " W$a +touch +\./subshell\.txt$" "$f"
-          # Relative names show under the directory they resolved against.
-          grep -qE ' r +bash +\./sub/missing\.txt$' "$f"
-          grep -qE ' d +python3 +\./sub/gone$' "$f"
-          grep -qE ' r +python3 +\./sub/absent$' "$f"
-          # A refused syscall: noted under the heading, and a details row.
-          grep -qE '^> 🚫 Refused system calls: ' "$f"
-          grep -qE ' ! +python3 +syscall:unshare$' "$f"
-          if [ "$(uname -m)" = x86_64 ]; then
-            grep -qE '^> 🚫 .*illed for a 32-bit system call: .*`int80`' "$f"
-            grep -qE ' ! +int80 +syscall:32-bit getpid \(killed\)$' "$f"
-          fi
-          # A refused change shows only as failed.
-          grep -qE ' a!? +chmod +\./root-owned\.txt$' "$f"
-          # Each program sharing a descriptor gets its own row.
-          grep -qE ' W +bash +\./shared\.txt$' "$f"
-          grep -qE ' W +sh +\./shared\.txt$' "$f"
-          grep -qE ' W +bash +\./execd\.txt$' "$f"
-          grep -qE ' W +cat +\./execd\.txt$' "$f"
-          grep -qE ' w!? +mkdir +\./root-owned/x$' "$f"
-          grep -qE ' W +ln +\./link-dst\.txt$' "$f"
-          grep -qE ' L +ln +\./link-src\.txt$' "$f"
-          grep -qE ' l +ln +/etc/hostname$' "$f"
-          # A file mapped executable shows as read unless it is a library or
-          # an exec mapped it, as it does run.sh's interpreter.
-          grep -qE ' R +python3 +\./mapped\.bin$' "$f"
-          # A mapping the kernel refused after the tracer's hook is not a write.
-          if grep -qE ' [A-Za-z!]*[Ww][A-Za-z!]* +python3 +\./ro-mapped\.bin$' "$f"; then exit 1; fi
-          # Shared anonymous memory names no file.
-          grep -qE ' RW +python3 +\./mprotected\.bin$' "$f"
-          grep -qE ' RW +python3 +\./mprotected-rwx\.bin$' "$f"
-          if grep -q '/dev/zero' "$f"; then exit 1; fi
-          if grep -qE ' [A-Z]*R[A-Z!]* +\S+ +/usr/bin/dash$' "$f"; then exit 1; fi
-          # Run without a path: a memfd by its quoted name, a deleted file marked.
-          sed -n '/^#### Executed/,/^#### Accessed/p' "$f" > executed.md
-          grep -qF '| `memfd:"probe-memfd"` |' executed.md
-          grep -qF '| `./gone-bin` (deleted) |' executed.md
-          # buildcage's own wrappers must never reach the summary.
-          if grep -qE ' (setpriv|buildcage-init|run-script\.sh) ' "$f"; then exit 1; fi
+          ./test/assert-filesystem-audit.sh
 
       - name: Download and check the filesystem audit artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -363,39 +300,7 @@ jobs:
           name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
           path: ${{ runner.temp }}/audit
       - name: The artifact holds the step's events with buildcage's own stripped out
-        run: |
-          f=$(ls ${{ runner.temp }}/audit/*.jsonl)
-          test -s "$f"
-          echo "::group::Recorded events (first lines)"; head -20 "$f"; echo "::endgroup::"
-          grep -q '"kind":"write"' "$f"
-          # overlayfs opens a layer's directories with O_NOATIME (0o1000000) on
-          # its own behalf; none of those may pass for the step's.
-          n=$(jq -s '[.[] | select(.kind == "open" and ((.flags // 0) / 262144 | floor) % 2 == 1)] | length' "$f")
-          [ "$n" -eq 0 ]
-          # buildcage's own exec wrappers and scratch files must not leak.
-          if grep -qE '"comm":"(setpriv|buildcage-init|run-script\.sh)"' "$f"; then exit 1; fi
-          # A program run by a relative name is recorded under the file it
-          # resolved to, the script itself rather than its interpreter, with
-          # the name it was run by beside it.
-          grep -qE '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"' "$f"
-          jq -se 'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)' "$f" > /dev/null
-          # A mkdir the read-only root refused before the tracer's path hook is
-          # recorded (the summary folds it into /usr/**), one on a name
-          # already there is not.
-          jq -se 'any(.[]; .kind == "mkdir" and .path == "/usr/local/buildcage-ro-probe" and .err == 30)' "$f" > /dev/null
-          jq -se 'any(.[]; .kind == "chmod" and .failed and .mode == "0777" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
-          jq -se 'any(.[]; .kind == "chown" and .failed and .owner == "1:2" and (.path | endswith("/root-owned.txt")))' "$f" > /dev/null
-          if jq -se 'any(.[]; .kind == "mkdir" and .err == 17)' "$f" > /dev/null; then exit 1; fi
-          jq -se 'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)' "$f" > /dev/null
-          # Refused after the tracer's hook: no mapping, and only the failed open.
-          if jq -se 'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))' "$f" > /dev/null; then exit 1; fi
-          jq -se '[.[] | select(.kind == "open" and (.path // "" | endswith("/fifo")))] | length == 1 and .[0].failed' "$f" > /dev/null
-          if grep -q '/var/tmp/buildcage-' "$f"; then exit 1; fi
-          if grep -q 'buildcage-audit-sentinel-arg' "$f"; then exit 1; fi
-          jq -se 'any(.[]; .kind == "syscall" and .syscall == "unshare" and .err == 1 and .failed)' "$f" > /dev/null
-          if [ "$(uname -m)" = x86_64 ]; then
-            jq -se 'any(.[]; .kind == "syscall" and .syscall == "getpid" and .compat and .killed)' "$f" > /dev/null
-          fi
+        run: ./test/assert-filesystem-audit-artifact.sh "$RUNNER_TEMP/audit"
 
       - name: The tracer and the sandbox's cgroup are gone after the step
         run: |
@@ -762,35 +667,7 @@ jobs:
           path: ${{ runner.temp }}/buildcage-traffic
 
       - name: Verify the traffic artifact
-        run: |
-          node -e '
-            const fs = require("node:fs");
-            const rows = JSON.parse(
-              fs.readFileSync(process.env.RUNNER_TEMP + "/buildcage-traffic/traffic.json", "utf8"),
-            );
-            const methodRefused = rows.some(
-              (r) => r.action === "block" && r.host === "example.com" && r.method === "POST",
-            );
-            const hostRefused = rows.some(
-              (r) => r.action === "block" && r.host === "neverssl.com",
-            );
-            const passthrough = rows.some(
-              (r) => r.protocol === "tls" && r.host === "github.com" && r.bytes > 0,
-            );
-            if (!methodRefused) {
-              console.log("::error::POST to example.com was not recorded as blocked in the traffic artifact");
-              process.exit(1);
-            }
-            if (!hostRefused) {
-              console.log("::error::neverssl.com was not recorded as blocked in the traffic artifact");
-              process.exit(1);
-            }
-            if (!passthrough) {
-              console.log("::error::the github.com TLS passthrough was not recorded in the traffic artifact");
-              process.exit(1);
-            }
-            console.log("Traffic artifact verified.");
-          '
+        run: node test/assert-inspect-traffic-artifact.mjs "$RUNNER_TEMP/buildcage-traffic/traffic.json"
 
       - parallel:
           - name: sandbox-parallel-short-universal
@@ -1069,50 +946,11 @@ jobs:
           name: ${{ steps.restrict.outputs.traffic_artifact_name }}
           path: ${{ runner.temp }}/aws-traffic
 
-      # Each key the step signed with is told apart, and each STS call that
-      # issued one points at the requests signed with it.
       - name: Verify the traffic artifact's aws objects
         env:
           ROLE_ACCOUNT: ${{ steps.accounts.outputs.role }}
           SWITCHED_ACCOUNT: ${{ steps.accounts.outputs.switched }}
-        run: |
-          node -e '
-            const fs = require("node:fs");
-            const { ROLE_ACCOUNT, SWITCHED_ACCOUNT } = process.env;
-            const rows = JSON.parse(
-              fs.readFileSync(process.env.RUNNER_TEMP + "/aws-traffic/traffic.json", "utf8"),
-            ).filter((r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST");
-            const check = (ok, message) => {
-              if (!ok) {
-                console.log("::error::" + message);
-                console.log(JSON.stringify(rows, null, 2));
-                process.exit(1);
-              }
-            };
-            const allowed = rows.filter((r) => r.action === "allow");
-            const env = allowed.filter((r) => r.aws?.key === "env");
-            const assumed = allowed.filter((r) => r.aws?.key === "assumed");
-            const assumeRole = env.find((r) => r.aws.assumedAccount === SWITCHED_ACCOUNT && r.aws.issuedKeyRef);
-            check(assumeRole, "no AssumeRole signed with the starting key names the account and the key it issued");
-            check(
-              assumed.some((r) => r.aws.keyRef === assumeRole.aws.issuedKeyRef && r.aws.accountId === SWITCHED_ACCOUNT),
-              "no request was signed with the key AssumeRole issued, credited to its account",
-            );
-            const webIdentity = allowed.find((r) => r.aws?.key === "none" && r.aws.accountId === ROLE_ACCOUNT);
-            check(webIdentity?.aws.issuedKeyRef, "the unsigned AssumeRoleWithWebIdentity names no issued key");
-            check(
-              assumed.some((r) => r.aws.keyRef === webIdentity.aws.issuedKeyRef),
-              "no request was signed with the key AssumeRoleWithWebIdentity issued",
-            );
-            const refused = rows.filter((r) => r.action === "block" && r.reason === "aws-key-not-allowed");
-            check(refused.length > 0, "the call signed with a key from outside the step is not recorded as refused");
-            const known = new Set(allowed.map((r) => r.aws?.keyRef).filter(Boolean));
-            check(
-              refused.every((r) => r.aws?.keyRef && !known.has(r.aws.keyRef)),
-              "a refused call carries no keyRef, or that of a key the check let through",
-            );
-            console.log("Traffic artifact verified.");
-          '
+        run: node test/assert-aws-traffic-artifact.mjs "$RUNNER_TEMP/aws-traffic/traffic.json"
 
       # No account named: the switched role's key is one restrict would refuse,
       # and the report names its account for the workflow to check.
