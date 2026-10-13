@@ -9,14 +9,14 @@
 # the only thing that decides whether a request succeeds is the instance's own
 # allowlist. The two names below resolve to the same origin.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+require_local_image
 
 TMP_A=$(mktemp -d)
 TMP_B=$(mktemp -d)
 cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
+  fixture_down universal
   rm -rf "$TMP_A" "$TMP_B"
 }
 trap cleanup EXIT
@@ -28,33 +28,21 @@ CURL="curl -fsS -k -o /dev/null --max-time 10"
 
 run_instance() {
   local tmpdir="$1" https_rule="$2" own_url="$3" other_url="$4" test_net_addr="$5"
-  GITHUB_WORKSPACE="$tmpdir" \
-  GITHUB_STATE="$tmpdir/state.env" \
-  GITHUB_STEP_SUMMARY="$tmpdir/summary.md" \
-  BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$tmpdir/debug-summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
-  INPUT_PROXY_ENGINE="universal" \
-  TEST_NET_ADDR="$test_net_addr" \
-  INPUT_ALLOWED_HTTPS_RULES="$https_rule" \
-  INPUT_ALLOWED_HTTP_RULES="" \
-  INPUT_ALLOWED_IP_RULES="" \
-  INPUT_FAIL_ON_BLOCKED="false" \
-  INPUT_RUN="$CURL $own_url
+  run_step universal "$tmpdir/step" \
+    TEST_NET_ADDR="$test_net_addr" \
+    INPUT_ALLOWED_HTTPS_RULES="$https_rule" \
+    INPUT_ALLOWED_HTTP_RULES="" \
+    INPUT_ALLOWED_IP_RULES="" \
+    INPUT_FAIL_ON_BLOCKED="false" \
+    INPUT_RUN="$CURL $own_url
 if $CURL $other_url 2>&1; then
   echo cross-talk: $other_url was reachable
   exit 1
-fi" \
-    node "$REPO_ROOT/dist/main.cjs" > "$tmpdir/out.log" 2>&1
+fi"
   echo $? > "$tmpdir/exit_code"
 }
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
-touch "$TMP_A/state.env" "$TMP_A/summary.md" "$TMP_B/state.env" "$TMP_B/summary.md"
-
-echo "--- bringing up fixture origin (compose.test-universal.yaml) ---"
-docker compose -f "$REPO_ROOT/compose.test-universal.yaml" up -d --build --wait
+fixture_up universal
 
 # Each proxy adds its own address to the shared fixture network, so the two
 # cannot take the default one (docker/compose.action.test-universal.yaml).
@@ -80,7 +68,7 @@ for label_dir in "A:$TMP_A" "B:$TMP_B"; do
     pass "instance $label reached only its own allowlisted host"
   else
     fail "instance $label -- exit code $code, see log below"
-    cat "$dir/out.log"
+    cat "$dir/step.log"
   fi
 done
 
@@ -89,7 +77,7 @@ done
 for label_dir in "A:$TMP_A" "B:$TMP_B"; do
   label="${label_dir%%:*}"
   dir="${label_dir#*:}"
-  name=$(awk '/^container_name<</{getline; print; exit}' "$dir/state.env")
+  name=$(awk '/^container_name<</{getline; print; exit}' "$dir/step.state")
   if [ -z "$name" ]; then
     fail "instance $label wrote no container_name to GITHUB_STATE"
     continue

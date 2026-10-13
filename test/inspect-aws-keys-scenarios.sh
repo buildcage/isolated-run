@@ -18,11 +18,6 @@
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
-# Assembled at runtime: a literal shaped like an AWS access key ID trips secret
-# scanning on push.
-AKIA="AK""IA"
-ASIA="AS""IA"
-
 C="curl -sS -o /dev/null -w %{http_code} --max-time 10"
 CF=https://cloudformation.us-east-1.amazonaws.com/
 STS=https://sts.us-east-1.amazonaws.com

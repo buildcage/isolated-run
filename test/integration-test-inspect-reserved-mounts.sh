@@ -4,11 +4,9 @@
 # names the link or where it leads. Drives dist/main.cjs directly, without the
 # real action wrapper.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 WORKDIR=$(mktemp -d)
 TARGET_PARENT=$(mktemp -d)
@@ -25,28 +23,19 @@ done
 # The shallowest directory made for the link, removed with it.
 MADE_DIR=""
 cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
+  fixture_down inspect
   if [ -n "$MADE_DIR" ]; then sudo -n rm -rf "$MADE_DIR"; fi
   rm -rf "$WORKDIR" "$TARGET_PARENT"
 }
 trap cleanup EXIT
-touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
 run_instance() {
   local write_through="$1" run_script="$2"
-  GITHUB_WORKSPACE="$WORKDIR" \
-  GITHUB_STATE="$WORKDIR/state.env" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-  BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-  INPUT_PROXY_ENGINE="inspect" \
-  INPUT_WRITE_THROUGH="$write_through" \
-  INPUT_RUN="$run_script" \
-    node "$REPO_ROOT/dist/main.cjs" > "$WORKDIR/out.log" 2>&1
+  run_step inspect "$WORKDIR/step" \
+    INPUT_WRITE_THROUGH="$write_through" \
+    INPUT_RUN="$run_script"
   echo $? > "$WORKDIR/exit_code"
-  cat "$WORKDIR/out.log"
+  cat "$WORKDIR/step.log"
 }
 
 echo ""
@@ -66,13 +55,12 @@ if ! sudo -n mkdir -p "$(dirname "$CA_DIR_LINK")" || ! sudo -n ln -s "$TARGET" "
   assert_results
 fi
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+fixture_up inspect
 
 # The link itself fails as a symlink, before the CA directory check.
 run_instance "$CA_DIR_LINK" "true"
 CODE=$(cat "$WORKDIR/exit_code")
-if [ "$CODE" != "0" ] && grep -qF "symlinks are not followed. Name the path it leads to instead: \"$TARGET\"" "$WORKDIR/out.log"; then
+if [ "$CODE" != "0" ] && grep -qF "symlinks are not followed. Name the path it leads to instead: \"$TARGET\"" "$WORKDIR/step.log"; then
   pass "write_through: $CA_DIR_LINK is refused as a symlink to $TARGET"
 else
   fail "write_through: $CA_DIR_LINK was accepted (exit $CODE)"
@@ -80,7 +68,7 @@ fi
 
 run_instance "$TARGET" "true"
 CODE=$(cat "$WORKDIR/exit_code")
-if [ "$CODE" != "0" ] && grep -qF "is in the CA directory \"$CA_DIR_LINK\" (a symlink to \"$TARGET\")" "$WORKDIR/out.log"; then
+if [ "$CODE" != "0" ] && grep -qF "is in the CA directory \"$CA_DIR_LINK\" (a symlink to \"$TARGET\")" "$WORKDIR/step.log"; then
   pass "write_through: $TARGET is refused when $CA_DIR_LINK links to it"
 else
   fail "write_through: $TARGET was accepted (exit $CODE)"

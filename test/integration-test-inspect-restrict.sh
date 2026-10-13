@@ -12,46 +12,30 @@
 # regression risk unique to this repo, so it is checked here rather than
 # only in theory.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 echo ""
 echo "=== Inspect Engine Integration Test (restrict) ==="
 echo ""
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+trap 'fixture_down inspect' EXIT
+fixture_up inspect
 
 SYSTEM_CA=/etc/ssl/certs/ca-certificates.crt
 HASH_BEFORE=$(sha256sum "$SYSTEM_CA" | awk '{print $1}')
 
 TMPDIR=$(mktemp -d)
-touch "$TMPDIR/state.env"
-SUMMARY_FILE="$TMPDIR/summary.md"
-touch "$SUMMARY_FILE"
 
 echo "--- running the sandboxed step (proxy_engine: inspect, restrict mode) ---"
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$SUMMARY_FILE" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-INPUT_PROXY_ENGINE="inspect" \
-INPUT_PROXY_MODE="restrict" \
-INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443" \
-INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
-INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$ ~^tlsany\.example\.com:.*$" \
-INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$ 10.200.0.53:53 10.200.0.100:2525" \
-INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
+run_step inspect "$TMPDIR/step" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443" \
+  INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
+  INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443 ~^tlspass\.example\.com:8443$ ~^tlsany\.example\.com:.*$" \
+  INPUT_ALLOWED_IP_RULES="~^10\.200\.0\.\d+:9080$ 10.200.0.53:53 10.200.0.100:2525" \
+  INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**
 GET https://allowed.example.com:9443/public/**
 GET|POST https://api.example.com/v1/*
 GET http://10.200.0.100/pub-by-addr/**
@@ -70,10 +54,10 @@ GET ~^https?://anyport\.example\.com:.*/.*$
 # silence. (A '#' is rejected at input as a comment written without its
 # space, so it never reaches the config.)
 GET ~^https://blocked\.example\.com/frag(x|'z)$" \
-INPUT_FAIL_ON_BLOCKED="false" \
-INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh" \
-  node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
-RUN_EXIT=${PIPESTATUS[0]}
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh"
+RUN_EXIT=$?
+cat "$TMPDIR/step.log"
 
 echo ""
 echo "--- scenario exit code: $RUN_EXIT ---"
@@ -85,7 +69,7 @@ fi
 
 echo ""
 echo "--- report assertions (Job Summary) ---"
-SUMMARY=$(cat "$SUMMARY_FILE")
+SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"
@@ -174,21 +158,15 @@ fi
 # nothing else reached this host, so its close is kept; it belongs in neither
 # table, and the timeline is the only place it can appear. Its host is the SNI,
 # the only name it ever gave.
-if grep -qE "⚠️ .*: HTTPS aborted\.example\.com:443 -> client-(aborted|timeout)$" <<< "$SUMMARY"; then
-  pass "a connection the client left is in the timeline, with a mark of its own"
-else
-  fail "the aborted connection is missing from the timeline"
-fi
+assert_summary_matches "⚠️ .*: HTTPS aborted\.example\.com:443 -> client-(aborted|timeout)$" \
+  "a connection the client left is in the timeline, with a mark of its own"
 if grep -qF "| aborted.example.com:443 | HTTPS |" <<< "$SUMMARY"; then
   fail "the aborted connection was put in one of the host tables"
 else
   pass "the aborted connection is in neither host table"
 fi
-if grep -qE "⚠️ .*: HTTPS abandoned\.example\.com:443 -> client-tls-failed$" <<< "$SUMMARY"; then
-  pass "a failed client handshake is in the timeline, named by its SNI"
-else
-  fail "the failed client handshake is missing from the timeline"
-fi
+assert_summary_matches "⚠️ .*: HTTPS abandoned\.example\.com:443 -> client-tls-failed$" \
+  "a failed client handshake is in the timeline, named by its SNI"
 # No rule takes the row above away, so the refused lookup for the same name has
 # to survive: it is the only row a reader can act on.
 assert_summary_contains "| aborted.example.com | DNS | 🚫 dns-not-allowed |" \
@@ -237,25 +215,17 @@ fi
 echo ""
 echo "--- CA trust survives a write_through: entry containing its mount points ---"
 WT_TMPDIR=$(mktemp -d)
-touch "$WT_TMPDIR/state.env" "$WT_TMPDIR/summary.md"
-GITHUB_WORKSPACE="$WT_TMPDIR" \
-GITHUB_STATE="$WT_TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WT_TMPDIR/summary.md" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-INPUT_PROXY_ENGINE="inspect" \
-INPUT_PROXY_MODE="restrict" \
-INPUT_WRITE_THROUGH="/etc" \
-INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**" \
-INPUT_RUN="curl -sS --max-time 10 -o /dev/null https://allowed.example.com/public/pkg.tgz" \
-  node "$REPO_ROOT/dist/main.cjs" > "$WT_TMPDIR/out.log" 2>&1
+run_step inspect "$WT_TMPDIR/step" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_WRITE_THROUGH="/etc" \
+  INPUT_ALLOWED_URL_RULES="GET https://allowed.example.com/public/**" \
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null https://allowed.example.com/public/pkg.tgz"
 WT_EXIT=$?
 if [ "$WT_EXIT" = "0" ]; then
   pass "an allowed HTTPS GET still verifies against the injected CA under write_through: /etc"
 else
-  fail "write_through: /etc broke CA trust or DNS (exit $WT_EXIT; see $WT_TMPDIR/out.log)"
-  cat "$WT_TMPDIR/out.log"
+  fail "write_through: /etc broke CA trust or DNS (exit $WT_EXIT; see $WT_TMPDIR/step.log)"
+  cat "$WT_TMPDIR/step.log"
 fi
 if [ "$HASH_BEFORE" = "$(sha256sum "$SYSTEM_CA" | awk '{print $1}')" ]; then
   pass "the host's system CA store is still untouched after the write_through: /etc step"

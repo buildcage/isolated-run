@@ -7,9 +7,9 @@
 # own (which disables the read-only restriction entirely), and the deprecated
 # writable: spelling.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 # Outside every always-writable path ($GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP),
@@ -30,11 +30,9 @@ cleanup() {
 trap cleanup EXIT
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
-
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITE_THROUGH="/opt
 ${PARENT}/created-kept
@@ -80,7 +78,6 @@ for mode in persistent ephemeral; do
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE="$mode" \
   INPUT_WRITE_THROUGH="${STICKY}/$mode/build/out" \
@@ -102,7 +99,6 @@ done
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITE_THROUGH="/" \
 INPUT_RUN="touch /opt/.buildcage-writable-test
@@ -120,7 +116,6 @@ fi
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITABLE="/opt" \
 INPUT_RUN="touch /opt/.buildcage-writable-test

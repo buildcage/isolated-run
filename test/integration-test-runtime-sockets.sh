@@ -10,9 +10,9 @@
 # test-e2e.yml's enforcement steps for the one case that does exercise
 # the real action.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 HOST_UID=$(id -u)
 RUN_DOCKER_SOCKET_CHECKS=0
@@ -42,7 +42,6 @@ touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='echo "SANDBOX_GID=$(id -g)"
 if [ -S /var/run/docker.sock ]; then echo "SOCKET_IS_SOCKET=yes"; else echo "SOCKET_IS_SOCKET=no"; fi
@@ -144,7 +143,6 @@ if [ -S /run/dbus/system_bus_socket ]; then
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_WRITE_THROUGH="/run/dbus/system_bus_socket" \
   INPUT_RUN='if [ -S /var/run/dbus/system_bus_socket ]; then echo "REEXPOSED_BUS_IS_SOCKET=yes"; else echo "REEXPOSED_BUS_IS_SOCKET=no"; fi' \

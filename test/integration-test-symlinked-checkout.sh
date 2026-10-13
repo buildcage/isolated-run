@@ -6,10 +6,9 @@
 # The link sits in /var/tmp, where the sandbox cannot write, so the checkout
 # is protected at its target rather than refused.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
-
-source "$(dirname "$0")/helpers.sh"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 LINK="/var/tmp/buildcage-test-checkout-$$"
@@ -20,7 +19,6 @@ ln -s "$(pwd -P)" "$LINK"
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='touch "$GITHUB_WORKSPACE/ran"' \
   node "$LINK/dist/main.cjs"

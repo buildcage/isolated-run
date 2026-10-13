@@ -5,44 +5,29 @@
 # enforcement end-to-end (see test/universal-restrict-scenarios.sh for the
 # scenario list itself).
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built universal-engine image}"
+require_local_image universal
 
 echo ""
 echo "=== Universal Engine Integration Test (restrict) ==="
 echo ""
 
-echo "--- bringing up fixture origin (compose.test-universal.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-universal.yaml" up -d --build --wait
+trap 'fixture_down universal' EXIT
+fixture_up universal
 
 TMPDIR=$(mktemp -d)
-touch "$TMPDIR/state.env"
-SUMMARY_FILE="$TMPDIR/summary.md"
-touch "$SUMMARY_FILE"
 
 echo "--- running the sandboxed step (proxy_engine: universal, restrict mode) ---"
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$SUMMARY_FILE" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
-INPUT_PROXY_ENGINE="universal" \
-INPUT_PROXY_MODE="restrict" \
-INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$ ~^tlsany\\.example\\.com:.*\$" \
-INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 allowed.example.com:8080 *.wildcard.example.com:80 *.wildcard.example.com:8080" \
-INPUT_ALLOWED_IP_RULES="10.200.0.100:8443 10.200.0.100:2525" \
-INPUT_FAIL_ON_BLOCKED="false" \
-INPUT_RUN="bash $REPO_ROOT/test/universal-restrict-scenarios.sh" \
-  node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
-RUN_EXIT=${PIPESTATUS[0]}
+run_step universal "$TMPDIR/step" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$ ~^tlsany\\.example\\.com:.*\$" \
+  INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 allowed.example.com:8080 *.wildcard.example.com:80 *.wildcard.example.com:8080" \
+  INPUT_ALLOWED_IP_RULES="10.200.0.100:8443 10.200.0.100:2525" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN="bash $REPO_ROOT/test/universal-restrict-scenarios.sh"
+RUN_EXIT=$?
+cat "$TMPDIR/step.log"
 
 echo ""
 echo "--- scenario exit code: $RUN_EXIT ---"
@@ -54,7 +39,7 @@ fi
 
 echo ""
 echo "--- report assertions (Job Summary) ---"
-SUMMARY=$(cat "$SUMMARY_FILE")
+SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
 assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"

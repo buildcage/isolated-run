@@ -7,11 +7,9 @@
 # is left alone with a warning. Directories made for a new database are removed
 # afterwards, and removing one on the host mid-command gives a warning.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 CHROME_VERSION=154.0.8037.57
 
@@ -19,12 +17,8 @@ echo ""
 echo "=== Inspect Engine Integration Test (Chromium's NSS database) ==="
 echo ""
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+trap 'fixture_down inspect' EXIT
+fixture_up inspect
 
 TMPDIR=$(mktemp -d)
 
@@ -42,26 +36,18 @@ SHOW="grep nssdb /proc/self/mountinfo || echo 'no nssdb mount'; ls -la \$HOME/.p
 
 show_home() { find "$1" -ls | sed 's/^/    /'; }
 
-# run_step <home> <run> [VAR=value...]: runs the action with HOME pointed away
-# from the runner's real one. Sets $OUT and $RUN_EXIT.
-run_step() {
+# chrome_step <home> <run> [VAR=value...]: runs the action with HOME pointed
+# away from the runner's real one. Sets $OUT and $RUN_EXIT.
+chrome_step() {
   local home=$1 run=$2
   shift 2
-  touch "$TMPDIR/state.env" "$TMPDIR/summary.md"
-  OUT=$(env "$@" \
+  run_step inspect "$TMPDIR/$(basename "$home")" \
     HOME="$home" \
-    GITHUB_WORKSPACE="$TMPDIR" \
-    GITHUB_STATE="$TMPDIR/state.env" \
-    GITHUB_STEP_SUMMARY="$TMPDIR/summary.md" \
-    BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$TMPDIR/summary.md" \
-    BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-    BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-    BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-    INPUT_PROXY_ENGINE="inspect" \
     INPUT_PROXY_MODE="audit" \
     INPUT_RUN="$run" \
-    node "$REPO_ROOT/dist/main.cjs" 2>&1)
+    "$@"
   RUN_EXIT=$?
+  OUT=$(cat "$TMPDIR/$(basename "$home").log")
   echo "$OUT" | tail -25
 }
 
@@ -75,7 +61,7 @@ echo "--- a home with no database ---"
 HOME_A="$TMPDIR/home-a"
 mkdir -p "$HOME_A"
 # Control: without the database the same browser must refuse the proxy.
-run_step "$HOME_A" "
+chrome_step "$HOME_A" "
 $SHOW
 HOME=/tmp/chromium-control $CHECK untrusted
 rm -rf /tmp/chromium-control
@@ -96,7 +82,7 @@ echo ""
 echo "--- a home with its own XDG database ---"
 HOME_B="$TMPDIR/home-b"
 mkdir -p "$HOME_B/.local/share/pki/nssdb"
-run_step "$HOME_B" "
+chrome_step "$HOME_B" "
 $SHOW
 $CHECK"
 if [ "$RUN_EXIT" = "0" ]; then
@@ -116,7 +102,7 @@ echo "--- a command that writes to the database ---"
 HOME_C="$TMPDIR/home-c"
 mkdir -p "$HOME_C/.pki/nssdb"
 printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_C/.pki/nssdb/pkcs11.txt"
-run_step "$HOME_C" "
+chrome_step "$HOME_C" "
 grep -q buildcage \$HOME/.pki/nssdb/pkcs11.txt
 touch \$HOME/.pki/nssdb/written-by-the-command"
 if [ "$RUN_EXIT" = "0" ]; then
@@ -136,7 +122,7 @@ echo ""
 echo "--- the same command under filesystem_mode: ephemeral ---"
 HOME_E="$TMPDIR/home-e"
 mkdir -p "$HOME_E"
-run_step "$HOME_E" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FILESYSTEM_MODE=ephemeral
+chrome_step "$HOME_E" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FILESYSTEM_MODE=ephemeral
 if [ "$RUN_EXIT" = "0" ]; then
   pass "the step carried on"
 else
@@ -153,7 +139,7 @@ echo ""
 echo "--- a command that leaves the database alone ---"
 HOME_I="$TMPDIR/home-i"
 mkdir -p "$HOME_I"
-run_step "$HOME_I" "true"
+chrome_step "$HOME_I" "true"
 if [ "$RUN_EXIT" = "0" ] && [ ! -e "$HOME_I/.pki" ]; then
   pass "the directories made for the database were taken back"
 else
@@ -174,7 +160,7 @@ rm -f "$TMPDIR/started-j"
   rm -rf "$HOME_J/.pki"
 ) &
 REMOVER=$!
-run_step "$HOME_J" "touch $TMPDIR/started-j; sleep 3"
+chrome_step "$HOME_J" "touch $TMPDIR/started-j; sleep 3"
 wait "$REMOVER"
 if [ "$RUN_EXIT" = "0" ] &&
   grep -q "$HOME_J/.pki/nssdb was removed or replaced on the runner while the command ran" <<<"$OUT"; then
@@ -189,7 +175,7 @@ HOME_H="$TMPDIR/home-h"
 mkdir -p "$HOME_H/.pki/nssdb"
 printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_H/.pki/nssdb/pkcs11.txt"
 # The module is appended after the slot, as modutil does.
-run_step "$HOME_H" "
+chrome_step "$HOME_H" "
 $SHOW
 $CHECK
 touch \$HOME/.pki/nssdb/written-by-the-command
@@ -213,7 +199,7 @@ echo ""
 echo "--- a command that copies the CA into the database ---"
 HOME_F="$TMPDIR/home-f"
 mkdir -p "$HOME_F/.pki/nssdb"
-run_step "$HOME_F" "cp /dev/buildcage-nssdb/cert9.db \$HOME/.pki/nssdb/copy.db"
+chrome_step "$HOME_F" "cp /dev/buildcage-nssdb/cert9.db \$HOME/.pki/nssdb/copy.db"
 if [ "$RUN_EXIT" != "0" ] && grep -q "copied the proxy CA into the NSS database at $HOME_F/.pki/nssdb" <<<"$OUT" &&
   grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
   pass "the step failed, naming the database and pointing at fail_on_ca_residue"
@@ -231,7 +217,7 @@ echo "--- a database the runner user cannot write ---"
 HOME_G="$TMPDIR/home-g"
 mkdir -p "$HOME_G/.pki/nssdb"
 chmod 555 "$HOME_G/.pki/nssdb"
-run_step "$HOME_G" "
+chrome_step "$HOME_G" "
 $SHOW
 $CHECK untrusted"
 if [ "$RUN_EXIT" = "0" ] && grep -q "the runner user cannot write $HOME_G/.pki/nssdb" <<<"$OUT" &&

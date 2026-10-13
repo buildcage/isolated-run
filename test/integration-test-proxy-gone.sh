@@ -7,7 +7,7 @@
 # property under test is entirely about its own --proxy-netns check, so a
 # throwaway container stands in for the real buildcage-proxy image.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
 # The throwaway container. Pinned like every fixture Dockerfile, so a moving
 # tag can't fail a run for a reason run-isolated.sh had no part in.

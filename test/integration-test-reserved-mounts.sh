@@ -9,11 +9,9 @@
 # compose.test-universal.yaml rather than a real site: what is under test is the
 # mount, so nothing here should turn on a third party being up.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 # Runner-owned, so the sandbox (which keeps the runner's own uid and gains no
@@ -31,39 +29,29 @@ for candidate in /etc/ssl/cert.pem /etc/ssl/ca-bundle.pem; do
 done
 CA_LINK_MADE=false
 cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
+  fixture_down universal
   if [ "$CA_LINK_MADE" = true ]; then sudo -n rm -f "$CA_LINK"; fi
   sudo -n rm -rf "$TESTDIR"
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
-touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 cp /etc/resolv.conf "$WORKDIR/host-resolv-before.conf"
-
 
 run_instance() {
   local write_through="$1" run_script="$2"
-  GITHUB_WORKSPACE="$WORKDIR" \
-  GITHUB_STATE="$WORKDIR/state.env" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
-  INPUT_PROXY_ENGINE="universal" \
-  INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
-  INPUT_WRITE_THROUGH="$write_through" \
-  INPUT_RUN="$run_script" \
-    node "$REPO_ROOT/dist/main.cjs" > "$WORKDIR/out.log" 2>&1
+  run_step universal "$WORKDIR/step" \
+    INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
+    INPUT_WRITE_THROUGH="$write_through" \
+    INPUT_RUN="$run_script"
   echo $? > "$WORKDIR/exit_code"
-  cat "$WORKDIR/out.log"
+  cat "$WORKDIR/step.log"
 }
 
 echo ""
 echo "=== Sandbox reserved-mount Assertions ==="
 echo ""
 
-echo "--- bringing up fixture origin (compose.test-universal.yaml) ---"
-docker compose -f "$REPO_ROOT/compose.test-universal.yaml" up -d --build --wait
+fixture_up universal
 
 # Case 1: write_through: /etc persists writes under /etc without taking the
 # action's own DNS and CA mounts with it. `-k` because the fixture origin's
@@ -107,7 +95,7 @@ fi
 run_instance "/etc/resolv.conf" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 
-if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/out.log"; then
+if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/step.log"; then
   pass "write_through: /etc/resolv.conf is refused"
 else
   fail "write_through: /etc/resolv.conf was accepted (exit $CODE)"
@@ -135,7 +123,7 @@ else
   run_instance "$TESTDIR/bundle.pem" "true"
   CODE=$(cat "$WORKDIR/exit_code")
 
-  if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/out.log"; then
+  if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/step.log"; then
     pass "write_through: the file $CA_LINK links to is refused"
   else
     fail "write_through: the file $CA_LINK links to was accepted (exit $CODE)"

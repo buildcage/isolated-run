@@ -12,9 +12,7 @@
 # loopback and exit on SIGTERM, which is what tells an over-broad rule from a
 # correct one that merely looks unreachable from outside.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
 # The probe containers below. Pinned like every fixture Dockerfile, so a
 # moving tag can't fail a run for a reason the sandbox had no part in.

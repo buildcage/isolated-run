@@ -17,9 +17,9 @@
 # inputs. What only a real post step can show is that the refusal is wired
 # through dist/post.cjs to the sudo and rm that would otherwise run.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 FAKE_BIN=$(mktemp -d)
 SUDO_LOG="$FAKE_BIN/sudo.log"
@@ -89,7 +89,6 @@ run_hard_kill_and_post() {
   GITHUB_WORKSPACE="$workdir" \
     GITHUB_STATE="$workdir/state.env" \
     GITHUB_STEP_SUMMARY="$workdir/summary.md" \
-    BUILDCAGE_BUILD_TEST_HOOKS=1 \
     BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
     INPUT_RUN="sleep 300" \
     node dist/main.cjs >"$workdir/out.log" 2>&1 &
@@ -158,7 +157,6 @@ touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN='cat >> "$GITHUB_STATE" <<EOF
 container_name<<BUILDCAGE_EOF
@@ -186,7 +184,6 @@ GITHUB_WORKSPACE="$VICTIM_DIR" \
   GITHUB_STATE="$VICTIM_DIR/state.env" \
   GITHUB_STEP_SUMMARY="$VICTIM_DIR/summary.md" \
   GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 GITHUB_JOB=test GITHUB_ACTION=buildcage RUNNER_TEMP="$VICTIM_DIR" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN="sleep 300" \
   node dist/main.cjs >"$VICTIM_DIR/out.log" 2>&1 &

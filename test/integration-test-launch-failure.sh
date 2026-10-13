@@ -9,9 +9,9 @@
 # standing in for the buildcage-proxy image, as integration-test-proxy-gone.sh
 # does.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 # renovate: datasource=docker depName=alpine
 ALPINE_IMAGE="alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
@@ -39,7 +39,6 @@ touch "$WORKDIR/step/state.env" "$WORKDIR/step/summary.md"
 GITHUB_WORKSPACE="$WORKDIR/step" \
 GITHUB_STATE="$WORKDIR/step/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/step/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN="exit 3" \
   node dist/main.cjs >"$WORKDIR/step.log" 2>&1

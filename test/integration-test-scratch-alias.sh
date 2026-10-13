@@ -5,9 +5,9 @@
 # /var/tmp/buildcage-<uid> alone would leave it readable and, in persistent
 # mode, writable from the sandbox.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 ALIAS="/tmp/buildcage-$(id -u)"
 WORKDIR=$(mktemp -d)
@@ -52,7 +52,6 @@ for mode in persistent ephemeral; do
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE="$mode" \
   INPUT_RUN="$RUN_INPUT" \
