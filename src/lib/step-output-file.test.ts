@@ -31,17 +31,48 @@ describe("readOutputEntries", () => {
   });
 
   it.each([
-    ["a line with neither = nor <<", "a=1\ngarbage\nb=2\n"],
-    ["< alone", "a=1\nx<y\n"],
-    ["an empty name before =, which the runner takes", "a=1\n=1\n"],
-    ["an empty name before <<", "a=1\n<<EOF\nv\nEOF\n"],
-    ["an empty delimiter", "a=1\nx<<\nv\n"],
-    ["a delimiter that never comes", "a=1\nx<<NEVER\ntraffic_artifact_name=ok\n"],
-    ["a value line with no newline after it", "a=1\nx<<EOF\nv"],
-  ])("stops at %s, keeping what came before", (_label, text) => {
-    const { entries, error } = readOutputEntries(text);
-    expect(entries.map((e) => e.name)).toStrictEqual(["a"]);
-    expect(error).toBeDefined();
+    [
+      "a line with neither = nor <<",
+      "a=1\ngarbage\nb=2\n",
+      "line 2 is neither NAME=VALUE nor NAME<<DELIMITER",
+    ],
+    ["< alone", "a=1\nx<y\n", "line 2 is neither NAME=VALUE nor NAME<<DELIMITER"],
+    [
+      "an empty name before =, which the runner takes",
+      "a=1\n=1\n",
+      "line 2 has an empty name before =",
+    ],
+    ["an empty name before <<", "a=1\n<<EOF\nv\nEOF\n", "line 2 has an empty name before <<"],
+    ["an empty delimiter", "a=1\nx<<\nv\n", 'line 2, output "x", has an empty delimiter'],
+    [
+      "a delimiter that never comes",
+      "a=1\n\nx<<NEVER\ntraffic_artifact_name=ok\n",
+      'line 3, output "x", never reaches its delimiter "NEVER"',
+    ],
+    [
+      "a value line with no newline after it",
+      "a=1\nx<<EOF\nv",
+      'line 2, output "x", never reaches its delimiter "EOF"',
+    ],
+  ])("stops at %s, keeping what came before", (_, text, error) => {
+    expect(readOutputEntries(text)).toStrictEqual({
+      entries: [{ name: "a", text: "a=1\n" }],
+      error,
+    });
+  });
+
+  it("escapes what JSON leaves as it is: DEL, C1 controls, format characters, separators", () => {
+    expect(readOutputEntries("x\u202e\u{e0001}<<\u007f\u0085\u2028\n").error).toBe(
+      'line 1, output "x\\u202e\\udb40\\udc01", never reaches its delimiter ' +
+        '"\\u007f\\u0085\\u2028"',
+    );
+  });
+
+  it("quotes a name or delimiter escaped and cut short, and never a value", () => {
+    const long = "d".repeat(65);
+    expect(readOutputEntries(`x\r<<${long}\nsecret\n`).error).toBe(
+      `line 1, output "x\\r", never reaches its delimiter "${"d".repeat(64)}…"`,
+    );
   });
 });
 
@@ -64,7 +95,7 @@ describe("validatedOutputText", () => {
   it("drops what the runner could not read, and says why", () => {
     expect(validate("a=1\nx<<NEVER\nb=2\n")).toStrictEqual({
       text: "a=1\n",
-      error: "a NAME<<DELIMITER entry never reaches its delimiter",
+      error: 'line 2, output "x", never reaches its delimiter "NEVER"',
     });
   });
 

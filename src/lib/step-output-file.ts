@@ -26,8 +26,10 @@ export interface OutputEntries {
 export function readOutputEntries(text: string): OutputEntries {
   const entries: OutputEntries["entries"] = [];
   let index = 0;
+  let lineNumber = 0;
   const readLine = (): { line: string; newline: boolean } | undefined => {
     if (index >= text.length) return undefined;
+    lineNumber++;
     const lf = text.indexOf("\n", index);
     const end = lf === -1 ? text.length : lf;
     const line = text.slice(index, end);
@@ -39,31 +41,54 @@ export function readOutputEntries(text: string): OutputEntries {
     const read = readLine();
     if (!read) return { entries };
     const { line } = read;
+    const at = `line ${lineNumber}`;
     if (line === "") continue;
     const equals = line.indexOf("=");
     const heredoc = line.indexOf("<<");
     if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
       // Taken here, but the runner's SetOutput throws on it and stops.
-      if (equals === 0) return { entries, error: "an entry has an empty name" };
+      if (equals === 0) return { entries, error: `${at} has an empty name before =` };
       entries.push({ name: line.slice(0, equals), text: text.slice(start, index) });
       continue;
     }
     if (heredoc === -1)
-      return { entries, error: "a line is neither NAME=VALUE nor NAME<<DELIMITER" };
+      return { entries, error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER` };
     const name = line.slice(0, heredoc);
     const delimiter = line.slice(heredoc + 2);
-    if (name === "" || delimiter === "") {
-      return { entries, error: "a NAME<<DELIMITER line has an empty name or delimiter" };
+    if (name === "") return { entries, error: `${at} has an empty name before <<` };
+    if (delimiter === "") {
+      return { entries, error: `${at}, output ${quoted(name)}, has an empty delimiter` };
     }
     for (;;) {
       const value = readLine();
       if (!value || (value.line !== delimiter && !value.newline)) {
-        return { entries, error: "a NAME<<DELIMITER entry never reaches its delimiter" };
+        return {
+          entries,
+          error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`,
+        };
       }
       if (value.line === delimiter) break;
     }
     entries.push({ name, text: text.slice(start, index) });
   }
+}
+
+// A value may hold a secret, so only a NAME<<DELIMITER line's name and
+// delimiter are quoted, cut short and escaped. After a delimiter that came too
+// early that line can still be part of a value; the runner's own error would
+// quote all of it.
+const MAX_QUOTED = 64;
+
+function quoted(text: string): string {
+  const chars = Array.from(text);
+  const cut = chars.length > MAX_QUOTED ? `${chars.slice(0, MAX_QUOTED).join("")}…` : text;
+  // JSON leaves DEL, C1 controls, format characters such as bidi overrides and
+  // the line and paragraph separators as they are.
+  return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) =>
+    Array.from({ length: c.length }, (_, i) => {
+      return `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`;
+    }).join(""),
+  );
 }
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads

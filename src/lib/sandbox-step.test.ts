@@ -760,7 +760,7 @@ describe("runSandboxStep", () => {
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
       expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.from("a=1\n"));
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT was written without what the runner could not read: a NAME<<DELIMITER entry never reaches its delimiter; failing the step",
+        '$GITHUB_OUTPUT was written without what the runner could not read: line 2, output "x", never reaches its delimiter "NEVER"; failing the step',
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
