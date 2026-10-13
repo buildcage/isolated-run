@@ -54,6 +54,9 @@ COPY docker/gen-seccomp-profile/go.mod docker/gen-seccomp-profile/go.sum ./
 RUN go mod download
 COPY docker/gen-seccomp-profile/main.go ./
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/gen-seccomp-profile .
+# The license files of what it links, for /opt/buildcage/licenses/.
+COPY docker/collect-go-licenses.sh /usr/local/bin/
+RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" collect-go-licenses.sh /out/licenses/gen-seccomp-profile
 
 # filesystem-audit, the file-access tracer, is compiled here and, like runc
 # and gen-seccomp-profile, extracted onto the runner host and run there; see
@@ -77,6 +80,8 @@ RUN go generate ./... && \
     cc -Wall -Wextra -O2 -DN_HEADS=4 -DN_TAILS=40 -o /tmp/held_test bpf/held_test.c && /tmp/held_test && \
     CGO_ENABLED=0 go test ./... && \
     CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
+COPY docker/collect-go-licenses.sh /usr/local/bin/
+RUN CGO_ENABLED=0 GOARCH="${TARGETARCH}" collect-go-licenses.sh /out/licenses/filesystem-audit
 
 # Bundle the QuickJS scripts (rolldown; see rolldown.scripts.config.js),
 # since qjs has no TypeScript support. Architecture-independent output, so
@@ -161,8 +166,13 @@ COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bi
 # docker/filesystem-audit/main.go).
 COPY --from=filesystem-audit-build /out/filesystem-audit /opt/buildcage/bin/filesystem-audit
 
+COPY LICENSE /opt/buildcage/LICENSE
 COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
-COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt /opt/buildcage/licenses/
+COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt \
+     licenses/curl.txt licenses/QuickJS-ng.txt /opt/buildcage/licenses/
+COPY licenses/s6-overlay/ /opt/buildcage/licenses/s6-overlay/
+COPY --from=gen-seccomp-profile-build /out/licenses/ /opt/buildcage/licenses/
+COPY --from=filesystem-audit-build /out/licenses/ /opt/buildcage/licenses/
 
 # The services both engines run, then this engine's own files on top.
 COPY docker/common/files/s6-rc.d/     /etc/s6-overlay/s6-rc.d/
