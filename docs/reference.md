@@ -943,7 +943,8 @@ non-isolated step.
 These two the command writes freely, so where its writes would reach the runner this action mediates
 them: the command writes action-owned backing copies bound into the sandbox, the real files are kept
 out of its reach (at any other path a bind mount shows them at, too), and after the step the action
-reads the copies back and writes the real files itself. That is every step in `persistent` mode. In
+reads the copies back and writes the real files itself, failing the step if one is not a regular
+file already there (GitHub's runner creates both before the step). That is every step in `persistent` mode. In
 `ephemeral` mode they are discarded with the overlay like any other write, unless `write_through`
 names the file or a directory it is in (`$RUNNER_TEMP`, say), at any of those paths; only then are they mediated and written back,
 without a bind of their own.

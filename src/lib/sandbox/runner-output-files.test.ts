@@ -21,6 +21,7 @@ import {
   removeBackingDir,
   RUNNER_FILES_DIR,
   runnerFilesDirFor,
+  writeRunnerFile,
 } from "./runner-output-files.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
@@ -221,6 +222,56 @@ describe("readBackingFile", () => {
       readFile: () => Buffer.alloc(0),
     });
     expect(read).toStrictEqual({ reason: "it could not be read (odd)" });
+  });
+});
+
+describe("writeRunnerFile", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("replaces a regular file's content", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const path = join(dir, "set_output_abc");
+    writeFileSync(path, "old=longer value\n");
+    writeRunnerFile(path, Buffer.from("a=1\n"));
+    expect(readFileSync(path, "utf8")).toBe("a=1\n");
+  });
+
+  it("does not create a missing file", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const path = join(dir, "set_output_abc");
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(/ENOENT/);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("does not follow a symlink", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const target = join(dir, "bashrc");
+    const path = join(dir, "set_output_abc");
+    writeFileSync(target, "kept\n");
+    symlinkSync(target, path);
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(/ELOOP|EMLINK/);
+    expect(readFileSync(target, "utf8")).toBe("kept\n");
+  });
+
+  it("does not block on a FIFO", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const path = join(dir, "set_output_abc");
+    execFileSync("mkfifo", [path]);
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(/ENXIO/);
+  });
+
+  it("refuses a directory", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const path = join(dir, "set_output_abc");
+    mkdirSync(path);
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(/EISDIR/);
+  });
+
+  it("refuses a device it can open", () => {
+    expect(() => writeRunnerFile("/dev/null", Buffer.from("a=1\n"))).toThrow(
+      "it is not a regular file",
+    );
   });
 });
 

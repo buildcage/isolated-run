@@ -797,6 +797,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   horizontal rule. Because the real file is out of the command's reach, a symlink, FIFO, directory
   or permission it leaves on the backing copy reaches nothing: a copy that is not a regular file, or
   that it made unreadable, is read back as empty and fails the step, never followed or blocked on.
+  The mask needs the real file to exist, so the host writes it only if it is already a regular file,
+  never creating it or following a symlink at its path; otherwise the step fails.
   The backing directory sits under `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the
   command reaches it only through the bind and cannot move it aside. Filling the backing copy to
   GitHub's 1 MiB Job Summary limit cannot push the report out -- GitHub drops a summary over the
