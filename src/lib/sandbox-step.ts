@@ -474,6 +474,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
   const readAudit = deps.readStepFilesystemAudit({
     audit,
     attached: run.auditAttached(),
+    cancelled,
     upload: inputs.filesystemAuditArtifact.upload,
     retentionDays: inputs.filesystemAuditArtifact.retentionDays,
     containerName,

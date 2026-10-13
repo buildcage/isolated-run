@@ -265,6 +265,7 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(ENV, deps);
 
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].cancelled).toBe(false);
     const report = mocks.reportStepTraffic.mock.calls[0][0];
     expect(report.processActivity).toBe(true);
     report.moreBlocks(1_700_000_000);
@@ -975,6 +976,7 @@ describe("runSandboxStep", () => {
 
       await runSandboxStep(ENV, deps);
 
+      expect(mocks.readStepFilesystemAudit.mock.calls[0][0].cancelled).toBe(true);
       const report = mocks.reportStepTraffic.mock.calls[0][0];
       expect(report.processActivity).toBe(true);
       report.moreBlocks(1_700_000_000);

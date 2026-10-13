@@ -17,7 +17,11 @@ import {
   type FilesystemAuditReportOptions,
 } from "./report.ts";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  // A recording without the end line fails the step.
+  process.exitCode = undefined;
+});
 
 // The stripped copy, written beside the recording and uploaded in its place.
 const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
@@ -112,6 +116,7 @@ describe("readStepFilesystemAudit", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
   };
 
   it("links the skipped-hooks note to the guide", async () => {
@@ -245,6 +250,64 @@ describe("readStepFilesystemAudit", () => {
     }
   });
 
+  describe("a recording without the end line", () => {
+    const end = JSON.stringify({ kind: "end", dropped: 0, untracked: 0 });
+    const write = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" });
+
+    it("fails the step, and still renders and uploads what was recorded", async () => {
+      const note = annotation();
+      const { deps: d, summaries, uploads } = deps({ raw: write });
+
+      await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+      expect(note.error).toHaveBeenCalledWith(
+        "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(summaries[0]).toContain("This record is incomplete");
+      expect(uploads).toEqual([CLEAN]);
+    });
+
+    it("leaves the step alone when the step was cancelled", async () => {
+      const note = annotation();
+      const { deps: d, summaries } = deps({ raw: write });
+
+      await reportStepFilesystemAudit(
+        { ...base, cancelled: true, audit: AUDIT, annotation: note, env: {} },
+        d,
+      );
+
+      expect(note.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+      expect(summaries[0]).toContain("This record is incomplete");
+    });
+
+    it("leaves the step alone when the end line is there, whatever it dropped", async () => {
+      const note = annotation();
+      const dropped = JSON.stringify({ kind: "end", dropped: 3, untracked: 1 });
+      for (const last of [end, dropped]) {
+        const { deps: d } = deps({ raw: [write, last].join("\n") });
+        await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+      }
+
+      expect(note.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it("leaves the step alone when the tracer never attached", async () => {
+      const note = annotation();
+      const { deps: d } = deps({ raw: write });
+
+      await reportStepFilesystemAudit(
+        { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
+        d,
+      );
+
+      expect(note.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
+  });
+
   it("still uploads the recording when the summary fails to render", async () => {
     const note = annotation();
     const {
@@ -347,13 +410,14 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
-  it("warns of a cut-short recording when the file is empty, and uploads nothing", async () => {
+  it("fails the step on an empty recording, and uploads nothing", async () => {
+    const note = annotation();
     const { deps: d, summaries, uploads, outputs } = deps({ raw: "" });
 
-    await reportStepFilesystemAudit(
-      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
-      d,
-    );
+    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+    expect(note.error).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBe(1);
 
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toContain("**This record is incomplete.**");
@@ -685,6 +749,7 @@ describe("readStepFilesystemAudit: failures while reading", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };
@@ -791,6 +856,7 @@ describe("readStepFilesystemAudit: an upload that throws", () => {
         actionRef: "v2",
         failClosed: false,
         attached: true,
+        cancelled: false,
         audit: AUDIT,
         annotation: note,
         env: {},
@@ -816,6 +882,7 @@ describe("readStepFilesystemAudit", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };

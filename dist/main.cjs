@@ -70005,16 +70005,19 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 		let r = firstPassNeeds(line) ? parseLine(line) : void 0;
 		stripper.observe(r), summarize(() => summary.observe(r));
 	});
-	let sink = openSink?.(), again = 0, lengthAgain = 0;
+	let sink = openSink?.(), again = 0, lengthAgain = 0, ended = !1;
 	if (forEachLine((line) => {
 		again++, lengthAgain += line.length;
-		let r = parseLine(line), kept = stripper.filter(line, r);
+		let r = parseLine(line);
+		isRecord(r) && r.kind === "end" && (ended = !0);
+		let kept = stripper.filter(line, r);
 		summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && sink?.(kept.line);
 	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
 	let result;
 	return summarize(() => result = summary.finish()), {
 		summary: result,
-		summaryError
+		summaryError,
+		ended
 	};
 }
 //#endregion
@@ -70074,7 +70077,7 @@ function prefixes(value, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-function readStepFilesystemAudit({ audit, attached, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$4,
 		...overrides
@@ -70100,7 +70103,9 @@ function readStepFilesystemAudit({ audit, attached, upload, retentionDays, conta
 		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: () => unreadableSummaryBlocks() });
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: () => unreadableSummaryBlocks() })) : settled(NONE);
-	let { summary, summaryError, written } = reduced, artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let { summary, summaryError, ended, written } = reduced;
+	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	let artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
 		upload: async () => {
@@ -74426,6 +74431,7 @@ async function finalizeStep(run, deps) {
 	let readAudit = deps.readStepFilesystemAudit({
 		audit,
 		attached: run.auditAttached(),
+		cancelled,
 		upload: inputs.filesystemAuditArtifact.upload,
 		retentionDays: inputs.filesystemAuditArtifact.retentionDays,
 		containerName,

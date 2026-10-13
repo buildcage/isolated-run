@@ -46,6 +46,9 @@ export interface FilesystemAuditReportOptions {
   /** Whether the tracer attached. Once it has, its recording is there until
    *  the post step, so one that is gone was removed by something else. */
   attached: boolean;
+  /** A cancelled step cuts the tracer's stop short, so its record may lack the
+   *  end line, and the step fails anyway. */
+  cancelled: boolean;
   /** upload_filesystem_audit_artifact: whether to upload the record at all. */
   upload: boolean;
   retentionDays: number | undefined;
@@ -197,6 +200,7 @@ export function readStepFilesystemAudit(
   {
     audit,
     attached,
+    cancelled,
     upload,
     retentionDays,
     containerName,
@@ -253,7 +257,15 @@ export function readStepFilesystemAudit(
     process.exitCode = 1;
     return settled({ blocks: () => unreadableSummaryBlocks() });
   }
-  const { summary, summaryError, written } = reduced;
+  const { summary, summaryError, ended, written } = reduced;
+  // The tracer exited during the step, as a full disk makes it, or did not
+  // finish its record when stopped. Only the banner would say so otherwise.
+  if (attached && !ended && !cancelled) {
+    annotation.error(
+      "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
+    );
+    process.exitCode = 1;
+  }
   const artifactOf = (name: string): RecordArtifact =>
     !upload ? "not-requested" : name ? { name } : "upload-failed";
   const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
