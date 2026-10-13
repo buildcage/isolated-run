@@ -101,9 +101,11 @@ static __always_inline long current_sys_nr(void)
 /**
  * A change made through descriptor d alone. Its hook records it when it
  * succeeds, but a read-only mount refuses fchmod and fchown, and an
- * append-only file ftruncate, before the hook runs.
+ * append-only file ftruncate, before the hook runs. AT_FDCWD names no file
+ * here, so it is not taken for the working directory.
  */
-#define FD_OP(k, d) (OP(k, 0, 0, d, 0, 0, 0) && ({ p->by_fd = 1; 1; }))
+#define FD_OP(k, d)									\
+	((int)(d) != AT_FDCWD && OP(k, 0, 0, d, 0, 0, 0) && ({ p->by_fd = 1; 1; }))
 
 /**
  * Making a name. The kernel refuses one on a read-only mount before the
@@ -115,7 +117,7 @@ static __always_inline long current_sys_nr(void)
 #define ENOSYS 38
 
 /**
- * utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
+ * utimensat, utime, utimes, futimesat and {,l,f}setxattr are the attribute
  * changes with no security_path_* hook of their own; recorded here, success
  * and failure alike. A NULL path (futimens) changes the file dfd refers to;
  * with AT_FDCWD it names nothing and fails.
@@ -235,6 +237,10 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 				bump(&untracked);
 			return;
 		}
+		// A pipe, socket or memfd is no file a step protects, and
+		// ftruncate on a pipe fails as a matter of course.
+		if (ret < 0 && call->by_fd && (e->marks & MARK_INTERNAL))
+			return;
 	} else if (r > 1 && e->data[0] != '/') {
 		off = add_base(e, off, call->dfd1, 1, e->n1);
 	}

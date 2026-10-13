@@ -633,7 +633,10 @@ that name as `name` where it differs from `path`. These names are best-effort: t
 command's memory when the call returns, so another thread can rewrite one first, or change
 directory so that a relative one is joined to another, and a process tracing the command can change
 the call's arguments. A failed open's flags are read the same way, but its name is the kernel's
-copy, unless the kernel refused the name as too long, when it is read like the others. A path too deep to record in full is shown cut, with `…/`. A failed open's name too long to record in full is
+copy, unless the kernel refused the name as too long, when it is read like the others. A change
+through a descriptor alone that fails before the kernel reaches its file, as `fchmod` on a read-only
+mount, and an `fsetxattr`, are recorded under the file the descriptor held when the call returned,
+which another thread can swap first. A path too deep to record in full is shown cut, with `…/`. A failed open's name too long to record in full is
 shown cut at its end, with `…`. A row's command name is the one
 the process gave itself, not a thread's, so it says which process acted, not which binary, and a
 process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
