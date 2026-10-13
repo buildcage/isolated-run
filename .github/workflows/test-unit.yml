@@ -61,7 +61,7 @@ jobs:
               - 'test/*/*.sh'
               - 'test/.shellcheckrc'
               - 'dev/*.sh'
-              - '.github/examples/**/*.sh'
+              - '.github/examples/*/*.sh'
 
   unit_test:
     needs: changes
