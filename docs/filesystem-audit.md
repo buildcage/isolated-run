@@ -189,8 +189,8 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   `clone`, is not recorded even when refused, since the kernel's own `EPERM` for it would read the
   same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
   thread killed while others run on is not recorded. Past 200 command and system call pairs, the
-  details add a row only for the first command refused a system call without being killed, and for
-  each command killed for one; the artifact, if uploaded, has the rest.
+  details add a row only for each system call's first refusal that did not kill the command, and for
+  every kill; the artifact, if uploaded, has the rest.
 
 ### Flags
 
