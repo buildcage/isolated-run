@@ -23185,6 +23185,67 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	return requireDigest(digest, actionRef);
 }
 //#endregion
+//#region src/lib/command-summary.ts
+const HTML_BLOCKS = [
+	{
+		start: /^<(?:script|pre|style|textarea)(?:[\s>]|$)/i,
+		end: /<\/(?:script|pre|style|textarea)>/i,
+		closer: "</pre>"
+	},
+	{
+		start: /^<!--/,
+		end: /-->/
+	},
+	{
+		start: /^<\?/,
+		end: /\?>/,
+		closer: "?>"
+	},
+	{
+		start: /^<!\[CDATA\[/,
+		end: /\]\]>/,
+		closer: "]]>"
+	},
+	{
+		start: /^<![A-Za-z]/,
+		end: />/,
+		closer: ">"
+	}
+], OTHER_HTML_BLOCK = /^<[A-Za-z/]/, FENCE = /^(`{3,}|~{3,})(.*)$/, CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+function commandSummaryClosers(text) {
+	let open;
+	for (let line of text.split(/\r\n|\r|\n/)) {
+		if (open?.kind === "fence") {
+			let close = CLOSING_FENCE.exec(line);
+			close && close[1][0] === open.marker[0] && close[1].length >= open.marker.length && (open = void 0);
+			continue;
+		}
+		if (open?.kind === "html") {
+			open.end.test(line) && (open = void 0);
+			continue;
+		}
+		if (open?.kind === "other-html") {
+			line.trim() === "" && (open = void 0);
+			continue;
+		}
+		let fence = FENCE.exec(line);
+		if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) {
+			open = {
+				kind: "fence",
+				marker: fence[1]
+			};
+			continue;
+		}
+		let block = HTML_BLOCKS.find((b) => b.start.test(line));
+		block ? block.end.test(line) || (open = {
+			kind: "html",
+			...block
+		}) : OTHER_HTML_BLOCK.test(line) && (open = { kind: "other-html" });
+	}
+	let closers = [];
+	return open?.kind === "fence" ? closers.push(open.marker) : open?.kind === "html" && open.closer && closers.push(open.closer), text.includes("<!--") && closers.push("<!-- -->"), closers.length === 0 ? "" : `${/[\r\n]$/.test(text) ? "" : "\n"}${closers.join("\n")}\n`;
+}
+//#endregion
 //#region src/core/lib/docker/host-addresses.ts
 function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
 	let found = new Set();
@@ -74267,7 +74328,10 @@ function writeBackMediatedFile(file, annotation, deps) {
 		if (file.variable === "GITHUB_OUTPUT") {
 			let { text, error } = validatedOutputText(read.bytes);
 			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
-		} else content = read.bytes;
+		} else {
+			let closers = commandSummaryClosers(read.bytes.toString("utf8"));
+			content = Buffer.concat([read.bytes, Buffer.from(closers, "utf8")]);
+		}
 	}
 	try {
 		deps.writeRunnerFile(file.realPath, content);

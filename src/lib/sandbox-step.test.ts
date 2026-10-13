@@ -811,7 +811,7 @@ describe("runSandboxStep", () => {
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
-    it("writes the command's own summary back verbatim, to be fitted with the report", async () => {
+    it("writes the command's own summary back as it is when nothing is left open", async () => {
       mocks.readBackingFile.mockImplementation((path: string) =>
         path.endsWith("GITHUB_STEP_SUMMARY")
           ? { bytes: Buffer.from("## the command's own\n") }
@@ -825,6 +825,19 @@ describe("runSandboxStep", () => {
         Buffer.from("## the command's own\n"),
       );
       expect(annotation.error).not.toHaveBeenCalled();
+    });
+
+    it("closes a code fence the command's summary left open, so the report is not read as code", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("```\nlog") } : { empty: true },
+      );
+
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
+        ENV.GITHUB_STEP_SUMMARY,
+        Buffer.from("```\nlog\n```\n"),
+      );
     });
 
     it("fails the step but still reports when the $GITHUB_STEP_SUMMARY backing was not a regular file", async () => {
