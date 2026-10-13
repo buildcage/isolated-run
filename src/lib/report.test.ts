@@ -468,7 +468,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "build", processActivity: true }),
     );
     expect(markdown).toMatch(
-      /^## Traffic & Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
+      /^## Traffic \\& Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
     );
     // The step closes the summary after the process activity.
     expect(markdown).not.toMatch(/Reported by/);

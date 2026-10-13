@@ -68734,7 +68734,7 @@ const ALIGN_MARKERS = {
 	center: ":---:"
 }, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
 function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*&]/g, "\\$&").replace(/\r?\n/g, " ");
 }
 function markdownTable(formats, rows) {
 	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
