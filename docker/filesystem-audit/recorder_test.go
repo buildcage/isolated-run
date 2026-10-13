@@ -221,3 +221,29 @@ func TestExecFilesAttach(t *testing.T) {
 		t.Fatalf("exec = %+v, want the memfd it ran", memfd)
 	}
 }
+
+// An exec that fails after its file is resolved leaves no exec record to take
+// the file up.
+func TestExecFilesDropsAFailedExecsFile(t *testing.T) {
+	files := execFiles{}
+	files.attach(&record{Kind: "exec-file", PID: 9, Path: "/work/noshebang"})
+	files.attach(&record{Kind: "exec-file", PID: 9, Path: "/usr/bin/make"})
+	retry := record{Kind: "exec", PID: 9, Path: "make"}
+	files.attach(&retry)
+	if retry.Path != "/usr/bin/make" {
+		t.Fatalf("exec = %+v, want the file of its own attempt", retry)
+	}
+
+	files.attach(&record{Kind: "exec-file", PID: 9, Path: "/work/noshebang"})
+	if files.attach(&record{Kind: "fork", PID: 9, PPID: 7}) {
+		t.Fatal("a fork record should be kept")
+	}
+	if _, left := files[9]; left {
+		t.Fatal("a reused pid should not keep the file of the exited process")
+	}
+	reused := record{Kind: "exec", PID: 9, Path: "./build"}
+	files.attach(&reused)
+	if reused.Path != "./build" || reused.Name != "" {
+		t.Fatalf("exec = %+v, want it left under the name it was run by", reused)
+	}
+}
