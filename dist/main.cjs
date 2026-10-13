@@ -72587,7 +72587,8 @@ function defaultSpawn(command, args, input) {
 			"inherit",
 			"inherit"
 		],
-		env: hostCommandEnv(command)
+		env: hostCommandEnv(command),
+		detached: !0
 	});
 	return child.stdin.on("error", () => {}), child.stdin.end(input), {
 		exited: new Promise((resolve) => {

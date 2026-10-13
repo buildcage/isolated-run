@@ -55,6 +55,10 @@ function defaultSpawn(command: string, args: string[], input: Buffer): Child {
   const child = spawn(hostCommand(command), args, {
     stdio: ["pipe", "inherit", "inherit"],
     env: hostCommandEnv(command),
+    // In a process group of its own: an older sudo such as Ubuntu 22.04's
+    // 1.9.9 drops any signal sent from its own process group, so the
+    // cancel's SIGTERMs would never reach run-isolated.sh.
+    detached: true,
   });
   // A child that exits before reading all of input leaves an EPIPE here,
   // which says nothing about how it exited.
