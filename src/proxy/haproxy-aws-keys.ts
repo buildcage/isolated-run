@@ -273,7 +273,7 @@ function learnFlags(): string[] {
     "    # Only a redirect answering a registry request the check did not refuse",
     "    # can teach a key, and only over TLS, where the registry's certificate",
     "    # was verified. Each name's regex runs only on a host under its domain.",
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
     `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
     "    # Any answer over TLS names the account of its role, but only one to a",
     "    # request the check let through can teach a key. A plaintext answer",

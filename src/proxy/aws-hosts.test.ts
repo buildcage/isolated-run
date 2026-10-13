@@ -13,11 +13,11 @@ import {
 
 // What the config writes is also what reaches the regex engine: HAProxy's
 // word parser leaves `\.` alone. See escapeForHaproxy.
-// HAProxy's `-m end`, which txn.host is tested with.
-const apiHost = { test: (host: string) => AWS_API_SUFFIXES.some((s) => host.endsWith(s)) };
 const stsHost = new RegExp(STS_HOST);
 const resourceHost = new RegExp(AWS_RESOURCE_HOST);
 const publicHost = new RegExp(AWS_PUBLIC_HOST);
+// HAProxy's `-m end`, which txn.host is tested with.
+const apiHost = { test: (host: string) => AWS_API_SUFFIXES.some((s) => host.endsWith(s)) };
 
 describe("AWS API hosts", () => {
   it("covers the classic, China and dual-stack domains", () => {
