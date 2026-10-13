@@ -68723,7 +68723,7 @@ function toRow(group) {
 		count: group.count,
 		expected: !0,
 		expectedBy: group.rule,
-		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
+		note: `(${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
 }
 //#endregion
@@ -68737,7 +68737,7 @@ function escapeCell(value) {
 	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
 }
 function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
 	return `${fence}${pad}${text}${pad}${fence}`;
 }
 function codeCell(value) {
@@ -68746,7 +68746,7 @@ function codeCell(value) {
 function markdownTable(formats, rows) {
 	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
 	for (let row of rows) {
-		let cells = formats.map((f) => (f.code ? codeCell : escapeCell)(row[f.key]));
+		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
 		lines.push(`| ${cells.join(" | ")} |`);
 	}
 	return lines.join("\n");
@@ -68761,7 +68761,7 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	let formats = [{
 		key: "host",
 		title: "Host",
-		code: !0
+		cell: String
 	}, {
 		key: "ruleType",
 		title: "Rule"
@@ -68778,7 +68778,7 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 		title: "Expected",
 		align: "center"
 	}), markdownTable(formats, rows.map((r) => ({
-		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
+		host: codeCell(r.port === "-" ? r.host : `${r.host}:${r.port}`) + (r.note ? ` ${r.note}` : ""),
 		ruleType: r.ruleType,
 		reason: r.outcome ? OUTCOME_MARK[r.outcome] + r.reason : r.reason,
 		count: r.count,
@@ -69013,12 +69013,12 @@ function leftOutSection(leftOut) {
 		{
 			key: "method",
 			title: "Method",
-			code: !0
+			cell: codeCell
 		},
 		{
 			key: "url",
 			title: "URL",
-			code: !0
+			cell: codeCell
 		},
 		{
 			key: "part",

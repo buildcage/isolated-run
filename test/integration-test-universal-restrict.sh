@@ -89,8 +89,8 @@ assert_summary_contains "| \`tlsany.example.com_x.evil.example.net:80\` | HTTP |
   "a plaintext Host holding a colon was refused the same way"
 
 # The Allowed Hosts table never shows a reason column, so a plain substring
-# search for "| \`blocked.example.com:80\` | HTTP |" would also match the start
-# of its correct Blocked Hosts row ("| \`blocked.example.com:80\` | HTTP |
+# search for "| `blocked.example.com:80` | HTTP |" would also match the start
+# of its correct Blocked Hosts row ("| `blocked.example.com:80` | HTTP |
 # not-allowed |"). Scope the search to just the Allowed Hosts section instead.
 ALLOWED_SECTION=$(awk '
   /^###/ { in_section = (index($0, "Allowed Hosts") > 0) ? 1 : 0; next }
