@@ -137,8 +137,8 @@ export function resolveFilesystemPlan(
   const written = resolveWriteThroughInput(writeThroughInput, env);
   const realpath = deps.realpath ?? realPathOf;
   const resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
-  // Only ephemeral mediates by coverage, and an entry can cover a runner file
-  // through another mount of it (see pathAliases).
+  // Ephemeral mediates only the files an entry covers, which it can do through
+  // another mount of them (see pathAliases).
   const hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [];
   const runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
     const path = env[variable];

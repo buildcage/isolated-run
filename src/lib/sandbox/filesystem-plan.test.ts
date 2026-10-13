@@ -316,7 +316,7 @@ describe("resolveFilesystemPlan", () => {
       });
     });
 
-    it("fails with its own code when the host mount table cannot be read", () => {
+    it("fails as FILESYSTEM_PLAN_FAILED when the host mount table cannot be read", () => {
       const run = () =>
         resolveFilesystemPlan("ephemeral", "", FILES_ENV, {
           listHostMounts: () => {

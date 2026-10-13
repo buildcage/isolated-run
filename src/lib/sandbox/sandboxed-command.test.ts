@@ -281,7 +281,7 @@ describe("runSandboxedCommand", () => {
     ]);
   });
 
-  it("masks a mediated runner file at its other paths a persisting path reaches", async () => {
+  it("masks a mediated runner file at its other mounts under a persisting path", async () => {
     const output = "/home/runner/work/_temp/_runner_file_commands/set_output_abc";
     mocks.listHostMounts.mockReturnValue([
       { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
@@ -299,7 +299,7 @@ describe("runSandboxedCommand", () => {
     ]);
   });
 
-  it("leaves a runner file unmasked at a path ephemeral discards the writes to", async () => {
+  it("leaves a runner file unmasked at a mount whose writes ephemeral discards", async () => {
     const output = "/home/runner/work/_temp/_runner_file_commands/set_output_abc";
     mocks.listHostMounts.mockReturnValue([
       { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
