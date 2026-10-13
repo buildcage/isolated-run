@@ -160,7 +160,8 @@ export function readBackingFile(
     return unreadable(e);
   }
   if (!stats.isFile()) return { reason: "it was not a regular file" };
-  if (stats.size > MAX_OUTPUT_BYTES) return { reason: "it was over 64 MiB" };
+  if (stats.size > MAX_OUTPUT_BYTES)
+    return { reason: `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` };
   try {
     return { bytes: deps.readFile(path) };
   } catch (e) {
