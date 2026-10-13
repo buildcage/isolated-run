@@ -71,23 +71,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        filesystem_mode: [persistent, ephemeral]
-        # The oldest (22.04) and newest (26.04) kernels GitHub-hosted runners
-        # ship, once per architecture.
+        # One job per kernel that GitHub-hosted runners ship, covering each
+        # architecture and each filesystem_mode twice. Kernel-dependent
+        # failures have so far always hit both architectures at once.
+        #
+        # The audit mode, enforcement and concurrency cases need the same
+        # image, so they ride along here rather than take a runner of their
+        # own.
         include:
-          - { runner: ubuntu-22.04, filesystem_mode: persistent }
-          - { runner: ubuntu-22.04-arm, filesystem_mode: persistent }
-          - { runner: ubuntu-26.04, filesystem_mode: persistent }
-          - { runner: ubuntu-26.04-arm, filesystem_mode: persistent }
-          # The audit mode cases need the same image, so they ride along here
-          # rather than take a runner of their own.
-          - { runner: ubuntu-24.04, filesystem_mode: persistent, audit_mode: true }
-          - { runner: ubuntu-24.04-arm, filesystem_mode: persistent, audit_mode: true }
+          - { runner: ubuntu-22.04-arm, filesystem_mode: ephemeral, concurrency: true }
+          - runner: ubuntu-24.04
+            filesystem_mode: persistent
+            audit_mode: true
+            enforcement: true
+            concurrency: true
+          - { runner: ubuntu-24.04-arm, filesystem_mode: persistent }
+          - { runner: ubuntu-26.04, filesystem_mode: ephemeral }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}, ${{ matrix.runner }})"
+    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}${{ matrix.enforcement && ', enforcement, config_file' || '' }}${{ matrix.concurrency && ', concurrency' || '' }}, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -418,6 +421,205 @@ jobs:
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
+      # One representative case through the real action wrapper, against real
+      # internet hosts (no fixture network), proves proxy_engine: universal
+      # wiring end-to-end: an allowed host reaches its origin, a blocked one does
+      # not, and both verdicts reach the report.
+      # Which names, ports and protocols are judged which way, and the log-line
+      # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
+      # which needs a fixture network this job deliberately does not set up.
+      - name: Run an isolated command via the real action
+        if: matrix.enforcement
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+          # A later step can't read this step's GITHUB_STEP_SUMMARY back
+          # (GitHub ignores attempts to reassign it), so mirror it here too.
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
+        with:
+          proxy_engine: universal
+          allowed_https_rules: example.com:443
+          allowed_http_rules: example.com:80
+          # Blocked connections below are expected, not a failure.
+          fail_on_blocked: false
+          run: |
+            echo "=== allowlisted HTTP host must be reachable ==="
+            wget -q -T 5 -O /dev/null http://example.com/
+
+            echo "=== allowlisted HTTPS host must be reachable ==="
+            wget -q -T 5 -O /dev/null https://example.com/
+
+            echo "=== non-allowlisted HTTP host must be blocked (isolation-escape check) ==="
+            if wget -q -T 5 -O /dev/null http://neverssl.com/ 2>&1; then
+              echo "UNEXPECTED: neverssl.com was reachable"
+              exit 1
+            fi
+            echo "OK: neverssl.com correctly blocked"
+
+            echo "=== non-allowlisted HTTPS host must be blocked ==="
+            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
+              echo "UNEXPECTED: example.org (HTTPS) was reachable"
+              exit 1
+            fi
+            echo "OK: example.org (HTTPS) correctly blocked"
+
+      - name: Verify the sandbox report contains the expected allowed/blocked entries
+        if: always() && matrix.enforcement
+        env:
+          # Same debug-only mirror as the step above, not GITHUB_STEP_SUMMARY.
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
+        run: ./test/assert-sandbox.sh
+
+      # config_file through the real action: the engine, the rules and
+      # fail_on_blocked it sets all reach the step. The image is universal either
+      # way, so the step checks for the CA inspect would have put in the sandbox.
+      - name: Write the config file
+        if: matrix.enforcement
+        run: |
+          mkdir -p e2e-config
+          cat > e2e-config/buildcage.yml <<'YAML'
+          proxy_engine: universal
+          # The blocked request below is expected.
+          fail_on_blocked: false
+          allowed_https_rules: |
+            example.com:443
+          YAML
+
+      - name: Run an isolated command configured by the file
+        if: matrix.enforcement
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+        with:
+          config_file: e2e-config/buildcage.yml
+          run: |
+            echo "=== the engine the file sets must be the one in use ==="
+            if [ -e /dev/buildcage-ca.pem ]; then
+              echo "UNEXPECTED: the inspect engine's CA is in the sandbox"
+              exit 1
+            fi
+
+            echo "=== a host the file allows must be reachable ==="
+            wget -q -T 5 -O /dev/null https://example.com/
+
+            echo "=== a host the file does not allow must be blocked ==="
+            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
+              echo "UNEXPECTED: example.org was reachable"
+              exit 1
+            fi
+
+      # Container/network/Compose-project namespacing holds under Actions' own
+      # `parallel:` keyword; the direct-script counterpart is in
+      # test-integration.yml.
+      - parallel:
+          - name: sandbox-parallel-a
+            id: parallel_a
+            if: matrix.concurrency
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-a-summary.md
+            with:
+              proxy_engine: universal
+              allowed_https_rules: example.com:443
+              allowed_http_rules: example.com:80
+              label: parallel-a
+              fail_on_blocked: false
+              run: |
+                sleep 5
+                wget -q -T 5 -O /dev/null http://example.com/
+                if wget -q -T 5 -O /dev/null http://example.net/ 2>&1; then
+                  echo "::error::cross-talk: example.net (step B's allowlist) was reachable from step A"; exit 1
+                fi
+
+          - name: sandbox-parallel-b
+            id: parallel_b
+            if: matrix.concurrency
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+              BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-b-summary.md
+            with:
+              proxy_engine: universal
+              allowed_https_rules: example.net:443
+              allowed_http_rules: example.net:80
+              label: parallel-b
+              fail_on_blocked: false
+              run: |
+                wget -q -T 5 -O /dev/null http://example.net/
+                if wget -q -T 5 -O /dev/null http://example.com/ 2>&1; then
+                  echo "::error::cross-talk: example.com (step A's allowlist) was reachable from step B"; exit 1
+                fi
+
+      - name: Verify no leftover buildcage-proxy containers/networks after the parallel steps
+        if: always() && matrix.concurrency
+        run: |
+          LEFTOVER_C=$(docker ps -a --filter "name=buildcage-proxy-" -q)
+          LEFTOVER_N=$(docker network ls --filter "name=buildcage-proxy-" -q)
+          if [ -n "$LEFTOVER_C" ] || [ -n "$LEFTOVER_N" ]; then
+            echo "::error::leftover buildcage-proxy containers/networks found after parallel sandbox steps"
+            exit 1
+          fi
+
+      # Every step makes the same missing write_through targets at once, and
+      # the targets stay after each of them ends.
+      - parallel:
+          - name: sandbox-parallel-write-through-short-persistent
+            if: matrix.concurrency
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              label: parallel-write-through-short-persistent
+              write_through: |
+                ./out
+                ./out-empty
+              run: "true"
+
+          - name: sandbox-parallel-write-through-short-ephemeral
+            if: matrix.concurrency
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              filesystem_mode: ephemeral
+              label: parallel-write-through-short-ephemeral
+              write_through: |
+                ./out
+                ./out-empty
+              run: "true"
+
+          - name: sandbox-parallel-write-through-long
+            if: matrix.concurrency
+            uses: ./
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
+            with:
+              proxy_engine: universal
+              filesystem_mode: ephemeral
+              label: parallel-write-through-long
+              write_through: |
+                ./out
+                ./out-empty
+              run: |
+                sleep 15
+                echo written > ./out/file
+
+      - name: Verify the write_through targets were kept
+        if: matrix.concurrency
+        run: |
+          if [ "$(cat out/file 2>/dev/null)" != "written" ]; then
+            echo "::error::the long step's write to ./out/file did not reach the runner"
+            exit 1
+          fi
+          if [ ! -d out-empty ]; then
+            echo "::error::./out-empty was removed after the steps ended"
+            exit 1
+          fi
+          echo "OK: the write reached the runner, and both targets were kept"
+
       # After every other check, as these leave the kernel's BTF unusable for
       # the rest of the job, post steps included. An empty file is caught by
       # the action's own check, before the proxy starts.
@@ -476,311 +678,16 @@ jobs:
             echo "::error::the failed start left the audit's files"; exit 1
           fi
 
-  # Proves container/network/Compose-project namespacing holds under
-  # Actions' own `parallel:` keyword; the direct-script counterpart is
-  # in test-integration.yml.
-  test_sandbox_concurrency:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # 22.04 carries the oldest kernel GitHub-hosted runners ship (6.8). Its arm
-        # image runs here, as the inspect job below needs Chrome, which it lacks.
-        runner: [ubuntu-latest, ubuntu-22.04-arm]
-        # The enforcement cases need the same image, so they ride along here
-        # rather than take a runner of their own.
-        include:
-          - { runner: ubuntu-latest, enforcement: true }
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-    name: "e2e: test (sandbox, concurrency${{ matrix.enforcement && ', enforcement, config_file, fail_on_blocked' || '' }}, ${{ matrix.runner }})"
-
-    env:
-      PROXY_ENGINE: universal
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-vp
-
-      - name: Build local sandbox proxy image
-        run: docker compose build proxy
-
-      - name: Resolve local image ref
-        id: local_image
-        run: echo "ref=$(docker compose config --images proxy)" >> "$GITHUB_OUTPUT"
-
-      - name: Rebuild the action with the local-image test hook enabled
-        env:
-          BUILDCAGE_BUILD_TEST_HOOKS: "1"
-        run: vp run build
-
-      # One representative case through the real action wrapper, against real
-      # internet hosts (no fixture network), proves proxy_engine: universal
-      # wiring end-to-end: an allowed host reaches its origin, a blocked one does
-      # not, write_through: opens a path, and both verdicts reach the report.
-      # Which names, ports and protocols are judged which way, and the log-line
-      # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
-      # which needs a fixture network this job deliberately does not set up.
-      - name: Run an isolated command via the real action
-        if: matrix.enforcement
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-          # A later step can't read this step's GITHUB_STEP_SUMMARY back
-          # (GitHub ignores attempts to reassign it), so mirror it here too.
-          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
-        with:
-          proxy_engine: universal
-          allowed_https_rules: example.com:443
-          allowed_http_rules: example.com:80
-          # Blocked connections below are expected, not a failure.
-          fail_on_blocked: false
-          # One representative write_through: pattern through the real action;
-          # other write_through: values are cheaper to check in test-integration.yml.
-          write_through: /opt
-          run: |
-            echo "=== allowlisted HTTP host must be reachable ==="
-            wget -q -T 5 -O /dev/null http://example.com/
-
-            echo "=== allowlisted HTTPS host must be reachable ==="
-            wget -q -T 5 -O /dev/null https://example.com/
-
-            echo "=== non-allowlisted HTTP host must be blocked (isolation-escape check) ==="
-            if wget -q -T 5 -O /dev/null http://neverssl.com/ 2>&1; then
-              echo "UNEXPECTED: neverssl.com was reachable"
-              exit 1
-            fi
-            echo "OK: neverssl.com correctly blocked"
-
-            echo "=== non-allowlisted HTTPS host must be blocked ==="
-            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
-              echo "UNEXPECTED: example.org (HTTPS) was reachable"
-              exit 1
-            fi
-            echo "OK: example.org (HTTPS) correctly blocked"
-
-            echo "=== /opt must be writable when listed under write_through: ==="
-            touch /opt/.buildcage-writable-test
-            rm -f /opt/.buildcage-writable-test
-
-      - name: Verify the sandbox report contains the expected allowed/blocked entries
-        if: always() && matrix.enforcement
-        env:
-          # Same debug-only mirror as the step above, not GITHUB_STEP_SUMMARY.
-          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
-        run: ./test/assert-sandbox.sh
-
-      # config_file through the real action: the engine, the rules and
-      # fail_on_blocked it sets all reach the step. The image is universal either
-      # way, so the step checks for the CA inspect would have put in the sandbox.
-      - name: Write the config file
-        if: matrix.enforcement
-        run: |
-          mkdir -p e2e-config
-          cat > e2e-config/buildcage.yml <<'YAML'
-          proxy_engine: universal
-          # The blocked request below is expected.
-          fail_on_blocked: false
-          allowed_https_rules: |
-            example.com:443
-          YAML
-
-      - name: Run an isolated command configured by the file
-        if: matrix.enforcement
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        with:
-          config_file: e2e-config/buildcage.yml
-          run: |
-            echo "=== the engine the file sets must be the one in use ==="
-            if [ -e /dev/buildcage-ca.pem ]; then
-              echo "UNEXPECTED: the inspect engine's CA is in the sandbox"
-              exit 1
-            fi
-
-            echo "=== a host the file allows must be reachable ==="
-            wget -q -T 5 -O /dev/null https://example.com/
-
-            echo "=== a host the file does not allow must be blocked ==="
-            if wget -q -T 5 -O /dev/null https://example.org/ 2>&1; then
-              echo "UNEXPECTED: example.org was reachable"
-              exit 1
-            fi
-
-      # fail_on_blocked defaults to true and should fail on a blocked
-      # connection; known_blocked_rules should exempt a matching one. Both are
-      # unit-tested at the logic level: this proves the wiring end-to-end,
-      # reusing the same built image for both cases.
-      - name: Run an isolated command that triggers a blocked connection
-        if: matrix.enforcement
-        id: blocked_connection
-        continue-on-error: true
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        with:
-          proxy_engine: universal
-          allowed_https_rules: example.com:443
-          allowed_http_rules: example.com:80
-          # fail_on_blocked intentionally left at its default (true).
-          run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
-
-      - name: Verify fail_on_blocked actually failed the step
-        if: always() && matrix.enforcement && steps.blocked_connection.outcome != 'skipped'
-        run: |
-          if [ "${{ steps.blocked_connection.outcome }}" != "failure" ]; then
-            echo "::error::Expected the blocked-connection step to fail (fail_on_blocked defaults to true), but it reported '${{ steps.blocked_connection.outcome }}'"
-            exit 1
-          fi
-          echo "OK: fail_on_blocked correctly failed the step"
-
-      - name: Run an isolated command whose only blocked connection is known_blocked_rules-listed
-        if: matrix.enforcement
-        id: known_blocked_connection
-        uses: ./
-        env:
-          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-        with:
-          proxy_engine: universal
-          allowed_https_rules: example.com:443
-          allowed_http_rules: example.com:80
-          known_blocked_rules: neverssl.com:80
-          # fail_on_blocked intentionally left at its default (true).
-          run: wget -q -T 5 -O /dev/null http://neverssl.com/ || true
-
-      - name: Verify known_blocked_rules kept the step from failing
-        if: always() && matrix.enforcement && steps.known_blocked_connection.outcome != 'skipped'
-        run: |
-          if [ "${{ steps.known_blocked_connection.outcome }}" != "success" ]; then
-            echo "::error::Expected the step to succeed (the only blocked connection matches known_blocked_rules), but it reported '${{ steps.known_blocked_connection.outcome }}'"
-            exit 1
-          fi
-          echo "OK: known_blocked_rules correctly kept the step from failing"
-
-      - parallel:
-          - name: sandbox-parallel-a
-            id: parallel_a
-            uses: ./
-            env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-              BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-a-summary.md
-            with:
-              proxy_engine: universal
-              allowed_https_rules: example.com:443
-              allowed_http_rules: example.com:80
-              label: parallel-a
-              fail_on_blocked: false
-              run: |
-                sleep 5
-                wget -q -T 5 -O /dev/null http://example.com/
-                if wget -q -T 5 -O /dev/null http://example.net/ 2>&1; then
-                  echo "::error::cross-talk: example.net (step B's allowlist) was reachable from step A"; exit 1
-                fi
-
-          - name: sandbox-parallel-b
-            id: parallel_b
-            uses: ./
-            env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-              BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-b-summary.md
-            with:
-              proxy_engine: universal
-              allowed_https_rules: example.net:443
-              allowed_http_rules: example.net:80
-              label: parallel-b
-              fail_on_blocked: false
-              run: |
-                wget -q -T 5 -O /dev/null http://example.net/
-                if wget -q -T 5 -O /dev/null http://example.com/ 2>&1; then
-                  echo "::error::cross-talk: example.com (step A's allowlist) was reachable from step B"; exit 1
-                fi
-
-      - name: Verify no leftover buildcage-proxy containers/networks after the parallel steps
-        if: always()
-        run: |
-          LEFTOVER_C=$(docker ps -a --filter "name=buildcage-proxy-" -q)
-          LEFTOVER_N=$(docker network ls --filter "name=buildcage-proxy-" -q)
-          if [ -n "$LEFTOVER_C" ] || [ -n "$LEFTOVER_N" ]; then
-            echo "::error::leftover buildcage-proxy containers/networks found after parallel sandbox steps"
-            exit 1
-          fi
-
-      # Every step makes the same missing write_through targets at once, and
-      # the targets stay after each of them ends.
-      - parallel:
-          - name: sandbox-parallel-write-through-short-persistent
-            uses: ./
-            env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-            with:
-              proxy_engine: universal
-              label: parallel-write-through-short-persistent
-              write_through: |
-                ./out
-                ./out-empty
-              run: "true"
-
-          - name: sandbox-parallel-write-through-short-ephemeral
-            uses: ./
-            env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-            with:
-              proxy_engine: universal
-              filesystem_mode: ephemeral
-              label: parallel-write-through-short-ephemeral
-              write_through: |
-                ./out
-                ./out-empty
-              run: "true"
-
-          - name: sandbox-parallel-write-through-long
-            uses: ./
-            env:
-              BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_image.outputs.ref }}
-            with:
-              proxy_engine: universal
-              filesystem_mode: ephemeral
-              label: parallel-write-through-long
-              write_through: |
-                ./out
-                ./out-empty
-              run: |
-                sleep 15
-                echo written > ./out/file
-
-      - name: Verify the write_through targets were kept
-        if: always()
-        run: |
-          if [ "$(cat out/file 2>/dev/null)" != "written" ]; then
-            echo "::error::the long step's write to ./out/file did not reach the runner"
-            exit 1
-          fi
-          if [ ! -d out-empty ]; then
-            echo "::error::./out-empty was removed after the steps ended"
-            exit 1
-          fi
-          echo "OK: the write reached the runner, and both targets were kept"
-
   # A concurrent step ending must not detach an inspect step's CA mount,
   # whatever engine the ending step uses.
   test_sandbox_concurrency_inspect:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.runner }}
+    # ubuntu-latest's hosts already run the inspect integration tests.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
-    name: "e2e: test (sandbox, inspect engine, concurrency, ${{ matrix.runner }})"
+    name: "e2e: test (sandbox, inspect engine, concurrency, ubuntu-22.04)"
 
     steps:
       - name: Checkout
@@ -1272,7 +1179,6 @@ jobs:
       [
         changes,
         test_sandbox_filesystem_audit,
-        test_sandbox_concurrency,
         test_sandbox_concurrency_inspect,
         test_sandbox_aws_key_check,
       ]
