@@ -176,7 +176,7 @@ const NONE: StepFilesystemAudit = { blocks: () => [] };
 /**
  * Uploads the recording before the Job Summary is written, so a cut section's
  * notice can say whether the artifact holds the rest. Never throws, so the
- * report and the proxy's teardown that follow are always reached.
+ * traffic report that follows is always reached.
  */
 export async function prepareStepFilesystemAudit(
   {

@@ -74171,7 +74171,11 @@ async function runSandboxStep(env, overrides = {}) {
 				cancelled: cancel.signal.aborted
 			}, deps) && (process.exitCode = 1);
 		} finally {
-			await stopProxy(), stopListening();
+			try {
+				await stopProxy();
+			} finally {
+				stopListening();
+			}
 		}
 	}
 	return exitCode;

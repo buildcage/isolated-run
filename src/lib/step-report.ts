@@ -96,8 +96,7 @@ export interface ReportedTraffic {
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
- * could not be read or recorded cannot vouch that nothing was blocked. The
- * proxy teardown that runs after this call depends on reaching it.
+ * could not be read or recorded cannot vouch that nothing was blocked.
  */
 export async function reportStepTraffic(
   {

@@ -645,7 +645,8 @@ export async function runSandboxStep(
       envOverrides: mediation?.envOverrides,
     });
   } finally {
-    // A report that throws still leaves the proxy stopped and the signals released.
+    // The reports are written not to throw; one that does anyway still leaves
+    // the proxy stopped and the signals released.
     try {
       const runnerFileFailed = await finalizeStep(
         {
@@ -662,8 +663,11 @@ export async function runSandboxStep(
       );
       if (runnerFileFailed) process.exitCode = 1;
     } finally {
-      await stopProxy();
-      stopListening();
+      try {
+        await stopProxy();
+      } finally {
+        stopListening();
+      }
     }
   }
 
