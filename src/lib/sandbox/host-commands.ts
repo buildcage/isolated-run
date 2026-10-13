@@ -31,12 +31,11 @@ const PINNED_COMMANDS = ["docker", "sudo"] as const;
 export function persistingWritablePaths(
   filesystemMode: FilesystemMode,
   writeThroughPaths: string[],
-  env: NodeJS.ProcessEnv,
-  realpath: (path: string) => string = realPathOf,
+  defaultDirs: DefaultWritableDirs,
 ): string[] {
   if (filesystemMode === "ephemeral") return writeThroughPaths;
   return writableDirsOf({
-    ...resolveDefaultWritableDirs(env, realpath),
+    ...defaultDirs,
     writablePaths: writeThroughPaths,
   });
 }
@@ -272,5 +271,9 @@ export function pinningPaths(
   } catch {
     // See above.
   }
-  return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
+  return persistingWritablePaths(
+    "persistent",
+    writeThroughPaths,
+    resolveDefaultWritableDirs(env, realpath),
+  );
 }

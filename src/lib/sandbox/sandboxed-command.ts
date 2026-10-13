@@ -8,7 +8,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { PROXY_ADDRESS } from "#core/lib/log/proxy-address.ts";
 
 import { netnsNameFor } from "../container.ts";
-import { SandboxError } from "../errors.ts";
+import { asSandboxError, SandboxError } from "../errors.ts";
 import type { FilesystemMode } from "../filesystem-mode.ts";
 import {
   extractCaCert,
@@ -32,7 +32,12 @@ import {
   startFilesystemAudit,
   type AuditHandle,
 } from "./filesystem-audit-tracer.ts";
-import { jvmTools, persistingWritablePaths, resolveDefaultWritableDirs } from "./host-commands.ts";
+import {
+  jvmTools,
+  persistingWritablePaths,
+  resolveDefaultWritableDirs,
+  type DefaultWritableDirs,
+} from "./host-commands.ts";
 import {
   renameGuardDirs as renameGuards,
   sandboxReadonlyFileCommands,
@@ -54,7 +59,7 @@ import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
-import type { BuiltOciSpec, MountEntry, OverlayDirs } from "./types.ts";
+import type { BuiltOciSpec, MountEntry, MountinfoEntry, OverlayDirs } from "./types.ts";
 
 /**
  * The sandbox's own end of the direct veth link to the proxy's buildcage0
@@ -182,6 +187,34 @@ export interface AssembledBundle {
   caTrust: CaTrustFiles | undefined;
   netnsName: string;
   rootfsBindDir: string;
+  /** The paths whose writes persist, as the mounts were built from them;
+   *  what is settled after the command goes by these. */
+  persisting: string[];
+}
+
+/**
+ * The writable directories, resolved once as the bundle is assembled. The
+ * mounts are built from these, so what is settled after the command goes by
+ * the same paths even if the command changed where they resolve.
+ */
+interface WritableLayout {
+  defaultDirs: DefaultWritableDirs;
+  /** Persistent mode's, whichever mode runs; see pinningPaths. */
+  persistent: string[];
+  /** The running mode's; see persistingWritablePaths. */
+  persisting: string[];
+}
+
+function resolveWritableLayout(
+  { filesystemMode, writeThroughPaths, env }: AssembleBundleOptions,
+  realpath: RunSandboxedCommandDeps["realpath"],
+): WritableLayout {
+  const defaultDirs = resolveDefaultWritableDirs(env, realpath);
+  return {
+    defaultDirs,
+    persistent: persistingWritablePaths("persistent", writeThroughPaths, defaultDirs),
+    persisting: persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs),
+  };
 }
 
 function extractBootstrap(
@@ -196,9 +229,9 @@ function extractBootstrap(
     // one); see gen-seccomp-profile/main.go.
     return extractRuncBootstrap({ containerName, destDir: dir });
   } catch (e) {
-    if (e instanceof SandboxError) throw e;
-    throw new SandboxError(
-      `Failed to extract runc/gen-seccomp-profile from the proxy image: ${errorMessage(e)}`,
+    throw asSandboxError(
+      e,
+      "Failed to extract runc/gen-seccomp-profile from the proxy image",
       "RUNC_EXTRACT_FAILED",
     );
   }
@@ -213,6 +246,7 @@ function extractCaTrust(
   containerName: string,
   dir: string,
   options: AssembleBundleOptions,
+  layout: WritableLayout,
   {
     extractCaCert,
     writeCaTrustFiles,
@@ -222,14 +256,10 @@ function extractCaTrust(
     realpath,
   }: RunSandboxedCommandDeps,
 ): CaTrustFiles {
-  const { env, writeThroughPaths, warn } = options;
+  const { env, warn } = options;
   try {
     const caCertPath = extractCaCert(containerName, dir);
-    // Persistent mode's paths in either mode; see pinningPaths.
-    const tools = jvmTools(
-      env,
-      persistingWritablePaths("persistent", writeThroughPaths, env, realpath),
-    );
+    const tools = jvmTools(env, layout.persistent);
     const files: CaTrustFiles = {
       ...writeCaTrustFiles(caCertPath, dir, env, tools, { warn }),
       nssDb: prepareNssDb(
@@ -237,7 +267,7 @@ function extractCaTrust(
         dir,
         env.HOME,
         { warn, info },
-        { homeUpper: homeUpperFor(dir, options, realpath) },
+        { homeUpper: homeUpperFor(dir, options, layout.persisting) },
       ),
     };
     const preset = presetCaVariables(files, env, realpath);
@@ -250,9 +280,9 @@ function extractCaTrust(
     }
     return files;
   } catch (e) {
-    if (e instanceof SandboxError) throw e;
-    throw new SandboxError(
-      `Failed to extract the proxy's CA from the proxy image: ${errorMessage(e)}`,
+    throw asSandboxError(
+      e,
+      "Failed to extract the proxy's CA from the proxy image",
       "CA_EXTRACT_FAILED",
     );
   }
@@ -262,13 +292,12 @@ function extractCaTrust(
  *  not written through. */
 function homeUpperFor(
   dir: string,
-  options: AssembleBundleOptions,
-  realpath: RunSandboxedCommandDeps["realpath"],
+  { filesystemMode, overlayRoots, env }: AssembleBundleOptions,
+  persisting: string[],
 ): string | undefined {
-  const { filesystemMode, overlayRoots, env } = options;
   const home = env.HOME;
   if (filesystemMode !== "ephemeral" || !home || !overlayRoots.includes(home)) return undefined;
-  if (persists(join(home, NSS_DB_PATH), options, realpath)) return undefined;
+  if (persists(join(home, NSS_DB_PATH), persisting)) return undefined;
   return overlayUpperFor(dir, home);
 }
 
@@ -315,6 +344,32 @@ function writeBundleFiles(
 }
 
 /**
+ * The host paths kept read-only in the sandbox, each created first: runc skips
+ * a read-only path that doesn't exist, and the sandbox could then create it.
+ */
+function prepareReadonlyHostPaths(
+  persisting: string[],
+  { writeThroughPaths, env }: AssembleBundleOptions,
+  hostMounts: MountinfoEntry[],
+  { lstat, readlink, mkdir, touch }: RunSandboxedCommandDeps,
+): { readonlyHostPaths: string[]; renameGuardDirs: string[] } {
+  const symlinkDeps = { lstat, readlink };
+  const dirs = sandboxReadonlyHostDirs(persisting, env, undefined, symlinkDeps, hostMounts);
+  const files = sandboxReadonlyFileCommands(
+    writeThroughPaths,
+    persisting,
+    env,
+    symlinkDeps,
+    hostMounts,
+  );
+  const readonlyHostPaths = [...dirs, ...files];
+  const renameGuardDirs = renameGuards(readonlyHostPaths, persisting);
+  for (const dir of dirs) mkdir(dir, { mode: 0o700, recursive: true });
+  for (const file of files) touch(file);
+  return { readonlyHostPaths, renameGuardDirs };
+}
+
+/**
  * The uid/gid the sandboxed process runs as. Only supplementary groups are
  * dropped by buildOciConfig; this substitutes the primary GID too, if it's a
  * privileged group. See identity.ts.
@@ -355,8 +410,16 @@ export function assembleBundle(
   const { listHostMounts, buildOciConfig } = deps;
 
   const { runcPath, seccompProfile, baseSpec } = extractBootstrap(containerName, dir, deps);
+  let layout;
+  try {
+    layout = resolveWritableLayout(options, deps.realpath);
+  } catch (e) {
+    throw asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
+  }
   const caTrust =
-    proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, deps) : undefined;
+    proxyEngine === "inspect"
+      ? extractCaTrust(containerName, dir, options, layout, deps)
+      : undefined;
 
   const netnsName = netnsNameFor(containerName);
   const rootfsBindDir = join(dir, "rootfs");
@@ -371,38 +434,15 @@ export function assembleBundle(
     // alone only covers the top-level rootfs mount (see
     // computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
-    const persisting = persistingWritablePaths(
-      filesystemMode,
-      writeThroughPaths,
-      env,
-      deps.realpath,
-    );
-    const symlinkDeps = { lstat: deps.lstat, readlink: deps.readlink };
-    const readonlyHostDirs = sandboxReadonlyHostDirs(
-      persisting,
-      env,
-      undefined,
-      symlinkDeps,
+    const { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(
+      layout.persisting,
+      options,
       hostMounts,
+      deps,
     );
-    const readonlyFiles = sandboxReadonlyFileCommands(
-      writeThroughPaths,
-      persisting,
-      env,
-      symlinkDeps,
-      hostMounts,
-    );
-    const renameGuardDirs = renameGuards([...readonlyHostDirs, ...readonlyFiles], persisting);
-    // runc skips a read-only path that doesn't exist, and the sandbox could
-    // then create it.
-    for (const dir of readonlyHostDirs) deps.mkdir(dir, { mode: 0o700, recursive: true });
-    for (const file of readonlyFiles) deps.touch(file);
     config = buildOciConfig(baseSpec, {
       identity: resolveIdentity(env, options.warn, deps),
-      writable: {
-        ...resolveDefaultWritableDirs(env, deps.realpath),
-        writablePaths: writeThroughPaths,
-      },
+      writable: { ...layout.defaultDirs, writablePaths: writeThroughPaths },
       ephemeral:
         filesystemMode === "ephemeral"
           ? { overlayRoots: overlayScratchPaths, allowWrite: writeThroughPaths }
@@ -423,28 +463,25 @@ export function assembleBundle(
       },
       env,
       caTrust,
-      readonlyHostPaths: [...readonlyHostDirs, ...readonlyFiles],
+      readonlyHostPaths,
       renameGuardDirs,
       extraInternalMounts: options.internalMounts,
       extraMaskedPaths: options.maskedPaths,
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
-    // A step in here that already speaks to the user keeps its own words:
-    // resolveSandboxGid's UNSAFE_PRIMARY_GID, and the writable-path guards
-    // buildOciConfig runs, which resolveFilesystemPlan reports under the
-    // same code when its own early copy catches the input first.
-    if (e instanceof SandboxError) throw e;
+    // A step in here that already speaks to the user keeps its own words
+    // (resolveSandboxGid's UNSAFE_PRIMARY_GID passes through asSandboxError),
+    // and so do the writable-path guards buildOciConfig runs, which
+    // resolveFilesystemPlan reports under the same code when its own early
+    // copy catches the input first.
     if (e instanceof WritablePathConflictError) {
       throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
     }
-    throw new SandboxError(
-      `Failed to build the sandbox's OCI bundle: ${errorMessage(e)}`,
-      "OCI_CONFIG_BUILD_FAILED",
-    );
+    throw asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
   }
 
-  return { config, runcPath, caTrust, netnsName, rootfsBindDir };
+  return { config, runcPath, caTrust, netnsName, rootfsBindDir, persisting: layout.persisting };
 }
 
 export const CA_RESIDUE_HINT =
@@ -452,19 +489,9 @@ export const CA_RESIDUE_HINT =
   "(a copy of the CA is then written back).";
 
 /** Whether a write to path would have outlived the command: whether it lies
- *  under a path the filesystem mode keeps writes to. */
-function persists(
-  path: string,
-  {
-    filesystemMode,
-    writeThroughPaths,
-    env,
-  }: Pick<RunSandboxedCommandOptions, "filesystemMode" | "writeThroughPaths" | "env">,
-  realpath: RunSandboxedCommandDeps["realpath"],
-): boolean {
-  return persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath).some(
-    (p) => p === "/" || path === p || path.startsWith(`${p}/`),
-  );
+ *  under `persisting`, the paths the filesystem mode keeps writes to. */
+function persists(path: string, persisting: string[]): boolean {
+  return persisting.some((p) => p === "/" || path === p || path.startsWith(`${p}/`));
 }
 
 function releaseDeps(
@@ -480,10 +507,11 @@ function releaseDeps(
  *  written back. */
 function finishNssDb(
   caTrust: CaTrustFiles | undefined,
+  persisting: string[],
   options: RunSandboxedCommandOptions,
   deps: RunSandboxedCommandDeps,
 ): void {
-  const { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info, realpath } = deps;
+  const { nssDbDetached, settleNssDbSlot, releaseNssDbDirs, readFile, info } = deps;
   const nssDb = caTrust?.nssDb;
   if (!nssDb) return;
   const { failOnCaResidue, warn } = options;
@@ -491,7 +519,7 @@ function finishNssDb(
 
   // Under ephemeral the mount sits on the overlay, which a host rmdir cannot
   // detach.
-  const persist = persists(nssDb.destination, options, realpath);
+  const persist = persists(nssDb.destination, persisting);
   const detached = persist ? nssDbDetached(nssDb) : undefined;
   if (detached !== undefined) {
     warn(detached);
@@ -517,10 +545,9 @@ function finishNssDb(
       );
     }
   } catch (e) {
-    if (e instanceof SandboxError) throw e;
-    throw new SandboxError(
-      `could not write back what the command wrote to the NSS database at ${nssDb.destination}: ` +
-        errorMessage(e),
+    throw asSandboxError(
+      e,
+      `could not write back what the command wrote to the NSS database at ${nssDb.destination}`,
       "NSS_DATABASE_WRITE_BACK_FAILED",
     );
   } finally {
@@ -578,7 +605,7 @@ export async function runSandboxedCommand(
 
   return withScratchDir(
     async (dir) => {
-      const { config, runcPath, caTrust, netnsName, rootfsBindDir } = assembleBundle(
+      const { config, runcPath, caTrust, netnsName, rootfsBindDir, persisting } = assembleBundle(
         dir,
         options,
         deps,
@@ -608,7 +635,7 @@ export async function runSandboxedCommand(
         if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
         throw e;
       }
-      finishNssDb(caTrust, options, deps);
+      finishNssDb(caTrust, persisting, options, deps);
       return exitCode;
     },
     {
