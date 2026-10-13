@@ -260,9 +260,9 @@ export function readStepFilesystemAudit(
   const { summary, summaryError, ended, written } = reduced;
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
-  if (!ended && !cancelled) {
+  if (attached && !ended && !cancelled) {
     annotation.error(
-      "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Its own lines in the step log say why",
+      "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
     );
     process.exitCode = 1;
   }

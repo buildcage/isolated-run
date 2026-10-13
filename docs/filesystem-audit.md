@@ -432,9 +432,9 @@ The summary can also open with a warning, or be missing:
   very large number of files at once can cause it.
 - **The same warning, with an error and a failed step, in any mode.** The record has no end line:
   the tracer exited before the step ended, or did not finish the record when the step stopped it.
-  The tracer's own lines in the step log say why, such as a `filesystem-audit: fatal:` line ending
-  in `no space left on device` once the step filled the disk. A cancelled step does not add this
-  error.
+  A reason the tracer gave is in the step log on a `filesystem-audit: fatal:` line, such as one
+  ending in `no space left on device` once the step filled the disk. A cancelled step does not add
+  this error.
 - **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
   be missing; see [Skipped hooks](#skipped-hooks).
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is

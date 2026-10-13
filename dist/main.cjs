@@ -70104,7 +70104,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: () => unreadableSummaryBlocks() })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
-	!ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Its own lines in the step log say why"), process.exitCode = 1);
+	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
 	let artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
