@@ -3,15 +3,16 @@
 # read-only inside the sandbox in both filesystem modes and cannot be renamed
 # away, and that write_through naming GITHUB_ENV or GITHUB_PATH opens that one
 # file only. Under write_through: / nothing above them is a mount point, so the
-# third run also tries to move $RUNNER_TEMP aside. The fourth reaches the files
-# through a bind mount that write_through names. See
-# sandboxReadonlyFileCommands and renameGuardDirs in sandbox/host-commands.ts.
+# third run also tries to move $RUNNER_TEMP aside, and writes to /opt, which
+# no other entry opens. The fourth reaches the files through a bind mount that
+# write_through names. See sandboxReadonlyFileCommands and renameGuardDirs in
+# sandbox/host-commands.ts.
 #
-# The last run checks the other half: GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are
-# mediated, so the command writes backing copies it can rewrite in place (sed
-# -i, which would EBUSY against a bind-mounted file), and the host writes the
-# real files from them -- even under ephemeral, where other writes are
-# discarded. See runner-output-files.ts.
+# The ephemeral run also checks the other half: GITHUB_OUTPUT and
+# GITHUB_STEP_SUMMARY are mediated, so the command writes backing copies it can
+# rewrite in place (sed -i, which would EBUSY against a bind-mounted file), and
+# the host writes the real files from them -- even under ephemeral, where other
+# writes are discarded. See runner-output-files.ts.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -69,6 +70,24 @@ if [ "$MODE" = persistent ]; then
     echo "OK: the file command directory cannot be renamed"
   fi
 fi
+if [ "$MODE" = ephemeral ]; then
+  if echo "mediated_key=initial" >>"$GITHUB_OUTPUT" && sed -i "s/initial/final/" "$GITHUB_OUTPUT"; then
+    echo "OK: GITHUB_OUTPUT can be rewritten in place"
+  else
+    echo "UNEXPECTED: GITHUB_OUTPUT could not be rewritten in place"
+    rc=1
+  fi
+  echo "MEDIATED_SUMMARY" >>"$GITHUB_STEP_SUMMARY"
+fi
+if [ "$OPENED" = none ]; then
+  if touch /opt/.buildcage-whole-test 2>/dev/null; then
+    rm -f /opt/.buildcage-whole-test
+    echo "OK: /opt is writable"
+  else
+    echo "UNEXPECTED: /opt was not writable"
+    rc=1
+  fi
+fi
 exit $rc'
 
 # Runs one sandbox, named $1, in mode $2 with write_through $3, which opens
@@ -76,15 +95,17 @@ exit $rc'
 run_probe() {
   local tag="$1" mode="$2" write_through="$3" opened="$4"
   local env_file="$COMMANDS/set_env_$tag" path_file="$COMMANDS/add_path_$tag"
-  local state_file="$COMMANDS/save_state_$tag"
-  touch "$env_file" "$path_file" "$state_file"
+  local state_file="$COMMANDS/save_state_$tag" output_file="$COMMANDS/set_output_$tag"
+  local summary_file="$WORKDIR/summary_$tag.md"
+  touch "$env_file" "$path_file" "$state_file" "$output_file" "$summary_file"
   echo "=== $mode, write_through: $write_through ==="
   RUNNER_TEMP="$WORKDIR/_temp" \
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_ENV="$env_file" \
   GITHUB_PATH="$path_file" \
   GITHUB_STATE="$state_file" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+  GITHUB_OUTPUT="$output_file" \
+  GITHUB_STEP_SUMMARY="$summary_file" \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE="$mode" \
   INPUT_WRITE_THROUGH="$write_through" \
@@ -131,30 +152,6 @@ exit \$rc" \
   node dist/main.cjs
 ALIAS_CODE=$?
 
-# Mediation: the command writes GITHUB_OUTPUT and GITHUB_STEP_SUMMARY, rewriting
-# the output in place with sed -i, under ephemeral (where a plain write would be
-# discarded). The host must end up with what the command left.
-MED_OUTPUT="$COMMANDS/set_output_med"
-MED_SUMMARY="$WORKDIR/summary_med.md"
-touch "$COMMANDS/set_env_med" "$COMMANDS/add_path_med" "$COMMANDS/save_state_med"
-touch "$MED_OUTPUT" "$MED_SUMMARY"
-echo "=== mediation: GITHUB_OUTPUT and GITHUB_STEP_SUMMARY (ephemeral) ==="
-RUNNER_TEMP="$WORKDIR/_temp" \
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_ENV="$COMMANDS/set_env_med" \
-GITHUB_PATH="$COMMANDS/add_path_med" \
-GITHUB_STATE="$COMMANDS/save_state_med" \
-GITHUB_OUTPUT="$MED_OUTPUT" \
-GITHUB_STEP_SUMMARY="$MED_SUMMARY" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_FILESYSTEM_MODE=ephemeral \
-INPUT_RUN='set -e
-echo "mediated_key=initial" >> "$GITHUB_OUTPUT"
-sed -i "s/initial/final/" "$GITHUB_OUTPUT"
-echo "## from the command" >> "$GITHUB_STEP_SUMMARY"' \
-  node dist/main.cjs
-MED_CODE=$?
-
 echo ""
 echo "=== Sandbox File Command Assertions ==="
 echo ""
@@ -182,15 +179,18 @@ check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_epheme
 check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
 check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
 
-check_status "mediation: the step held" "$MED_CODE" 0
+MED_OUTPUT="$COMMANDS/set_output_ephemeral"
+MED_SUMMARY="$WORKDIR/summary_ephemeral.md"
 if grep -qx "mediated_key=final" "$MED_OUTPUT" 2>/dev/null; then
-  pass "mediation: GITHUB_OUTPUT written back after an in-place edit"
+  pass "ephemeral: GITHUB_OUTPUT written back after an in-place edit"
 else
-  fail "mediation: GITHUB_OUTPUT -- got: $(cat "$MED_OUTPUT" 2>/dev/null)"
+  fail "ephemeral: GITHUB_OUTPUT -- got: $(cat "$MED_OUTPUT" 2>/dev/null)"
 fi
-if grep -q "## from the command" "$MED_SUMMARY" 2>/dev/null; then
-  pass "mediation: GITHUB_STEP_SUMMARY carries the command's own summary"
+# The report is written from the host after the sandbox exits, so the command's
+# markdown ends up alongside it rather than in place of it.
+if grep -qx "MEDIATED_SUMMARY" "$MED_SUMMARY" 2>/dev/null && grep -q "^## " "$MED_SUMMARY"; then
+  pass "ephemeral: GITHUB_STEP_SUMMARY carries the command's markdown next to this action's report"
 else
-  fail "mediation: GITHUB_STEP_SUMMARY -- got: $(cat "$MED_SUMMARY" 2>/dev/null)"
+  fail "ephemeral: GITHUB_STEP_SUMMARY -- got: $(cat "$MED_SUMMARY" 2>/dev/null)"
 fi
 assert_results

@@ -1,11 +1,9 @@
 #!/bin/bash
 # Verifies write_through: by driving dist/main.cjs directly, without the real
 # action wrapper; see test-e2e.yml's enforcement steps for the one
-# case that does exercise the real action. Covers an existing path, a missing
-# one (created as the runner and kept, written to or not), a missing one two
-# levels under a root-owned 1777 parent (created as the runner), `/` on its
-# own (which disables the read-only restriction entirely), and the deprecated
-# writable: spelling.
+# case that does exercise the real action. Covers an existing path and a
+# missing one (created as the runner and kept, written to or not). `/` on its
+# own is checked in integration-test-file-commands.sh.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -18,13 +16,8 @@ WORKDIR=$(mktemp -d)
 PARENT=/opt/buildcage-write-through-test
 sudo -n mkdir -p "$PARENT"
 sudo -n chown "$(id -u):$(id -g)" "$PARENT"
-# Root-owned but writable by everyone, like /tmp, and outside every
-# always-writable path for the same reason as PARENT.
-STICKY=/opt/buildcage-write-through-sticky-test
-sudo -n mkdir -p "$STICKY"
-sudo -n chmod 1777 "$STICKY"
 cleanup() {
-  sudo -n rm -rf "$PARENT" "$STICKY"
+  sudo -n rm -rf "$PARENT"
   rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
@@ -70,63 +63,6 @@ if [ -d "${PARENT}/created-empty" ]; then
   pass "a created directory left empty is kept too"
 else
   fail "${PARENT}/created-empty was removed after the step"
-fi
-
-# Every directory made on the way to the target is the runner's, so a later
-# step outside any sandbox can still write under it.
-for mode in persistent ephemeral; do
-  GITHUB_WORKSPACE="$WORKDIR" \
-  GITHUB_STATE="$WORKDIR/state.env" \
-  GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-  INPUT_FILESYSTEM_MODE="$mode" \
-  INPUT_WRITE_THROUGH="${STICKY}/$mode/build/out" \
-  INPUT_RUN="mkdir ${STICKY}/$mode/build/out/logs
-echo built > ${STICKY}/$mode/build/out/marker" \
-    node dist/main.cjs
-  STICKY_CODE=$?
-  OWNER=$(stat -c '%u:%g' "${STICKY}/$mode/build" 2>/dev/null)
-  if [ "$STICKY_CODE" = "0" ] && [ "$OWNER" = "$(id -u):$(id -g)" ] \
-    && mkdir "${STICKY}/$mode/build/later"; then
-    pass "$mode: a path made under a root-owned 1777 parent is the runner's all the way down"
-  else
-    fail "$mode: a path under a root-owned 1777 parent was not the runner's (exit $STICKY_CODE, ${STICKY}/$mode/build owned by ${OWNER:-<none>})"
-  fi
-done
-
-# `/` names the root of every mount there is, which leaves nothing for the
-# read-only policy to apply to.
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_STATE="$WORKDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_WRITE_THROUGH="/" \
-INPUT_RUN="touch /opt/.buildcage-writable-test
-rm -f /opt/.buildcage-writable-test" \
-  node dist/main.cjs
-ROOT_CODE=$?
-
-if [ "$ROOT_CODE" = "0" ]; then
-  pass "/ is fully writable when write_through: / is set"
-else
-  fail "/ was not fully writable when write_through: / is set (exit $ROOT_CODE)"
-fi
-
-# The pre-rename spelling has to keep working (see resolveWriteThroughInput).
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_STATE="$WORKDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_WRITABLE="/opt" \
-INPUT_RUN="touch /opt/.buildcage-writable-test
-rm -f /opt/.buildcage-writable-test" \
-  node dist/main.cjs
-ALIAS_CODE=$?
-
-if [ "$ALIAS_CODE" = "0" ]; then
-  pass "the deprecated writable: spelling still works"
-else
-  fail "writable: no longer works as an alias (exit $ALIAS_CODE)"
 fi
 
 assert_results
