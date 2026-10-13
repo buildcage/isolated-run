@@ -182,13 +182,13 @@ that only ran programs has no accessed paths table, and the flag legend opens th
   holding a space is quoted there, as `"VM Thread"`, except a memfd's name, which is quoted
   already, and a refused system call.
 - A **refused system call** is one the sandbox's seccomp profile does not allow, such as
-  `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names each one
-  with the first commands that made it, and the details, where they fit, show it once per program,
-  as `syscall:io_uring_setup` with `!`. One already recorded as a failed change to a path is not
-  repeated, and one the profile allows only for some arguments, as `clone`, is not recorded even
-  when refused, since the kernel's own `EPERM` for it would read the same. A program killed for a
-  32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread killed while others run on
-  is not recorded.
+  `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names the
+  first 10, each with the first commands that made it, and counts the rest; the details, where they
+  fit, show every one once per program, as `syscall:io_uring_setup` with `!`. One already recorded
+  as a failed change to a path is not repeated, and one the profile allows only for some arguments,
+  as `clone`, is not recorded even when refused, since the kernel's own `EPERM` for it would read
+  the same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
+  thread killed while others run on is not recorded.
 
 ### Flags
 
@@ -446,13 +446,14 @@ refuses; see [What changes in the step](#what-changes-in-the-step).
 ### Skipped hooks
 
 On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
-entered again. The kernels on GitHub-hosted runners do not pause the hooks, nor do Ubuntu 22.04's
-and 24.04's `generic` kernels as they boot by default; Ubuntu 26.04's, and the 7.0 hardware
-enablement kernel of 24.04, do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt`
-prints the modes with the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped
-when it is `(full)` or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is
-missing even so, the kernel cannot switch modes, and hooks can be skipped when
-`/boot/config-$(uname -r)` sets `CONFIG_PREEMPT_RCU=y`.
+entered again. The `-azure` kernels GitHub-hosted runners boot do not pause the hooks, the 7.0 one
+on `ubuntu-26.04` included, nor do Ubuntu 22.04's and 24.04's `generic` kernels as they boot by
+default. Ubuntu 26.04's `generic` kernel and the 7.0 hardware enablement kernel of 24.04 do. On a
+self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the modes with the one in use
+in parentheses, such as `full (lazy)`, and hooks can be skipped when it is `(full)` or `(lazy)`.
+That file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing even so, the kernel
+cannot switch modes, and hooks can be skipped when `/boot/config-$(uname -r)` sets
+`CONFIG_PREEMPT_RCU=y`.
 
 `host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
 accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
