@@ -38,14 +38,14 @@ GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_RUN='echo sandboxed-process-started; sleep 300' \
+INPUT_RUN='echo sandboxed-process-started; sleep 297' \
   node dist/main.cjs > "$WORKDIR/out.log" 2>&1 &
 NODE_PID=$!
 
-echo "waiting for the sandboxed 'sleep 300' to start..." >&2
+echo "waiting for the sandboxed 'sleep 297' to start..." >&2
 FOUND=0
 for _ in $(seq 1 60); do
-  if pgrep -f "sleep 300" >/dev/null 2>&1; then
+  if pgrep -f "^sleep 297" >/dev/null 2>&1; then
     FOUND=1
     break
   fi
@@ -62,7 +62,7 @@ sleep 0.5
 # whatever limits the runner's service has reach the command too. Read from
 # here, since the sandbox sees only its own cgroup namespace.
 OWN_CGROUP=$(sed -n 's/^0:://p' /proc/self/cgroup)
-SLEEP_PID=$(pgrep -f -n "^sleep 300")
+SLEEP_PID=$(pgrep -f -n "^sleep 297")
 SANDBOX_CGROUP=$(sed -n 's/^0:://p' "/proc/$SLEEP_PID/cgroup" 2>/dev/null)
 echo "runner cgroup: ${OWN_CGROUP}, sandbox cgroup: ${SANDBOX_CGROUP}" >&2
 
@@ -79,7 +79,7 @@ BASH_PID="${BASH_PIDS[0]}"
 # same privilege.
 sudo -n kill -9 "$BASH_PID"
 for _ in $(seq 1 20); do
-  pgrep -f "sleep 300" >/dev/null 2>&1 || break
+  pgrep -f "^sleep 297" >/dev/null 2>&1 || break
   sleep 0.1
 done
 
@@ -92,7 +92,7 @@ case "$SANDBOX_CGROUP" in
   *)
     fail "the sandbox's cgroup is ${SANDBOX_CGROUP:-unknown}, not under ${OWN_CGROUP}" ;;
 esac
-if pgrep -f "sleep 300" >/dev/null 2>&1; then
+if pgrep -f "^sleep 297" >/dev/null 2>&1; then
   fail "sandboxed process survived as an orphan after run-isolated.sh was killed"
 else
   pass "entire sandbox process tree died with run-isolated.sh"
