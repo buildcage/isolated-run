@@ -100,28 +100,32 @@ exit $rc'
 CODE_NONE=$(cat "$NONE/exit_code")
 AFTER=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
 LOG_NONE="$NONE/out.log"
+FAILURES_BEFORE_NONE=$FAILURES
+# The leak checks below need the command to have run, or an absent marker
+# would pass them untested.
 if [ "$CODE_NONE" = "0" ]; then
   pass "a host mount under an overlay root is visible and writable, and /tmp and \$HOME keep the host's owner and mode"
 else
-  fail "a check inside the sandbox gave way (exit $CODE_NONE) -- see $LOG_NONE"
-  cat "$LOG_NONE"
+  fail "a check inside the sandbox gave way (exit $CODE_NONE)"
 fi
-if [ ! -e "$HOME_MARKER" ]; then
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$HOME_MARKER" ]; then
   pass "a file created under \$HOME during the step is not on the host afterwards"
 else
   fail "a file created under \$HOME during the step leaked to the host"
 fi
-if [ -f "$HOME_PRELOADED" ] && [ "$(cat "$HOME_PRELOADED")" = "pre-existing-on-host" ]; then
+if [ "$CODE_NONE" = "0" ] && [ -f "$HOME_PRELOADED" ] &&
+  [ "$(cat "$HOME_PRELOADED")" = "pre-existing-on-host" ]; then
   pass "deleting a pre-existing \$HOME file inside the sandbox does not delete it on the host"
 else
   fail "a pre-existing \$HOME file was actually removed from the host by an in-sandbox delete"
 fi
-if [ ! -e "$NONE/tool/written" ] && [ ! -e "$BIND_SRC/written" ] && [ ! -e "$NONE/$DEEP/written" ]; then
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$NONE/tool/written" ] && [ ! -e "$BIND_SRC/written" ] &&
+  [ ! -e "$NONE/$DEEP/written" ]; then
   pass "writes to a host mount under an overlay root are discarded"
 else
   fail "a write to a host mount under an overlay root reached the host"
 fi
-if [ ! -e "$TMP_MARKER" ]; then
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$TMP_MARKER" ]; then
   pass "a write to /tmp is discarded"
 else
   fail "a write to /tmp reached the host"
@@ -130,12 +134,12 @@ if grep -q "^Filesystem mode: ephemeral$" "$LOG_NONE" &&
   grep -q "^Ephemeral (writes discarded at step end): $HOME$" "$LOG_NONE"; then
   pass "setup log shows the folded ephemeral paths"
 else
-  fail "setup log is missing the expected filesystem-mode lines -- see $LOG_NONE"
+  fail "setup log is missing the expected filesystem-mode lines"
 fi
 if grep -q "^Discarded ephemeral writes under .*$HOME" "$LOG_NONE"; then
   pass "a discard line is logged for the ephemeral overlay roots"
 else
-  fail "no discard line was logged for the ephemeral overlay roots -- see $LOG_NONE"
+  fail "no discard line was logged for the ephemeral overlay roots"
 fi
 if [ "$BEFORE" = "$AFTER" ]; then
   pass "the run's scratch dir (including overlay upper/work) is fully cleaned up afterwards"
@@ -143,6 +147,9 @@ else
   fail "the run's scratch dir was not fully cleaned up -- before/after $SCRATCH_BASE listings differ"
   echo "before: $BEFORE"
   echo "after:  $AFTER"
+fi
+if [ "$FAILURES" != "$FAILURES_BEFORE_NONE" ]; then
+  cat "$LOG_NONE"
 fi
 sudo -n umount "$NONE/tool" "$NONE/bound" "$NONE/$DEEP"
 rm -rf "$NONE" "$BIND_SRC"
@@ -155,30 +162,33 @@ rm -f "$HOME_MARKER" "$HOME_PRELOADED" "$TMP_MARKER"
 THROUGH=$(mktemp -d)
 rm -f /opt/.buildcage-ephemeral-allow-write-test
 run_ephemeral "$THROUGH" "./dist
-/opt" '
-mkdir -p "$GITHUB_WORKSPACE/dist"
-echo "built" > "$GITHUB_WORKSPACE/dist/output.txt"
-echo x > /opt/.buildcage-ephemeral-allow-write-test
-'
+/opt" 'rc=0
+echo "built" > "$GITHUB_WORKSPACE/dist/output.txt" || rc=1
+echo x > /opt/.buildcage-ephemeral-allow-write-test || rc=1
+exit $rc'
 CODE_THROUGH=$(cat "$THROUGH/exit_code")
 LOG_THROUGH="$THROUGH/out.log"
-if [ "$CODE_THROUGH" = "0" ] && [ -f "$THROUGH/dist/output.txt" ]; then
+FAILURES_BEFORE_THROUGH=$FAILURES
+check_status "write_through: ./dist and /opt: the step held" "$CODE_THROUGH" 0
+# A file on the host is itself the proof it persisted, so each entry is judged
+# on its own whatever the other did.
+if [ -f "$THROUGH/dist/output.txt" ]; then
   pass "write_through: ./dist creates the missing dir runner-owned and persists writes under it"
 else
-  fail "write_through: ./dist did not persist the write (exit $CODE_THROUGH) -- see $LOG_THROUGH"
+  fail "write_through: ./dist did not persist the write"
 fi
-if [ "$CODE_THROUGH" = "0" ] && [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
+if [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
   pass "write_through: /opt persists a write to an existing, already-writable directory"
 else
-  fail "write_through: /opt did not persist the write (exit $CODE_THROUGH) -- see $LOG_THROUGH"
+  fail "write_through: /opt did not persist the write"
 fi
 if grep -q "^Writable (persisted): *$THROUGH/dist$" "$LOG_THROUGH" &&
   grep -q "^Writable (persisted): */opt$" "$LOG_THROUGH"; then
   pass "setup log shows the persisted paths"
 else
-  fail "setup log is missing the persisted paths -- see $LOG_THROUGH"
+  fail "setup log is missing the persisted paths"
 fi
-if [ "$CODE_THROUGH" != "0" ]; then
+if [ "$FAILURES" != "$FAILURES_BEFORE_THROUGH" ]; then
   cat "$LOG_THROUGH"
 fi
 rm -f /opt/.buildcage-ephemeral-allow-write-test
