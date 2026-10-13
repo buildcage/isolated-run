@@ -4,26 +4,24 @@
  */
 
 // API endpoints only: the commercial, China and European Sovereign Cloud
-// domains, and the dual-stack ones.
-const AMAZONAWS_TLDS = ["com", "com.cn", "eu"];
-const DUALSTACK_DOMAIN_NAMES = [
-  "api.aws",
-  "api.amazonwebservices.com.cn",
-  "api.amazonwebservices.eu",
+// domains, and the dual-stack ones, written as regexes.
+const AMAZONAWS_TLDS = ["com", "com\\.cn", "eu"];
+const DUALSTACK_NAMES = [
+  "api\\.aws",
+  "api\\.amazonwebservices\\.com\\.cn",
+  "api\\.amazonwebservices\\.eu",
 ];
-const alternatives = (names: string[]) =>
-  `(${names.map((n) => n.replaceAll(".", "\\.")).join("|")})`;
-const AMAZONAWS_DOMAINS = `amazonaws\\.${alternatives(AMAZONAWS_TLDS)}`;
-const DUALSTACK_DOMAINS = alternatives(DUALSTACK_DOMAIN_NAMES);
+const AMAZONAWS_DOMAINS = `amazonaws\\.(${AMAZONAWS_TLDS.join("|")})`;
+const DUALSTACK_DOMAINS = `(${DUALSTACK_NAMES.join("|")})`;
 export const AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
 // The same domains as suffixes, which HAProxy tests without a regex. Matched
 // against txn.host, which is lowercased, has no port and holds only
 // [A-Za-z0-9._-]. Any name under these domains, whatever its labels hold, so
 // one with a `_` is checked.
 export const AWS_API_SUFFIXES = [
-  ...AMAZONAWS_TLDS.map((tld) => `.amazonaws.${tld}`),
-  ...DUALSTACK_DOMAIN_NAMES.map((name) => `.${name}`),
-];
+  ...AMAZONAWS_TLDS.map((tld) => `amazonaws\\.${tld}`),
+  ...DUALSTACK_NAMES,
+].map((domain) => `.${domain.replaceAll("\\.", ".")}`);
 // The names an interface VPC endpoint gives a service.
 const vpceHost = (service: string) =>
   `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`;
