@@ -127,7 +127,7 @@ check_status "10.200.0.100:8443 with SNI allowed.example.com" \
 # arrives within 3s only if the passthrough does not wait out inspect-delay
 # (5s) for the client's first bytes.
 echo "=== [Direct IP - allowed, server speaks first] ==="
-OUT=$(sleep 4 | timeout 3 nc 10.200.0.100 2525 || true)
+OUT=$(timeout 3 bash -c 'exec 3<>/dev/tcp/10.200.0.100/2525 && head -c 4 <&3' 2>/dev/null || true)
 case "$OUT" in
   220\ *) pass "10.200.0.100:2525 greeted without waiting for the client" ;;
   *) fail "10.200.0.100:2525 sent no greeting within 3s -- got: $OUT" ;;
@@ -141,39 +141,24 @@ else
   pass "10.200.0.101:8443 blocked"
 fi
 
-echo "=== [HTTPS - dns-failed (NXDOMAIN)] ==="
-CODE=$($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "nxdomain.wildcard.example.com blocked (got $CODE)"
-else
-  fail "nxdomain.wildcard.example.com reached the origin"
-fi
+# The cases below each wait out the resolver or a deliberately idle
+# connection, seconds apiece, so they run alongside the rest and are checked
+# at the end.
+SLOW=$(mktemp -d)
 
-echo "=== [HTTPS - dns-failed (AAAA only, no A record)] ==="
-CODE=$($C --max-time 5 https://v6only.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "v6only.wildcard.example.com blocked (got $CODE)"
-else
-  fail "v6only.wildcard.example.com reached the origin"
-fi
+echo "=== [HTTPS - dns-failed (NXDOMAIN)] (checked at the end) ==="
+($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
 
-echo "=== [HTTP - dns-failed (AAAA only, no A record)] ==="
+echo "=== [HTTPS - dns-failed (AAAA only, no A record)] (checked at the end) ==="
+($C --max-time 5 https://v6only.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/v6only-https" &
+
 # The HTTP path resolves through a do-resolve pair of its own, so the HTTPS
-# case above says nothing about it.
-CODE=$($C --max-time 5 http://v6only.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "v6only.wildcard.example.com HTTP blocked (got $CODE)"
-else
-  fail "v6only.wildcard.example.com HTTP reached the origin"
-fi
+# cases above say nothing about it.
+echo "=== [HTTP - dns-failed (AAAA only, no A record)] (checked at the end) ==="
+($C --max-time 5 http://v6only.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/v6only-http" &
 
-echo "=== [HTTP - dns-failed (NXDOMAIN)] ==="
-CODE=$($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "nxdomain.wildcard.example.com HTTP blocked (got $CODE)"
-else
-  fail "nxdomain.wildcard.example.com HTTP reached the origin"
-fi
+echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
+($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-http" &
 
 # [SSRF - allowlisted name resolving to an internal address (169.254.169.254)]
 # internal.wildcard.example.com matches the *.wildcard.example.com allowlist
@@ -221,7 +206,7 @@ fi
 echo "=== [HTTP keep-alive - allowed then blocked] ==="
 ((printf 'GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n'; sleep 1; \
   printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \
- | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+ | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  requests sent over one keep-alive connection (checked against the report)"
 
 # The other direction, which the pair above cannot show: a refusal must not
@@ -231,7 +216,7 @@ echo "  requests sent over one keep-alive connection (checked against the report
 echo "=== [HTTP keep-alive - blocked then allowed] ==="
 ((printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\n\r\n'; sleep 1; \
   printf 'GET / HTTP/1.1\r\nHost: keepalive.wildcard.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \
- | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+ | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  requests sent over one keep-alive connection (checked against the report)"
 
 # [TLS ClientHello with no SNI extension at all. There is no name to judge,
@@ -245,7 +230,7 @@ echo "  request sent (blocked expected in the report)"
 # [HTTP/1.0 request with no Host header, the plaintext counterpart of the
 # case above.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (blocked expected in the report)"
 
 # [A crafted SNI carrying the bytes of a log line: x" -\n[T] buildcage
@@ -267,8 +252,23 @@ echo "  request sent (an invalid-sni row expected in the report)"
 # The same name in a plaintext Host. Only the last `:port` is a port.
 echo "=== [HTTP - Host holding a colon] ==="
 ((printf 'GET / HTTP/1.1\r\nHost: tlsany.example.com:x.evil.example.net:80\r\nConnection: close\r\n\r\n'; sleep 1) \
- | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true)
+ | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (an invalid-host row expected in the report)"
+
+wait
+check_slow() {
+  local label="$1" file="$2"
+  if [ "$(cat "$SLOW/$file")" != "200" ]; then
+    pass "$label blocked (got $(cat "$SLOW/$file"))"
+  else
+    fail "$label reached the origin"
+  fi
+}
+check_slow nxdomain.wildcard.example.com nxdomain-https
+check_slow v6only.wildcard.example.com v6only-https
+check_slow "v6only.wildcard.example.com HTTP" v6only-http
+check_slow "nxdomain.wildcard.example.com HTTP" nxdomain-http
+rm -rf "$SLOW"
 
 # Last, by which time a link-local address would have arrived.
 echo "=== [no IPv6 address on the sandbox's interface] ==="

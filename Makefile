@@ -155,11 +155,12 @@ test_integration_sandbox_linux_runtime: ## The action's remaining integration te
 # third-party site being up.
 .PHONY: test_integration_sandbox_universal
 test_integration_sandbox_universal: ## Run the universal-engine fixture-based integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built with test hooks)
-	@./test/integration-test-universal-restrict.sh
-	@./test/integration-test-universal-audit.sh
-	@./test/integration-test-concurrent.sh
-	@./test/integration-test-known-blocked-rules.sh
-	@./test/integration-test-reserved-mounts.sh
+	@./test/with-fixture.sh universal \
+		./test/integration-test-universal-restrict.sh \
+		./test/integration-test-universal-audit.sh \
+		./test/integration-test-concurrent.sh \
+		./test/integration-test-known-blocked-rules.sh \
+		./test/integration-test-reserved-mounts.sh
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
@@ -180,8 +181,9 @@ test_integration_sandbox_inspect_rules: ## Inspect-engine restrict, audit, round
 
 .PHONY: test_integration_sandbox_inspect_ca
 test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NSS database and the CA mount's reserved paths
-	@./test/integration-test-inspect-chromium.sh
-	@./test/integration-test-inspect-reserved-mounts.sh
+	@./test/with-fixture.sh inspect \
+		./test/integration-test-inspect-chromium.sh \
+		./test/integration-test-inspect-reserved-mounts.sh
 
 # Builds each engine's proxy image itself (docker compose build), unlike the
 # two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.

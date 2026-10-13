@@ -17,10 +17,11 @@ echo ""
 echo "=== Inspect Engine Integration Test (Chromium's NSS database) ==="
 echo ""
 
-trap 'fixture_down inspect' EXIT
-fixture_up inspect
-
 TMPDIR=$(mktemp -d)
+# The browser and node_modules take seconds to remove, so that runs on in the
+# background rather than holding up whatever comes next.
+trap 'fixture_down inspect; rm -rf "$TMPDIR" &' EXIT
+fixture_up inspect
 
 # Installed outside the sandbox. Chrome for Testing ships chrome-headless-shell
 # for x86-64 Linux only.
@@ -151,16 +152,18 @@ echo ""
 echo "--- the database's directory removed outside the sandbox while the command runs ---"
 HOME_J="$TMPDIR/home-j"
 mkdir -p "$HOME_J"
-rm -f "$TMPDIR/started-j"
+rm -f "$TMPDIR/started-j" "$TMPDIR/removed-j"
 (
   for _ in $(seq 600); do
     [ -e "$TMPDIR/started-j" ] && break
     sleep 0.1
   done
   rm -rf "$HOME_J/.pki"
+  touch "$TMPDIR/removed-j"
 ) &
 REMOVER=$!
-chrome_step "$HOME_J" "touch $TMPDIR/started-j; sleep 3"
+chrome_step "$HOME_J" "touch $TMPDIR/started-j
+for _ in \$(seq 100); do [ -e $TMPDIR/removed-j ] && break; sleep 0.1; done"
 wait "$REMOVER"
 if [ "$RUN_EXIT" = "0" ] &&
   grep -q "$HOME_J/.pki/nssdb was removed or replaced on the runner while the command ran" <<<"$OUT"; then
@@ -233,7 +236,5 @@ else
   fail "the database changed"
   show_home "$HOME_G"
 fi
-
-rm -rf "$TMPDIR"
 
 assert_results

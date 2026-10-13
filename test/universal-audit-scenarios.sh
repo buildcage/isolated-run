@@ -62,21 +62,16 @@ else
   fail "runner.wildcard.example.com HTTP reached the runner"
 fi
 
-echo "=== [HTTPS - dns-failed (NXDOMAIN)] ==="
-CODE=$($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "nxdomain.wildcard.example.com blocked (got $CODE)"
-else
-  fail "nxdomain.wildcard.example.com reached the origin"
-fi
+# The cases below each wait out the resolver or a deliberately idle
+# connection, seconds apiece, so they run alongside the rest and are checked
+# at the end.
+SLOW=$(mktemp -d)
 
-echo "=== [HTTP - dns-failed (NXDOMAIN)] ==="
-CODE=$($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000")
-if [ "$CODE" != "200" ]; then
-  pass "nxdomain.wildcard.example.com HTTP blocked (got $CODE)"
-else
-  fail "nxdomain.wildcard.example.com HTTP reached the origin"
-fi
+echo "=== [HTTPS - dns-failed (NXDOMAIN)] (checked at the end) ==="
+($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
+
+echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
+($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-http" &
 
 # [TLS ClientHello with no SNI extension at all. There is no name to judge, so
 # the connection is refused on that alone, audit mode or not; the report
@@ -89,7 +84,7 @@ echo "  request sent (blocked expected in the report)"
 # [HTTP/1.0 request with no Host header, the plaintext counterpart of the
 # case above.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 blocked.example.com 80 > /dev/null 2>&1 || true)
+((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 blocked.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (blocked expected in the report)"
 
 # [What a resolver does when a UDP answer comes back truncated. The query has
@@ -105,5 +100,18 @@ if [ "${ANSWER:4:4}" = "abcd" ]; then
 else
   fail "a TCP lookup at the resolver went unanswered (got '$ANSWER')"
 fi
+
+wait
+check_slow() {
+  local label="$1" file="$2"
+  if [ "$(cat "$SLOW/$file")" != "200" ]; then
+    pass "$label blocked (got $(cat "$SLOW/$file"))"
+  else
+    fail "$label reached the origin"
+  fi
+}
+check_slow nxdomain.wildcard.example.com nxdomain-https
+check_slow "nxdomain.wildcard.example.com HTTP" nxdomain-http
+rm -rf "$SLOW"
 
 scenario_results
