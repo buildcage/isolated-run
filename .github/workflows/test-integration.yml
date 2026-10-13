@@ -44,7 +44,8 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'rolldown.scripts.config.js'
               - '.dockerignore'
-              - 'licenses/*.txt'
+              - 'licenses/**'
+              - 'LICENSE'
             harness: &harness
               - 'rolldown.config.js' # each job builds a test-hook dist
               - 'scripts/**' # run by that dist, from the checkout
