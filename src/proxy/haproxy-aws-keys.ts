@@ -126,7 +126,8 @@ function credentialFacts(): string[] {
     "    http-request set-var(txn.aws_git) bool(true) if aws_git_host { req.fhdr(authorization) -m reg -i ^basic\\s }",
     "    acl aws_git var(txn.aws_git) -m bool",
     "    # A query is matched undecoded, as a form body is, so a name inside a",
-    "    # value does not count, but X-Amz-Cr%65dential does.",
+    "    # value does not count, but X-Amz-Cr%65dential does. Only & splits it:",
+    "    # EC2 reads a ; in a query as part of the value, and STS refuses one.",
     `    http-request set-var(txn.aws_query) bool(true) if aws_host { query -m reg -i (^|&)${SIGV4_PARAM}= }`,
     "    acl aws_query var(txn.aws_query) -m bool",
     `    acl aws_query_many query -m reg -i (^|&)${SIGV4_PARAM}=.*&${SIGV4_PARAM}=`,
@@ -151,7 +152,8 @@ function credentialFacts(): string[] {
     `    http-request set-var(txn.aws_unsupported) bool(true) if aws_form { req.body -m reg -i (^|[&;])(${SIGV2_PARAM}|${SIGV4_PARAM})= }`,
     "    # A non-form body would carry a SigV2 past the form-body check above, and",
     "    # EC2 takes it over the Authorization header. EC2 has no JSON API, so a",
-    "    # non-form POST is never legitimate.",
+    "    # non-form POST is never legitimate. EC2 refuses a body on any other",
+    "    # method.",
     `    http-request set-var(txn.aws_unsupported) bool(true) if aws_host METH_POST { var(txn.host) -m reg ${EC2_HOST} } !{ req.hdr(content-type) -m beg -i application/x-www-form-urlencoded }`,
     "    # A query credential spelled other than the one name the key is read from.",
     "    http-request set-var(txn.aws_unsupported) bool(true) if aws_query !{ url_param(X-Amz-Credential) -m found }",
@@ -266,7 +268,8 @@ function learnFlags(): string[] {
  * Git credential by the account it names. Only a form body naming Action and
  * RoleArn once each, with neither in the query, is judged. Names are counted
  * in any spelling: STS decodes a name, and takes the query's value over the
- * body's even for a POST.
+ * body's even for a POST. Only & splits a parameter: STS refuses a ; in
+ * either.
  */
 function roleRules(accountFile: string) {
   return {
