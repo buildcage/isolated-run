@@ -80,6 +80,11 @@ jobs:
       - name: Check (lint/format)
         run: vp check
 
+      # The scripts the action runs on the host and as the sandbox's PID 1.
+      # The runner image ships shellcheck.
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh
+
       - uses: ./.github/actions/verify-dist
 
       # A test stuck in a synchronous loop never yields to vitest's own timeout,

@@ -3,6 +3,7 @@ import {
   caTrustAdditions,
   type CaTrustFiles,
 } from "./ca-trust.ts";
+import { ENV_BLOB_TERMINATOR } from "./env-loader.ts";
 import { realHostProbes, type HostProbes, type NofileLimit } from "./host-probes.ts";
 import {
   ephemeralLayers,
@@ -273,7 +274,14 @@ export function buildOciConfig(
       // No other setpriv flags are needed here: uid/gid, capabilities,
       // and no_new_privs are already applied by runc itself (above/below)
       // before this execs.
-      args: [probes.setprivPath(), "--pdeathsig=KILL", "--", envLoaderPath, scriptPath],
+      args: [
+        probes.setprivPath(),
+        "--pdeathsig=KILL",
+        "--",
+        envLoaderPath,
+        ENV_BLOB_TERMINATOR,
+        scriptPath,
+      ],
       // Empty by design: envLoaderPath applies the step's environment from
       // stdin before execing scriptPath, keeping `env:` secrets off the
       // runner's disk. See env-loader.ts.

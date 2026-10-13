@@ -196,6 +196,7 @@ echo "Configuring sandbox namespace network..." >&2
 # No link-local address on eth0: it would arrive after the command starts,
 # and Chromium fails a request in flight on any address change. A kernel
 # without IPv6 gives it none anyway.
+# shellcheck disable=SC2016 # Expanded by the inner sh.
 ip netns exec "$NETNS_NAME" sh -c '
   set -e
   ip link set "$1" name eth0
@@ -210,6 +211,7 @@ echo "Configuring proxy-side veth as buildcage0..." >&2
 # The name is fixed because init-iptables's "-i buildcage0" rule is added at
 # container startup, before this device exists, and matches on the name
 # whenever it appears.
+# shellcheck disable=SC2016 # Expanded by the inner sh.
 nsenter --net="$PROXY_NETNS" -- sh -c '
   set -e
   ip link set "$1" name buildcage0
