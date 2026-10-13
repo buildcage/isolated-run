@@ -3,8 +3,8 @@ Third-Party Licenses
 
 The isolated-run proxy image (universal proxy engine) includes the following
 third-party software. Each component retains its original license. The
-isolated-run source code itself is licensed under the MIT License (see LICENSE
-file).
+isolated-run source code itself is licensed under the MIT License (see
+/opt/buildcage/LICENSE).
 
 ------------------------------------------------------------------------------
 
@@ -165,9 +165,10 @@ Go modules linked into /opt/buildcage/bin/filesystem-audit
 
 ------------------------------------------------------------------------------
 
-Libraries these packages pull in, and the rest of the base image's packages,
-keep the licenses their own packages declare; `apk list -I` inside the image
-lists them.
+The packages and libraries these pull in, such as the s6, s6-rc and execline
+programs s6-overlay runs, and the rest of the base image's packages, keep the
+licenses their own packages declare; `apk list -I` inside the image lists
+them.
 
 ------------------------------------------------------------------------------
 

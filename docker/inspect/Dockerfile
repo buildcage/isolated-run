@@ -166,6 +166,7 @@ COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bi
 # docker/filesystem-audit/main.go).
 COPY --from=filesystem-audit-build /out/filesystem-audit /opt/buildcage/bin/filesystem-audit
 
+COPY LICENSE /opt/buildcage/LICENSE
 COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt \
      licenses/curl.txt licenses/QuickJS-ng.txt licenses/s6-overlay.txt /opt/buildcage/licenses/

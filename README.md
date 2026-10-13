@@ -782,6 +782,8 @@ details.
 
 The Docker image includes third-party components under their own licenses (GPL, Apache 2.0, ISC,
 etc.). See [THIRD_PARTY_LICENSES](./THIRD_PARTY_LICENSES) for the full list.
+The image carries that file, this repository's LICENSE and the license texts it points to under
+`/opt/buildcage/`.
 
 The Action bundles its npm dependencies (MIT, Apache 2.0, ISC) into the committed `dist/` files.
 See [THIRD_PARTY_LICENSES_NPM](./THIRD_PARTY_LICENSES_NPM) for their license texts.
