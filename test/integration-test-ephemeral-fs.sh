@@ -85,6 +85,7 @@ echo bound >"$BIND_SRC/present"
 sudo -n mount --bind "$BIND_SRC" "$NONE/bound"
 SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
 BEFORE=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
+# shellcheck disable=SC2016 # expands in the sandbox
 BC_DEEP="$DEEP" BC_HOST_ATTRS="$HOST_ATTRS" BC_TMP_MARKER="$TMP_MARKER" \
   run_ephemeral "$NONE" "" 'rc=0
 touch "$HOME/.buildcage-ephemeral-test-marker"
@@ -161,6 +162,7 @@ rm -f "$HOME_MARKER" "$HOME_PRELOADED" "$TMP_MARKER"
 # (CI images make /opt writable by the runner user) persists writes too.
 THROUGH=$(mktemp -d)
 rm -f /opt/.buildcage-ephemeral-allow-write-test
+# shellcheck disable=SC2016 # expands in the sandbox
 run_ephemeral "$THROUGH" "./dist
 /opt" 'rc=0
 echo "built" > "$GITHUB_WORKSPACE/dist/output.txt" || rc=1

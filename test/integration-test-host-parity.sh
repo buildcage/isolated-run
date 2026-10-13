@@ -38,6 +38,7 @@ run_sandboxed() {
   EXPECT_SHM_KB=$(df -k --output=size /dev/shm | tail -1 | tr -d ' ')
   export EXPECT_NOFILE_SOFT EXPECT_NOFILE_HARD EXPECT_HOSTNAME EXPECT_SHM_KB
   echo "host baseline: nofile ${EXPECT_NOFILE_SOFT}/${EXPECT_NOFILE_HARD}, /dev/shm ${EXPECT_SHM_KB}k, hostname ${EXPECT_HOSTNAME}"
+  # shellcheck disable=SC2016 # expands in the sandbox
   run_sandboxed 'fail() { echo "UNEXPECTED: $1"; exit 1; }
 [ "$(ulimit -Sn)" = "$EXPECT_NOFILE_SOFT" ] || fail "soft RLIMIT_NOFILE is $(ulimit -Sn), the runner has $EXPECT_NOFILE_SOFT"
 [ "$(ulimit -Hn)" = "$EXPECT_NOFILE_HARD" ] || fail "hard RLIMIT_NOFILE is $(ulimit -Hn), the runner has $EXPECT_NOFILE_HARD"

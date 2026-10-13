@@ -40,6 +40,7 @@ export BC_STEP_SECRET="buildcage-step-secret-$$"
 # than more env vars, so the assertions compare against something that did
 # not travel with the environment; read by relative path below, the sandbox's
 # cwd being $GITHUB_WORKSPACE.
+# shellcheck disable=SC2016 # JavaScript
 node -e '
   const { writeFileSync } = require("node:fs");
   for (const name of process.argv.slice(2)) {

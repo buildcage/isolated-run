@@ -57,7 +57,8 @@ jobs:
               - 'THIRD_PARTY_LICENSES_NPM'
               - 'action.yml'
               # Shellcheck's other inputs.
-              - 'test/**/*.sh'
+              - 'test/*.sh'
+              - 'test/*/*.sh'
               - 'test/.shellcheckrc'
               - 'dev/*.sh'
               - '.github/examples/**/*.sh'

@@ -16,6 +16,7 @@ trap 'rm -rf "$WORKDIR" "$LINK"' EXIT
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 ln -s "$(pwd -P)" "$LINK"
 
+# shellcheck disable=SC2016 # expands in the sandbox
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \

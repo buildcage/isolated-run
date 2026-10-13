@@ -39,6 +39,7 @@ WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
+# shellcheck disable=SC2016 # expands in the sandbox
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \

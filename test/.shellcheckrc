@@ -1,4 +1,4 @@
 source-path=SCRIPTDIR
 external-sources=true
-# Script text handed to the sandbox is single-quoted so that it expands there.
-disable=SC2016
+# Some helpers take an optional argument.
+disable=SC2119

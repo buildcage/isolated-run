@@ -27,6 +27,7 @@ touch "$WORKDIR/summary.md"
 
 # The step script: each file is written to and renamed, and the one named in
 # write_through is expected to take the write.
+# shellcheck disable=SC2016 # expands in the sandbox
 PROBE_SCRIPT='rc=0
 for name in GITHUB_ENV GITHUB_PATH GITHUB_STATE; do
   file=$(printenv "$name")
@@ -119,8 +120,10 @@ run_probe() {
     node dist/main.cjs
 }
 
+# shellcheck disable=SC2016 # the action expands write_through
 run_probe persistent persistent '$GITHUB_PATH' GITHUB_PATH
 PERSISTENT_CODE=$?
+# shellcheck disable=SC2016
 run_probe ephemeral ephemeral '$GITHUB_ENV
 $GITHUB_OUTPUT' GITHUB_ENV
 EPHEMERAL_CODE=$?
