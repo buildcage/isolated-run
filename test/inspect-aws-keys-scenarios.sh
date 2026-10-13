@@ -107,33 +107,33 @@ echo "=== [what the check cannot read through] ==="
 pad() { head -c "$1" /dev/zero | tr '\0' a; }
 check_status "the start key in the header, a key of the build's own past 300 KB of body" \
   "$({ printf 'Action=X&M='; pad 300000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001"; } |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a 300 KB body" \
   "$({ printf 'Action=X&M='; pad 300000; } |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "200"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "200"
 # 413 is the fixture origin's own 1 MiB cap: the proxy read the body to its
 # end and let it through.
 check_status "the start key in the header, a body just under 4 MiB" \
   "$({ printf 'Action=X&M='; pad 4150000; } |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "413"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "413"
 check_status "the start key in the header, a key of the build's own at the end of a body just under 4 MiB" \
   "$({ printf 'Action=X&M='; pad 4150000; printf '&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001"; } |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a form body past 4 MiB" \
   "$({ printf 'Action=X&M='; pad 4300000; } |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a compressed form body" \
-  "$(printf 'Action=X' | gzip | C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Encoding: gzip" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+  "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Encoding: gzip" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a NUL ahead of a key of the build's own in the body" \
   "$(printf 'Action=X\0&AWSAccessKeyId=%s' "${AKIA}TESTATTACKER0001" |
-    C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+    $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a form body compressed and marked identity too" \
-  "$(printf 'Action=X' | gzip | C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Encoding: gzip, identity" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+  "$(printf 'Action=X' | gzip | $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Encoding: gzip, identity" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 check_status "the start key in the header, a chunked form body" \
-  "$(printf 'Action=X' | C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
+  "$(printf 'Action=X' | $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-www-form-urlencoded" --data-binary @- "$CF")" "403"
 # 413 is the fixture origin's own 1 MiB cap: the proxy let the body through.
 check_status "the start key in the header, a 2 MB binary body with no Content-Type" \
-  "$({ printf '\x89PNG'; pad 2000000; } | C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type:" --data-binary @- "$CF")" "413"
+  "$({ printf '\x89PNG'; pad 2000000; } | $C -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type:" --data-binary @- "$CF")" "413"
 check_status "a public read whose query holds a broken escape" "$($C "https://bucket.s3.amazonaws.com/public/x?a=%zz")" "200"
 check_status "a presigned URL with %00 ahead of its credential" \
   "$($C "https://bucket.s3.amazonaws.com/x?a=%00&X-Amz-Credential=${AKIA}TESTATTACKER0001%2Fx")" "403"
@@ -148,7 +148,7 @@ echo "=== [a CodeCommit login, which carries a key or an account] ==="
 CC=https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/info/refs
 check_status "Git's first CodeCommit request, with no credential" "$($C "$CC")" "200"
 check_status "a chunked Git fetch to CodeCommit with the start key" \
-  "$(printf '0014command=fetch0000' | C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-git-upload-pack-request" --data-binary @- https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/git-upload-pack)" "200"
+  "$(printf '0014command=fetch0000' | $C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" -H "Transfer-Encoding: chunked" -H "Content-Type: application/x-git-upload-pack-request" --data-binary @- https://git-codecommit.us-east-1.amazonaws.com/v1/repos/app/git-upload-pack)" "200"
 check_status "a CodeCommit credential-helper login with the start key" \
   "$($C -u "${AKIA}TESTSTARTKEY0001:20261008T000000Zab" "$CC")" "200"
 check_status "a CodeCommit credential-helper login with a key of the build's own" \
@@ -196,7 +196,7 @@ check_status "the key in a header" \
   "$($C -H "Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTISSUEDKEY01/20261010/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=ab" $LAYER)" "403"
 
 echo "=== [AssumeRoleWithWebIdentity, judged by the role's account] ==="
-form() { C -X POST -H "Content-Type: application/x-www-form-urlencoded" --data "$1" "$2"; }
+form() { $C -X POST -H "Content-Type: application/x-www-form-urlencoded" --data "$1" "$2"; }
 ROLE="arn%3Aaws%3Aiam%3A%3A111111111111%3Arole%2Fdeploy"
 EVIL="arn%3Aaws%3Aiam%3A%3A999999999999%3Arole%2Fevil"
 check_status "unknown until a web identity call hands it out" \
