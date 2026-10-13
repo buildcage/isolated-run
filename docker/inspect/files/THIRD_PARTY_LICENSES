@@ -87,8 +87,28 @@ runc
     Source  : https://github.com/seccomp/libseccomp
 
   libpathrs
-    License : MPL-2.0 OR LGPL-3.0-or-later
+    License : MPL-2.0 OR LGPL-3.0-or-later; distributed here under MPL-2.0
     Source  : https://github.com/cyphar/libpathrs
+
+  runc's NOTICE file, reproduced verbatim:
+
+    runc
+
+    Copyright 2012-2015 Docker, Inc.
+
+    This product includes software developed at Docker, Inc. (http://www.docker.com).
+
+    The following is courtesy of our legal counsel:
+
+
+    Use and transfer of Docker may be subject to certain restrictions by the
+    United States and other governments.
+    It is your responsibility to ensure that your use and/or transfer does not
+    violate applicable laws.
+
+    For more information, please see http://www.bis.doc.gov
+
+    See also http://www.apache.org/dev/crypto.html and/or seek legal counsel.
 
 ------------------------------------------------------------------------------
 
@@ -156,6 +176,11 @@ Go modules linked into /opt/buildcage/bin/filesystem-audit
 Libraries these packages pull in, and the rest of the base image's packages,
 keep the licenses their own packages declare; `apk list -I` inside the image
 lists them.
+
+------------------------------------------------------------------------------
+
+The full texts of the GPL-2.0, LGPL-2.1, MPL-2.0 and Apache-2.0 licenses
+named above are in /opt/buildcage/licenses/.
 
 ------------------------------------------------------------------------------
 

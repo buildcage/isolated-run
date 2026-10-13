@@ -162,6 +162,7 @@ COPY --from=gen-seccomp-profile-build /out/gen-seccomp-profile /opt/buildcage/bi
 COPY --from=filesystem-audit-build /out/filesystem-audit /opt/buildcage/bin/filesystem-audit
 
 COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
+COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt /opt/buildcage/licenses/
 
 # The services both engines run, then this engine's own files on top.
 COPY docker/common/files/s6-rc.d/     /etc/s6-overlay/s6-rc.d/

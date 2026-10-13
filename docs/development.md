@@ -367,7 +367,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── docs/                      # development.md, security.md, aws.md, filesystem-audit.md, plus
 │                              # the reference.md/rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
-│                              # during `vp run build`, and what .glf.jsonc substitutes in
+│                              # during `vp run build`, and what .glf.jsonc substitutes in.
+│                              # Its GPL, LGPL, MPL and Apache texts are copied into both images
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands
