@@ -942,10 +942,11 @@ non-isolated step.
 
 These two the command writes freely, so where its writes would reach the runner this action mediates
 them: the command writes action-owned backing copies bound into the sandbox, the real files are kept
-out of its reach, and after the step the action reads the copies back and writes the real files
-itself. That is every step in `persistent` mode. In `ephemeral` mode they are discarded with the
-overlay like any other write, unless `write_through` names the file or a directory it is in
-(`$RUNNER_TEMP`, say); only then are they mediated and written back, without a bind of their own.
+out of its reach (at any other path a bind mount shows them at, too), and after the step the action
+reads the copies back and writes the real files itself. That is every step in `persistent` mode. In
+`ephemeral` mode they are discarded with the overlay like any other write, unless `write_through`
+names the file or a directory it is in (`$RUNNER_TEMP`, say), by its own path or one a bind mount
+shows it at; only then are they mediated and written back, without a bind of their own.
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
 the step); `$GITHUB_STEP_SUMMARY` is written back as the command left it, plus whatever closes a
 code fence, comment or raw HTML block it left open, then the report is fitted around it (see

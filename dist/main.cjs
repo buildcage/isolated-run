@@ -72390,13 +72390,15 @@ function resolveWriteThroughInput(writeThroughInput, env) {
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
+	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
 		let path = env[variable];
-		return path ? [{
+		if (!path) return [];
+		let real = onRealRunnerDir((0, node_path.normalize)(path), env, realpath);
+		return [{
 			variable,
-			path: onRealRunnerDir((0, node_path.normalize)(path), env, realpath)
-		}] : [];
-	}), mediatedVariables = runnerFiles.filter(({ path }) => filesystemMode !== "ephemeral" || resolved.some((entry) => isAtOrUnder(path, entry))).map(({ variable }) => variable), writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ path }) => path === p));
+			paths: [real, ...pathAliases(hostMounts, real)]
+		}];
+	}), mediatedVariables = runnerFiles.filter(({ paths }) => filesystemMode !== "ephemeral" || paths.some((path) => resolved.some((entry) => isAtOrUnder(path, entry)))).map(({ variable }) => variable), writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ paths }) => paths.includes(p)));
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
 		overlayRoots: [],
 		writeThroughPaths,
@@ -72433,7 +72435,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 			runnerTemp,
 			tmp,
 			workdir
-		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
+		].filter((p) => !!p), writeThroughPaths, deps);
 		return {
 			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
 			writeThroughPaths,
@@ -72441,6 +72443,13 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		};
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+	}
+}
+function readHostMounts(deps) {
+	try {
+		return (deps.listHostMounts ?? listHostMounts)();
+	} catch (e) {
+		throw new SandboxError(`Failed to read the host's mount table: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
 }
 function onRealRunnerDir(path, env, realpath) {
@@ -73169,6 +73178,12 @@ function prepareReadonlyHostPaths(persisting, { writeThroughPaths, env }, hostMo
 		renameGuardDirs: renameGuardDirs$1
 	};
 }
+function maskedRunnerFiles(paths, persisting, hostMounts, { lstat, readlink }) {
+	return paths.flatMap((path) => [path, ...pathAliases(hostMounts, realPathOf(path, {
+		lstat,
+		readlink
+	})).filter((alias) => persisting.some((root) => isAtOrUnder(alias, root)))]);
+}
 function resolveIdentity(env, warn, { resolveSandboxGid, info }) {
 	let { gid, substitutedFrom, nssError } = resolveSandboxGid(process.getgid(), env);
 	return nssError !== void 0 && warn(`buildcage: could not look up groups through NSS (${nssError}); the primary group couldn't be verified and is treated as privileged`), substitutedFrom !== void 0 && info(`buildcage: sandbox GID substituted (${substitutedFrom} -> ${gid}) -- ${nssError === void 0 ? "the runner's primary group grants container/VM runtime access" : "the runner's primary group couldn't be verified through NSS"}`), {
@@ -73213,7 +73228,7 @@ function assembleBundle(dir, options, deps) {
 			readonlyHostPaths,
 			renameGuardDirs,
 			extraInternalMounts: options.internalMounts,
-			extraMaskedPaths: options.maskedPaths
+			extraMaskedPaths: maskedRunnerFiles(options.maskedPaths ?? [], layout.persisting, hostMounts, deps)
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");

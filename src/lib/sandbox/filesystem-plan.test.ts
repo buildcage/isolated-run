@@ -7,7 +7,9 @@ import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 // /proc/self/mountinfo is Linux-only, so the default listHostMounts is mocked.
 vi.mock("./mountinfo.ts", () => ({
-  listHostMounts: () => [{ mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" }],
+  listHostMounts: () => [
+    { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", device: "0:50", root: "/" },
+  ],
 }));
 
 describe("resolveFilesystemPlan", () => {
@@ -272,6 +274,43 @@ describe("resolveFilesystemPlan", () => {
       });
       expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
     });
+
+    describe("through another mount of the runner's work directory", () => {
+      const aliased = (writeThrough: string) =>
+        resolveFilesystemPlan("ephemeral", writeThrough, FILES_ENV, {
+          exists: alwaysExists,
+          lstat: notLink,
+          deviceOf: () => 1,
+          realpath: (p) => p,
+          listHostMounts: () => [
+            { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
+            { mountPoint: "/mnt/alias", fsType: "ext4", device: "8:1", root: "/home/runner/work" },
+          ],
+        });
+
+      it("mediates the files under a directory write_through names there", () => {
+        const covered = aliased("/mnt/alias/_temp");
+        expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
+        expect(covered.writeThroughPaths).toStrictEqual(["/mnt/alias/_temp"]);
+      });
+
+      it("mediates a file write_through names there, and drops it from the binds", () => {
+        const named = aliased("/mnt/alias/_temp/_runner_file_commands/set_output_abc");
+        expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
+        expect(named.writeThroughPaths).toStrictEqual([]);
+      });
+    });
+
+    it("fails with its own code when the host mount table cannot be read", () => {
+      const run = () =>
+        resolveFilesystemPlan("ephemeral", "", FILES_ENV, {
+          listHostMounts: () => {
+            throw new Error("EACCES");
+          },
+        });
+      expect(run).toThrow(SandboxError);
+      expect(run).toThrow(expect.objectContaining({ code: "FILESYSTEM_PLAN_FAILED" }));
+    });
   });
 
   it("takes the overlay candidates by their real paths, as write_through's are", () => {
@@ -292,7 +331,7 @@ describe("resolveFilesystemPlan", () => {
       realpath: (p) => p,
       listHostMounts: () =>
         ["/", "/home/runner", "/home/runner/_tool", "/home/runner/out/cache", "/opt/data"].map(
-          (mountPoint) => ({ mountPoint, fsType: "ext4" }),
+          (mountPoint, i) => ({ mountPoint, fsType: "ext4", device: `8:${i}`, root: "/" }),
         ),
       isDirectory: () => true,
     });
@@ -305,7 +344,9 @@ describe("resolveFilesystemPlan", () => {
       exists: alwaysExists,
       deviceOf: () => 1,
       realpath: (p) => p,
-      listHostMounts: () => [{ mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" }],
+      listHostMounts: () => [
+        { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", device: "0:50", root: "/" },
+      ],
       warn,
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/tmp"]);
