@@ -42,8 +42,8 @@ export interface SummaryOptions extends Prefixes {
   limits?: Partial<Limits>;
 }
 
-// Past this many command and syscall pairs, the rest but kills are left to the
-// artifact.
+// Past this many command and syscall pairs, the rest but kills and each
+// syscall's first are left to the artifact.
 const REFUSED_KEPT = 200;
 
 interface Limits {
@@ -201,6 +201,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let seq = 0;
   const added = new Map<number | undefined, number>();
   const refused = new Map<string, RefusedRow>();
+  const refusedNames = new Set<string>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -220,8 +221,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
       if (!row) {
-        // A kill explains a step's "Bad system call", so it is always kept.
-        if (refused.size >= REFUSED_KEPT && !r.killed) return;
+        // A kill explains a step's "Bad system call", and a syscall's first row
+        // keeps it in the note, so both are always kept. The profile bounds
+        // how many names there are.
+        if (refused.size >= REFUSED_KEPT && !r.killed && refusedNames.has(name)) return;
+        if (!r.killed) refusedNames.add(name);
         row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
       }

@@ -69880,7 +69880,7 @@ function createAuditSummary(prefixes) {
 		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
@@ -69891,8 +69891,8 @@ function createAuditSummary(prefixes) {
 			if (r.kind === "syscall") {
 				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					if (refused.size >= 200 && !r.killed) return;
-					row = {
+					if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
+					r.killed || refusedNames.add(name), row = {
 						agg: newAgg(),
 						flags: "!",
 						comm,

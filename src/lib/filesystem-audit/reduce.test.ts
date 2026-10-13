@@ -207,7 +207,7 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["! syscall:32-bit ? (killed)", "! a.out syscall:32-bit ? (killed)"]);
   });
 
-  it("names the first commands of a refused syscall, and keeps the first 200 pairs and every kill", () => {
+  it("names the first commands of a refused syscall, and keeps the first 200 pairs, each syscall's first and every kill", () => {
     const refused = (comm: string, t?: string): object => ({
       ...(t && { t }),
       kind: "syscall",
@@ -237,6 +237,15 @@ describe("createAuditSummary", () => {
     expect(lines(many)).toContain("! p199 syscall:unshare");
     expect(many).not.toContain("p200");
     expect(lines(many)).toContain("! old syscall:32-bit socketcall (killed)");
+    const hidden = render(...Array.from({ length: 200 }, (_, i) => refused(`p${i}`)), {
+      kind: "syscall",
+      comm: "late",
+      syscall: "bpf",
+      err: 1,
+      failed: true,
+    });
+    expect(hidden).toContain("`bpf` (`late`)");
+    expect(lines(hidden)).toContain("! late syscall:bpf");
     expect(render({ kind: "syscall", comm: "x" })).toContain(
       "> 🚫 Refused system calls: `?` (`x`).",
     );
