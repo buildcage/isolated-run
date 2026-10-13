@@ -13,10 +13,9 @@
 # real files from them -- even under ephemeral, where other writes are
 # discarded. See runner-output-files.ts.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
-
-source "$(dirname "$0")/helpers.sh"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -86,7 +85,6 @@ run_probe() {
   GITHUB_PATH="$path_file" \
   GITHUB_STATE="$state_file" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE="$mode" \
   INPUT_WRITE_THROUGH="$write_through" \
@@ -117,7 +115,6 @@ GITHUB_ENV="$COMMANDS/env_alias" \
 GITHUB_PATH="$COMMANDS/path_alias" \
 GITHUB_STATE="$COMMANDS/state_alias" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITE_THROUGH="$ALIAS" \
 INPUT_RUN="rc=0
@@ -149,7 +146,6 @@ GITHUB_PATH="$COMMANDS/add_path_med" \
 GITHUB_STATE="$COMMANDS/save_state_med" \
 GITHUB_OUTPUT="$MED_OUTPUT" \
 GITHUB_STEP_SUMMARY="$MED_SUMMARY" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE=ephemeral \
 INPUT_RUN='set -e

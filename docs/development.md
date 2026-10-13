@@ -134,7 +134,7 @@ build), rolldown's own module-graph tree-shaking excludes that entire file from 
 physically absent, not just unreachable. A CI check (`unit_test` job) and the pre-commit hook
 additionally confirm a normal build's `dist/` never mentions `BUILDCAGE_BUILD_TEST_HOOKS`,
 `BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or `BUILDCAGE_RUN_DEBUG_*` name (such as
-`BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step summary the integration assertions read).
+`BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step summary the e2e assertions read).
 
 To exercise it locally:
 
@@ -365,7 +365,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── test/                      # integration-test-*.sh driving dist/main.cjs, assert-*.sh/.mjs
 │                              # checking what the e2e steps reported, and *-scenarios.sh run
 │                              # inside the sandbox as a step's own `run:`. helpers.sh carries
-│                              # what they share, helpers.mjs its pass/fail for the .mjs ones
+│                              # what they share, driver-helpers.sh the drivers' own setup and
+│                              # run_step, helpers.mjs the pass/fail of the .mjs ones
 ├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
 │                              # refresh; not used in production or CI
 ├── docs/                      # development.md, security.md, aws.md, filesystem-audit.md, plus

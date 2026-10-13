@@ -14,11 +14,9 @@
 # (`make test_sandbox_dev`), where overlayfs-on-overlayfs is known to fail
 # (see overlayfs-preflight.ts's REQUIREMENT message).
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 # Runs dist/main.cjs with filesystem_mode: ephemeral against a fresh
 # $GITHUB_WORKSPACE/$RUNNER_TEMP (both under mktemp's default, i.e. /tmp,
@@ -35,7 +33,6 @@ run_ephemeral() {
   GITHUB_STATE="$workdir/state.env" \
   GITHUB_STEP_SUMMARY="$workdir/summary.md" \
   RUNNER_TEMP="$runner_temp" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE="ephemeral" \
   INPUT_WRITE_THROUGH="$write_through" \
@@ -97,7 +94,6 @@ GITHUB_WORKSPACE="$CASE2" \
 GITHUB_STATE="$CASE2/state.env" \
 GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE2" \
 RUNNER_TEMP="$(dirname "$GITHUB_OUTPUT_FILE2")" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH="" \
@@ -131,7 +127,6 @@ GITHUB_WORKSPACE="$CASE3" \
 GITHUB_STATE="$CASE3/state.env" \
 GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE3" \
 RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_FILESYSTEM_MODE="ephemeral" \
 INPUT_WRITE_THROUGH='$GITHUB_ENV' \

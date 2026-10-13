@@ -5,9 +5,9 @@
 # Drives dist/main.cjs directly, like integration-test-die-with-parent.sh,
 # so this script can send that SIGINT itself.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 
@@ -29,7 +29,6 @@ cancel_step() {
   GITHUB_WORKSPACE="$dir" \
   GITHUB_STATE="$dir/state.env" \
   GITHUB_STEP_SUMMARY="$dir/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN="$run" \
     node dist/main.cjs > "$dir/out.log" 2>&1 &

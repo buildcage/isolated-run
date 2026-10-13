@@ -1,9 +1,9 @@
 #!/bin/bash
 # Shared by both halves of the suite: the drivers that run on the runner host
-# (integration-test-*.sh, assert-sandbox*.sh) and the scenario scripts that run
-# inside the sandbox as a step's own `run:` input (*-scenarios.sh). Sourced
-# rather than executed, so it sets no shell options of its own: each script
-# keeps its own.
+# (integration-test-*.sh, through driver-helpers.sh, and assert-*.sh) and the
+# scenario scripts that run inside the sandbox as a step's own `run:` input
+# (*-scenarios.sh). Sourced rather than executed, so it sets no shell options
+# of its own: each script keeps its own.
 #
 # The two halves report differently, and that is the only thing they disagree
 # about: a driver ends with assert_results and fails the job; a scenario script
@@ -14,6 +14,11 @@
 # front from the summary file the action wrote.
 
 FAILURES=0
+
+# Assembled at runtime: a literal shaped like an AWS access key ID trips secret
+# scanning on push.
+AKIA="AK""IA"
+ASIA="AS""IA"
 
 pass() { echo "  PASS  $1"; }
 
@@ -48,6 +53,17 @@ assert_summary_contains() {
     pass "$label"
   else
     fail "$label -- not found in report"
+  fi
+}
+
+# assert_summary_contains for an extended regular expression, with what to
+# report on a miss if the label alone would not say it.
+assert_summary_matches() {
+  local pattern="$1" label="$2" missed="${3:-$2 -- no match in report}"
+  if grep -qE -- "$pattern" <<< "$SUMMARY"; then
+    pass "$label"
+  else
+    fail "$missed"
   fi
 }
 

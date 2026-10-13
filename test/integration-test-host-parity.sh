@@ -4,8 +4,9 @@
 # buildOciConfig), and that the command is not the sandbox's PID 1 (see
 # env-loader.ts). Drives dist/main.cjs directly, like integration-test-defaults.sh.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -29,7 +30,6 @@ run_parity_check() {
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN='fail() { echo "UNEXPECTED: $1"; exit 1; }
 [ "$(ulimit -Sn)" = "$EXPECT_NOFILE_SOFT" ] || fail "soft RLIMIT_NOFILE is $(ulimit -Sn), the runner has $EXPECT_NOFILE_SOFT"
@@ -59,7 +59,6 @@ run_sandboxed() {
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN="$1" \
     node dist/main.cjs
@@ -73,7 +72,6 @@ NOT_PID1_CODE=$?
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='/usr/bin/env | grep -qx record=mine && /usr/bin/env | grep -qx UID=12345 ||
   { echo "UNEXPECTED: record or UID did not reach the command as set"; exit 1; }' \

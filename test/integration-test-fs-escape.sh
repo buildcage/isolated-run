@@ -6,8 +6,9 @@
 # rbinds never re-expose it. Drives dist/main.cjs directly, like the other
 # run integration tests.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 WORKDIR2=$(mktemp -d)
@@ -17,7 +18,6 @@ touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='set -e
 echo "=== the scratch rootfs must not re-expose host / ==="
@@ -74,7 +74,6 @@ SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
 GITHUB_WORKSPACE="$WORKDIR2" \
 GITHUB_STATE="$WORKDIR2/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR2/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITE_THROUGH="$SCRATCH_BASE" \
 INPUT_RUN="true" \
@@ -103,7 +102,6 @@ LINK_OUTPUT=$(
   GITHUB_WORKSPACE="$WORKDIR3" \
   GITHUB_STATE="$WORKDIR3/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR3/summary.md" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_FILESYSTEM_MODE=ephemeral \
   INPUT_WRITE_THROUGH="./cache" \

@@ -13,10 +13,9 @@
 # which the command could replace, refuses to start; one placed where the
 # sandbox cannot write is followed, and its target is what becomes read-only.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
-
-source "$(dirname "$0")/helpers.sh"
+require_local_image
 
 ACTION_ROOT=$(pwd -P)
 WORKDIR=$(mktemp -d)
@@ -54,7 +53,6 @@ PATH="$STANDIN_DIR:$PATH" \
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_WRITE_THROUGH="$NESTED_WRITABLE" \
 INPUT_RUN="rc=0
@@ -108,7 +106,6 @@ GITHUB_WORKSPACE="$NESTED_WORKSPACE" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
 DOCKER_CONFIG="$NESTED_WORKSPACE/.docker-config" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN="rc=0
 for dir in '$NESTED_BASE/repo' '$NESTED_BASE'; do
@@ -134,7 +131,6 @@ run_with_config() {
   GITHUB_STATE="$WORKDIR/state.env" \
   GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
   DOCKER_CONFIG="$1" \
-  BUILDCAGE_BUILD_TEST_HOOKS=1 \
   BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
   INPUT_RUN="if touch '$LINKED_CONFIG/probe' 2>/dev/null; then
   echo 'UNEXPECTED: the linked config directory was writable'

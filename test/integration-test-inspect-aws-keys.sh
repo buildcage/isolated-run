@@ -5,57 +5,35 @@
 # a step with no key to start from, or under proxy_engine: universal, fails
 # before the proxy starts.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-# Assembled at runtime: a literal shaped like an AWS access key ID trips secret
-# scanning on push.
-AKIA="AK""IA"
-ASIA="AS""IA"
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 echo ""
 echo "=== Inspect Engine Integration Test (AWS access key check) ==="
 echo ""
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+trap 'fixture_down inspect' EXIT
+fixture_up inspect
 
 TMPDIR=$(mktemp -d)
 
-# One step: a fresh state and summary file, the shared fixture inputs, and
-# whatever the caller adds. Prints the step's output to $TMPDIR/<name>.log.
-run_step() {
+# One step with the shared fixture inputs, which the caller's VARs override.
+aws_step() {
   local name="$1"
   shift
-  touch "$TMPDIR/$name.state" "$TMPDIR/$name.md"
-  env \
-    GITHUB_WORKSPACE="$TMPDIR" \
-    GITHUB_STATE="$TMPDIR/$name.state" \
-    GITHUB_STEP_SUMMARY="$TMPDIR/$name.md" \
-    BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$TMPDIR/$name.md" \
-    BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-    BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-    BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-    INPUT_PROXY_ENGINE="inspect" \
+  run_step inspect "$TMPDIR/$name" \
     INPUT_AWS_KEY_CHECK="true" \
     INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="111111111111" \
     INPUT_ALLOWED_URL_RULES="* https://**.amazonaws.com/**
 POST http://sts.us-east-1.amazonaws.com/sts/**
 GET https://allowed.example.com/public/**" \
     INPUT_FAIL_ON_BLOCKED="false" \
-    "$@" \
-    node "$REPO_ROOT/dist/main.cjs" > "$TMPDIR/$name.log" 2>&1
+    "$@"
 }
 
 echo "--- restrict: the scenarios ---"
-run_step restrict \
+aws_step restrict \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_RUN="bash $REPO_ROOT/test/inspect-aws-keys-scenarios.sh"
@@ -85,7 +63,7 @@ fi
 
 echo ""
 echo "--- audit: let through, and noted ---"
-run_step audit \
+aws_step audit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
   INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${AKIA}TESTSTARTKEY0001/x' https://sts.us-east-1.amazonaws.com/sts/other-account &&
@@ -103,19 +81,15 @@ fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
 assert_summary_contains "(restrict would refuse: aws-key-not-allowed, key 1)" \
   "the timeline says restrict would have refused the request"
-if grep -qE "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 2 from a role in 111111111111\)" <<< "$SUMMARY"; then
-  pass "an AssumeRole answer to a key restrict would refuse taught no key"
-else
-  fail "an AssumeRole answer to a key restrict would refuse taught its key"
-fi
+assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 2 from a role in 111111111111\)" \
+  "an AssumeRole answer to a key restrict would refuse taught no key" \
+  "an AssumeRole answer to a key restrict would refuse taught its key"
 assert_summary_contains "| key 3 from a role in 999999999999 | ssm.us-east-1.amazonaws.com, sqs.us-east-1.amazonaws.com | 2 |" \
   "the requests signed with a key an AssumeRole answer issued are one row, naming the role's account"
 assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
-if grep -qE "^ +111111111111$" <<< "$SUMMARY"; then
-  pass "the restrict example names the account given, unmarked"
-else
-  fail "the restrict example does not name the account given on a line of its own"
-fi
+assert_summary_matches "^ +111111111111$" \
+  "the restrict example names the account given, unmarked" \
+  "the restrict example does not name the account given on a line of its own"
 assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
   "the restrict example marks the account a role was assumed in"
 if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
@@ -126,7 +100,7 @@ fi
 
 echo ""
 echo "--- aws_key_check alone: the step's own key, and no role's ---"
-run_step keyonly \
+aws_step keyonly \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
@@ -141,7 +115,7 @@ fi
 
 echo ""
 echo "--- aws_key_check alone, audited: every account a role was assumed in ---"
-run_step keyonlyaudit \
+aws_step keyonlyaudit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
   INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
@@ -166,7 +140,7 @@ fi
 
 echo ""
 echo "--- no key to start from ---"
-run_step nokey \
+aws_step nokey \
   INPUT_PROXY_MODE="audit" \
   INPUT_RUN="true"
 RUN_EXIT=$?
@@ -184,7 +158,7 @@ fi
 
 echo ""
 echo "--- under proxy_engine: universal ---"
-run_step universal \
+aws_step universal \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_ENGINE="universal" \
   INPUT_PROXY_MODE="audit" \

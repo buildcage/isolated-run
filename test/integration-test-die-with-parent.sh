@@ -6,9 +6,9 @@
 # through the real action wrapper, so this script can reach in and kill
 # run-isolated.sh mid-run.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 WORKDIR=$(mktemp -d)
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
@@ -37,7 +37,6 @@ trap cleanup EXIT
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN='echo sandboxed-process-started; sleep 300' \
   node dist/main.cjs > "$WORKDIR/out.log" 2>&1 &

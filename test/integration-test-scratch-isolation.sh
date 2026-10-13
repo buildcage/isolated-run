@@ -7,8 +7,9 @@
 # crashed run leaves behind anyway, and the assertion doesn't then depend on
 # two runs overlapping in time.
 set -uo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to the locally built proxy image}"
+require_local_image
 
 SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
 DECOY_DIR="$SCRATCH_BASE/sandbox-decoy"
@@ -109,7 +110,6 @@ SANDBOX
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-BUILDCAGE_BUILD_TEST_HOOKS=1 \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 BC_DECOY_MARKER="$DECOY_SECRET" \
 BC_INJECTION_MARKER="$INJECTION_MARKER" \

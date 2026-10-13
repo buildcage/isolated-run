@@ -4,41 +4,25 @@
 # for a reason that has nothing to do with rules: the internal-address guard,
 # an unresolvable name, or no name to judge at all.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built universal-engine image}"
+require_local_image universal
 
 echo ""
 echo "=== Universal Engine Integration Test (audit) ==="
 echo ""
 
-echo "--- bringing up fixture origin (compose.test-universal.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-universal.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-universal.yaml" up -d --build --wait
+trap 'fixture_down universal' EXIT
+fixture_up universal
 
 TMPDIR=$(mktemp -d)
-touch "$TMPDIR/state.env"
-SUMMARY_FILE="$TMPDIR/summary.md"
-touch "$SUMMARY_FILE"
 
 echo "--- running the sandboxed step (proxy_engine: universal, audit mode) ---"
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$SUMMARY_FILE" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$SUMMARY_FILE" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-universal.yaml" \
-INPUT_PROXY_ENGINE="universal" \
-INPUT_PROXY_MODE="audit" \
-INPUT_FAIL_ON_BLOCKED="false" \
-INPUT_RUN="bash $REPO_ROOT/test/universal-audit-scenarios.sh" \
-  node "$REPO_ROOT/dist/main.cjs" 2>&1 | tee "$TMPDIR/out.log"
-RUN_EXIT=${PIPESTATUS[0]}
+run_step --tee universal "$TMPDIR/step" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN="bash $REPO_ROOT/test/universal-audit-scenarios.sh"
+RUN_EXIT=$?
 
 echo ""
 echo "--- scenario exit code: $RUN_EXIT ---"
@@ -50,7 +34,7 @@ fi
 
 echo ""
 echo "--- report assertions (Job Summary) ---"
-SUMMARY=$(cat "$SUMMARY_FILE")
+SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
 assert_summary_contains "| blocked.example.com:443 | HTTPS |" "any domain recorded as audited"

