@@ -892,11 +892,10 @@ this:
   group of paths can carry a heading. Unlike the rule inputs, only a whole-line `#` counts: a `#`
   anywhere else stays part of the path, since a path may legitimately contain one (or a space before
   one) and an inline comment could not be told apart from it.
-- `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_ENV`, and
-  `GITHUB_PATH`, not arbitrary env, so a value smuggled in through the step's own `env:` block can't
-  redirect where a listed path resolves. Any other `$NAME` is rejected, `GITHUB_OUTPUT` and
-  `GITHUB_STEP_SUMMARY` included: this action mediates those two itself (see
-  [below](#github_output-and-github_step_summary)), so `write_through` has nothing to add for them.
+- `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
+  `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
+  through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
+  is rejected.
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
@@ -909,9 +908,9 @@ this:
   to `/var/home`.
 - A path that doesn't already exist is created before the step runs, **always as a directory**, the
   same convention Docker itself uses for a bind mount whose host source doesn't exist yet
-  (`docker run -v`/`--mount`), never as a file. `$GITHUB_ENV` and `$GITHUB_PATH` are the runner's own
-  generated files and must already exist: a missing one is an error, not something this action
-  creates. Anything else missing (`./dist`, say) is created
+  (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
+  `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
+  is an error, not something this action creates. Anything else missing (`./dist`, say) is created
   as a directory by the runner user, parents included, which needs the nearest existing parent to
   be writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
   command runs, since the command couldn't write there either. Create such a path in an earlier,
@@ -941,12 +940,13 @@ non-isolated step.
 
 ### `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`
 
-These two the command writes freely, so this action mediates them rather than leaving them to
-`write_through`: the command writes action-owned backing copies bound into the sandbox, the real
-files are kept out of its reach, and after the step the action reads the copies back and writes the
-real files itself. So they reach the runner **in either filesystem mode** -- `ephemeral` included,
-where other writes are discarded -- without being named in `write_through`, and `write_through`
-rejects them. `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped
+These two the command writes freely, so where its writes would reach the runner this action
+mediates them: the command writes action-owned backing copies bound into the sandbox, the real files
+are kept out of its reach, and after the step the action reads the copies back and writes the real
+files itself. That is every step in `persistent` mode. In `ephemeral` mode they are discarded with
+the overlay like any other write, unless `write_through` names the file or a directory it is in
+(`$RUNNER_TEMP`, say); only then are they mediated and written back, without a bind of their own.
+`$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped
 entry fails the step); `$GITHUB_STEP_SUMMARY` is written back verbatim, then the report is fitted
 around it (see [Traffic artifact](#traffic-artifact) and the step's Job Summary). `$GITHUB_ENV`,
 `$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox as before.
@@ -1021,6 +1021,6 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 was its `filesystem_mode: ephemeral`-only counterpart. `writable:` still works and means the same
 thing, with one change: its entries now go through the resolution above, so a relative entry
 resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside
-the five supported variables is rejected instead of being treated as a literal path. Setting both
+the seven supported variables is rejected instead of being treated as a literal path. Setting both
 joins their lines. `allow_write:` has been removed, and a step still passing it fails with a message
 saying so rather than silently discarding the writes it asked to keep.

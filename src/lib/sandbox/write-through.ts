@@ -5,22 +5,26 @@ import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.t
 
 /** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
  *  arbitrary env: a step's own `env:` block could otherwise smuggle a
- *  path override into what's meant to be a fixed, reviewable list.
- *  GITHUB_OUTPUT and GITHUB_STEP_SUMMARY are not here: this action mediates
- *  them whatever the mode (see runner-output-files.ts), so write_through has
- *  nothing to add and naming one is an error. */
+ *  path override into what's meant to be a fixed, reviewable list. */
 const ALLOWED_WRITE_THROUGH_VARS = [
   "HOME",
   "GITHUB_WORKSPACE",
   "RUNNER_TEMP",
+  "GITHUB_OUTPUT",
   "GITHUB_ENV",
   "GITHUB_PATH",
+  "GITHUB_STEP_SUMMARY",
 ] as const;
 
 /** The runner's own generated files. A missing write_through entry that names
  *  one of these is always an error (see assertKnownFilesExist); everything
  *  else missing is treated as a directory to create. */
-const KNOWN_FILE_VARS = ["GITHUB_ENV", "GITHUB_PATH"] as const;
+const KNOWN_FILE_VARS = [
+  "GITHUB_OUTPUT",
+  "GITHUB_ENV",
+  "GITHUB_PATH",
+  "GITHUB_STEP_SUMMARY",
+] as const;
 
 // Braces are a matched pair, not independently optional: "$NAME}" (a
 // missing opening brace) must not match through to the trailing "}" and
@@ -212,7 +216,7 @@ export function assertKnownFilesExist(
   if (missing !== undefined) {
     throw new WriteThroughTargetMissingError(
       `write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own ` +
-        "generated files (GITHUB_ENV/GITHUB_PATH) and should " +
+        "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
         "already be present -- something is wrong with the environment.",
     );
   }

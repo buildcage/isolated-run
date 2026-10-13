@@ -25,6 +25,7 @@ import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
+import { MEDIATED_VARIABLES, type MediatedVariable } from "./runner-output-files.ts";
 import { realPathOf, type SymlinkDeps } from "./symlinks.ts";
 import type { HostMount } from "./types.ts";
 import {
@@ -78,8 +79,15 @@ export interface FilesystemPlan {
   /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
-  /** Normalized, free of symlinks and pre-created, in either filesystem mode. */
+  /** Normalized, free of symlinks and pre-created, in either filesystem mode.
+   *  An entry naming a mediated runner file is left out: the mediation writes
+   *  that file back instead of a bind. */
   writeThroughPaths: string[];
+  /** The runner files whose writes reach the runner, through the mediation
+   *  (runner-output-files.ts): every one the step has in persistent mode, and
+   *  in ephemeral mode only those a write_through entry covers. The rest stay
+   *  under the overlay and are discarded with it. */
+  mediatedVariables: MediatedVariable[];
 }
 
 /** `warn` aside, a test-only seam onto the filesystem dependencies of
@@ -127,7 +135,18 @@ export function resolveFilesystemPlan(
 ): FilesystemPlan {
   const written = resolveWriteThroughInput(writeThroughInput, env);
   const realpath = deps.realpath ?? realPathOf;
-  const writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+  const resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+  const runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
+    const path = env[variable];
+    return path ? [{ variable, path: onRealRunnerDir(normalize(path), env, realpath) }] : [];
+  });
+  const mediatedVariables = runnerFiles
+    .filter(
+      ({ path }) =>
+        filesystemMode !== "ephemeral" || resolved.some((entry) => isAtOrUnder(path, entry)),
+    )
+    .map(({ variable }) => variable);
+  const writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ path }) => path === p));
 
   // Ahead of the early return below: reaching that with the sentinel under
   // ephemeral would leave the run with no overlay. The CA mount lands where a
@@ -144,7 +163,7 @@ export function resolveFilesystemPlan(
   // the same reason. Only a literal `/` opts out: an entry that a symlinked
   // runner directory turns into `/` still meets that guard.
   if (written.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths };
+    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
   }
 
   try {
@@ -178,7 +197,8 @@ export function resolveFilesystemPlan(
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
   }
 
-  if (filesystemMode !== "ephemeral") return { overlayRoots: [], writeThroughPaths };
+  if (filesystemMode !== "ephemeral")
+    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
 
   // Separate try/catch from the above: this only touches the fixed
   // $HOME, $RUNNER_TEMP, /tmp and $GITHUB_WORKSPACE candidates and the host
@@ -196,7 +216,7 @@ export function resolveFilesystemPlan(
       ...candidateRoots,
       ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
     ];
-    return { overlayRoots, writeThroughPaths };
+    return { overlayRoots, writeThroughPaths, mediatedVariables };
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`,

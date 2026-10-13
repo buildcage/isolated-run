@@ -264,7 +264,6 @@ export async function prepareStepFilesystemAudit(
     try {
       deps.setOutput(artifactName);
     } catch (e) {
-      // The command may have written a name of its own there and locked the file.
       failOrWarn(
         annotation,
         failClosed,

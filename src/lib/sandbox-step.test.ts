@@ -81,6 +81,8 @@ const stopListening = vi.fn();
 
 const DIGEST = "sha256:" + "a".repeat(64);
 
+const RUNNER_FILES = ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const;
+
 const ENV = {
   GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
   HOME: "/home/runner",
@@ -126,6 +128,7 @@ beforeEach(() => {
   mocks.resolveFilesystemPlan.mockReturnValue({
     overlayRoots: [],
     writeThroughPaths: [],
+    mediatedVariables: RUNNER_FILES,
   });
   mocks.readLocalImageOverride.mockResolvedValue(null);
   mocks.verifyImageDigestOrThrow.mockResolvedValue(DIGEST);
@@ -141,8 +144,8 @@ beforeEach(() => {
   mocks.onCancel.mockReturnValue(stopListening);
   // Mirrors the real mediation: a backing file per variable the step has.
   mocks.mediateRunnerOutputFiles.mockImplementation(
-    (env: NodeJS.ProcessEnv, backingDir: string) => {
-      const files = (["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const)
+    (env: NodeJS.ProcessEnv, variables: typeof RUNNER_FILES, backingDir: string) => {
+      const files = variables
         .filter((v) => env[v])
         .map((variable) => ({
           variable,
@@ -216,6 +219,7 @@ describe("runSandboxStep", () => {
     mocks.resolveFilesystemPlan.mockReturnValue({
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/home/runner/work/repo/repo/dist"],
+      mediatedVariables: RUNNER_FILES,
     });
     mocks.readFailOnCaResidue.mockReturnValue(false);
 
@@ -475,6 +479,7 @@ describe("runSandboxStep", () => {
     mocks.resolveFilesystemPlan.mockReturnValue({
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/opt/cache"],
+      mediatedVariables: ["GITHUB_OUTPUT"],
     });
     await runSandboxStep(ENV, deps);
 
@@ -482,6 +487,7 @@ describe("runSandboxStep", () => {
       "Filesystem mode: ephemeral",
       "Ephemeral (writes discarded at step end): /home/runner",
       "Writable (persisted):                    /opt/cache",
+      "Written back after the step:             $GITHUB_OUTPUT",
     ]);
   });
 
@@ -624,6 +630,7 @@ describe("runSandboxStep", () => {
       mocks.resolveFilesystemPlan.mockReturnValue({
         overlayRoots: ["/home/runner", "/tmp"],
         writeThroughPaths: [],
+        mediatedVariables: RUNNER_FILES,
       });
 
       await runSandboxStep(ENV, deps);
@@ -836,13 +843,26 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
+    it("writes back none of the runner files the plan leaves under the overlay", async () => {
+      mocks.resolveFilesystemPlan.mockReturnValue({
+        overlayRoots: ["/home/runner"],
+        writeThroughPaths: [],
+        mediatedVariables: [],
+      });
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.mediateRunnerOutputFiles.mock.calls[0][1]).toStrictEqual([]);
+      expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
+      expect(mocks.removeBackingDir).not.toHaveBeenCalled();
+    });
+
     // The sandbox sees the backing directory only through its bind, and the
     // post step finds it by the container name.
     it("keeps the backing directory beside the scratch dir, and removes it after the write-back", async () => {
       await runSandboxStep(ENV, deps);
 
       const backingDir = `${SANDBOX_SCRATCH_BASE}/runner-files-deadbeef`;
-      expect(mocks.mediateRunnerOutputFiles.mock.calls[0][1]).toBe(backingDir);
+      expect(mocks.mediateRunnerOutputFiles.mock.calls[0][2]).toBe(backingDir);
       expect(mocks.removeBackingDir).toHaveBeenCalledExactlyOnceWith(backingDir);
       expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.removeBackingDir));
     });
@@ -1002,11 +1022,16 @@ describe("preflight", () => {
     mocks.resolveFilesystemPlan.mockReturnValue({
       overlayRoots: ["/home/runner"],
       writeThroughPaths: ["/opt/out"],
+      mediatedVariables: RUNNER_FILES,
     });
 
     const plan = preflight(readStepInputs(ENV, deps), ENV, deps);
 
-    expect(plan).toStrictEqual({ overlayRoots: ["/home/runner"], writeThroughPaths: ["/opt/out"] });
+    expect(plan).toStrictEqual({
+      overlayRoots: ["/home/runner"],
+      writeThroughPaths: ["/opt/out"],
+      mediatedVariables: RUNNER_FILES,
+    });
     expect(mocks.readLocalImageOverride).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });

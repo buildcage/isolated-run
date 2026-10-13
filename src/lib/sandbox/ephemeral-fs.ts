@@ -235,17 +235,19 @@ export function createOverlayScratchDirs(
 
 /**
  * Setup-time log lines for `filesystem_mode: ephemeral`, the already-folded
- * overlay roots and resolved write_through paths, never the raw input
- * strings. Empty (no lines at all) for `persistent` mode.
+ * overlay roots, resolved write_through paths and mediated runner files, never
+ * the raw input strings. Empty (no lines at all) for `persistent` mode.
  */
 export function formatFilesystemPlanLog(
   mode: "persistent" | "ephemeral",
   overlayRoots: string[],
   writeThrough: string[],
+  writtenBack: string[] = [],
 ): string[] {
   if (mode !== "ephemeral") return [];
   const lines = ["Filesystem mode: ephemeral"];
   for (const root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
   for (const entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+  for (const name of writtenBack) lines.push(`Written back after the step:             $${name}`);
   return lines;
 }

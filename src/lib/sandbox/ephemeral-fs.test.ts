@@ -354,6 +354,14 @@ describe("formatFilesystemPlanLog", () => {
     ]);
   });
 
+  it("lists the mediated runner files written back after the step last", () => {
+    expect(formatFilesystemPlanLog("ephemeral", ["/tmp"], [], ["GITHUB_OUTPUT"])).toStrictEqual([
+      "Filesystem mode: ephemeral",
+      "Ephemeral (writes discarded at step end): /tmp",
+      "Written back after the step:             $GITHUB_OUTPUT",
+    ]);
+  });
+
   it("emits only the mode line when there is nothing to fold either way", () => {
     expect(formatFilesystemPlanLog("ephemeral", [], [])).toStrictEqual([
       "Filesystem mode: ephemeral",

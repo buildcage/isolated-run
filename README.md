@@ -420,7 +420,8 @@ is gone.
 > [!NOTE]
 > Discarding those writes is the point, but the same overlay also drops output the command was meant
 > to produce. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, so whatever the
-> command writes to them is gone once the step ends unless you name that file in `write_through:`.
+> command writes to them is gone once the step ends unless `write_through:` names that file or a
+> directory it is in.
 > Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job Summary this action
 > writes its own report to. That report and the `traffic_artifact_name` and
 > `filesystem_audit_artifact_name` outputs are unaffected either way: all are written from the runner
