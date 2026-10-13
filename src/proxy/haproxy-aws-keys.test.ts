@@ -179,6 +179,29 @@ describe("awsKeyRequestRules", () => {
   });
 });
 
+describe("the key's map entry", () => {
+  it("is looked up after every key is read and the body waited for, and before any line reads it", () => {
+    for (const rules of [
+      awsKeyRequestRules(CHECK, "restrict"),
+      awsKeyRequestRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }, "audit"),
+    ]) {
+      const lookups = rules.flatMap((l, i) =>
+        l.includes("set-var(txn.aws_key_entry)") ? [i] : [],
+      );
+      expect(lookups.length).toBe(1);
+      const lookup = lookups[0]!;
+      rules.forEach((l, i) => {
+        if (l.includes("set-var(txn.aws_key) ") || l.includes("wait-for-body")) {
+          expect(i < lookup).toBe(true);
+        }
+        if (/\baws_key_known\b|var\(txn\.aws_key_entry\)/.test(l) && i !== lookup) {
+          expect(i > lookup).toBe(true);
+        }
+      });
+    }
+  });
+});
+
 describe("the traffic record", () => {
   it("names a field for each value the record's aws object holds", () => {
     expect(awsKeyExtension(CHECK).logFields).toStrictEqual({
