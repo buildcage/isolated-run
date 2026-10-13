@@ -73606,7 +73606,7 @@ function applyOutcomeAnnotations(annotation, emissions) {
 	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
 }
 //#endregion
-//#region src/proxy/haproxy-aws-keys.ts
+//#region src/proxy/aws-hosts.ts
 const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`, apiHost = (service, vpceService = service) => `^${service}(-fips)?(\\.[a-z0-9-]+)?\\.(amazonaws\\.(com|com\\.cn|eu)|(api\\.aws|api\\.amazonwebservices\\.com\\.cn|api\\.amazonwebservices\\.eu))$|${vpceHost(vpceService)}`;
 apiHost("sts"), `${apiHost("ec2", "ec2(-fips)?")}`, "" + vpceHost("git-codecommit(-fips)?");
 const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
