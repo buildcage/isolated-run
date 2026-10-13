@@ -222,8 +222,6 @@ func TestExecFilesAttach(t *testing.T) {
 	}
 }
 
-// An exec that fails after its file is resolved leaves no exec record to take
-// the file up.
 func TestExecFilesDropsAFailedExecsFile(t *testing.T) {
 	files := execFiles{}
 	files.attach(&record{Kind: "exec-file", PID: 9, Path: "/work/noshebang"})

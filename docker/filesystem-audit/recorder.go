@@ -139,7 +139,8 @@ type execFiles map[uint32]record
 
 // attach takes in an exec-file record, keeping its path for the exec that
 // follows, and reports true so the caller drops it. An exec record gets that
-// path, with the name it was run by moved to Name.
+// path, with the name it was run by moved to Name. A fork record drops the
+// entry for its pid.
 func (f execFiles) attach(r *record) bool {
 	switch r.Kind {
 	case "exec-file":
