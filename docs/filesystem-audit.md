@@ -24,9 +24,8 @@ while the step runs.
   step wrote, so you can name only what a later step needs:
 
   1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
-     `write_through` only what you already know a later step reads, such as a `./dist` directory it
-     builds. (`$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` need no entry: this action mediates them,
-     so they reach later steps in either mode.)
+     `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
+     step sets outputs.
   2. Look at the `W`, `D` and `A` rows under **Accessed Paths**, and at the `M` rows. `M` marks
      only the path a file was moved away from, so a file a tool writes under a temporary name and
      then renames into place shows under the temporary name; the artifact has where it went, as

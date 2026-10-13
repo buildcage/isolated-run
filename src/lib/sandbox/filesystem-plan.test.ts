@@ -24,7 +24,7 @@ describe("resolveFilesystemPlan", () => {
   it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [] });
+    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], mediatedVariables: [] });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -52,7 +52,11 @@ describe("resolveFilesystemPlan", () => {
   it("skips the guard and creates nothing for the / sentinel", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "/", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: ["/"] });
+    expect(plan).toStrictEqual({
+      overlayRoots: [],
+      writeThroughPaths: ["/"],
+      mediatedVariables: [],
+    });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -217,6 +221,57 @@ describe("resolveFilesystemPlan", () => {
     // nested under HOME here, so it folds away too: only HOME and /tmp
     // are left.
     expect(plan.overlayRoots.sort()).toStrictEqual([ENV.HOME, "/tmp"].sort());
+  });
+
+  describe("which runner files are mediated back", () => {
+    const FILES_ENV = {
+      ...ENV,
+      GITHUB_OUTPUT: `${ENV.RUNNER_TEMP}/_runner_file_commands/set_output_abc`,
+      GITHUB_STEP_SUMMARY: `${ENV.RUNNER_TEMP}/_runner_file_commands/step_summary_abc`,
+    };
+    const plan = (mode: "persistent" | "ephemeral", writeThrough: string) =>
+      resolveFilesystemPlan(mode, writeThrough, FILES_ENV, {
+        exists: alwaysExists,
+        lstat: notLink,
+        deviceOf: () => 1,
+        listHostMounts: () => [],
+        realpath: (p) => p,
+      });
+
+    it("mediates every runner file the step has in persistent mode", () => {
+      expect(plan("persistent", "").mediatedVariables).toStrictEqual([
+        "GITHUB_OUTPUT",
+        "GITHUB_STEP_SUMMARY",
+      ]);
+    });
+
+    it("leaves both under the overlay in ephemeral mode unless write_through covers them", () => {
+      expect(plan("ephemeral", "./dist").mediatedVariables).toStrictEqual([]);
+    });
+
+    // The mediation writes the file back, so the entry needs no bind of its own.
+    it("mediates a file write_through names, and drops it from the binds", () => {
+      const named = plan("ephemeral", "./dist\n$GITHUB_OUTPUT");
+      expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
+      expect(named.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`]);
+    });
+
+    it("mediates the files under a directory write_through names", () => {
+      const covered = plan("ephemeral", "$RUNNER_TEMP");
+      expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
+      expect(covered.writeThroughPaths).toStrictEqual([ENV.RUNNER_TEMP]);
+    });
+
+    it("compares a runner file by its real path, as write_through's are", () => {
+      const covered = resolveFilesystemPlan("ephemeral", "$RUNNER_TEMP", FILES_ENV, {
+        exists: alwaysExists,
+        lstat: notLink,
+        deviceOf: () => 1,
+        listHostMounts: () => [],
+        realpath: (p) => p.replace(/^\/home\//, "/var/home/"),
+      });
+      expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
+    });
   });
 
   it("takes the overlay candidates by their real paths, as write_through's are", () => {

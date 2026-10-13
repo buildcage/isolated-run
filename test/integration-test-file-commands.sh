@@ -8,11 +8,12 @@
 # write_through names. See sandboxReadonlyFileCommands and renameGuardDirs in
 # sandbox/host-commands.ts.
 #
-# The ephemeral run also checks the other half: GITHUB_OUTPUT and
-# GITHUB_STEP_SUMMARY are mediated, so the command writes backing copies it can
+# The ephemeral run also checks the other half: GITHUB_OUTPUT, named in
+# write_through, is mediated, so the command writes a backing copy it can
 # rewrite in place (sed -i, which would EBUSY against a bind-mounted file), and
-# the host writes the real files from them -- even under ephemeral, where other
-# writes are discarded. See runner-output-files.ts.
+# the host writes the real file from it. GITHUB_STEP_SUMMARY, not named, stays
+# under the overlay and is discarded, while this action's report still lands.
+# See runner-output-files.ts.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -77,7 +78,12 @@ if [ "$MODE" = ephemeral ]; then
     echo "UNEXPECTED: GITHUB_OUTPUT could not be rewritten in place"
     rc=1
   fi
-  echo "MEDIATED_SUMMARY" >>"$GITHUB_STEP_SUMMARY"
+  if echo "DISCARDED_SUMMARY" >>"$GITHUB_STEP_SUMMARY"; then
+    echo "OK: GITHUB_STEP_SUMMARY is writable"
+  else
+    echo "UNEXPECTED: GITHUB_STEP_SUMMARY was not writable"
+    rc=1
+  fi
 fi
 if [ "$OPENED" = none ]; then
   if touch /opt/.buildcage-whole-test 2>/dev/null; then
@@ -115,7 +121,8 @@ run_probe() {
 
 run_probe persistent persistent '$GITHUB_PATH' GITHUB_PATH
 PERSISTENT_CODE=$?
-run_probe ephemeral ephemeral '$GITHUB_ENV' GITHUB_ENV
+run_probe ephemeral ephemeral '$GITHUB_ENV
+$GITHUB_OUTPUT' GITHUB_ENV
 EPHEMERAL_CODE=$?
 run_probe whole persistent / none
 WHOLE_CODE=$?
@@ -179,18 +186,18 @@ check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_epheme
 check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
 check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
 
-MED_OUTPUT="$COMMANDS/set_output_ephemeral"
-MED_SUMMARY="$WORKDIR/summary_ephemeral.md"
-if grep -qx "mediated_key=final" "$MED_OUTPUT" 2>/dev/null; then
+OUTPUT_FILE="$COMMANDS/set_output_ephemeral"
+SUMMARY_FILE="$WORKDIR/summary_ephemeral.md"
+if grep -qx "mediated_key=final" "$OUTPUT_FILE" 2>/dev/null; then
   pass "ephemeral: GITHUB_OUTPUT written back after an in-place edit"
 else
-  fail "ephemeral: GITHUB_OUTPUT -- got: $(cat "$MED_OUTPUT" 2>/dev/null)"
+  fail "ephemeral: GITHUB_OUTPUT -- got: $(cat "$OUTPUT_FILE" 2>/dev/null)"
 fi
-# The report is written from the host after the sandbox exits, so the command's
-# markdown ends up alongside it rather than in place of it.
-if grep -qx "MEDIATED_SUMMARY" "$MED_SUMMARY" 2>/dev/null && grep -q "^## " "$MED_SUMMARY"; then
-  pass "ephemeral: GITHUB_STEP_SUMMARY carries the command's markdown next to this action's report"
+# The report is written from the host after the sandbox exits, outside the
+# overlay that took the command's markdown.
+if ! grep -q "DISCARDED_SUMMARY" "$SUMMARY_FILE" 2>/dev/null && grep -q "^## " "$SUMMARY_FILE"; then
+  pass "ephemeral: GITHUB_STEP_SUMMARY, not named in write_through, has this action's report and not the command's markdown"
 else
-  fail "ephemeral: GITHUB_STEP_SUMMARY -- got: $(cat "$MED_SUMMARY" 2>/dev/null)"
+  fail "ephemeral: GITHUB_STEP_SUMMARY -- got: $(cat "$SUMMARY_FILE" 2>/dev/null)"
 fi
 assert_results

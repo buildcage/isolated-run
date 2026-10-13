@@ -28,6 +28,7 @@ const ENV = {
   GITHUB_OUTPUT: "/home/runner/work/_temp/_runner_file_commands/set_output_abc",
   GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/_runner_file_commands/step_summary_abc",
 };
+const BOTH = ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const;
 
 describe("mediateRunnerOutputFiles", () => {
   const captured = () => {
@@ -42,7 +43,7 @@ describe("mediateRunnerOutputFiles", () => {
 
   it("mediates both variables: a directory bind, the real paths masked, the env repointed", () => {
     const { made, wrote, deps } = captured();
-    const result = mediateRunnerOutputFiles(ENV, "/scratch/backing", deps);
+    const result = mediateRunnerOutputFiles(ENV, BOTH, "/scratch/backing", deps);
 
     expect(made).toStrictEqual(["/scratch/backing"]);
     expect(wrote).toStrictEqual(["/scratch/backing/output", "/scratch/backing/step-summary"]);
@@ -75,18 +76,18 @@ describe("mediateRunnerOutputFiles", () => {
     });
   });
 
-  it("mediates only the variable the step has", () => {
+  it("mediates only the variables it is given", () => {
     const { wrote, deps } = captured();
-    const result = mediateRunnerOutputFiles({ GITHUB_OUTPUT: ENV.GITHUB_OUTPUT }, "/scratch", deps);
+    const result = mediateRunnerOutputFiles(ENV, ["GITHUB_OUTPUT"], "/scratch", deps);
 
     expect(wrote).toStrictEqual(["/scratch/output"]);
     expect(result?.files.map((f) => f.variable)).toStrictEqual(["GITHUB_OUTPUT"]);
     expect(result?.maskedPaths).toStrictEqual([ENV.GITHUB_OUTPUT]);
   });
 
-  it("does nothing, touching no directory, when neither variable is set", () => {
+  it("does nothing, touching no directory, when given no variable", () => {
     const { made, deps } = captured();
-    expect(mediateRunnerOutputFiles({}, "/scratch", deps)).toBeUndefined();
+    expect(mediateRunnerOutputFiles(ENV, [], "/scratch", deps)).toBeUndefined();
     expect(made).toStrictEqual([]);
   });
 
@@ -94,7 +95,7 @@ describe("mediateRunnerOutputFiles", () => {
     const base = mkdtempSync(join(tmpdir(), "mediate-"));
     const backingDir = join(base, "backing");
     try {
-      mediateRunnerOutputFiles(ENV, backingDir);
+      mediateRunnerOutputFiles(ENV, BOTH, backingDir);
       expect(readFileSync(join(backingDir, "output"), "utf8")).toBe("");
       expect(readFileSync(join(backingDir, "step-summary"), "utf8")).toBe("");
     } finally {
@@ -107,7 +108,7 @@ describe("mediateRunnerOutputFiles", () => {
     const backingDir = join(base, "backing");
     mkdirSync(backingDir);
     try {
-      expect(() => mediateRunnerOutputFiles(ENV, backingDir)).toThrow(/EEXIST/);
+      expect(() => mediateRunnerOutputFiles(ENV, BOTH, backingDir)).toThrow(/EEXIST/);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
@@ -117,7 +118,7 @@ describe("mediateRunnerOutputFiles", () => {
     const base = mkdtempSync(join(tmpdir(), "mediate-"));
     chmodSync(base, 0o777);
     try {
-      expect(() => mediateRunnerOutputFiles(ENV, join(base, "backing"))).toThrow(
+      expect(() => mediateRunnerOutputFiles(ENV, BOTH, join(base, "backing"))).toThrow(
         /not a private directory/,
       );
     } finally {

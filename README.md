@@ -420,12 +420,13 @@ is gone.
 > [!NOTE]
 > Discarding those writes is the point, but the same overlay also drops output the command was meant
 > to produce. `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` live under `$RUNNER_TEMP`, so whatever the
-> command writes to them is gone once the step ends unless you name that file in `write_through:`.
-> Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job Summary this action
-> writes its own report to. That report and the `traffic_artifact_name` and
+> command writes to them is gone once the step ends unless `write_through:` names that file or a
+> directory it is in. Naming `$GITHUB_STEP_SUMMARY` puts the command's markdown in the same Job
+> Summary this action writes its own report to. That report and the `traffic_artifact_name` and
 > `filesystem_audit_artifact_name` outputs are unaffected either way: all are written from the runner
-> host after the sandboxed command has exited, outside the overlay. Before they are, `$GITHUB_OUTPUT`
-> is rewritten to what the runner can read of it, and a file it cannot read to the end fails the step.
+> host after the sandboxed command has exited, outside the overlay. A `$GITHUB_OUTPUT` kept this way
+> is rewritten first to what the runner can read of it, and a file it cannot read to the end fails
+> the step.
 
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new

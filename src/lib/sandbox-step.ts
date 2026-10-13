@@ -62,6 +62,7 @@ import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,
   validateFilesystemInputs,
+  type FilesystemPlan,
 } from "./sandbox/filesystem-plan.ts";
 import { pinHostCommands, pinningPaths } from "./sandbox/host-commands.ts";
 import { assertNonRootUid } from "./sandbox/identity.ts";
@@ -356,7 +357,7 @@ export function preflight(
   { filesystemMode, writeThroughInput, filesystemAudit, annotation }: StepInputs,
   env: NodeJS.ProcessEnv,
   deps: SandboxStepDeps,
-): { overlayRoots: string[]; writeThroughPaths: string[] } {
+): FilesystemPlan {
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(deps.getuid!());
 
@@ -385,18 +386,20 @@ export function preflight(
   // write_through entry, or a target that can't be created, fails before the
   // proxy container ever starts, same reasoning as checkPasswordlessSudo
   // above.
-  const { overlayRoots, writeThroughPaths } = deps.resolveFilesystemPlan(
-    filesystemMode,
-    writeThroughInput,
-    env,
-    { warn: deps.warn },
-  );
+  const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
+    warn: deps.warn,
+  });
   if (filesystemMode === "ephemeral") {
-    for (const line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) {
+    for (const line of formatFilesystemPlanLog(
+      filesystemMode,
+      plan.overlayRoots,
+      plan.writeThroughPaths,
+      plan.mediatedVariables,
+    )) {
       deps.info(line);
     }
   }
-  return { overlayRoots, writeThroughPaths };
+  return plan;
 }
 
 /** The proxy image to run, verified unless a local test build overrides it. */
@@ -469,7 +472,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     try {
       set("");
     } catch {
-      // The report setting it again says so.
+      // The traffic report's own append after it meets the same failure and
+      // says so.
     }
   }
   const prepareAudit = () =>
@@ -541,7 +545,7 @@ export async function runSandboxStep(
 ): Promise<number> {
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
-  const { overlayRoots, writeThroughPaths } = preflight(inputs, env, deps);
+  const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
   const { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
 
@@ -624,7 +628,7 @@ export async function runSandboxStep(
       );
     }
 
-    mediation = deps.mediateRunnerOutputFiles(env, runnerFilesBackingDir);
+    mediation = deps.mediateRunnerOutputFiles(env, mediatedVariables, runnerFilesBackingDir);
 
     exitCode = await deps.runSandboxedCommand({
       containerName,

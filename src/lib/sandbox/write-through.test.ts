@@ -21,15 +21,8 @@ const ENV = {
 
 describe("resolveWriteThroughEntry", () => {
   it("expands $NAME and ${NAME} forms for allowed variables", () => {
-    expect(resolveWriteThroughEntry("$GITHUB_ENV", ENV)).toBe(ENV.GITHUB_ENV);
-    expect(resolveWriteThroughEntry("${GITHUB_ENV}", ENV)).toBe(ENV.GITHUB_ENV);
-  });
-
-  it("rejects GITHUB_OUTPUT and GITHUB_STEP_SUMMARY, which this action mediates", () => {
-    expect(() => resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV)).toThrow(/unsupported variable/);
-    expect(() => resolveWriteThroughEntry("$GITHUB_STEP_SUMMARY", ENV)).toThrow(
-      /unsupported variable/,
-    );
+    expect(resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV)).toBe(ENV.GITHUB_OUTPUT);
+    expect(resolveWriteThroughEntry("${GITHUB_OUTPUT}", ENV)).toBe(ENV.GITHUB_OUTPUT);
   });
 
   it("expands a leading ~/ to $HOME", () => {
@@ -111,6 +104,7 @@ describe("resolveWriteThroughEntry", () => {
     expect(resolveWriteThroughEntry("$RUNNER_TEMP", ENV)).toBe(ENV.RUNNER_TEMP);
     expect(resolveWriteThroughEntry("$GITHUB_ENV", ENV)).toBe(ENV.GITHUB_ENV);
     expect(resolveWriteThroughEntry("$GITHUB_PATH", ENV)).toBe(ENV.GITHUB_PATH);
+    expect(resolveWriteThroughEntry("$GITHUB_STEP_SUMMARY", ENV)).toBe(ENV.GITHUB_STEP_SUMMARY);
   });
 });
 

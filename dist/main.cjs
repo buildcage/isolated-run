@@ -70811,11 +70811,12 @@ function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync
 		};
 	});
 }
-function formatFilesystemPlanLog(mode, overlayRoots, writeThrough) {
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
 	if (mode !== "ephemeral") return [];
 	let lines = ["Filesystem mode: ephemeral"];
 	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
 	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
 	return lines;
 }
 //#endregion
@@ -71939,9 +71940,16 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
 	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
 	"GITHUB_ENV",
-	"GITHUB_PATH"
-], KNOWN_FILE_VARS = ["GITHUB_ENV", "GITHUB_PATH"], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], KNOWN_FILE_VARS = [
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
@@ -71991,7 +71999,7 @@ function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, re
 }
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_ENV/GITHUB_PATH) and should already be present -- something is wrong with the environment.`);
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
 function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
 	let missing = resolvedPaths.filter((path) => !exists(path));
@@ -72121,6 +72129,166 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
+function readOutputEntries(text) {
+	let entries = [], index = 0, lineNumber = 0, readLine = () => {
+		if (index >= text.length) return;
+		lineNumber++;
+		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
+		return index = lf === -1 ? text.length : lf + 1, {
+			line,
+			newline: lf !== -1
+		};
+	};
+	for (;;) {
+		let start = index, read = readLine();
+		if (!read) return { entries };
+		let { line } = read, at = `line ${lineNumber}`;
+		if (line === "") continue;
+		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
+		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			if (equals === 0) return {
+				entries,
+				error: `${at} has an empty name before =`
+			};
+			entries.push({
+				name: line.slice(0, equals),
+				text: text.slice(start, index)
+			});
+			continue;
+		}
+		if (heredoc === -1) return {
+			entries,
+			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
+		};
+		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
+		if (name === "") return {
+			entries,
+			error: `${at} has an empty name before <<`
+		};
+		if (delimiter === "") return {
+			entries,
+			error: `${at}, output ${quoted(name)}, has an empty delimiter`
+		};
+		for (;;) {
+			let value = readLine();
+			if (!value || value.line !== delimiter && !value.newline) return {
+				entries,
+				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
+			};
+			if (value.line === delimiter) break;
+		}
+		entries.push({
+			name,
+			text: text.slice(start, index)
+		});
+	}
+}
+function quoted(text) {
+	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
+	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
+}
+const WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
+function validatedOutputText(bytes) {
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
+		text: "",
+		error: "it is not UTF-8"
+	};
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
+	return {
+		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
+		error
+	};
+}
+//#endregion
+//#region src/lib/sandbox/runner-output-files.ts
+const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
+	GITHUB_OUTPUT: "output",
+	GITHUB_STEP_SUMMARY: "step-summary"
+}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
+	mkdir: (path) => {
+		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
+	},
+	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
+		mode: 420,
+		flag: "wx"
+	})
+};
+function mediateRunnerOutputFiles(env, variables, backingDir, deps = realMediateDeps) {
+	if (variables.length === 0) return;
+	deps.mkdir(backingDir);
+	let files = [], envOverrides = {};
+	for (let variable of variables) {
+		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
+		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
+			variable,
+			realPath: env[variable],
+			backingPath
+		});
+	}
+	return {
+		envOverrides,
+		mounts: [{
+			destination: RUNNER_FILES_DIR,
+			type: "none",
+			source: backingDir,
+			options: ["rbind", "rw"]
+		}],
+		maskedPaths: files.map((f) => f.realPath),
+		files
+	};
+}
+const realReadBackingDeps = {
+	lstat: (path) => (0, node_fs.lstatSync)(path),
+	readFile: (path) => (0, node_fs.readFileSync)(path)
+};
+function readBackingFile(path, deps = realReadBackingDeps) {
+	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
+	try {
+		stats = deps.lstat(path);
+	} catch (e) {
+		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
+	}
+	if (!stats.isFile()) return { reason: "it was not a regular file" };
+	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
+	try {
+		return { bytes: deps.readFile(path) };
+	} catch (e) {
+		return unreadable(e);
+	}
+}
+function removeBackingDir(path) {
+	let pending = [path];
+	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
+		let stats;
+		try {
+			stats = (0, node_fs.lstatSync)(dir);
+		} catch (e) {
+			if (e.code === "ENOENT") continue;
+			throw e;
+		}
+		if (stats.isDirectory()) {
+			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
+			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
+		}
+	}
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function runnerFilesDirFor(containerName) {
+	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
+}
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
@@ -72138,10 +72306,17 @@ function resolveWriteThroughInput(writeThroughInput, env) {
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, writeThroughPaths = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
+		let path = env[variable];
+		return path ? [{
+			variable,
+			path: onRealRunnerDir((0, node_path.normalize)(path), env, realpath)
+		}] : [];
+	}), mediatedVariables = runnerFiles.filter(({ path }) => filesystemMode !== "ephemeral" || resolved.some((entry) => isAtOrUnder(path, entry))).map(({ variable }) => variable), writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ path }) => path === p));
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
 		overlayRoots: [],
-		writeThroughPaths
+		writeThroughPaths,
+		mediatedVariables
 	};
 	try {
 		assertKnownFilesExist(written, env, deps);
@@ -72165,7 +72340,8 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 	if (filesystemMode !== "ephemeral") return {
 		overlayRoots: [],
-		writeThroughPaths
+		writeThroughPaths,
+		mediatedVariables
 	};
 	try {
 		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
@@ -72176,7 +72352,8 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		].filter((p) => !!p), writeThroughPaths, deps), hostMounts = (deps.listHostMounts ?? listHostMounts)();
 		return {
 			overlayRoots: [...candidateRoots, ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps)],
-			writeThroughPaths
+			writeThroughPaths,
+			mediatedVariables
 		};
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
@@ -72290,167 +72467,6 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 	}
 	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
-}
-function readOutputEntries(text) {
-	let entries = [], index = 0, lineNumber = 0, readLine = () => {
-		if (index >= text.length) return;
-		lineNumber++;
-		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
-		return index = lf === -1 ? text.length : lf + 1, {
-			line,
-			newline: lf !== -1
-		};
-	};
-	for (;;) {
-		let start = index, read = readLine();
-		if (!read) return { entries };
-		let { line } = read, at = `line ${lineNumber}`;
-		if (line === "") continue;
-		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
-		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-			if (equals === 0) return {
-				entries,
-				error: `${at} has an empty name before =`
-			};
-			entries.push({
-				name: line.slice(0, equals),
-				text: text.slice(start, index)
-			});
-			continue;
-		}
-		if (heredoc === -1) return {
-			entries,
-			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
-		};
-		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
-		if (name === "") return {
-			entries,
-			error: `${at} has an empty name before <<`
-		};
-		if (delimiter === "") return {
-			entries,
-			error: `${at}, output ${quoted(name)}, has an empty delimiter`
-		};
-		for (;;) {
-			let value = readLine();
-			if (!value || value.line !== delimiter && !value.newline) return {
-				entries,
-				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
-			};
-			if (value.line === delimiter) break;
-		}
-		entries.push({
-			name,
-			text: text.slice(start, index)
-		});
-	}
-}
-function quoted(text) {
-	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
-	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
-}
-const WIDE_BOMS = [
-	[255, 254],
-	[254, 255],
-	[
-		0,
-		0,
-		254,
-		255
-	]
-];
-function validatedOutputText(bytes) {
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
-		text: "",
-		error: "it is not UTF-8"
-	};
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
-	return {
-		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
-		error
-	};
-}
-//#endregion
-//#region src/lib/sandbox/runner-output-files.ts
-const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
-	GITHUB_OUTPUT: "output",
-	GITHUB_STEP_SUMMARY: "step-summary"
-}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
-	mkdir: (path) => {
-		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
-	},
-	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
-		mode: 420,
-		flag: "wx"
-	})
-};
-function mediateRunnerOutputFiles(env, backingDir, deps = realMediateDeps) {
-	let present = MEDIATED_VARIABLES.filter((v) => env[v]);
-	if (present.length === 0) return;
-	deps.mkdir(backingDir);
-	let files = [], envOverrides = {};
-	for (let variable of present) {
-		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
-		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
-			variable,
-			realPath: env[variable],
-			backingPath
-		});
-	}
-	return {
-		envOverrides,
-		mounts: [{
-			destination: RUNNER_FILES_DIR,
-			type: "none",
-			source: backingDir,
-			options: ["rbind", "rw"]
-		}],
-		maskedPaths: files.map((f) => f.realPath),
-		files
-	};
-}
-const realReadBackingDeps = {
-	lstat: (path) => (0, node_fs.lstatSync)(path),
-	readFile: (path) => (0, node_fs.readFileSync)(path)
-};
-function readBackingFile(path, deps = realReadBackingDeps) {
-	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
-	try {
-		stats = deps.lstat(path);
-	} catch (e) {
-		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
-	}
-	if (!stats.isFile()) return { reason: "it was not a regular file" };
-	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
-	try {
-		return { bytes: deps.readFile(path) };
-	} catch (e) {
-		return unreadable(e);
-	}
-}
-function removeBackingDir(path) {
-	let pending = [path];
-	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
-		let stats;
-		try {
-			stats = (0, node_fs.lstatSync)(dir);
-		} catch (e) {
-			if (e.code === "ENOENT") continue;
-			throw e;
-		}
-		if (stats.isDirectory()) {
-			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
-			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
-		}
-	}
-	(0, node_fs.rmSync)(path, {
-		recursive: !0,
-		force: !0
-	});
-}
-function runnerFilesDirFor(containerName) {
-	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
-	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
 //#region src/lib/sandbox/env-loader.ts
@@ -74302,12 +74318,9 @@ function preflight({ filesystemMode, writeThroughInput, filesystemAudit, annotat
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
 	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
-	let { overlayRoots, writeThroughPaths } = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn: deps.warn });
-	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) deps.info(line);
-	return {
-		overlayRoots,
-		writeThroughPaths
-	};
+	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn: deps.warn });
+	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
+	return plan;
 }
 async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {
 	let localOverride = await deps.readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
@@ -74390,7 +74403,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let deps = {
 		...realDeps,
 		...overrides
-	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
@@ -74433,7 +74446,7 @@ async function runSandboxStep(env, overrides = {}) {
 	try {
 		let proxyNetns = deps.getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		mediation = deps.mediateRunnerOutputFiles(env, runnerFilesBackingDir), exitCode = await deps.runSandboxedCommand({
+		mediation = deps.mediateRunnerOutputFiles(env, mediatedVariables, runnerFilesBackingDir), exitCode = await deps.runSandboxedCommand({
 			containerName,
 			proxyNetns,
 			runInput,

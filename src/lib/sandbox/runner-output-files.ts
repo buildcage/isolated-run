@@ -7,7 +7,9 @@
  * the command's environment points at those, and the real files are masked from
  * it. After the step the host reads the backing files and writes the real ones
  * itself, so a symlink, FIFO, directory or permission the command could leave
- * at the real path never reaches it.
+ * at the real path never reaches it. Under ephemeral only a file write_through
+ * covers is mediated; the rest stay under the overlay and are discarded with it
+ * (see FilesystemPlan.mediatedVariables).
  *
  * A directory, not a bind per file: the command (and @actions/core) may rewrite
  * a file in place with `sed -i` or a temp-and-rename, which EBUSYs against a
@@ -46,7 +48,7 @@ export const RUNNER_FILES_DIR = "/dev/buildcage-runner-files";
 
 const LEAF = { GITHUB_OUTPUT: "output", GITHUB_STEP_SUMMARY: "step-summary" } as const;
 export type MediatedVariable = keyof typeof LEAF;
-const MEDIATED_VARIABLES = Object.keys(LEAF) as MediatedVariable[];
+export const MEDIATED_VARIABLES = Object.keys(LEAF) as MediatedVariable[];
 
 export interface MediatedRunnerFile {
   variable: MediatedVariable;
@@ -86,24 +88,25 @@ const realMediateDeps: MediateDeps = {
 };
 
 /**
- * Sets up the mediation for whichever of the two variables the step has. The
+ * Sets up the mediation for `variables`, each set in `env`: those the
+ * filesystem plan lets reach the runner (FilesystemPlan.mediatedVariables). The
  * backing directory is created at `backingDir`, which must be somewhere the
  * sandbox cannot see (runnerFilesDirFor), so the command reaches it
  * only through the bind and cannot rename or replace it. The caller owns its
  * lifetime, reading the files back before removing it. Returns undefined when
- * neither variable is set, so the caller leaves the sandbox untouched.
+ * `variables` is empty, so the caller leaves the sandbox untouched.
  */
 export function mediateRunnerOutputFiles(
   env: NodeJS.ProcessEnv,
+  variables: readonly MediatedVariable[],
   backingDir: string,
   deps: MediateDeps = realMediateDeps,
 ): RunnerOutputMediation | undefined {
-  const present = MEDIATED_VARIABLES.filter((v) => env[v]);
-  if (present.length === 0) return undefined;
+  if (variables.length === 0) return undefined;
   deps.mkdir(backingDir);
   const files: MediatedRunnerFile[] = [];
   const envOverrides: Record<string, string> = {};
-  for (const variable of present) {
+  for (const variable of variables) {
     const leaf = LEAF[variable];
     const backingPath = join(backingDir, leaf);
     // Empty so the command appends to a file that exists and the host can read
