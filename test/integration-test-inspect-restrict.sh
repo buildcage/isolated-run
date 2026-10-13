@@ -77,28 +77,28 @@ echo "--- report assertions (Job Summary) ---"
 SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
-assert_summary_contains "| allowed.example.com:443 | HTTPS |" "allowed.example.com:443 recorded as allowed"
-assert_summary_contains "| allowed.example.com:80 | HTTP |" "allowed.example.com:80 recorded as allowed"
-assert_summary_contains "| blocked.example.com:443 | HTTPS |" "blocked.example.com:443 recorded as blocked"
-assert_summary_contains "| blocked.example.com:9443 | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
-assert_summary_contains "| 10.200.0.100:9080 | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
-assert_summary_contains "| 10.200.0.100:2525 | IP |" "an allowed address the client sent nothing on recorded as allowed"
-assert_summary_contains "| 10.200.0.53:53 | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
+assert_summary_contains "| \`allowed.example.com:443\` | HTTPS |" "allowed.example.com:443 recorded as allowed"
+assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
+assert_summary_contains "| \`blocked.example.com:443\` | HTTPS |" "blocked.example.com:443 recorded as blocked"
+assert_summary_contains "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
+assert_summary_contains "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
+assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
+assert_summary_contains "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule refused this one and none can clear it, so it is tabled apart.
 assert_summary_contains "#### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
-assert_summary_contains "| absent.example.com:443 | HTTPS | ⚠️ dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"
+assert_summary_contains "| \`absent.example.com:443\` | HTTPS | ⚠️ dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"
 # The opposite case: a connection that never completed is a refusal, because
 # nothing on it was ever authenticated. It reads like an outage and is counted
 # anyway.
-assert_summary_contains "| deadend.example.com:443 | HTTPS | 🚫 origin-connect-failed |" \
+assert_summary_contains "| \`deadend.example.com:443\` | HTTPS | 🚫 origin-connect-failed |" \
   "a connection that never completed is in the blocked table, not the failed one"
 # Only a numeric tlserr on the log line makes this origin-untrusted rather than
 # origin-connect-failed, so the row also shows HAProxy logged the TLS error.
-assert_summary_contains "| impostor.example.com:443 | HTTPS | 🚫 origin-untrusted |" \
+assert_summary_contains "| \`impostor.example.com:443\` | HTTPS | 🚫 origin-untrusted |" \
   "an origin whose certificate the proxy cannot verify is in the blocked table as untrusted"
 # The same host over plaintext, where no certificate was ever going to be
 # checked, so nothing was hidden by the connection failing.
-assert_summary_contains "| deadend.example.com:80 | HTTP | ⚠️ origin-unreachable |" \
+assert_summary_contains "| \`deadend.example.com:80\` | HTTP | ⚠️ origin-unreachable |" \
   "a plaintext connection that failed is a failure, not a refusal"
 assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-allowed" "out-of-rule POST recorded with its reason"
 # `OPTIONS *` carries no path, so no URL can spell what it asked for and the
@@ -166,7 +166,7 @@ fi
 assert_summary_matches "⚠️ .*: HTTPS aborted\.example\.com:443 -> client-(aborted|timeout)$" \
   "a connection the client left is in the timeline, with a mark of its own" \
   "the aborted connection is missing from the timeline"
-if grep -qF "| aborted.example.com:443 | HTTPS |" <<< "$SUMMARY"; then
+if grep -qF "| \`aborted.example.com:443\` | HTTPS |" <<< "$SUMMARY"; then
   fail "the aborted connection was put in one of the host tables"
 else
   pass "the aborted connection is in neither host table"
@@ -176,15 +176,15 @@ assert_summary_matches "⚠️ .*: HTTPS abandoned\.example\.com:443 -> client-t
   "the failed client handshake is missing from the timeline"
 # No rule takes the row above away, so the refused lookup for the same name has
 # to survive: it is the only row a reader can act on.
-assert_summary_contains "| aborted.example.com | DNS | 🚫 dns-not-allowed |" \
+assert_summary_contains "| \`aborted.example.com\` | DNS | 🚫 dns-not-allowed |" \
   "the refused lookup for the same name is still its own Blocked row"
 # A refusal made before a whole request arrived is still a refusal, so it is in
 # the table and in fail_on_blocked. The plain stage has no SNI to name it by:
 # bytes sent to an address are named by it, as the ip rule that could pass them
 # would be, and a request to a name lands on the proxy's own address, which
 # names nothing.
-if grep -qF '| 10.200.0.100:5432 | IP | 🚫 bad-request |' <<< "$SUMMARY" \
-  && grep -qE '^\| \(unknown\):[0-9]+ \| HTTP \| 🚫 missing-host-header \|' <<< "$SUMMARY"; then
+if grep -qF '| `10.200.0.100:5432` | IP | 🚫 bad-request |' <<< "$SUMMARY" \
+  && grep -qE '^\| `\(unknown\):[0-9]+` \| HTTP \| 🚫 missing-host-header \|' <<< "$SUMMARY"; then
   pass "both refusals that named no host are in the Blocked Hosts table"
 else
   fail "the Blocked Hosts table is missing the rows for requests that named no host"

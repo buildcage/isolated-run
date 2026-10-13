@@ -173,9 +173,9 @@ role. Every other reason gets a row for each host, as in **🚫 Blocked Hosts**:
 | key 1 from a role in 222222222222 | cloudformation.us-east-1.amazonaws.com, s3.us-east-1.amazonaws.com |    66 |
 | key 2                             | ssm.us-east-1.amazonaws.com                                        |     3 |
 
-| Host                            | Rule  | Reason            | Count |
-| ------------------------------- | ----- | ----------------- | ----: |
-| sts.us-east-1.amazonaws.com:443 | HTTPS | aws-no-credential |     1 |
+| Host                              | Rule  | Reason            | Count |
+| --------------------------------- | ----- | ----------------- | ----: |
+| `sts.us-east-1.amazonaws.com:443` | HTTPS | aws-no-credential |     1 |
 
 **Communication details** names the key on each of those requests, in `restrict` too, where a
 refused one ends in `-> aws-key-not-allowed, key 1 from a role in 222222222222`:

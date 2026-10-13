@@ -68734,12 +68734,19 @@ const ALIGN_MARKERS = {
 	center: ":---:"
 }, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
 function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*&]/g, "\\$&").replace(/\r?\n/g, " ");
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function codeSpan(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(value) {
+	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
 }
 function markdownTable(formats, rows) {
 	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
 	for (let row of rows) {
-		let cells = formats.map((f) => escapeCell(row[f.key]));
+		let cells = formats.map((f) => (f.code ? codeCell : escapeCell)(row[f.key]));
 		lines.push(`| ${cells.join(" | ")} |`);
 	}
 	return lines.join("\n");
@@ -68753,7 +68760,8 @@ const OUTCOME_MARK = {
 function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	let formats = [{
 		key: "host",
-		title: "Host"
+		title: "Host",
+		code: !0
 	}, {
 		key: "ruleType",
 		title: "Rule"
@@ -69004,11 +69012,13 @@ function leftOutSection(leftOut) {
 	return md += markdownTable([
 		{
 			key: "method",
-			title: "Method"
+			title: "Method",
+			code: !0
 		},
 		{
 			key: "url",
-			title: "URL"
+			title: "URL",
+			code: !0
 		},
 		{
 			key: "part",
@@ -69400,13 +69410,6 @@ function escapeChar(c) {
 	if (named !== void 0) return named;
 	let cp = Number(c.codePointAt(0));
 	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-}
-function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-	return `${fence}${pad}${text}${pad}${fence}`;
-}
-function codeCell(text) {
-	return codeSpan(text.replace(/\|/g, "\\|"));
 }
 function field(text) {
 	return text.includes(" ") ? `"${text}"` : text;

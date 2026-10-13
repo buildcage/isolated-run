@@ -1,3 +1,5 @@
+import { codeCell } from "#core/lib/report/render/markdown-table.ts";
+
 import { DELETED_MARK, type Shown } from "./paths.ts";
 
 // A file or process name is chosen by the step, and a newline in one could
@@ -34,20 +36,6 @@ function escapeChar(c: string): string {
   const cp = Number(c.codePointAt(0));
   if (cp >= RAW_BYTE_FIRST && cp <= RAW_BYTE_LAST) return `\\x${(cp & 0xff).toString(16)}`;
   return `\\u{${cp.toString(16)}}`;
-}
-
-// A cell holding a path as a code span, so Markdown in a name the step chose
-// (an entity, ~~, a link) prints as itself. GFM still splits a table row on a
-// `|` inside a code span, so that alone is escaped.
-export function codeSpan(text: string): string {
-  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = "`".repeat(longest + 1);
-  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-  return `${fence}${pad}${text}${pad}${fence}`;
-}
-
-function codeCell(text: string): string {
-  return codeSpan(text.replace(/\|/g, "\\|"));
 }
 
 // A details line parts its fields with spaces, so a name holding one is quoted.

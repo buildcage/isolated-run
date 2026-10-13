@@ -288,8 +288,8 @@ describe("computeReportOutcomes", () => {
       );
       expect(tables(markdown)).toStrictEqual([
         [
-          "| s3.amazonaws.com:443 | HTTPS | aws-key-not-allowed | 2 |",
-          "| s3.amazonaws.com:443 | HTTPS | aws-no-credential | 1 |",
+          "| `s3.amazonaws.com:443` | HTTPS | aws-key-not-allowed | 2 |",
+          "| `s3.amazonaws.com:443` | HTTPS | aws-no-credential | 1 |",
         ],
       ]);
     });
@@ -344,8 +344,8 @@ describe("computeReportOutcomes", () => {
           "| key 3 | cloudformation.amazonaws.com | 1 |",
         ],
         [
-          "| s3.amazonaws.com:443 | HTTPS | aws-no-credential | 1 |",
-          "| s3.amazonaws.com:443 | HTTPS | aws-ambiguous-credential | 1 |",
+          "| `s3.amazonaws.com:443` | HTTPS | aws-no-credential | 1 |",
+          "| `s3.amazonaws.com:443` | HTTPS | aws-ambiguous-credential | 1 |",
         ],
       ]);
       expect(details(markdown)).toContain(
@@ -417,7 +417,7 @@ describe("computeReportOutcomes", () => {
     expect(details(markdown)).toContain(
       "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
     );
-    expect(markdown).toContain("| s3.amazonaws.com:443 | HTTPS | 🚫 aws-key-not-allowed | 1 |");
+    expect(markdown).toContain("| `s3.amazonaws.com:443` | HTTPS | 🚫 aws-key-not-allowed | 1 |");
     expect(markdown).not.toContain("### 🚨");
   });
 
@@ -468,7 +468,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "build", processActivity: true }),
     );
     expect(markdown).toMatch(
-      /^## Traffic \\& Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
+      /^## Traffic & Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
     );
     // The step closes the summary after the process activity.
     expect(markdown).not.toMatch(/Reported by/);
