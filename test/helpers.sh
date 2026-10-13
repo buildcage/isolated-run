@@ -56,13 +56,14 @@ assert_summary_contains() {
   fi
 }
 
-# assert_summary_contains for an extended regular expression.
+# assert_summary_contains for an extended regular expression, with what to
+# report on a miss if the label alone would not say it.
 assert_summary_matches() {
-  local pattern="$1" label="$2"
+  local pattern="$1" label="$2" missed="${3:-$2 -- no match in report}"
   if grep -qE -- "$pattern" <<< "$SUMMARY"; then
     pass "$label"
   else
-    fail "$label -- no match in report"
+    fail "$missed"
   fi
 }
 
