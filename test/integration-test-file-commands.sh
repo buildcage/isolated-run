@@ -27,6 +27,7 @@ touch "$WORKDIR/summary.md"
 
 # The step script: each file is written to and renamed, and the one named in
 # write_through is expected to take the write.
+# shellcheck disable=SC2016 # expands in the sandbox
 PROBE_SCRIPT='rc=0
 for name in GITHUB_ENV GITHUB_PATH GITHUB_STATE; do
   file=$(printenv "$name")
@@ -119,8 +120,10 @@ run_probe() {
     node dist/main.cjs
 }
 
+# shellcheck disable=SC2016 # the action expands write_through
 run_probe persistent persistent '$GITHUB_PATH' GITHUB_PATH
 PERSISTENT_CODE=$?
+# shellcheck disable=SC2016
 run_probe ephemeral ephemeral '$GITHUB_ENV
 $GITHUB_OUTPUT' GITHUB_ENV
 EPHEMERAL_CODE=$?
@@ -130,10 +133,10 @@ WHOLE_CODE=$?
 # The same files through a bind mount of the work directory that write_through
 # names: what is read-only at one path has to be at the other too.
 ALIAS="/mnt/buildcage-test-alias-$$"
-sudo -n mkdir -p "$ALIAS" && sudo -n mount --bind "$WORKDIR" "$ALIAS" || {
+if ! sudo -n mkdir -p "$ALIAS" || ! sudo -n mount --bind "$WORKDIR" "$ALIAS"; then
   echo "  FAIL  could not bind-mount the work directory onto $ALIAS"
   exit 1
-}
+fi
 trap 'sudo -n umount "$ALIAS"; sudo -n rmdir "$ALIAS"; rm -rf "$WORKDIR"' EXIT
 for name in env path state; do touch "$COMMANDS/${name}_alias"; done
 echo "=== persistent, write_through: $ALIAS ==="

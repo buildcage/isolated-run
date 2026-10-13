@@ -56,6 +56,12 @@ jobs:
               - 'dist/**'
               - 'THIRD_PARTY_LICENSES_NPM'
               - 'action.yml'
+              # Shellcheck's other inputs.
+              - 'test/*.sh'
+              - 'test/*/*.sh'
+              - 'test/.shellcheckrc'
+              - 'dev/*.sh'
+              - '.github/examples/*/*.sh'
 
   unit_test:
     needs: changes
@@ -80,10 +86,15 @@ jobs:
       - name: Check (lint/format)
         run: vp check
 
-      # The scripts the action runs on the host and as the sandbox's PID 1.
       # The runner image ships shellcheck.
       - name: Shellcheck
-        run: shellcheck scripts/*.sh
+        run: |
+          shellcheck scripts/*.sh test/*.sh test/*/*.sh dev/*.sh docker/*.sh \
+            .github/actions/*/*.sh .github/examples/*/*.sh
+          # with-contenv runs these under the image's busybox sh, which has
+          # pipefail.
+          shellcheck -s sh -e SC3040 docker/*/files/s6-scripts/* \
+            docker/common/files/s6-rc.d/{coredns,haproxy}/{run,data/check}
 
       - uses: ./.github/actions/verify-dist
 

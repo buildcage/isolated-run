@@ -104,6 +104,7 @@ fi
 
 echo ""
 echo "Rules generated from the audit run:"
+# shellcheck disable=SC2001 # indents every line, not just the first
 sed 's/^/    /' <<< "$RULES"
 
 echo ""

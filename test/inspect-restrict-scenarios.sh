@@ -219,14 +219,14 @@ check_status "GET aborted.example.com" "$?" "90"
 # the plain stage, which reads it as a request and refuses it.
 # integration-test-inspect-restrict.sh checks the report counts that refusal.]
 echo "=== [Not an HTTP request at all] ==="
-((printf 'NOT-HTTP\r\n\r\n'; sleep 1) | nc -w 5 10.200.0.100 5432 > /dev/null 2>&1 || true) &
+( (printf 'NOT-HTTP\r\n\r\n'; sleep 1) | nc -w 5 10.200.0.100 5432 > /dev/null 2>&1 || true) &
 echo "  bytes sent (a blocked row expected in the report)"
 
 # [A request that parsed and named no host, which the stage refuses ahead of
 # the rules: there is nothing to match and nothing to resolve. The inspect
 # counterpart of universal-restrict-scenarios.sh's own case.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET /public/pkg.tgz HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
+( (printf 'GET /public/pkg.tgz HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (a blocked row expected in the report)"
 
 echo "=== [Forged Host - the destination is not the client's to choose] ==="
@@ -259,7 +259,7 @@ echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
 # SNI = abandoned.example.com, offering no cipher suite the proxy shares, so the
 # proxy refuses the handshake.
 echo "=== [Client TLS handshake fails] ==="
-((printf '\x16\x03\x01\x00\x4d\x01\x00\x00\x49\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x1e\x00\x00\x00\x1a\x00\x18\x00\x00\x15\x61\x62\x61\x6e\x64\x6f\x6e\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d'; sleep 1) \
+( (printf '\x16\x03\x01\x00\x4d\x01\x00\x00\x49\x03\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00\x00\x1e\x00\x00\x00\x1a\x00\x18\x00\x00\x15\x61\x62\x61\x6e\x64\x6f\x6e\x65\x64\x2e\x65\x78\x61\x6d\x70\x6c\x65\x2e\x63\x6f\x6d'; sleep 1) \
  | nc -w 5 allowed.example.com 443 > /dev/null 2>&1 || true) &
 echo "  sent (checked in the report, see integration-test-inspect-restrict.sh)"
 

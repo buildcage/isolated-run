@@ -204,7 +204,7 @@ fi
 # test/integration-test-universal-restrict.sh, since this script only sees
 # curl/nc exit status, not the proxy's log.]
 echo "=== [HTTP keep-alive - allowed then blocked] ==="
-((printf 'GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n'; sleep 1; \
+( (printf 'GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n'; sleep 1; \
   printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \
  | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  requests sent over one keep-alive connection (checked against the report)"
@@ -214,7 +214,7 @@ echo "  requests sent over one keep-alive connection (checked against the report
 # nowhere else, so the report showing it as allowed is this connection's
 # second request and nothing else.
 echo "=== [HTTP keep-alive - blocked then allowed] ==="
-((printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\n\r\n'; sleep 1; \
+( (printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\n\r\n'; sleep 1; \
   printf 'GET / HTTP/1.1\r\nHost: keepalive.wildcard.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \
  | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  requests sent over one keep-alive connection (checked against the report)"
@@ -230,7 +230,7 @@ echo "  request sent (blocked expected in the report)"
 # [HTTP/1.0 request with no Host header, the plaintext counterpart of the
 # case above.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
+( (printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (blocked expected in the report)"
 
 # [A crafted SNI carrying the bytes of a log line: x" -\n[T] buildcage
@@ -251,7 +251,7 @@ echo "  request sent (an invalid-sni row expected in the report)"
 
 # The same name in a plaintext Host. Only the last `:port` is a port.
 echo "=== [HTTP - Host holding a colon] ==="
-((printf 'GET / HTTP/1.1\r\nHost: tlsany.example.com:x.evil.example.net:80\r\nConnection: close\r\n\r\n'; sleep 1) \
+( (printf 'GET / HTTP/1.1\r\nHost: tlsany.example.com:x.evil.example.net:80\r\nConnection: close\r\n\r\n'; sleep 1) \
  | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (an invalid-host row expected in the report)"
 

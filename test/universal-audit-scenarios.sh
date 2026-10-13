@@ -84,7 +84,7 @@ echo "  request sent (blocked expected in the report)"
 # [HTTP/1.0 request with no Host header, the plaintext counterpart of the
 # case above.]
 echo "=== [HTTP - missing-host-header] ==="
-((printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 blocked.example.com 80 > /dev/null 2>&1 || true) &
+( (printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1) | nc -w 5 blocked.example.com 80 > /dev/null 2>&1 || true) &
 echo "  request sent (blocked expected in the report)"
 
 # [What a resolver does when a UDP answer comes back truncated. The query has

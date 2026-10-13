@@ -26,10 +26,12 @@ for i in $(seq 16); do timeout 40 python3 -c 'while 1: open("/etc/hostname").clo
 
 pids=
 for job in "opener open" "maker mkdir" "misser missing"; do
+	# shellcheck disable=SC2086 # split into the program and its argument
 	set -- $job
 	sh -c "echo \$\$ > $cg/cgroup.procs; exec taskset -c 0 $work/$1 $dir/work.py $2 $work 30" &
 	pids="$pids $!"
 done
+# shellcheck disable=SC2086 # a list of pids
 wait $pids
 sleep 12
 kill -TERM "$tracer"

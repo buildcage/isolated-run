@@ -1,0 +1,4 @@
+source-path=SCRIPTDIR
+external-sources=true
+# Some helpers take an optional argument.
+disable=SC2119

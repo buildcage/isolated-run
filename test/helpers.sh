@@ -17,8 +17,8 @@ FAILURES=0
 
 # Assembled at runtime: a literal shaped like an AWS access key ID trips secret
 # scanning on push.
-AKIA="AK""IA"
-ASIA="AS""IA"
+# shellcheck disable=SC2034 # used by the scripts that source this
+AKIA="AK""IA" ASIA="AS""IA"
 
 pass() { echo "  PASS  $1"; }
 
