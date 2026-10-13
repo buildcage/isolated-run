@@ -46,8 +46,11 @@ export const EC2_HOST = `${apiHost("ec2", "ec2(-fips)?")}|^[a-z0-9-]+\\.ec2\\.am
 // issuers, load balancers and EC2 public names. Every other API host names
 // only a service and a region, as S3's control, access point, Object Lambda
 // and Outposts endpoints do with no account or access point in front, public
-// or behind a VPC endpoint.
-export const S3_HOST = `^(?!s3-(accesspoint|control|object-lambda|outposts)(-fips)?\\.|(accesspoint|control)\\.vpce-)(.*\\.)?s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
+// or behind a VPC endpoint. Those are matched whole, so a bucket that shares
+// one's first label, as s3-control.s3.us-east-1.amazonaws.com does, still
+// names a resource.
+const S3_SERVICE_HOST = `s3-(accesspoint|control|object-lambda|outposts)(-fips)?(\\.dualstack)?\\.[a-z]+(-[a-z]+)+-[0-9]+\\.${AMAZONAWS_DOMAINS}$`;
+export const S3_HOST = `^(?!${S3_SERVICE_HOST}|(accesspoint|control)\\.vpce-)(.*\\.)?s3(-[a-z0-9-]+)?(\\.[a-z0-9-]+)*\\.${AMAZONAWS_DOMAINS}$`;
 export const AWS_RESOURCE_HOST =
   S3_HOST +
   `|\\.(dkr\\.ecr(-fips)?|d\\.codeartifact|execute-api|appsync-api|appsync-realtime-api)\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$` +

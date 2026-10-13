@@ -160,6 +160,12 @@ describe("hosts that name the resource", () => {
       "bucket.s3-accelerate.dualstack.amazonaws.com",
       "bucket.s3.cn-north-1.amazonaws.com.cn",
       "bucket.s3.eusc-de-east-1.amazonaws.eu",
+      // A bucket named like a service-only endpoint.
+      "s3-control.s3.us-east-1.amazonaws.com",
+      "s3-control.s3.amazonaws.com",
+      "s3-accesspoint-fips.s3-us-west-2.amazonaws.com",
+      "s3-object-lambda.s3.dualstack.us-east-1.amazonaws.com",
+      "s3-outposts.example.s3-website-us-east-1.amazonaws.com",
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
       "111111111111.dkr.ecr.cn-north-1.amazonaws.com.cn",
       "111111111111.dkr.ecr-fips.us-east-1.amazonaws.com",
