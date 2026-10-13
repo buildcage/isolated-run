@@ -78,22 +78,24 @@ jobs:
         # architecture and each filesystem_mode twice. Kernel-dependent
         # failures have so far always hit both architectures at once.
         #
-        # The audit mode, enforcement and concurrency cases need the same
-        # image, so they ride along here rather than take a runner of their
-        # own.
+        # The audit mode, runner read-only, enforcement and concurrency cases
+        # need the same image, so they ride along here rather than take a
+        # runner of their own. The runner's install directory differs between
+        # architectures, so its read-only check runs on both.
         include:
           - { runner: ubuntu-22.04-arm, filesystem_mode: ephemeral, concurrency: true }
           - runner: ubuntu-24.04
             filesystem_mode: persistent
             audit_mode: true
+            runner_read_only: true
             enforcement: true
             concurrency: true
-          - { runner: ubuntu-24.04-arm, filesystem_mode: persistent }
+          - { runner: ubuntu-24.04-arm, filesystem_mode: persistent, runner_read_only: true }
           - { runner: ubuntu-26.04, filesystem_mode: ephemeral }
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}${{ matrix.enforcement && ', enforcement, config_file' || '' }}${{ matrix.concurrency && ', concurrency' || '' }}, ${{ matrix.runner }})"
+    name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}${{ matrix.runner_read_only && ', runner read-only' || '' }}${{ matrix.enforcement && ', enforcement, config_file' || '' }}${{ matrix.concurrency && ', concurrency' || '' }}, ${{ matrix.runner }})"
 
     env:
       PROXY_ENGINE: universal
@@ -111,8 +113,7 @@ jobs:
           engines: universal
 
       # Verifies audit mode's Job Summary includes the auto-generated
-      # restrict-mode example, and that the sandbox cannot write to the runner's
-      # install directory or the action checkouts.
+      # restrict-mode example.
       - name: Run an isolated command in audit mode
         if: matrix.audit_mode
         uses: ./
@@ -132,9 +133,10 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-audit-summary.md
         run: ./test/assert-sandbox-audit.sh
 
-      # The shell's parent is the runner's bin/Runner.Worker.
+      # The sandbox cannot write to the runner's install directory or the
+      # action checkouts. The shell's parent is the runner's bin/Runner.Worker.
       - name: Locate the runner's install directory
-        if: matrix.audit_mode
+        if: matrix.runner_read_only
         run: |
           root=$(dirname "$(dirname "$(readlink -f "/proc/$PPID/exe")")")
           test -d "$root/externals"
@@ -142,7 +144,7 @@ jobs:
           echo "RUNNER_INSTALL_DIR=$root" >> "$GITHUB_ENV"
 
       - name: Try to write to the runner and the action checkouts
-        if: matrix.audit_mode
+        if: matrix.runner_read_only
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
