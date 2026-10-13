@@ -69908,83 +69908,90 @@ const LIST_INPUTS = [
 	"allowed_tls_rules",
 	"known_blocked_rules",
 	"write_through"
+], ACTION_INPUTS = [
+	"run",
+	"config_file",
+	"proxy_mode",
+	"proxy_engine",
+	...LIST_INPUTS,
+	"writable",
+	"aws_key_check",
+	"allowed_aws_role_accounts",
+	"upload_traffic_artifact",
+	"traffic_artifact_retention_days",
+	"fail_on_blocked",
+	"fail_on_ca_residue",
+	"filesystem_mode",
+	"filesystem_audit",
+	"upload_filesystem_audit_artifact",
+	"filesystem_audit_retention_days",
+	"label"
+], NOT_IN_CONFIG_FILE = [
+	"run",
+	"config_file",
+	"writable"
 ], CONFIG_FILE_INPUTS = {
-	known: [
-		"proxy_mode",
-		"proxy_engine",
-		...LIST_INPUTS,
-		"aws_key_check",
-		"allowed_aws_role_accounts",
-		"upload_traffic_artifact",
-		"traffic_artifact_retention_days",
-		"fail_on_blocked",
-		"fail_on_ca_residue",
-		"filesystem_mode",
-		"filesystem_audit",
-		"upload_filesystem_audit_artifact",
-		"filesystem_audit_retention_days",
-		"label"
-	],
+	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
 	lists: LIST_INPUTS
 };
 function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$6 = getInput) {
-	let runInput = getInput$6("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$9 = getInput) {
+	let runInput = getInput$9("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$5 = getInput) {
+function readProxyInputs(getInput$8 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$9 = getInput) {
+function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$9("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$9("write_through"),
-			writable: getInput$9("writable"),
-			allowWrite: getInput$9("allow_write")
+			writeThrough: getInput$3("write_through"),
+			writable: getInput$3("writable"),
+			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$8 = getInput) {
-	return resolveFilesystemAudit(getInput$8("filesystem_audit"));
+function readFilesystemAuditInput(getInput$2 = getInput) {
+	return resolveFilesystemAudit(getInput$2("filesystem_audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
-	let days = getInput$2("filesystem_audit_retention_days");
+function readFilesystemAuditArtifactInputs(getInput$5 = getInput) {
+	let days = getInput$5("filesystem_audit_retention_days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$2),
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$5),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$3 = getInput) {
-	return getInput$3("label") || void 0;
+function readStepLabel(getInput$6 = getInput) {
+	return getInput$6("label") || void 0;
 }
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+function readFailOnCaResidue(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$1);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+function readFailOnBlocked(getInput$4 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$4);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$4 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$7("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$4);
+	let check = readBooleanInput("aws_key_check", !1, getInput$7);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -72161,31 +72168,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"ACTIONS_RESULTS_URL",
 	"ACTIONS_CACHE_SERVICE_V2",
 	"ACTIONS_CACHE_MODE"
-]), ACTION_INPUT_ENV_KEYS = new Set([
-	"run",
-	"config_file",
-	"proxy_mode",
-	"proxy_engine",
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules",
-	"aws_key_check",
-	"allowed_aws_role_accounts",
-	"upload_traffic_artifact",
-	"traffic_artifact_retention_days",
-	"upload_filesystem_audit_artifact",
-	"fail_on_blocked",
-	"fail_on_ca_residue",
-	"known_blocked_rules",
-	"write_through",
-	"writable",
-	"filesystem_mode",
-	"filesystem_audit",
-	"filesystem_audit_retention_days",
-	"label"
-].map((input) => `INPUT_${input.toUpperCase()}`));
+]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`));
 function isRunnerOnly(key) {
 	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
 }

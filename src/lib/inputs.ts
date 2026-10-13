@@ -41,25 +41,35 @@ const LIST_INPUTS = [
   "write_through",
 ];
 
-/** Every input but `run`, the step itself, and the deprecated `writable`. */
+/** Every input action.yml declares. config_file takes these less
+ *  NOT_IN_CONFIG_FILE, and its error lists them in this order. */
+export const ACTION_INPUTS = [
+  "run",
+  "config_file",
+  "proxy_mode",
+  "proxy_engine",
+  ...LIST_INPUTS,
+  "writable",
+  "aws_key_check",
+  // Not merged from config_file: the workflow's accounts replace the file's.
+  "allowed_aws_role_accounts",
+  "upload_traffic_artifact",
+  "traffic_artifact_retention_days",
+  "fail_on_blocked",
+  "fail_on_ca_residue",
+  "filesystem_mode",
+  "filesystem_audit",
+  "upload_filesystem_audit_artifact",
+  "filesystem_audit_retention_days",
+  "label",
+];
+
+// The step itself, the file itself, and the deprecated spelling of write_through.
+const NOT_IN_CONFIG_FILE = ["run", "config_file", "writable"];
+
 export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
-  known: [
-    "proxy_mode",
-    "proxy_engine",
-    ...LIST_INPUTS,
-    "aws_key_check",
-    // Not merged: the workflow's accounts replace the file's.
-    "allowed_aws_role_accounts",
-    "upload_traffic_artifact",
-    "traffic_artifact_retention_days",
-    "fail_on_blocked",
-    "fail_on_ca_residue",
-    "filesystem_mode",
-    "filesystem_audit",
-    "upload_filesystem_audit_artifact",
-    "filesystem_audit_retention_days",
-    "label",
-  ],
+  // Marked pure so post.cjs, which uses other parts of this module, leaves it out.
+  known: /* @__PURE__ */ ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
   lists: LIST_INPUTS,
 };
 

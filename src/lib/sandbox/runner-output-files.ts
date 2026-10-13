@@ -138,8 +138,8 @@ const realReadBackingDeps: ReadBackingDeps = {
 
 /**
  * Reads a backing file the command wrote. A missing one (the command removed
- * it) is empty. Anything but a regular file, or one larger than a step's
- * outputs can be, is refused with a reason rather than followed, piped through
+ * it) is empty. Anything but a regular file, or one larger than
+ * MAX_OUTPUT_BYTES, is refused with a reason rather than followed, piped through
  * or read into memory, and so is one the command made unreadable, by its mode
  * or the directory's: this never throws, so the reports after it still go out.
  * The command has exited, so the lstat and the read do not race.
@@ -160,7 +160,8 @@ export function readBackingFile(
     return unreadable(e);
   }
   if (!stats.isFile()) return { reason: "it was not a regular file" };
-  if (stats.size > MAX_OUTPUT_BYTES) return { reason: "it was over 64 MiB" };
+  if (stats.size > MAX_OUTPUT_BYTES)
+    return { reason: `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` };
   try {
     return { bytes: deps.readFile(path) };
   } catch (e) {

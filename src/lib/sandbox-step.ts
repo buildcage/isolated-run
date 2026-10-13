@@ -226,7 +226,7 @@ function saveCleanupState(
  * symlink, FIFO or permission to work around. $GITHUB_OUTPUT is trimmed to the
  * entries the runner can read; a dropped entry fails the step, since the
  * runner would stop at it. A backing copy the command made unreadable (a
- * symlink, FIFO, one over 64 MiB, or permissions taken away) leaves the real
+ * symlink, FIFO, one over MAX_OUTPUT_BYTES, or permissions taken away) leaves the real
  * file empty and fails the step too.
  */
 function writeBackMediatedFile(

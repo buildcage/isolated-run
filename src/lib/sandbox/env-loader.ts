@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { ACTION_INPUTS } from "../inputs.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 import type { Warn } from "./scratch-dir.ts";
 
@@ -43,31 +44,7 @@ const RUNNER_ONLY_ENV_KEYS = new Set([
 // and this action is a JavaScript one, so no other action's inputs reach this
 // process to be missed. env-loader.test.ts holds the list to action.yml.
 export const ACTION_INPUT_ENV_KEYS = new Set(
-  [
-    "run",
-    "config_file",
-    "proxy_mode",
-    "proxy_engine",
-    "allowed_https_rules",
-    "allowed_http_rules",
-    "allowed_ip_rules",
-    "allowed_url_rules",
-    "allowed_tls_rules",
-    "aws_key_check",
-    "allowed_aws_role_accounts",
-    "upload_traffic_artifact",
-    "traffic_artifact_retention_days",
-    "upload_filesystem_audit_artifact",
-    "fail_on_blocked",
-    "fail_on_ca_residue",
-    "known_blocked_rules",
-    "write_through",
-    "writable",
-    "filesystem_mode",
-    "filesystem_audit",
-    "filesystem_audit_retention_days",
-    "label",
-  ].map((input) => `INPUT_${input.toUpperCase()}`),
+  ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`),
 );
 
 function isRunnerOnly(key: string): boolean {

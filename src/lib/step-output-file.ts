@@ -4,10 +4,15 @@
  * file. The runner reads the file top to bottom, setting each output as it
  * goes and stopping at the first entry it cannot read, so one the command left
  * unreadable would keep every line appended after it from being read.
+ *
+ * $GITHUB_STEP_SUMMARY is not read entry by entry, by the runner or here: the
+ * backing file is checked as a file (readBackingFile) and written back as the
+ * command left it.
  */
 
-/** Far above what GitHub keeps of a step's outputs, and quick to read in the
- *  seconds a cancelled step has left. */
+/** The most this action reads back of $GITHUB_OUTPUT or $GITHUB_STEP_SUMMARY.
+ *  Far above what GitHub keeps of either, and quick to read in the seconds a
+ *  cancelled step has left. */
 export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 export interface OutputEntries {
