@@ -138,7 +138,7 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 		return name, rest
 	}
 	base, rest := components(rest, n, truncated)
-	if name == "" { // futimens: the descriptor's own path
+	if name == "" { // futimens, fchmod: the descriptor's own path
 		return base, rest
 	}
 	return strings.TrimSuffix(base, "/") + "/" + name, rest
@@ -352,11 +352,22 @@ func decode(raw []byte) (record, error) {
 		r.Err = pathRet
 		r.Failed = true
 	}
-	// futimens names no file, so its path is the descriptor's own.
-	if (kind == filesystemAuditKindK_ATTR || kind == filesystemAuditKindK_ATTR_FAILED) && cstr(data) == "" {
+	// A change through a descriptor alone (futimens, fchmod) names no file,
+	// so its path is the descriptor's own.
+	if byDescriptor[kind] && cstr(data) == "" {
 		applyMarks(&r, marks, false)
 	}
 	return r, nil
+}
+
+// byDescriptor holds the kinds a change made through a descriptor alone is
+// recorded as.
+var byDescriptor = map[filesystemAuditKind]bool{
+	filesystemAuditKindK_ATTR:            true,
+	filesystemAuditKindK_ATTR_FAILED:     true,
+	filesystemAuditKindK_CHMOD_FAILED:    true,
+	filesystemAuditKindK_CHOWN_FAILED:    true,
+	filesystemAuditKindK_TRUNCATE_FAILED: true,
 }
 
 // permBits renders a mode's permission bits in octal, four digits at least.

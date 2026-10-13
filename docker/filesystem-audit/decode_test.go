@@ -390,6 +390,24 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true},
 		},
 		{
+			name: "failed chmod through a descriptor (fchmod)",
+			ev: event{kind: filesystemAuditKindK_CHMOD_FAILED, comm: "python3", pathRet: int32(unix.EROFS), bases: 1, mode: 3, flags: 0o4755,
+				data: append([]byte("\x00"), comps("env", "bin", "usr")...)},
+			want: record{Kind: "chmod", Comm: "python3", Path: "/usr/bin/env", Mode: "4755", Err: int32(unix.EROFS), Failed: true},
+		},
+		{
+			name: "failed truncate through a deleted file's descriptor (ftruncate)",
+			ev: event{kind: filesystemAuditKindK_TRUNCATE_FAILED, comm: "python3", pathRet: int32(unix.EPERM), bases: 1, mode: 2, marks: markUnlinked,
+				data: append([]byte("\x00"), comps("f", "tmp")...)},
+			want: record{Kind: "truncate", Comm: "python3", Path: "/tmp/f", Deleted: true, Err: int32(unix.EPERM), Failed: true},
+		},
+		{
+			name: "failed chown through a memfd's descriptor (fchown)",
+			ev: event{kind: filesystemAuditKindK_CHOWN_FAILED, comm: "python3", pathRet: int32(unix.EPERM), bases: 1, mode: 1, marks: markInternal, flags: 0, gid: 0,
+				data: append([]byte("\x00"), comps("memfd:x")...)},
+			want: record{Kind: "chown", Comm: "python3", Path: "memfd:x", Memfd: true, Owner: "0:0", Err: int32(unix.EPERM), Failed: true},
+		},
+		{
 			name: "attr on a name under a deleted directory keeps it unmarked",
 			ev: event{kind: filesystemAuditKindK_ATTR, comm: "touch", bases: 1, mode: 2, marks: markUnlinked,
 				data: append([]byte("f\x00"), comps("d", "tmp")...)},

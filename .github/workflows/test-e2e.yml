@@ -217,6 +217,19 @@ jobs:
             # Refused by the read-only root before the tracer's path hook, and
             # a name already there, which is no change.
             mkdir /usr/local/buildcage-ro-probe 2>/dev/null || true
+            # Changes through a descriptor alone the kernel refuses before the
+            # tracer's hook: on the read-only root, and a truncate through one
+            # not open for writing. Then an xattr set through one.
+            echo data > "$GITHUB_WORKSPACE/fd-truncate.txt"
+            echo data > "$GITHUB_WORKSPACE/fd-xattr.txt"
+            python3 -c 'import os, sys
+            ro = os.open("/usr/bin/env", os.O_RDONLY)
+            for change in (lambda: os.fchmod(ro, 0o4755), lambda: os.fchown(ro, 1, 2),
+                           lambda: os.ftruncate(os.open(sys.argv[1], os.O_RDONLY), 0)):
+                try: change()
+                except OSError: pass
+            os.setxattr(os.open(sys.argv[2], os.O_RDONLY), "user.buildcage", b"1")' \
+              "$GITHUB_WORKSPACE/fd-truncate.txt" "$GITHUB_WORKSPACE/fd-xattr.txt"
             mkdir "$GITHUB_WORKSPACE/sub" 2>/dev/null || true
             # A script run by a relative name from the directory it sits in.
             mkdir -p "$GITHUB_WORKSPACE/A"

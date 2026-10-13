@@ -60,6 +60,14 @@ holds "A refused chmod is recorded with its mode" \
   'any(.[]; .kind == "chmod" and .failed and .mode == "0777" and (.path | endswith("/root-owned.txt")))'
 holds "A refused chown is recorded with its owner" \
   'any(.[]; .kind == "chown" and .failed and .owner == "1:2" and (.path | endswith("/root-owned.txt")))'
+holds "A chmod through a descriptor the read-only root refused is recorded" \
+  'any(.[]; .kind == "chmod" and .err == 30 and .mode == "4755" and .path == "/usr/bin/env")'
+holds "A chown through a descriptor the read-only root refused is recorded" \
+  'any(.[]; .kind == "chown" and .err == 30 and .owner == "1:2" and .path == "/usr/bin/env")'
+holds "A truncate through a descriptor not open for writing is recorded" \
+  'any(.[]; .kind == "truncate" and .err == 22 and (.path | endswith("/fd-truncate.txt")))'
+holds "An xattr set through a descriptor is recorded" \
+  'any(.[]; .kind == "attr" and (.failed | not) and (.path | endswith("/fd-xattr.txt")))'
 holds "A symlink's longest target is recorded whole" \
   'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)'
 
