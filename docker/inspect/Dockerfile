@@ -103,7 +103,7 @@ FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 
 LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
       org.opencontainers.image.description="Network-isolated, method/path-inspecting proxy for arbitrary GitHub Actions commands" \
-      org.opencontainers.image.licenses="MIT AND Apache-2.0 AND GPL-2.0-or-later AND GPL-1.0-or-later AND curl AND ISC AND MPL-2.0 AND LGPL-2.1-only AND (MPL-2.0 OR LGPL-3.0-or-later) AND BSD-3-Clause" \
+      org.opencontainers.image.licenses="MIT AND Apache-2.0 AND GPL-2.0-or-later AND GPL-1.0-or-later AND curl AND ISC AND MPL-2.0 AND LGPL-2.1-only AND (MPL-2.0 OR LGPL-3.0-or-later) AND BSD-3-Clause AND BSD-2-Clause AND Zlib" \
       org.opencontainers.image.source="https://github.com/buildcage/isolated-run"
 
 # haproxy carries what this engine needs in one binary: it tells a TLS
@@ -171,8 +171,12 @@ COPY docker/inspect/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENS
 COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt \
      licenses/curl.txt licenses/QuickJS-ng.txt /opt/buildcage/licenses/
 COPY licenses/s6-overlay/ /opt/buildcage/licenses/s6-overlay/
+COPY licenses/alpine/ /opt/buildcage/licenses/alpine/
+COPY licenses/alpine-packages.txt /opt/buildcage/licenses/
 COPY --from=gen-seccomp-profile-build /out/licenses/ /opt/buildcage/licenses/
 COPY --from=filesystem-audit-build /out/licenses/ /opt/buildcage/licenses/
+RUN --mount=type=bind,source=docker/check-alpine-licenses.sh,target=/tmp/check-alpine-licenses.sh \
+    sh /tmp/check-alpine-licenses.sh /opt/buildcage/licenses/alpine-packages.txt /opt/buildcage/licenses
 
 # The services both engines run, then this engine's own files on top.
 COPY docker/common/files/s6-rc.d/     /etc/s6-overlay/s6-rc.d/
