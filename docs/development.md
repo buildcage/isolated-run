@@ -289,6 +289,7 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
 | `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
 | `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
 | `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
+| `make test_integration_sandbox_linux_signals`    | The second half's cancel tests alone, which CI runs on 22.04 too           |
 | `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
 | `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
 | `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |

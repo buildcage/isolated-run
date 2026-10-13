@@ -74,7 +74,7 @@ jobs:
     # !cancelled() forces this to evaluate when `changes` is skipped (it runs
     # only on pull_request); a skipped need otherwise skips the job unevaluated.
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     # The longest job here when it was one, so split in two.
@@ -82,7 +82,11 @@ jobs:
       fail-fast: false
       matrix:
         part: [filesystem, runtime]
-    name: "integration: test (sandbox, ${{ matrix.part }})"
+        runner: [ubuntu-latest]
+        # How sudo passes a cancel's signals on changed after 22.04's 1.9.9.
+        include:
+          - { part: signals, runner: ubuntu-22.04 }
+    name: "integration: test (sandbox, ${{ matrix.part }}${{ matrix.runner != 'ubuntu-latest' && format(', {0}', matrix.runner) || '' }})"
 
     env:
       PROXY_ENGINE: universal

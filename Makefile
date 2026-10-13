@@ -129,6 +129,12 @@ test_integration_sandbox_linux_filesystem: ## The action's filesystem integratio
 	@./test/integration-test-file-commands.sh
 	@./test/integration-test-symlinked-checkout.sh
 
+.PHONY: test_integration_sandbox_linux_signals
+test_integration_sandbox_linux_signals: export INPUT_PROXY_ENGINE := universal
+test_integration_sandbox_linux_signals: ## The runtime half's cancel and parent-death tests alone, which CI also runs on Ubuntu 22.04
+	@./test/integration-test-die-with-parent.sh
+	@./test/integration-test-signal-exit.sh
+
 .PHONY: test_integration_sandbox_linux_runtime
 test_integration_sandbox_linux_runtime: export INPUT_PROXY_ENGINE := universal
 test_integration_sandbox_linux_runtime: ## The action's remaining integration tests: defaults, processes, signals, the proxy's lifecycle
