@@ -96,6 +96,11 @@ COPY src/core/ ./src/core/
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
+# The final image's qjs alone, for make test_unit_qjs, so the tests skip the
+# builds above. The final image does not build from it.
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS qjs-test
+RUN apk add --no-cache quickjs-ng
+
 # Final image
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
