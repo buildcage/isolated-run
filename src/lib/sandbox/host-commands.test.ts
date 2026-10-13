@@ -43,22 +43,31 @@ describe("persistingWritablePaths", () => {
   const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
 
   it("is every directory persistent mode binds back read-write", () => {
-    expect(persistingWritablePaths("persistent", ["/opt/out"], env, asWritten)).toStrictEqual([
-      ...PERSISTENT,
-      "/opt/out",
-    ]);
+    expect(
+      persistingWritablePaths(
+        "persistent",
+        ["/opt/out"],
+        resolveDefaultWritableDirs(env, asWritten),
+      ),
+    ).toStrictEqual([...PERSISTENT, "/opt/out"]);
   });
 
   it("is only the write_through paths in ephemeral mode, whose overlays are discarded", () => {
     expect(
-      persistingWritablePaths("ephemeral", [`${WORKSPACE}/dist`], env, asWritten),
+      persistingWritablePaths(
+        "ephemeral",
+        [`${WORKSPACE}/dist`],
+        resolveDefaultWritableDirs(env, asWritten),
+      ),
     ).toStrictEqual([`${WORKSPACE}/dist`]);
   });
 
   it("spells the runner's directories as they really resolve, and write_through as written", () => {
     const real = (p: string) => realPathOf(p, withLinks({ [HOME]: "/data/runner" }));
 
-    expect(persistingWritablePaths("persistent", ["/opt/out"], env, real)).toStrictEqual([
+    expect(
+      persistingWritablePaths("persistent", ["/opt/out"], resolveDefaultWritableDirs(env, real)),
+    ).toStrictEqual([
       "/data/runner/work/repo/repo",
       "/data/runner",
       "/tmp",

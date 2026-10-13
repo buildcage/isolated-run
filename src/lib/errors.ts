@@ -1,4 +1,4 @@
-import { ActionError } from "#core/lib/errors.ts";
+import { ActionError, errorMessage } from "#core/lib/errors.ts";
 
 /**
  * Intentional error in the run action's own logic. Image provenance failures throw
@@ -92,6 +92,13 @@ export type SandboxErrorCode =
   | "AWS_ACCESS_KEY_MISSING";
 
 export class SandboxError extends ActionError<SandboxErrorCode> {}
+
+/** `e` itself when it is already a SandboxError, which speaks to the user in
+ *  its own words; otherwise its message after `prefix`, under `code`. */
+export function asSandboxError(e: unknown, prefix: string, code: SandboxErrorCode): SandboxError {
+  if (e instanceof SandboxError) return e;
+  return new SandboxError(`${prefix}: ${errorMessage(e)}`, code);
+}
 
 export function cancelledBeforeRun(): SandboxError {
   return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");

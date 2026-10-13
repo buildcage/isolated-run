@@ -813,6 +813,7 @@ describe("assembleBundle", () => {
       caTrust: undefined,
       netnsName: "buildcage-sandbox-deadbeef",
       rootfsBindDir: `${SCRATCH}/rootfs`,
+      persisting: ["/home/runner/work/repo/repo", "/home/runner", "/tmp"],
     });
     expect(mocks.writeOciConfig).not.toHaveBeenCalled();
     expect(mocks.runIsolated).not.toHaveBeenCalled();

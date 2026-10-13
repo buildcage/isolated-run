@@ -868,9 +868,9 @@ function resolveWriteThroughPaths(input, env) {
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
-function persistingWritablePaths(filesystemMode, writeThroughPaths, env, realpath = realPathOf) {
+function persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		...resolveDefaultWritableDirs(env, realpath),
+		...defaultDirs,
 		writablePaths: writeThroughPaths
 	});
 }
@@ -968,7 +968,7 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 	try {
 		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
 	} catch {}
-	return persistingWritablePaths("persistent", writeThroughPaths, env, realpath);
+	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
 //#endregion
 //#region src/post.ts
