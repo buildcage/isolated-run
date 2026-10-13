@@ -358,7 +358,10 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   │                          # image ref), distinct from the top-level compose.yaml below
 │   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
 │   └── compose.sandbox-dev.yaml          # Mac dev-loop overlay (see dev/)
-├── scripts/run-isolated.sh    # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
+├── scripts/
+│   ├── run-isolated.sh        # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
+│   └── buildcage-init.sh      # The sandbox's PID 1: applies the step environment from stdin,
+│                              # runs the step's script, forwards signals and reaps orphans
 ├── test/                      # assert-sandbox*.sh + integration-test-*.sh driving dist/main.cjs,
 │                              # and *-scenarios.sh run inside the sandbox as a step's own `run:`.
 │                              # helpers.sh carries what both halves share

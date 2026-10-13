@@ -21,8 +21,16 @@ import {
   buildEnvBlob,
   writeEnvLoader,
   ACTION_INPUT_ENV_KEYS,
+  envLoaderArgs,
 } from "./env-loader.ts";
 import { withScratchDir } from "./scratch-dir.ts";
+
+// The checkout's copy. ENV_LOADER_SOURCE is resolved for dist/main.cjs, so from
+// this test's directory it names no file.
+const LOADER_SOURCE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../scripts/buildcage-init.sh",
+);
 
 /** Not the first candidate: the mount lands where the runner keeps its store. */
 const SYSTEM_STORE = "/etc/pki/tls/certs/ca-bundle.crt";
@@ -172,9 +180,9 @@ describe("buildEnvBlob", () => {
 });
 
 describe("writeEnvLoader", () => {
-  it("writes an executable bash script that never evals and matches the blob's terminator", async () => {
+  it("writes an executable bash script that never evals", async () => {
     await withScratchDir((dir) => {
-      const path = writeEnvLoader(dir);
+      const path = writeEnvLoader(dir, LOADER_SOURCE);
       const content = readFileSync(path, "utf8");
       expect(content.startsWith("#!/bin/bash\n")).toBe(true);
       const code = content
@@ -182,7 +190,6 @@ describe("writeEnvLoader", () => {
         .filter((line) => !line.trimStart().startsWith("#"))
         .join("\n");
       expect(code).not.toMatch(/\beval\b/);
-      expect(content).toContain(records(buildEnvBlob({})).at(-1));
       expect(statSync(path).mode & 0o777).toBe(0o700);
     });
   });
@@ -209,12 +216,12 @@ async function runLoader(
 ): Promise<{ code: number | null; stdout: string; stderr: string; started: string }> {
   const dir = mkdtempSync(join(tmpdir(), "env-loader-test-"));
   try {
-    const loaderPath = writeEnvLoader(dir);
+    const loaderPath = writeEnvLoader(dir, LOADER_SOURCE);
     const scriptPath = join(dir, "run-script.sh");
     writeFileSync(scriptPath, `#!/bin/bash\n${script}\n`, { mode: 0o700 });
     const startedPath = join(dir, "started");
     const startedFd = openSync(startedPath, "w");
-    const loader = spawn("bash", [loaderPath, scriptPath], {
+    const loader = spawn("bash", envLoaderArgs(loaderPath, scriptPath), {
       stdio: ["pipe", "pipe", "pipe", startedFd],
     });
     closeSync(startedFd);

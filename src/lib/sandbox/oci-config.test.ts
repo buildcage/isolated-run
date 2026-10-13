@@ -158,6 +158,7 @@ describe("buildOciConfig", () => {
         "--pdeathsig=KILL",
         "--",
         baseArgs.runtime.envLoaderPath,
+        "__BUILDCAGE_ENV_END__",
         baseArgs.runtime.scriptPath,
       ]);
     });
