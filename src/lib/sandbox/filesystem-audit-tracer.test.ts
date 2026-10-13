@@ -223,8 +223,8 @@ describe("startFilesystemAudit", () => {
       resolveExit = r;
     });
     const kill = vi.fn(); // SIGTERM to the sudo wrapper does not end a wedged tracer
-    const exec = vi.fn(() => {
-      resolveExit();
+    const exec = vi.fn((_command: string, args: string[]) => {
+      if (args[2] === "-KILL") resolveExit();
       return "";
     });
     const remove = vi.fn();
@@ -240,7 +240,10 @@ describe("startFilesystemAudit", () => {
     await handle.stop();
 
     expect(kill).toHaveBeenCalledWith("SIGTERM");
-    expect(exec).toHaveBeenCalledWith("sudo", ["-n", "kill", "-KILL", "999"]);
+    expect(exec.mock.calls).toStrictEqual([
+      ["sudo", ["-n", "kill", "-TERM", "999"]],
+      ["sudo", ["-n", "kill", "-KILL", "999"]],
+    ]);
     expect(remove).toHaveBeenCalledWith(START_OPTIONS.pidFilePath);
   });
 
@@ -281,8 +284,8 @@ describe("startFilesystemAudit", () => {
     const exited = new Promise<void>((r) => {
       resolveExit = r;
     });
-    const exec = vi.fn(() => {
-      resolveExit();
+    const exec = vi.fn((_command: string, args: string[]) => {
+      if (args[2] === "-KILL") resolveExit();
       return "";
     });
     const remove = vi.fn(() => {
@@ -320,8 +323,8 @@ describe("startFilesystemAudit", () => {
           if (++waits === 50) cancel.abort(); // 5 seconds in
         },
         remove: vi.fn(),
-        exec: () => {
-          resolveExit();
+        exec: (_command: string, args: string[]) => {
+          if (args[2] === "-KILL") resolveExit();
           return "";
         },
         readFile: () => "999\n",
@@ -348,8 +351,8 @@ describe("startFilesystemAudit", () => {
           exists: () => true,
           sleep,
           remove: vi.fn(),
-          exec: () => {
-            resolveExit();
+          exec: (_command: string, args: string[]) => {
+            if (args[2] === "-KILL") resolveExit();
             return "";
           },
           readFile: () => "999\n",
@@ -449,13 +452,13 @@ describe("haltTracer", () => {
     };
   }
 
-  /** The seams, with a sudo kill that ends `s`. */
+  /** The seams, with a sudo kill -KILL that ends `s`. */
   function deps(s: ReturnType<typeof stubborn>, tail: () => string, pidfile = "777\n") {
     return {
       sleep: vi.fn(async (_ms: number, _detached?: boolean) => {}),
       remove: vi.fn(),
       exec: vi.fn((_command: string, args: string[]) => {
-        if (args[1] === "kill") s.exit();
+        if (args[2] === "-KILL") s.exit();
         return "";
       }),
       readFile: vi.fn(() => pidfile),
@@ -476,7 +479,20 @@ describe("haltTracer", () => {
     s.exit();
     await vi.waitFor(() => expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath));
     parked();
-    expect(d.exec).not.toHaveBeenCalled();
+    expect(d.exec.mock.calls).toStrictEqual([["sudo", ["-n", "kill", "-TERM", "777"]]]);
+  });
+
+  it("sends SIGTERM to the tracer itself, which an older sudo would not pass on", async () => {
+    const s = stubborn();
+    const d = deps(s, () => "");
+    d.exec.mockImplementation((_command: string, args: string[]) => {
+      if (args[2] === "-TERM") s.exit();
+      return "";
+    });
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    expect(d.exec.mock.calls).toStrictEqual([["sudo", ["-n", "kill", "-TERM", "777"]]]);
+    expect(d.sleep).not.toHaveBeenCalled();
+    expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath);
   });
 
   it("kills a tracer whose record is whole but that does not exit after the detach grace", async () => {

@@ -72280,30 +72280,30 @@ function extractTracer(containerName, destDir, { exec = defaultExec$1, chmod = n
 		hostPath: tracerPath
 	})), chmod(tracerPath, 493), tracerPath;
 }
-function killTracer(pidFilePath, { readFile, exec }) {
+function signalTracer(pidFilePath, signal, { readFile, exec }) {
 	try {
 		let pid = readPid(readFile, pidFilePath);
 		pid > 0 && exec("sudo", [
 			"-n",
 			"kill",
-			"-KILL",
+			`-${signal}`,
 			String(pid)
 		]);
 	} catch {}
 }
 async function haltTracer({ child, exited }, untilRecorded, { outPath, pidFilePath, cancel }, deps) {
 	let { sleep, remove, readTail } = deps;
-	child.kill("SIGTERM");
+	child.kill("SIGTERM"), signalTracer(pidFilePath, "TERM", deps);
 	let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
 	for (let waited = 0; !exited(); waited += 100) {
 		if (untilRecorded && recordComplete(readTail, outPath)) {
-			Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited() || killTracer(pidFilePath, deps), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+			Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited() || signalTracer(pidFilePath, "KILL", deps), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
 			return;
 		}
 		if (waited >= grace()) break;
 		await sleep(100);
 	}
-	exited() || killTracer(pidFilePath, deps), await child.exited, remove(pidFilePath);
+	exited() || signalTracer(pidFilePath, "KILL", deps), await child.exited, remove(pidFilePath);
 }
 async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFilePath, readyPath, watchPid, allowedSyscalls, cancel }, deps = {}) {
 	let { spawn = defaultSpawn$1, exists = node_fs.existsSync, sleep = defaultSleep, remove = defaultRemove, exec = defaultExec$1, readFile = defaultReadFile$1, readTail = defaultReadTail } = deps, child = spawn("sudo", [
