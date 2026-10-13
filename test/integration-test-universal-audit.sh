@@ -18,12 +18,11 @@ fixture_up universal
 TMPDIR=$(mktemp -d)
 
 echo "--- running the sandboxed step (proxy_engine: universal, audit mode) ---"
-run_step universal "$TMPDIR/step" \
+run_step --tee universal "$TMPDIR/step" \
   INPUT_PROXY_MODE="audit" \
   INPUT_FAIL_ON_BLOCKED="false" \
   INPUT_RUN="bash $REPO_ROOT/test/universal-audit-scenarios.sh"
 RUN_EXIT=$?
-cat "$TMPDIR/step.log"
 
 echo ""
 echo "--- scenario exit code: $RUN_EXIT ---"

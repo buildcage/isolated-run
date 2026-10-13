@@ -294,7 +294,7 @@ export async function writeReportSummary(
 
   // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
   // reassigned, so a later step has no way to read this step's copy back.
-  // This repo's own integration assertions read it instead; see
+  // This repo's own e2e assertions read it instead; see
   // test/assert-sandbox.sh. A test hook, so a normal build drops it; see
   // rolldown.config.js.
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS === "1") {

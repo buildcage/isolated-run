@@ -29,7 +29,7 @@ HASH_BEFORE=$(sha256sum "$SYSTEM_CA" | awk '{print $1}')
 TMPDIR=$(mktemp -d)
 
 echo "--- running the sandboxed step (proxy_engine: inspect, restrict mode) ---"
-run_step inspect "$TMPDIR/step" \
+run_step --tee inspect "$TMPDIR/step" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443" \
   INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80 deadend.example.com:80" \
@@ -57,7 +57,6 @@ GET ~^https://blocked\.example\.com/frag(x|'z)$" \
   INPUT_FAIL_ON_BLOCKED="false" \
   INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh"
 RUN_EXIT=$?
-cat "$TMPDIR/step.log"
 
 echo ""
 echo "--- scenario exit code: $RUN_EXIT ---"

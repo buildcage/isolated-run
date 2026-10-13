@@ -56,6 +56,16 @@ assert_summary_contains() {
   fi
 }
 
+# assert_summary_contains for an extended regular expression.
+assert_summary_matches() {
+  local pattern="$1" label="$2"
+  if grep -qE -- "$pattern" <<< "$SUMMARY"; then
+    pass "$label"
+  else
+    fail "$label -- no match in report"
+  fi
+}
+
 # Whether grep finds a match in a file: assert_file_has|assert_file_lacks
 # <file> <label> <grep args...>
 assert_file_has() {
@@ -71,16 +81,6 @@ assert_file_lacks() {
     fail "$label -- found: $(grep -m1 "$@" "$file")"
   else
     pass "$label"
-  fi
-}
-
-# The same for an extended regular expression.
-assert_summary_matches() {
-  local pattern="$1" label="$2"
-  if grep -qE -- "$pattern" <<< "$SUMMARY"; then
-    pass "$label"
-  else
-    fail "$label -- no match in report"
   fi
 }
 
