@@ -54,7 +54,10 @@ import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { checkFilesystemAuditHost } from "./sandbox/filesystem-audit-host.ts";
-import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
+import {
+  filesystemAuditPaths,
+  type FilesystemAuditPaths,
+} from "./sandbox/filesystem-audit-paths.ts";
 import {
   resolveFilesystemPlan,
   resolveWriteThroughInput,
@@ -72,6 +75,7 @@ import {
 } from "./sandbox/runner-output-files.ts";
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
+import { realPathOf } from "./sandbox/symlinks.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { validatedOutputText } from "./step-output-file.ts";
 import { reportStepTraffic, writeLateSummary } from "./step-report.ts";
@@ -91,74 +95,6 @@ export const WRITE_THROUGH_ALL_WARNING =
   "The commands this action runs on the host after the command are no longer kept out of " +
   'writable paths either. See "The / opt-out" in docs/reference.md.';
 
-/**
- * The steps this function sequences. Declared rather than imported straight
- * into the body so a test can watch the order and the arguments without
- * standing in for twenty modules at once; each one is tested in its own file.
- *
- * Pure steps are left out on purpose and run for real (resolveWriteThroughInput,
- * deriveProjectName, buildComposeEnv, resolveComposeFile,
- * formatFilesystemPlanLog, resolveBuildcageImageRef): what a test wants to see
- * of those is the value that reached the next step, not the call.
- */
-export interface SandboxStepDeps {
-  applyConfigFile: typeof applyConfigFile;
-  readRunCommand: typeof readRunCommand;
-  readProxyInputs: typeof readProxyInputs;
-  readFilesystemInputs: typeof readFilesystemInputs;
-  readFilesystemAuditInput: typeof readFilesystemAuditInput;
-  readFilesystemAuditArtifactInputs: typeof readFilesystemAuditArtifactInputs;
-  readRuleInputs: typeof readRuleInputs;
-  readFailOnCaResidue: typeof readFailOnCaResidue;
-  readFailOnBlocked: typeof readFailOnBlocked;
-  readAwsKeyInputs: typeof readAwsKeyInputs;
-  readTrafficArtifactInputs: typeof readTrafficArtifactInputs;
-  saveWriteThroughForPost: typeof saveWriteThroughForPost;
-  validateFilesystemInputs: typeof validateFilesystemInputs;
-  checkScratchBaseParent: typeof checkScratchBaseParent;
-  checkPasswordlessSudo: typeof checkPasswordlessSudo;
-  checkOverlayfsSupport: typeof checkOverlayfsSupport;
-  checkFilesystemAuditHost: typeof checkFilesystemAuditHost;
-  createAnnotation: typeof createAnnotation;
-  resolveFilesystemPlan: typeof resolveFilesystemPlan;
-  pinHostCommands: typeof pinHostCommands;
-  readLocalImageOverride: typeof readLocalImageOverride;
-  verifyImageDigestOrThrow: typeof verifyImageDigestOrThrow;
-  checkUrlAndTlsRuleSupport: typeof checkUrlAndTlsRuleSupport;
-  checkKnownBlockedUrlRuleSupport: typeof checkKnownBlockedUrlRuleSupport;
-  logRules: typeof logRules;
-  withLogGroup: typeof withLogGroup;
-  generateContainerName: typeof generateContainerName;
-  getContainerNetns: typeof getContainerNetns;
-  startSandboxProxy: typeof startSandboxProxy;
-  stopSandboxProxy: typeof stopSandboxProxy;
-  runSandboxedCommand: typeof runSandboxedCommand;
-  reportStepTraffic: typeof reportStepTraffic;
-  writeLateSummary: typeof writeLateSummary;
-  prepareStepFilesystemAudit: typeof prepareStepFilesystemAudit;
-  mediateRunnerOutputFiles: typeof mediateRunnerOutputFiles;
-  readBackingFile: typeof readBackingFile;
-  removeBackingDir: typeof removeBackingDir;
-  /** Writes a mediated runner file's real path from its validated backing
-   *  content; the command never touched the real path. */
-  writeRunnerFile: (path: string, content: Buffer) => void;
-  setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
-  setFilesystemAuditOutput: typeof setFilesystemAuditOutput;
-  /** Calls listener on each signal a cancelled run sends this process, and
-   *  returns what stops listening. */
-  onCancel: (listener: () => void) => () => void;
-  saveState: (name: string, value: string) => void;
-  info: (message: string) => void;
-  log: (message: string) => void;
-  /** A renamed input's migration message, printed whether or not this is a
-   *  real action run, unlike the suppressible `annotation` below. */
-  notice: (message: string) => void;
-  /** Where the sandbox's own warnings go. Always on for the same reason: they
-   *  are about the step's environment and its cleanup, which a run without a
-   *  report still needs to hear about. */
-  warn: (message: string) => void;
-}
-
 // Untested by design: process.on, handed the listener the tested caller chose.
 /* v8 ignore start */
 function onCancel(listener: () => void): () => void {
@@ -172,7 +108,17 @@ function onCancel(listener: () => void): () => void {
 }
 /* v8 ignore stop */
 
-const realDeps: SandboxStepDeps = {
+/**
+ * The steps this function sequences. Injected rather than imported straight
+ * into the body so a test can watch the order and the arguments without
+ * standing in for twenty modules at once; each one is tested in its own file.
+ *
+ * Pure steps are left out on purpose and run for real (resolveWriteThroughInput,
+ * pinningPaths, deriveProjectName, buildComposeEnv, resolveComposeFile,
+ * formatFilesystemPlanLog, resolveBuildcageImageRef): what a test wants to see
+ * of those is the value that reached the next step, not the call.
+ */
+const realDeps = {
   applyConfigFile,
   readRunCommand,
   readProxyInputs,
@@ -193,6 +139,9 @@ const realDeps: SandboxStepDeps = {
   createAnnotation,
   resolveFilesystemPlan,
   pinHostCommands,
+  /** Resolves a path on the host for pinningPaths. */
+  realPathOf: realPathOf as (path: string) => string,
+  getuid: process.getuid,
   readLocalImageOverride,
   verifyImageDigestOrThrow,
   checkUrlAndTlsRuleSupport,
@@ -210,18 +159,29 @@ const realDeps: SandboxStepDeps = {
   mediateRunnerOutputFiles,
   readBackingFile,
   removeBackingDir,
+  /** Writes a mediated runner file's real path from its validated backing
+   *  content; the command never touched the real path. */
   // A one-line fs wrapper; its behaviour is writeFileSync's.
   /* v8 ignore next */
-  writeRunnerFile: (path, content) => writeFileSync(path, content),
+  writeRunnerFile: (path: string, content: Buffer): void => writeFileSync(path, content),
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
+  /** Calls listener on each signal a cancelled run sends this process, and
+   *  returns what stops listening. */
   onCancel,
   saveState: core.saveState,
   info: core.info,
-  log: console.log,
+  log: console.log as (message: string) => void,
+  /** A renamed input's migration message, printed whether or not this is a
+   *  real action run, unlike the suppressible `annotation`. */
   notice: annotate.notice,
+  /** Where the sandbox's own warnings go. Always on for the same reason: they
+   *  are about the step's environment and its cleanup, which a run without a
+   *  report still needs to hear about. */
   warn: annotate.warning,
 };
+
+export type SandboxStepDeps = typeof realDeps;
 
 async function resolveVerifiedImage(
   { actionRef, actionRepo, proxyEngine }: VerifyImageIdentity & { proxyEngine: ProxyEngine },
@@ -260,21 +220,22 @@ function saveCleanupState(
 
 /**
  * Writes a mediated runner file's real path from what the command left in its
- * backing copy. The command never reached the real path (masked), so the host
- * writes it directly, with no symlink, FIFO or permission to work around.
- * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped entry
- * fails the step, since the runner would stop at it. A backing copy the command
- * made unreadable (a symlink, FIFO, one over 64 MiB, or permissions taken
- * away) leaves the real file empty and fails the step too.
+ * backing copy, and returns whether that failed the step. The command never
+ * reached the real path (masked), so the host writes it directly, with no
+ * symlink, FIFO or permission to work around. $GITHUB_OUTPUT is trimmed to the
+ * entries the runner can read; a dropped entry fails the step, since the
+ * runner would stop at it. A backing copy the command made unreadable (a
+ * symlink, FIFO, one over 64 MiB, or permissions taken away) leaves the real
+ * file empty and fails the step too.
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
   annotation: Annotation,
   deps: Pick<SandboxStepDeps, "readBackingFile" | "writeRunnerFile">,
-): void {
+): boolean {
   const fail = (reason: string) => {
     annotation.error(`$${file.variable} ${reason}; failing the step`);
-    process.exitCode = 1;
+    return true;
   };
   const read = deps.readBackingFile(file.backingPath);
   let content: Buffer = Buffer.alloc(0);
@@ -296,10 +257,273 @@ function writeBackMediatedFile(
   try {
     deps.writeRunnerFile(file.realPath, content);
   } catch (e) {
-    fail(`could not be written: ${errorMessage(e)}`);
-    return;
+    return fail(`could not be written: ${errorMessage(e)}`);
   }
-  if (failure) fail(failure);
+  return failure ? fail(failure) : false;
+}
+
+type StepInputs = ReturnType<typeof readStepInputs>;
+
+/**
+ * Reads every input and runs the checks that need nothing but the inputs, so
+ * a typo or a rule the engine cannot enforce fails before any setup.
+ */
+export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
+  const { log, notice } = deps;
+  // A local-path `uses: ./` names no ref. Verification takes it empty so it
+  // hard-fails instead of pinning the floating major-version image, which can
+  // drift from the vendored code; the report keeps a valid `uses:` line via the
+  // fallback.
+  const actionRef = env.GITHUB_ACTION_REF ?? "";
+  const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
+  const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
+
+  // Before any input is read: it rewrites what they all read.
+  const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+  for (const line of configFile?.summary ?? []) log(line);
+
+  const runInput = deps.readRunCommand();
+
+  const { proxyEngine, proxyMode } = deps.readProxyInputs();
+  log(`Proxy engine: ${proxyEngine}`);
+
+  // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
+  // realDeps).
+  const { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice);
+  const filesystemAudit = deps.readFilesystemAuditInput();
+  const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
+  // Before the first write under the scratch base, the one just below.
+  deps.checkScratchBaseParent();
+  // Before the command runs, for the post step's pinning; see post-write-through.ts.
+  if (configFile) deps.saveWriteThroughForPost(env, writeThroughInput);
+  // Needed only later, but read here so a typo fails before any setup.
+  const failOnCaResidue = deps.readFailOnCaResidue();
+  const failOnBlocked = deps.readFailOnBlocked();
+  const trafficArtifact = deps.readTrafficArtifactInputs();
+  const rules = deps.readRuleInputs();
+
+  // Same gate as writeReportSummary(): suppresses annotations when this
+  // script isn't running as the real action.
+  const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
+  if (filesystemAudit === "record") {
+    annotation.warning("filesystem_audit is experimental and may change.");
+  }
+
+  // Pure checks, so a rule the engine cannot enforce fails (or, in audit,
+  // warns) before any privileged setup.
+  const { urlRules, tlsRules, knownBlockedRules } = rules;
+  deps.checkUrlAndTlsRuleSupport(
+    { proxyEngine, proxyMode, urlRules, tlsRules },
+    annotation.warning,
+  );
+  deps.checkKnownBlockedUrlRuleSupport(
+    {
+      proxyEngine,
+      proxyMode,
+      knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
+    },
+    annotation.warning,
+  );
+  // Unlike the checks above, fails in audit too.
+  const aws = deps.readAwsKeyInputs({ proxyEngine }, env);
+
+  return {
+    actionRef,
+    reportActionRef,
+    actionRepo,
+    runInput,
+    proxyEngine,
+    proxyMode,
+    filesystemMode,
+    writeThroughInput,
+    filesystemAudit,
+    filesystemAuditArtifact,
+    failOnCaResidue,
+    failOnBlocked,
+    trafficArtifact,
+    rules,
+    annotation,
+    aws,
+  };
+}
+
+/**
+ * Checks the runner can isolate this step at all, and resolves where the
+ * command may write, before the image is verified or the proxy started.
+ */
+export function preflight(
+  { filesystemMode, writeThroughInput, filesystemAudit, annotation }: StepInputs,
+  env: NodeJS.ProcessEnv,
+  deps: SandboxStepDeps,
+): { overlayRoots: string[]; writeThroughPaths: string[] } {
+  // Before any privileged setup; see assertNonRootUid.
+  assertNonRootUid(deps.getuid!());
+
+  // Cheap, pure input check, so a plain mistake (an unset variable, or
+  // write_through: / under filesystem_mode: ephemeral) is rejected immediately
+  // rather than only after the privileged preflight checks below have already
+  // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
+  // probe). resolveFilesystemPlan re-checks the real paths on the host.
+  const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+  deps.validateFilesystemInputs(filesystemMode, writeThrough);
+  if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
+
+  // Before the preflights, which already run sudo.
+  deps.pinHostCommands(
+    pinningPaths(() => writeThroughInput, env, deps.realPathOf),
+    env,
+  );
+
+  // Fail fast, before image verification or starting the proxy container, if
+  // the runner can't support the isolation setup at all.
+  deps.checkPasswordlessSudo();
+  if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
+  if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
+
+  // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
+  // write_through entry, or a target that can't be created, fails before the
+  // proxy container ever starts, same reasoning as checkPasswordlessSudo
+  // above.
+  const { overlayRoots, writeThroughPaths } = deps.resolveFilesystemPlan(
+    filesystemMode,
+    writeThroughInput,
+    env,
+    { warn: deps.warn },
+  );
+  if (filesystemMode === "ephemeral") {
+    for (const line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) {
+      deps.info(line);
+    }
+  }
+  return { overlayRoots, writeThroughPaths };
+}
+
+/** The proxy image to run, verified unless a local test build overrides it. */
+async function resolveProxyImage(
+  { actionRef, actionRepo, proxyEngine }: StepInputs,
+  env: NodeJS.ProcessEnv,
+  deps: SandboxStepDeps,
+): Promise<{ imageRef: string; pullPolicy: "always" | "never"; composeFile: string }> {
+  const localOverride = await deps.readLocalImageOverride(env);
+  const { imageRef, pullPolicy } =
+    localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
+  deps.log(`buildcage: proxy image: ${imageRef}`);
+  return { imageRef, pullPolicy, composeFile: resolveComposeFile(localOverride) };
+}
+
+function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
+  deps.withLogGroup("buildcage: Configured ACL Rules", () => {
+    deps.logRules("HTTPS", rules.httpsRules);
+    deps.logRules("HTTP", rules.httpRules);
+    deps.logRules("IP", rules.ipRules);
+    deps.logRules("URL", rules.urlRules);
+    deps.logRules("TLS", rules.tlsRules);
+    deps.logRules(
+      "Known-blocked (informational only, not sent to proxy ACL)",
+      rules.knownBlockedRules,
+    );
+    if (aws.key) deps.log("AWS access key check: on");
+    if (aws.roleAccounts.length > 0) deps.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
+  });
+}
+
+/** What the step has set up by the time its command has run or failed to. */
+interface StepRun {
+  inputs: StepInputs;
+  env: NodeJS.ProcessEnv;
+  containerName: string;
+  stopProxy: () => Promise<void>;
+  audit: FilesystemAuditPaths | undefined;
+  auditAttached: boolean;
+  mediation: RunnerOutputMediation | undefined;
+  runnerFilesBackingDir: string;
+  cancelled: boolean;
+}
+
+/**
+ * Everything after the command, whether it ran or not: the runner files
+ * written back, the artifact outputs cleared, the reports, and the proxy
+ * stopped. None of it throws, so the proxy is always stopped.
+ */
+export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<void> {
+  const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
+  const { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
+  // Write $GITHUB_OUTPUT and then $GITHUB_STEP_SUMMARY back from their backing
+  // copies before this action appends its own: the artifact-name outputs via
+  // @actions/core (last-write-wins over anything the command set), and the
+  // reports onto the summary. The command never reached the real files, so
+  // there is no symlink, FIFO or permission to put right here.
+  if (mediation) {
+    for (const file of mediation.files) {
+      if (writeBackMediatedFile(file, annotation, deps)) process.exitCode = 1;
+    }
+    try {
+      deps.removeBackingDir(runnerFilesBackingDir);
+    } catch (e) {
+      deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
+    }
+  }
+  for (const set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) {
+    try {
+      set("");
+    } catch {
+      // The report setting it again says so.
+    }
+  }
+  const prepareAudit = () =>
+    deps.prepareStepFilesystemAudit({
+      audit,
+      attached: run.auditAttached,
+      upload: inputs.filesystemAuditArtifact.upload,
+      retentionDays: inputs.filesystemAuditArtifact.retentionDays,
+      containerName,
+      annotation,
+      env,
+      actionRepo,
+      actionRef: reportActionRef,
+      failClosed: proxyMode !== "audit" && failOnBlocked,
+    });
+  // The runner kills a cancelled step seconds after cancelling it, and a
+  // large recording takes a while to read and upload, so the traffic report
+  // goes first and the audit takes what the summary has left.
+  const filesystemReport = cancelled ? undefined : await prepareAudit();
+  const processActivity = audit !== undefined;
+  const { startedAt, reported } = await deps.reportStepTraffic({
+    containerName,
+    proxyEngine: inputs.proxyEngine,
+    parameters: {
+      mode: proxyMode,
+      allowedHttpsRules: rules.httpsRules,
+      allowedHttpRules: rules.httpRules,
+      allowedIpRules: rules.ipRules,
+      allowedTlsRules: rules.tlsRules,
+      allowedUrlRules: rules.urlRules,
+      knownBlockedRules: rules.knownBlockedRules,
+    },
+    annotation,
+    actionRepo,
+    actionRef: reportActionRef,
+    runCommand: inputs.runInput,
+    extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+    failOnBlocked,
+    trafficArtifact: inputs.trafficArtifact,
+    env,
+    moreBlocks: filesystemReport?.blocks,
+    processActivity,
+    // The audit written below closes the summary instead.
+    closeSummary: !(cancelled && processActivity),
+  });
+  if (cancelled && processActivity) {
+    const late = await prepareAudit();
+    await deps.writeLateSummary(late.blocks(startedAt), {
+      reported,
+      actionRepo,
+      isAudit: proxyMode === "audit",
+      env,
+      annotation,
+    });
+  }
+  await run.stopProxy();
 }
 
 /**
@@ -313,178 +537,20 @@ export async function runSandboxStep(
   env: NodeJS.ProcessEnv,
   overrides: Partial<SandboxStepDeps> = {},
 ): Promise<number> {
-  const {
-    applyConfigFile,
-    readRunCommand,
-    readProxyInputs,
-    readFilesystemInputs,
-    readFilesystemAuditInput,
-    readFilesystemAuditArtifactInputs,
-    readRuleInputs,
-    readFailOnCaResidue,
-    readFailOnBlocked,
-    readAwsKeyInputs,
-    readTrafficArtifactInputs,
-    saveWriteThroughForPost,
-    validateFilesystemInputs,
-    checkScratchBaseParent,
-    checkPasswordlessSudo,
-    checkOverlayfsSupport,
-    checkFilesystemAuditHost,
-    createAnnotation,
-    resolveFilesystemPlan,
-    pinHostCommands,
-    readLocalImageOverride,
-    verifyImageDigestOrThrow,
-    checkUrlAndTlsRuleSupport,
-    checkKnownBlockedUrlRuleSupport,
-    logRules,
-    withLogGroup,
-    generateContainerName,
-    getContainerNetns,
-    startSandboxProxy,
-    stopSandboxProxy,
-    runSandboxedCommand,
-    reportStepTraffic,
-    writeLateSummary,
-    prepareStepFilesystemAudit,
-    mediateRunnerOutputFiles,
-    readBackingFile,
-    removeBackingDir,
-    writeRunnerFile,
-    setTrafficArtifactOutput,
-    setFilesystemAuditOutput,
-    onCancel,
-    saveState,
-    info,
-    log,
-    notice,
-    warn,
-  } = { ...realDeps, ...overrides };
+  const deps = { ...realDeps, ...overrides };
+  const inputs = readStepInputs(env, deps);
+  const { overlayRoots, writeThroughPaths } = preflight(inputs, env, deps);
+  const { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+  logConfiguredRules(inputs, deps);
 
-  // A local-path `uses: ./` names no ref. Verification takes it empty so it
-  // hard-fails instead of pinning the floating major-version image, which can
-  // drift from the vendored code; the report keeps a valid `uses:` line via the
-  // fallback.
-  const actionRef = env.GITHUB_ACTION_REF ?? "";
-  const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
-  const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
-
-  // Before any input is read: it rewrites what they all read.
-  const configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
-  for (const line of configFile?.summary ?? []) log(line);
-
-  const runInput = readRunCommand();
-
-  const { proxyEngine, proxyMode } = readProxyInputs();
-  log(`Proxy engine: ${proxyEngine}`);
-
-  // `notice`, not `annotation`: readFilesystemInputs reads a renamed input (see
-  // SandboxStepDeps).
-  const { filesystemMode, writeThroughInput } = readFilesystemInputs(notice);
-  const filesystemAudit = readFilesystemAuditInput();
-  const filesystemAuditArtifact = readFilesystemAuditArtifactInputs();
-  // Before the first write under the scratch base, the one just below.
-  checkScratchBaseParent();
-  // Before the command runs, for the post step's pinning; see post-write-through.ts.
-  if (configFile) saveWriteThroughForPost(env, writeThroughInput);
-  // Needed only later, but read here so a typo fails before any setup.
-  const failOnCaResidue = readFailOnCaResidue();
-  const failOnBlocked = readFailOnBlocked();
-  const trafficArtifact = readTrafficArtifactInputs();
-  const { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } =
-    readRuleInputs();
-
-  // Same gate as writeReportSummary(): suppresses annotations when this
-  // script isn't running as the real action.
-  const annotation = createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
-  if (filesystemAudit === "record") {
-    annotation.warning("filesystem_audit is experimental and may change.");
-  }
-
-  // Pure checks, so a rule the engine cannot enforce fails (or, in audit,
-  // warns) before any privileged setup.
-  checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, annotation.warning);
-  checkKnownBlockedUrlRuleSupport(
-    {
-      proxyEngine,
-      proxyMode,
-      knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule),
-    },
-    annotation.warning,
-  );
-  // Unlike the checks above, fails in audit too.
-  const aws = readAwsKeyInputs({ proxyEngine }, env);
-
-  // Before any privileged setup; see assertNonRootUid.
-  assertNonRootUid(process.getuid!());
-
-  // Cheap, pure input check, so a plain mistake (an unset variable, or
-  // write_through: / under filesystem_mode: ephemeral) is rejected immediately
-  // rather than only after the privileged preflight checks below have already
-  // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
-  // probe). resolveFilesystemPlan re-checks the real paths on the host.
-  const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
-  validateFilesystemInputs(filesystemMode, writeThrough);
-  if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
-
-  // Before the preflights, which already run sudo.
-  pinHostCommands(
-    pinningPaths(() => writeThroughInput, env),
-    env,
-  );
-
-  // Fail fast, before image verification or starting the proxy container, if
-  // the runner can't support the isolation setup at all.
-  checkPasswordlessSudo();
-  if (filesystemMode === "ephemeral") checkOverlayfsSupport();
-  if (filesystemAudit === "record") checkFilesystemAuditHost();
-
-  // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
-  // write_through entry, or a target that can't be created, fails before the
-  // proxy container ever starts, same reasoning as checkPasswordlessSudo
-  // above.
-  const { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(
-    filesystemMode,
-    writeThroughInput,
-    env,
-    { warn },
-  );
-  if (filesystemMode === "ephemeral") {
-    for (const line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) {
-      info(line);
-    }
-  }
-
-  const localOverride = await readLocalImageOverride(env);
-  const { imageRef, pullPolicy } =
-    localOverride ??
-    (await resolveVerifiedImage(
-      { actionRef, actionRepo, proxyEngine },
-      { verifyImageDigestOrThrow, log },
-    ));
-  log(`buildcage: proxy image: ${imageRef}`);
-  const composeFile = resolveComposeFile(localOverride);
-
-  withLogGroup("buildcage: Configured ACL Rules", () => {
-    logRules("HTTPS", httpsRules);
-    logRules("HTTP", httpRules);
-    logRules("IP", ipRules);
-    logRules("URL", urlRules);
-    logRules("TLS", tlsRules);
-    logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules);
-    if (aws.key) console.log("AWS access key check: on");
-    if (aws.roleAccounts.length > 0)
-      console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
-  });
-
-  const containerName = generateContainerName();
+  const { proxyEngine, proxyMode, filesystemMode, rules, aws, annotation } = inputs;
+  const containerName = deps.generateContainerName();
   const projectName = deriveProjectName(containerName);
   const audit =
-    filesystemAudit === "record"
+    inputs.filesystemAudit === "record"
       ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE)
       : undefined;
-  saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState);
+  saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, deps.saveState);
 
   const composeEnv = buildComposeEnv(
     {
@@ -492,31 +558,39 @@ export async function runSandboxStep(
       proxyMode,
       proxyEngine,
       imageRef,
-      httpsRules: httpsRules,
-      httpRules: httpRules,
-      ipRules: ipRules,
-      urlRules,
-      tlsRules,
+      httpsRules: rules.httpsRules,
+      httpRules: rules.httpRules,
+      ipRules: rules.ipRules,
+      urlRules: rules.urlRules,
+      tlsRules: rules.tlsRules,
       awsKey: aws.key,
       awsRoleAccounts: aws.roleAccounts,
     },
     env,
   );
+  const stopProxy = () =>
+    deps.stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
 
   try {
-    await startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv });
+    await deps.startSandboxProxy({
+      composeFile,
+      projectName,
+      containerName,
+      pullPolicy,
+      composeEnv,
+    });
   } catch (e) {
     // compose up --wait leaves a container that never became ready, and its network, in place.
-    await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    await stopProxy();
     throw e;
   }
 
   // From here on a cancel stops the sandbox instead of this process, so the
   // report below still goes out and the sandbox does not outlive the step.
   const cancel = new AbortController();
-  const stopListening = onCancel(() => {
+  const stopListening = deps.onCancel(() => {
     if (cancel.signal.aborted) return;
-    info("buildcage: the step was cancelled; stopping the sandbox");
+    deps.info("buildcage: the step was cancelled; stopping the sandbox");
     cancel.abort();
   });
 
@@ -538,7 +612,7 @@ export async function runSandboxStep(
   let exitCode = 1;
   let auditAttached = false;
   try {
-    const proxyNetns = getContainerNetns(containerName);
+    const proxyNetns = deps.getContainerNetns(containerName);
     if (proxyNetns === null) {
       throw new SandboxError(
         `Sandbox proxy container ${containerName} is not running.`,
@@ -546,105 +620,41 @@ export async function runSandboxStep(
       );
     }
 
-    mediation = mediateRunnerOutputFiles(env, runnerFilesBackingDir);
+    mediation = deps.mediateRunnerOutputFiles(env, runnerFilesBackingDir);
 
-    exitCode = await runSandboxedCommand({
+    exitCode = await deps.runSandboxedCommand({
       containerName,
       proxyNetns,
-      runInput,
+      runInput: inputs.runInput,
       writeThroughPaths,
       env,
       proxyEngine,
       filesystemMode,
       overlayRoots,
-      failOnCaResidue,
+      failOnCaResidue: inputs.failOnCaResidue,
       filesystemAudit: audit,
       onAuditAttached: () => (auditAttached = true),
-      warn,
+      warn: deps.warn,
       cancel: cancel.signal,
       internalMounts: mediation?.mounts,
       maskedPaths: mediation?.maskedPaths,
       envOverrides: mediation?.envOverrides,
     });
   } finally {
-    // Write $GITHUB_OUTPUT and then $GITHUB_STEP_SUMMARY back from their backing
-    // copies before this action appends its own: the artifact-name outputs via
-    // @actions/core (last-write-wins over anything the command set), and the
-    // reports onto the summary. The command never reached the real files, so
-    // there is no symlink, FIFO or permission to put right here.
-    if (mediation) {
-      for (const file of mediation.files) {
-        writeBackMediatedFile(file, annotation, { readBackingFile, writeRunnerFile });
-      }
-      try {
-        removeBackingDir(runnerFilesBackingDir);
-      } catch (e) {
-        warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
-      }
-    }
-    for (const set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) {
-      try {
-        set("");
-      } catch {
-        // The report setting it again says so.
-      }
-    }
-    // None throws, so the teardown and stopListening are always reached.
-    const prepareAudit = () =>
-      prepareStepFilesystemAudit({
-        audit,
-        attached: auditAttached,
-        upload: filesystemAuditArtifact.upload,
-        retentionDays: filesystemAuditArtifact.retentionDays,
+    await finalizeStep(
+      {
+        inputs,
+        env,
         containerName,
-        annotation,
-        env,
-        actionRepo,
-        actionRef: reportActionRef,
-        failClosed: proxyMode !== "audit" && failOnBlocked,
-      });
-    // The runner kills a cancelled step seconds after cancelling it, and a
-    // large recording takes a while to read and upload, so the traffic report
-    // goes first and the audit takes what the summary has left.
-    const cancelled = cancel.signal.aborted;
-    const filesystemReport = cancelled ? undefined : await prepareAudit();
-    const processActivity = audit !== undefined;
-    const { startedAt, reported } = await reportStepTraffic({
-      containerName,
-      proxyEngine,
-      parameters: {
-        mode: proxyMode,
-        allowedHttpsRules: httpsRules,
-        allowedHttpRules: httpRules,
-        allowedIpRules: ipRules,
-        allowedTlsRules: tlsRules,
-        allowedUrlRules: urlRules,
-        knownBlockedRules,
+        stopProxy,
+        audit,
+        auditAttached,
+        mediation,
+        runnerFilesBackingDir,
+        cancelled: cancel.signal.aborted,
       },
-      annotation,
-      actionRepo,
-      actionRef: reportActionRef,
-      runCommand: runInput,
-      extraInputs: (report) => awsExampleInputs(aws, report.timeline),
-      failOnBlocked,
-      trafficArtifact,
-      env,
-      moreBlocks: filesystemReport?.blocks,
-      processActivity,
-      // The audit written below closes the summary instead.
-      closeSummary: !(cancelled && processActivity),
-    });
-    if (cancelled && processActivity) {
-      const late = await prepareAudit();
-      await writeLateSummary(late.blocks(startedAt), {
-        reported,
-        actionRepo,
-        isAudit: proxyMode === "audit",
-        env,
-        annotation,
-      });
-    }
-    await stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+      deps,
+    );
     stopListening();
   }
 
