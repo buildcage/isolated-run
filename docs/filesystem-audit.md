@@ -184,10 +184,10 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 - A **refused system call** is one the sandbox's seccomp profile does not allow, such as
   `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names the
   first 10, each with the first commands that made it, and counts the rest; the details, where they
-  fit, show each once per program, as `syscall:io_uring_setup` with `!`. One already recorded
-  as a failed change to a path is not repeated, and one the profile allows only for some arguments,
-  as `clone`, is not recorded even when refused, since the kernel's own `EPERM` for it would read
-  the same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
+  fit, show each once per program, as `syscall:io_uring_setup` with `!`. One already recorded as a
+  failed change to a path is not repeated, and one the profile allows only for some arguments, as
+  `clone`, is not recorded even when refused, since the kernel's own `EPERM` for it would read the
+  same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
   thread killed while others run on is not recorded. Past 200 command and system call pairs, the
   details add a row only for the first command refused a system call without being killed, and for
   each command killed for one; the artifact, if uploaded, has the rest.
