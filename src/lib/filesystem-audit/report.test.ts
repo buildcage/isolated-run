@@ -112,6 +112,7 @@ describe("readStepFilesystemAudit", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
   };
 
   it("links the skipped-hooks note to the guide", async () => {
@@ -243,6 +244,55 @@ describe("readStepFilesystemAudit", () => {
     } finally {
       process.exitCode = exitCode;
     }
+  });
+
+  describe("a recording without the end line", () => {
+    const exitCode = process.exitCode;
+    afterEach(() => {
+      process.exitCode = exitCode;
+    });
+    const end = JSON.stringify({ kind: "end", dropped: 0, untracked: 0 });
+    const write = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" });
+
+    it("fails the step, and still renders and uploads what was recorded", async () => {
+      const note = annotation();
+      const { deps: d, summaries, uploads } = deps({ raw: write });
+
+      await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+
+      expect(note.error).toHaveBeenCalledWith(
+        "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Its own lines in the step log say why",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(summaries[0]).toContain("This record is incomplete");
+      expect(uploads).toEqual([CLEAN]);
+    });
+
+    it("leaves the step alone when the step was cancelled", async () => {
+      const note = annotation();
+      const { deps: d, summaries } = deps({ raw: write });
+
+      await reportStepFilesystemAudit(
+        { ...base, cancelled: true, audit: AUDIT, annotation: note, env: {} },
+        d,
+      );
+
+      expect(note.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(exitCode);
+      expect(summaries[0]).toContain("This record is incomplete");
+    });
+
+    it("is not one with the end line, whatever it dropped", async () => {
+      const note = annotation();
+      const dropped = JSON.stringify({ kind: "end", dropped: 3, untracked: 1 });
+      for (const last of [end, dropped]) {
+        const { deps: d } = deps({ raw: [write, last].join("\n") });
+        await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+      }
+
+      expect(note.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(exitCode);
+    });
   });
 
   it("still uploads the recording when the summary fails to render", async () => {
@@ -685,6 +735,7 @@ describe("readStepFilesystemAudit: failures while reading", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };
@@ -791,6 +842,7 @@ describe("readStepFilesystemAudit: an upload that throws", () => {
         actionRef: "v2",
         failClosed: false,
         attached: true,
+        cancelled: false,
         audit: AUDIT,
         annotation: note,
         env: {},
@@ -816,6 +868,7 @@ describe("readStepFilesystemAudit", () => {
     actionRef: "v2",
     failClosed: false,
     attached: true,
+    cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
   };

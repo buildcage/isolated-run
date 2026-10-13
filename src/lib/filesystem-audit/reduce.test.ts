@@ -71,6 +71,19 @@ describe("reduceRecording", () => {
     expect(kept).toStrictEqual([step]);
   });
 
+  it("tells whether the recording holds the end line, even when the summary fails", () => {
+    const end = JSON.stringify({ kind: "end", dropped: 0, untracked: 0 });
+    const failing = (options: SummaryOptions) => ({
+      ...createAuditSummary(options),
+      observe: () => {
+        throw new Error("boom");
+      },
+    });
+    expect(reduceRecording(feed(step, end), BASE, OPTIONS).ended).toBe(true);
+    expect(reduceRecording(feed(step, end), BASE, OPTIONS, undefined, failing).ended).toBe(true);
+    expect(reduceRecording(feed(step), BASE, OPTIONS).ended).toBe(false);
+  });
+
   it("reduces with no sink", () => {
     expect(reduceRecording(feed(step), BASE, OPTIONS).summary).toBeDefined();
   });

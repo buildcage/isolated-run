@@ -669,8 +669,7 @@ spells a path. What it can do:
   itself, outside any system call, so its creation and contents go unrecorded. The step cannot
   choose that path, which needs host privilege to set, and reading the file afterwards is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
-  record is incomplete, as it does when the tracer did not stop cleanly. Flooding can hide which
-  accesses happened, not that some are missing.
+  record is incomplete. Flooding can hide which accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or
   hold more than 200,000 files and directories after folding. A few hundred long paths with `..`
   are enough, so a part past 300 KB folds more first, down to rows such as `/**` and `~/**` that
@@ -680,7 +679,8 @@ spells a path. What it can do:
 
 Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
 BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep
-a partial record.
+a partial record. A tracer that exits during the step, as one does when the step fills the disk it
+writes to, also fails the step, after the command, with the record cut where it stopped.
 
 ## Hardening
 

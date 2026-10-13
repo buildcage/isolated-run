@@ -347,6 +347,9 @@ export interface ReducedRecording {
   /** Undefined when summarizing failed, for summaryError. */
   summary: AuditSummary | undefined;
   summaryError?: unknown;
+  /** Whether the recording holds the tracer's end line, read apart from the
+   *  summary so a failed one still tells. */
+  ended: boolean;
 }
 
 /**
@@ -389,10 +392,12 @@ export function reduceRecording(
   const sink = openSink?.();
   let again = 0;
   let lengthAgain = 0;
+  let ended = false;
   forEachLine((line) => {
     again++;
     lengthAgain += line.length;
     const r = parseLine(line);
+    if (isRecord(r) && r.kind === "end") ended = true;
     const kept = stripper.filter(line, r);
     summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
     if (kept) sink?.(kept.line);
@@ -404,5 +409,5 @@ export function reduceRecording(
 
   let result: AuditSummary | undefined;
   summarize(() => (result = summary.finish()));
-  return { summary: result, summaryError };
+  return { summary: result, summaryError, ended };
 }

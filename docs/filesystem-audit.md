@@ -430,6 +430,11 @@ The summary can also open with a warning, or be missing:
 - **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
   cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
   very large number of files at once can cause it.
+- **The same warning, with an error and a failed step, in any mode.** The record has no end line:
+  the tracer exited before the step ended, or did not finish the record when the step stopped it.
+  The tracer's own lines in the step log say why, such as a `filesystem-audit: fatal:` line ending
+  in `no space left on device` once the step filled the disk. A cancelled step does not add this
+  error.
 - **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
   be missing; see [Skipped hooks](#skipped-hooks).
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
