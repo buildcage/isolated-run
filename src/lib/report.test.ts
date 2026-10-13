@@ -14,6 +14,8 @@ import type { InspectReportData, UniversalReportData } from "#core/lib/report/ty
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 import {
+  appendCommandSummary,
+  commandSummaryBytes,
   computeReportOutcomes,
   missingReportFrame,
   reportTitle,
@@ -498,6 +500,39 @@ describe("computeReportOutcomes", () => {
   });
 });
 
+describe("appendCommandSummary", () => {
+  function append(summary: string, held: number | undefined): string[] {
+    const appended: string[] = [];
+    appendCommandSummary("/summary.md", Buffer.from(summary), {
+      fileSize: () => {
+        if (held === undefined) throw new Error("ENOENT");
+        return held;
+      },
+      appendFile: (_, content) => void appended.push(Buffer.from(content).toString()),
+    });
+    return appended;
+  }
+
+  it("rules the command's summary off from buildcage's part before it", () => {
+    expect(append("mine\n", 10)).toStrictEqual(["\n\n---\n\nmine\n"]);
+  });
+
+  it.each([0, undefined])("adds no rule when buildcage wrote nothing (size %s)", (held) => {
+    expect(append("mine\n", held)).toStrictEqual(["mine\n"]);
+  });
+
+  it("appends nothing when the command wrote nothing", () => {
+    expect(append("", 10)).toStrictEqual([]);
+  });
+
+  it("counts the rule in the room it takes, and nothing for nothing", () => {
+    expect(commandSummaryBytes(Buffer.from("mine\n"))).toBe(
+      Buffer.byteLength(append("mine\n", 10)[0]),
+    );
+    expect(commandSummaryBytes(Buffer.alloc(0))).toBe(0);
+  });
+});
+
 describe("writeSummaryBlocks", () => {
   it("writes the blocks when they fit", async () => {
     const written: string[] = [];
@@ -549,32 +584,19 @@ describe("writeSummaryBlocks", () => {
     expect(wrote).toBe("fallback");
   });
 
-  it("rules off buildcage's part from the command's own output before it", async () => {
+  it("leaves room for what follows the blocks", async () => {
     const written: string[] = [];
-    await writeSummaryBlocks(
-      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "report\n", notice: "cut\n" }],
-      { GITHUB_STEP_SUMMARY: "/summary.md" },
-      {
-        fileSize: () => 10,
-        writeSummary: async (m) => void written.push(m),
-        separateFromExisting: true,
-      },
-    );
-    expect(written).toStrictEqual(["\n\n---\n\nreport\n"]);
-  });
-
-  it("adds no rule when the summary is still empty", async () => {
-    const written: string[] = [];
-    await writeSummaryBlocks(
-      [{ priority: 1, level: 1, section: "s", cut: "lines", text: "report\n", notice: "cut\n" }],
+    const { wrote } = await writeSummaryBlocks(
+      [{ id: "frame", priority: 1, level: 1, section: "k", cut: "keep", text: "frame\n" }],
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       {
         fileSize: () => 0,
         writeSummary: async (m) => void written.push(m),
-        separateFromExisting: true,
+        followingBytes: 1024 * 1024,
       },
     );
-    expect(written).toStrictEqual(["report\n"]);
+    expect(written).toStrictEqual([]);
+    expect(wrote).toBe("nothing");
   });
 
   it("returns the ids of the blocks it cut, by id rather than by notice text", async () => {

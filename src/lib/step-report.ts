@@ -76,6 +76,11 @@ export interface ReportStepOptions {
   /** Whether the step records its process activity, which the title names
    *  when its section is there. */
   processActivity: boolean;
+  /** See WriteSummaryBlocksOptions.followingBytes. */
+  followingSummaryBytes?: number;
+  /** Called once this action's part of the summary is written, before any
+   *  upload, to append what follows it. Must not throw. */
+  afterSummary?: () => void;
 }
 
 /**
@@ -103,6 +108,8 @@ export async function reportStepTraffic(
     env,
     moreBlocks = () => [],
     processActivity,
+    followingSummaryBytes,
+    afterSummary,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
@@ -143,12 +150,14 @@ export async function reportStepTraffic(
           ],
       env,
       annotation,
+      { followingBytes: followingSummaryBytes },
       { writeSummaryBlocks },
     );
 
   let artifactName = "";
   if (!report) {
     await writeRest();
+    afterSummary?.();
   } else {
     try {
       await writeReportSummary(
@@ -164,6 +173,7 @@ export async function reportStepTraffic(
           processActivity: named,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
+          followingBytes: followingSummaryBytes,
         },
         trafficArtifact.upload,
         env,
@@ -172,6 +182,7 @@ export async function reportStepTraffic(
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
       await writeRest();
     }
+    afterSummary?.();
 
     // Uploaded even when the summary failed: the command can delete the
     // summary file, and the artifact is then the only record left.
@@ -197,19 +208,19 @@ export async function reportStepTraffic(
   }
 }
 
-/** Fits `blocks` into what the Job Summary has left and writes them, after a
- *  rule when the command wrote a summary of its own; never throws, as a
- *  failure here only costs that part of the summary. */
+/** Fits `blocks` into what the Job Summary has left and writes them; never
+ *  throws, as a failure here only costs that part of the summary. */
 export async function writeMoreSummary(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
+  { followingBytes }: { followingBytes?: number } = {},
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
   const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await writeSummaryBlocks(blocks, env, { separateFromExisting: true });
+    await writeSummaryBlocks(blocks, env, { followingBytes });
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }

@@ -123,7 +123,7 @@ export function computeReportOutcomes(
 
 /** The Job Summary's file access, injectable so a test needs no real files. */
 export interface WriteReportSummaryDeps {
-  appendFile: (path: string, content: string) => void;
+  appendFile: (path: string, content: string | Uint8Array) => void;
   fileSize: (path: string) => number;
   writeSummary: typeof writeStepSummary;
 }
@@ -134,8 +134,8 @@ const realDeps: WriteReportSummaryDeps = {
   writeSummary: writeStepSummary,
 };
 
-// What the summary already holds counts against GitHub's limit too: the
-// isolated command can append to it. A missing or unreadable file holds nothing.
+// What the summary already holds counts against GitHub's limit too. A missing
+// or unreadable file holds nothing.
 function summarySize(path: string | undefined, fileSize: (p: string) => number): number {
   if (!path) return 0;
   try {
@@ -145,10 +145,31 @@ function summarySize(path: string | undefined, fileSize: (p: string) => number):
   }
 }
 
-// A horizontal rule set between the command's own Job Summary and buildcage's
-// report so the two are not read as one, added only when the command wrote
-// something and buildcage has room to follow it.
+// A horizontal rule set between buildcage's report and the command's own Job
+// Summary after it so the two are not read as one.
 const COMMAND_SEPARATOR = "\n\n---\n\n";
+
+/** What the command's own summary takes of the Job Summary once appended after
+ *  buildcage's part, which is fitted to leave it that room. */
+export function commandSummaryBytes(summary: Uint8Array): number {
+  return summary.length === 0 ? 0 : summary.length + bytes(COMMAND_SEPARATOR);
+}
+
+/**
+ * Appends the command's own summary after buildcage's part, under a rule when
+ * that part wrote anything. Written last, so whatever it leaves open (a code
+ * fence, a comment, a `<details>`) has nothing after it to swallow.
+ */
+export function appendCommandSummary(
+  path: string,
+  summary: Uint8Array,
+  overrides: Partial<Pick<WriteReportSummaryDeps, "appendFile" | "fileSize">> = {},
+): void {
+  const { appendFile, fileSize } = { ...realDeps, ...overrides };
+  if (summary.length === 0) return;
+  const separator = summarySize(path, fileSize) > 0 ? COMMAND_SEPARATOR : "";
+  appendFile(path, Buffer.concat([Buffer.from(separator, "utf8"), summary]));
+}
 
 /** Where the full report is when it did not reach the summary. */
 function fullReportLocation(artifactAvailable: boolean): string {
@@ -162,7 +183,7 @@ function fullReportLocation(artifactAvailable: boolean): string {
  *  before any summary is written. */
 export function reportDidNotFitMessage(artifactAvailable: boolean): string {
   return (
-    "The buildcage traffic report did not fit in GitHub's Job Summary size limit after this " +
+    "The buildcage traffic report did not fit in GitHub's Job Summary size limit alongside this " +
     `step's own output; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`
   );
 }
@@ -175,9 +196,9 @@ export function reportDidNotFitLine(artifactAvailable: boolean): string {
 export interface WriteSummaryBlocksOptions extends Partial<
   Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">
 > {
-  /** Put a horizontal rule before the blocks when the summary already holds
-   *  the command's own output. Set on buildcage's first write only. */
-  separateFromExisting?: boolean;
+  /** What is appended after the blocks, which counts against the limit too:
+   *  the command's own summary (commandSummaryBytes). */
+  followingBytes?: number;
   /** Written in place of the blocks when not even their frame fits: a single
    *  line pointing to the full report. Without it, nothing is written then. */
   fallbackLine?: string;
@@ -201,14 +222,13 @@ export interface SummaryWriteResult {
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
-  { separateFromExisting = false, fallbackLine, ...overrides }: WriteSummaryBlocksOptions = {},
+  { followingBytes = 0, fallbackLine, ...overrides }: WriteSummaryBlocksOptions = {},
 ): Promise<SummaryWriteResult> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
-  const used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize);
-  const separator = separateFromExisting && used > 0 ? COMMAND_SEPARATOR : "";
+  const used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize) + followingBytes;
   const cutIds = new Set<string>();
   const fitted = fitStepSummary(blocks, {
-    usedBytes: used + bytes(separator),
+    usedBytes: used,
     onCut: (b) => {
       if (b.id !== undefined) cutIds.add(b.id);
     },
@@ -216,14 +236,14 @@ export async function writeSummaryBlocks(
   // The same headroom fitStepSummary keeps, so buildcage's part never lands the
   // file at the edge GitHub drops it at.
   const fits = (text: string): boolean =>
-    used + bytes(separator) + bytes(text) <= STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
+    used + bytes(text) <= STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
   let content = "";
   let wrote: SummaryWriteResult["wrote"] = "nothing";
   if (fits(fitted)) {
-    content = separator + fitted;
+    content = fitted;
     wrote = "blocks";
   } else if (fallbackLine !== undefined && fits(fallbackLine)) {
-    content = separator + fallbackLine;
+    content = fallbackLine;
     wrote = "fallback";
   }
   if (content !== "") await writeSummary(content, env.GITHUB_STEP_SUMMARY);
@@ -233,6 +253,8 @@ export async function writeSummaryBlocks(
 export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
   /** The rest of the step's summary, printed after the report and fitted with it. */
   extraBlocks?: SummaryBlock[];
+  /** See WriteSummaryBlocksOptions.followingBytes. */
+  followingBytes?: number;
 }
 
 /**
@@ -249,7 +271,7 @@ export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions 
 export async function writeReportSummary(
   report: Report,
   annotation: Annotation,
-  { extraBlocks = [], ...options }: WriteReportSummaryOptions,
+  { extraBlocks = [], followingBytes, ...options }: WriteReportSummaryOptions,
   artifactAvailable: boolean,
   env: NodeJS.ProcessEnv,
   overrides: Partial<WriteReportSummaryDeps> = {},
@@ -274,7 +296,7 @@ export async function writeReportSummary(
     {
       fileSize,
       writeSummary,
-      separateFromExisting: true,
+      followingBytes,
       fallbackLine: reportDidNotFitLine(artifactAvailable),
     },
   );

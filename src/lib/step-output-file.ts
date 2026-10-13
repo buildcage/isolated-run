@@ -6,8 +6,8 @@
  * unreadable would keep every line appended after it from being read.
  *
  * $GITHUB_STEP_SUMMARY is not read entry by entry, by the runner or here: the
- * backing file is checked as a file (readBackingFile) and written back as the
- * command left it, plus what commandSummaryClosers adds.
+ * backing file is checked as a file (readBackingFile) and appended after the
+ * reports as the command left it.
  */
 
 /** The most this action reads back of $GITHUB_OUTPUT or $GITHUB_STEP_SUMMARY.

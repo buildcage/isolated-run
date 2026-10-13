@@ -789,13 +789,11 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 - **The Job Summary.** The report is rendered from the runner host after the command has exited, and
   a name or URL is escaped before it is written into a table, so the command cannot edit its own
-  report. It can still change how the report shows: an HTML element its own summary leaves open,
-  such as `<details>` or `<table>`, wraps the report that follows. A code fence, comment or raw HTML
-  block such as `<pre>` that it leaves open would hide the report or show it as code, so the host
-  closes those before writing the report. `$GITHUB_STEP_SUMMARY` is mediated wherever the command's
-  writes to it reach the runner (under `ephemeral` they otherwise go with the overlay): the command
-  writes a backing copy bound into the sandbox, the real file is masked from it, and the host writes
-  the real file after the step -- the command's own summary first, then the report after a
+  report. Its own summary comes after the report, so a code fence, comment or HTML element it leaves
+  open has nothing after it to hide or wrap. `$GITHUB_STEP_SUMMARY` is mediated wherever the
+  command's writes to it reach the runner (under `ephemeral` they otherwise go with the overlay): the
+  command writes a backing copy bound into the sandbox, the real file is masked from it, and the host
+  writes the real file after the step -- the report first, then the command's own summary after a
   horizontal rule. Because the real file is out of the command's reach, a symlink, FIFO, directory
   or permission it leaves on the backing copy reaches nothing: a copy that is not a regular file, or
   that it made unreadable, is read back as empty and fails the step, never followed or blocked on.

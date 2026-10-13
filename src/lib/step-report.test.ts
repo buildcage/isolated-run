@@ -105,7 +105,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
-      { separateFromExisting: true },
+      { followingBytes: undefined },
     );
   });
 
@@ -125,7 +125,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Traffic & Process Activity Report — build", true), block, FOOTER],
       {},
-      { separateFromExisting: true },
+      { followingBytes: undefined },
     );
   });
 
@@ -138,7 +138,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
-      { separateFromExisting: true },
+      { followingBytes: undefined },
     );
   });
 
@@ -177,6 +177,7 @@ describe("reportStepTraffic", () => {
       processActivity: false,
       failOnBlocked: true,
       extraBlocks: [FOOTER],
+      followingBytes: undefined,
     });
     expect(mocks.readActionVersion).toHaveBeenCalledWith(CONTAINER, "inspect");
   });
@@ -192,6 +193,47 @@ describe("reportStepTraffic", () => {
       7,
       annotation,
     );
+  });
+
+  it("leaves room for what follows the summary, with the report or alone", async () => {
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+    await reportStepTraffic(
+      options({ moreBlocks: () => [block], followingSummaryBytes: 100 }),
+      deps,
+    );
+    expect(mocks.writeReportSummary.mock.calls[0][2].followingBytes).toBe(100);
+
+    mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+    await reportStepTraffic(
+      options({ moreBlocks: () => [block], followingSummaryBytes: 100 }),
+      deps,
+    );
+    expect(mocks.writeSummaryBlocks.mock.calls[0][2]).toStrictEqual({ followingBytes: 100 });
+  });
+
+  it.each([
+    { case: "the report was written", fetch: true, write: true },
+    { case: "the report's write failed", fetch: true, write: false },
+    { case: "there was no report", fetch: false, write: true },
+  ])("appends what follows the summary after it and before the upload ($case)", async (c) => {
+    if (!c.fetch) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
+    if (!c.write) mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
+    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
+    const afterSummary = vi.fn();
+
+    await reportStepTraffic(
+      options({ moreBlocks: () => [block], trafficArtifact: { upload: true }, afterSummary }),
+      deps,
+    );
+
+    expect(afterSummary).toHaveBeenCalledTimes(1);
+    const after = afterSummary.mock.invocationCallOrder[0];
+    for (const write of [mocks.writeReportSummary, mocks.writeSummaryBlocks]) {
+      for (const order of write.mock.invocationCallOrder) expect(order).toBeLessThan(after);
+    }
+    for (const order of mocks.uploadTrafficArtifact.mock.invocationCallOrder) {
+      expect(order).toBeGreaterThan(after);
+    }
   });
 
   it("uploads after the summary, so a failed upload cannot lose the summary", async () => {
@@ -328,22 +370,28 @@ describe("writeMoreSummary", () => {
   const ann = annotation as unknown as ReportStepOptions["annotation"];
 
   it("writes the blocks into what the summary has left", async () => {
-    await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, deps);
+    await writeMoreSummary(
+      [block],
+      { GITHUB_STEP_SUMMARY: "/s" },
+      ann,
+      { followingBytes: 100 },
+      deps,
+    );
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [block],
       { GITHUB_STEP_SUMMARY: "/s" },
-      { separateFromExisting: true },
+      { followingBytes: 100 },
     );
   });
 
   it("writes nothing for no blocks", async () => {
-    await writeMoreSummary([], {}, ann, deps);
+    await writeMoreSummary([], {}, ann, {}, deps);
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
 
   it("warns rather than throws when the write fails", async () => {
     mocks.writeSummaryBlocks.mockRejectedValue(new Error("summary file is gone"));
-    await expect(writeMoreSummary([block], {}, ann, deps)).resolves.toBeUndefined();
+    await expect(writeMoreSummary([block], {}, ann, {}, deps)).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to write the Job Summary: summary file is gone",
     );
