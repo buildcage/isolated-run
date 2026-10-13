@@ -51906,7 +51906,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		exports$1.all = every$1, exports$1.allLimit = everyLimit$1, exports$1.allSeries = everySeries$1, exports$1.any = some$1, exports$1.anyLimit = someLimit$1, exports$1.anySeries = someSeries$1, exports$1.apply = apply, exports$1.applyEach = applyEach, exports$1.applyEachSeries = applyEachSeries, exports$1.asyncify = asyncify, exports$1.auto = auto, exports$1.autoInject = autoInject, exports$1.cargo = cargo$1, exports$1.cargoQueue = cargo, exports$1.compose = compose, exports$1.concat = concat$1, exports$1.concatLimit = concatLimit$1, exports$1.concatSeries = concatSeries$1, exports$1.constant = constant$1, exports$1.default = index, exports$1.detect = detect$1, exports$1.detectLimit = detectLimit$1, exports$1.detectSeries = detectSeries$1, exports$1.dir = dir, exports$1.doDuring = doWhilst$1, exports$1.doUntil = doUntil, exports$1.doWhilst = doWhilst$1, exports$1.during = whilst$1, exports$1.each = each, exports$1.eachLimit = eachLimit$1, exports$1.eachOf = eachOf$1, exports$1.eachOfLimit = eachOfLimit$1, exports$1.eachOfSeries = eachOfSeries$1, exports$1.eachSeries = eachSeries$1, exports$1.ensureAsync = ensureAsync, exports$1.every = every$1, exports$1.everyLimit = everyLimit$1, exports$1.everySeries = everySeries$1, exports$1.filter = filter$1, exports$1.filterLimit = filterLimit$1, exports$1.filterSeries = filterSeries$1, exports$1.find = detect$1, exports$1.findLimit = detectLimit$1, exports$1.findSeries = detectSeries$1, exports$1.flatMap = concat$1, exports$1.flatMapLimit = concatLimit$1, exports$1.flatMapSeries = concatSeries$1, exports$1.foldl = reduce$1, exports$1.foldr = reduceRight, exports$1.forEach = each, exports$1.forEachLimit = eachLimit$1, exports$1.forEachOf = eachOf$1, exports$1.forEachOfLimit = eachOfLimit$1, exports$1.forEachOfSeries = eachOfSeries$1, exports$1.forEachSeries = eachSeries$1, exports$1.forever = forever$1, exports$1.groupBy = groupBy, exports$1.groupByLimit = groupByLimit$1, exports$1.groupBySeries = groupBySeries, exports$1.inject = reduce$1, exports$1.log = log, exports$1.map = map$1, exports$1.mapLimit = mapLimit$1, exports$1.mapSeries = mapSeries$1, exports$1.mapValues = mapValues, exports$1.mapValuesLimit = mapValuesLimit$1, exports$1.mapValuesSeries = mapValuesSeries, exports$1.memoize = memoize, exports$1.nextTick = nextTick, exports$1.parallel = parallel, exports$1.parallelLimit = parallelLimit, exports$1.priorityQueue = priorityQueue, exports$1.queue = queue, exports$1.race = race$1, exports$1.reduce = reduce$1, exports$1.reduceRight = reduceRight, exports$1.reflect = reflect, exports$1.reflectAll = reflectAll, exports$1.reject = reject$1, exports$1.rejectLimit = rejectLimit$1, exports$1.rejectSeries = rejectSeries$1, exports$1.retry = retry, exports$1.retryable = retryable, exports$1.select = filter$1, exports$1.selectLimit = filterLimit$1, exports$1.selectSeries = filterSeries$1, exports$1.seq = seq, exports$1.series = series, exports$1.setImmediate = setImmediate$1, exports$1.some = some$1, exports$1.someLimit = someLimit$1, exports$1.someSeries = someSeries$1, exports$1.sortBy = sortBy$1, exports$1.timeout = timeout, exports$1.times = times, exports$1.timesLimit = timesLimit, exports$1.timesSeries = timesSeries, exports$1.transform = transform, exports$1.tryEach = tryEach$1, exports$1.unmemoize = unmemoize, exports$1.until = until, exports$1.waterfall = waterfall$1, exports$1.whilst = whilst$1, exports$1.wrapSync = asyncify, Object.defineProperty(exports$1, "__esModule", { value: !0 });
 	}));
 })), require_polyfills = __commonJSMin(((exports, module) => {
-	var constants$4 = require("constants"), origCwd = process.cwd, cwd = null, platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
+	var constants$5 = require("constants"), origCwd = process.cwd, cwd = null, platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
 	process.cwd = function() {
 		return cwd ||= origCwd.call(process), cwd;
 	};
@@ -51921,7 +51921,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 	}
 	module.exports = patch;
 	function patch(fs) {
-		constants$4.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./) && patchLchmod(fs), fs.lutimes || patchLutimes(fs), fs.chown = chownFix(fs.chown), fs.fchown = chownFix(fs.fchown), fs.lchown = chownFix(fs.lchown), fs.chmod = chmodFix(fs.chmod), fs.fchmod = chmodFix(fs.fchmod), fs.lchmod = chmodFix(fs.lchmod), fs.chownSync = chownFixSync(fs.chownSync), fs.fchownSync = chownFixSync(fs.fchownSync), fs.lchownSync = chownFixSync(fs.lchownSync), fs.chmodSync = chmodFixSync(fs.chmodSync), fs.fchmodSync = chmodFixSync(fs.fchmodSync), fs.lchmodSync = chmodFixSync(fs.lchmodSync), fs.stat = statFix(fs.stat), fs.fstat = statFix(fs.fstat), fs.lstat = statFix(fs.lstat), fs.statSync = statFixSync(fs.statSync), fs.fstatSync = statFixSync(fs.fstatSync), fs.lstatSync = statFixSync(fs.lstatSync), fs.chmod && !fs.lchmod && (fs.lchmod = function(path, mode, cb) {
+		constants$5.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./) && patchLchmod(fs), fs.lutimes || patchLutimes(fs), fs.chown = chownFix(fs.chown), fs.fchown = chownFix(fs.fchown), fs.lchown = chownFix(fs.lchown), fs.chmod = chmodFix(fs.chmod), fs.fchmod = chmodFix(fs.fchmod), fs.lchmod = chmodFix(fs.lchmod), fs.chownSync = chownFixSync(fs.chownSync), fs.fchownSync = chownFixSync(fs.fchownSync), fs.lchownSync = chownFixSync(fs.lchownSync), fs.chmodSync = chmodFixSync(fs.chmodSync), fs.fchmodSync = chmodFixSync(fs.fchmodSync), fs.lchmodSync = chmodFixSync(fs.lchmodSync), fs.stat = statFix(fs.stat), fs.fstat = statFix(fs.fstat), fs.lstat = statFix(fs.lstat), fs.statSync = statFixSync(fs.statSync), fs.fstatSync = statFixSync(fs.fstatSync), fs.lstatSync = statFixSync(fs.lstatSync), fs.chmod && !fs.lchmod && (fs.lchmod = function(path, mode, cb) {
 			cb && process.nextTick(cb);
 		}, fs.lchmodSync = function() {}), fs.chown && !fs.lchown && (fs.lchown = function(path, uid, gid, cb) {
 			cb && process.nextTick(cb);
@@ -51969,7 +51969,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		})(fs.readSync) : fs.readSync;
 		function patchLchmod(fs) {
 			fs.lchmod = function(path, mode, callback) {
-				fs.open(path, constants$4.O_WRONLY | constants$4.O_SYMLINK, mode, function(err, fd) {
+				fs.open(path, constants$5.O_WRONLY | constants$5.O_SYMLINK, mode, function(err, fd) {
 					if (err) {
 						callback && callback(err);
 						return;
@@ -51981,7 +51981,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					});
 				});
 			}, fs.lchmodSync = function(path, mode) {
-				var fd = fs.openSync(path, constants$4.O_WRONLY | constants$4.O_SYMLINK, mode), threw = !0, ret;
+				var fd = fs.openSync(path, constants$5.O_WRONLY | constants$5.O_SYMLINK, mode), threw = !0, ret;
 				try {
 					ret = fs.fchmodSync(fd, mode), threw = !1;
 				} finally {
@@ -51994,8 +51994,8 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			};
 		}
 		function patchLutimes(fs) {
-			constants$4.hasOwnProperty("O_SYMLINK") && fs.futimes ? (fs.lutimes = function(path, at, mt, cb) {
-				fs.open(path, constants$4.O_SYMLINK, function(er, fd) {
+			constants$5.hasOwnProperty("O_SYMLINK") && fs.futimes ? (fs.lutimes = function(path, at, mt, cb) {
+				fs.open(path, constants$5.O_SYMLINK, function(er, fd) {
 					if (er) {
 						cb && cb(er);
 						return;
@@ -52007,7 +52007,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					});
 				});
 			}, fs.lutimesSync = function(path, at, mt) {
-				var fd = fs.openSync(path, constants$4.O_SYMLINK), ret, threw = !0;
+				var fd = fs.openSync(path, constants$5.O_SYMLINK), ret, threw = !0;
 				try {
 					ret = fs.futimesSync(fd, at, mt), threw = !1;
 				} finally {
@@ -72290,6 +72290,17 @@ function readBackingFile(path, deps = realReadBackingDeps) {
 		return unreadable(e);
 	}
 }
+function writeRunnerFile(path, content) {
+	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_WRONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	try {
+		let stats = (0, node_fs.fstatSync)(fd);
+		if (!stats.isFile()) throw Error("not a regular file");
+		if (stats.nlink !== 1) throw Error("a hard link to another file");
+		(0, node_fs.ftruncateSync)(fd), (0, node_fs.writeFileSync)(fd, content);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
 function removeBackingDir(path) {
 	let pending = [path];
 	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
@@ -74284,7 +74295,7 @@ const realDeps = {
 	mediateRunnerOutputFiles,
 	readBackingFile,
 	removeBackingDir,
-	writeRunnerFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
+	writeRunnerFile,
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
 	onCancel,

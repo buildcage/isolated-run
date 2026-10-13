@@ -25,8 +25,13 @@
 
 import {
   chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -169,6 +174,25 @@ export function readBackingFile(
     return { bytes: deps.readFile(path) };
   } catch (e) {
     return unreadable(e);
+  }
+}
+
+/**
+ * Writes `content` to a mediated file's real path. The mask hides that path
+ * only if the runner created the file, so the host writes only a regular file
+ * already there: it never creates one, follows a symlink, blocks on a FIFO or
+ * writes through a hard link to another file.
+ */
+export function writeRunnerFile(path: string, content: Buffer): void {
+  const fd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stats = fstatSync(fd);
+    if (!stats.isFile()) throw new Error("not a regular file");
+    if (stats.nlink !== 1) throw new Error("a hard link to another file");
+    ftruncateSync(fd);
+    writeFileSync(fd, content);
+  } finally {
+    closeSync(fd);
   }
 }
 
