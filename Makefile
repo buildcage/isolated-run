@@ -176,10 +176,10 @@ test_integration_sandbox_inspect: ## Run the inspect-engine integration tests (n
 
 .PHONY: test_integration_sandbox_inspect_rules
 test_integration_sandbox_inspect_rules: ## Inspect-engine restrict, audit, round trip and AWS key check
-	@./test/integration-test-inspect-restrict.sh
-	@./test/integration-test-inspect-audit.sh
-	@./test/integration-test-inspect-roundtrip.sh
-	@./test/integration-test-inspect-aws-keys.sh
+	@./test/with-fixture.sh inspect \
+		./test/integration-test-inspect-restrict.sh \
+		./test/integration-test-inspect-roundtrip.sh \
+		./test/integration-test-inspect-aws-keys.sh
 
 .PHONY: test_integration_sandbox_inspect_ca
 test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NSS database and the CA mount's reserved paths

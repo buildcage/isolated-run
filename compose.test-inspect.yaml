@@ -1,5 +1,5 @@
 # Fixture network for the inspect engine's integration tests
-# (test/integration-test-inspect-restrict.sh, test/integration-test-inspect-audit.sh).
+# (test/integration-test-inspect-*.sh).
 #
 # This file does not define the proxy service: isolated-run's real action
 # always starts its own throwaway proxy container via
