@@ -3,19 +3,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
 
 import { SandboxError } from "./errors.ts";
-import { runSandboxStep, WRITE_THROUGH_ALL_WARNING, type SandboxStepDeps } from "./sandbox-step.ts";
+import {
+  finalizeStep,
+  preflight,
+  readStepInputs,
+  runSandboxStep,
+  WRITE_THROUGH_ALL_WARNING,
+  type SandboxStepDeps,
+} from "./sandbox-step.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips
 // secret scanning on push.
 const ASIA = ["A", "S", "I", "A"].join("");
-
-// Keeps pinningPaths from resolving the fixture's paths on this machine.
-vi.mock("./sandbox/symlinks.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./sandbox/symlinks.ts")>()),
-  realPathOf: (path: string) => path,
-}));
 
 // What is left to check here is the order they run in, what each one is
 // handed, and which of them still run when an earlier step fails.
@@ -27,6 +28,7 @@ const mocks = {
   readProxyInputs: vi.fn(),
   readFilesystemInputs: vi.fn(),
   readFilesystemAuditInput: vi.fn(),
+  readFilesystemAuditArtifactInputs: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
@@ -41,6 +43,8 @@ const mocks = {
   createAnnotation: vi.fn(),
   resolveFilesystemPlan: vi.fn(),
   pinHostCommands: vi.fn(),
+  realPathOf: vi.fn(),
+  getuid: vi.fn(),
   readLocalImageOverride: vi.fn(),
   verifyImageDigestOrThrow: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
@@ -95,6 +99,9 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // Keeps pinningPaths from resolving the fixture's paths on this machine.
+  mocks.realPathOf.mockImplementation((path: string) => path);
+  mocks.getuid.mockReturnValue(1001);
   mocks.readRunCommand.mockReturnValue("echo hello");
   mocks.readProxyInputs.mockReturnValue({ proxyEngine: "universal", proxyMode: "restrict" });
   mocks.readFilesystemInputs.mockReturnValue({
@@ -102,6 +109,7 @@ beforeEach(() => {
     writeThroughInput: "",
   });
   mocks.readFilesystemAuditInput.mockReturnValue("off");
+  mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload: false });
   mocks.readRuleInputs.mockReturnValue({
     httpsRules: ["example.com:443"],
     httpRules: [],
@@ -482,7 +490,7 @@ describe("runSandboxStep", () => {
       key: `${ASIA}AAAAAAAAAAAAAAAA`,
       roleAccounts: ["111111111111"],
     });
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const log = mocks.log;
 
     await runSandboxStep(ENV, deps);
 
@@ -498,7 +506,6 @@ describe("runSandboxStep", () => {
     expect(log).toHaveBeenCalledWith("AWS access key check: on");
     expect(log).toHaveBeenCalledWith("AWS role accounts: 111111111111");
     expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);
-    log.mockRestore();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {
@@ -959,5 +966,99 @@ describe("runSandboxStep", () => {
       await runSandboxStep(ENV, deps);
       expect(mocks.writeLateSummary).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("readStepInputs", () => {
+  it("reads every input and checks the rules, before any privileged check", () => {
+    const inputs = readStepInputs(ENV, deps);
+
+    expect(inputs).toMatchObject({
+      actionRef: "v1.2.3",
+      runInput: "echo hello",
+      proxyEngine: "universal",
+      filesystemMode: "persistent",
+      rules: { httpsRules: ["example.com:443"] },
+      annotation,
+    });
+    expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();
+    expect(mocks.readAwsKeyInputs).toHaveBeenCalled();
+    expect(mocks.pinHostCommands).not.toHaveBeenCalled();
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+  });
+});
+
+describe("preflight", () => {
+  it("returns the resolved plan, and starts no proxy", () => {
+    mocks.resolveFilesystemPlan.mockReturnValue({
+      overlayRoots: ["/home/runner"],
+      writeThroughPaths: ["/opt/out"],
+    });
+
+    const plan = preflight(readStepInputs(ENV, deps), ENV, deps);
+
+    expect(plan).toStrictEqual({ overlayRoots: ["/home/runner"], writeThroughPaths: ["/opt/out"] });
+    expect(mocks.readLocalImageOverride).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
+  it("refuses root before checking anything else", () => {
+    mocks.getuid.mockReturnValue(0);
+
+    expect(() => preflight(readStepInputs(ENV, deps), ENV, deps)).toThrow(SandboxError);
+    expect(mocks.validateFilesystemInputs).not.toHaveBeenCalled();
+    expect(mocks.pinHostCommands).not.toHaveBeenCalled();
+  });
+});
+
+describe("finalizeStep", () => {
+  const run = (over: Partial<Parameters<typeof finalizeStep>[0]> = {}) => ({
+    inputs: readStepInputs(ENV, deps),
+    env: ENV,
+    containerName: "buildcage-proxy-deadbeef",
+    stopProxy: vi.fn().mockResolvedValue(undefined),
+    audit: undefined,
+    auditAttached: () => false,
+    mediation: undefined,
+    runnerFilesBackingDir: "/var/tmp/buildcage-runner-files",
+    cancelled: false,
+    ...over,
+  });
+
+  it("reports, then stops the proxy, with nothing to write back", async () => {
+    const step = run();
+
+    expect(await finalizeStep(step, deps)).toBe(false);
+
+    expect(mocks.readBackingFile).not.toHaveBeenCalled();
+    expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
+    expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(vi.mocked(step.stopProxy)));
+    expect(mocks.writeLateSummary).not.toHaveBeenCalled();
+  });
+
+  it("says a runner file it could not write back failed the step, and still reports", async () => {
+    mocks.writeRunnerFile.mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+    const mediation = {
+      envOverrides: {},
+      mounts: [],
+      maskedPaths: [],
+      files: [
+        {
+          variable: "GITHUB_OUTPUT" as const,
+          realPath: ENV.GITHUB_OUTPUT,
+          backingPath: "/b/GITHUB_OUTPUT",
+        },
+      ],
+    };
+
+    const failed = await finalizeStep(run({ mediation }), deps);
+
+    expect(annotation.error).toHaveBeenCalledWith(
+      "$GITHUB_OUTPUT could not be written: EACCES; failing the step",
+    );
+    expect(failed).toBe(true);
+    expect(mocks.reportStepTraffic).toHaveBeenCalled();
   });
 });

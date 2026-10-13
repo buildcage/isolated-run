@@ -73990,6 +73990,8 @@ const realDeps = {
 	createAnnotation,
 	resolveFilesystemPlan,
 	pinHostCommands,
+	realPathOf,
+	getuid: process.getuid,
 	readLocalImageOverride,
 	verifyImageDigestOrThrow,
 	checkUrlAndTlsRuleSupport,
@@ -74035,9 +74037,7 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 function writeBackMediatedFile(file, annotation, deps) {
-	let fail = (reason) => {
-		annotation.error(`$${file.variable} ${reason}; failing the step`), process.exitCode = 1;
-	}, read = deps.readBackingFile(file.backingPath), content = Buffer.alloc(0), failure;
+	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), read = deps.readBackingFile(file.backingPath), content = Buffer.alloc(0), failure;
 	if ("reason" in read) failure = read.reason;
 	else if ("bytes" in read) {
 		if (file.variable === "GITHUB_OUTPUT") {
@@ -74048,72 +74048,168 @@ function writeBackMediatedFile(file, annotation, deps) {
 	try {
 		deps.writeRunnerFile(file.realPath, content);
 	} catch (e) {
-		fail(`could not be written: ${errorMessage(e)}`);
-		return;
+		return fail(`could not be written: ${errorMessage(e)}`);
 	}
-	failure && fail(failure);
+	return failure ? fail(failure) : !1;
 }
-async function runSandboxStep(env, overrides = {}) {
-	let { applyConfigFile, readRunCommand, readProxyInputs, readFilesystemInputs, readFilesystemAuditInput, readFilesystemAuditArtifactInputs, readRuleInputs, readFailOnCaResidue, readFailOnBlocked, readAwsKeyInputs, readTrafficArtifactInputs, saveWriteThroughForPost, validateFilesystemInputs, checkScratchBaseParent, checkPasswordlessSudo, checkOverlayfsSupport, checkFilesystemAuditHost, createAnnotation, resolveFilesystemPlan, pinHostCommands, readLocalImageOverride, verifyImageDigestOrThrow, checkUrlAndTlsRuleSupport, checkKnownBlockedUrlRuleSupport, logRules, withLogGroup, generateContainerName, getContainerNetns, startSandboxProxy, stopSandboxProxy, runSandboxedCommand, reportStepTraffic, writeLateSummary, prepareStepFilesystemAudit, mediateRunnerOutputFiles, readBackingFile, removeBackingDir, writeRunnerFile, setTrafficArtifactOutput, setFilesystemAuditOutput, onCancel, saveState, info, log, notice, warn } = {
-		...realDeps,
-		...overrides
-	}, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = applyConfigFile(env, CONFIG_FILE_INPUTS);
+function readStepInputs(env, deps) {
+	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
 	for (let line of configFile?.summary ?? []) log(line);
-	let runInput = readRunCommand(), { proxyEngine, proxyMode } = readProxyInputs();
+	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = readFilesystemInputs(notice), filesystemAudit = readFilesystemAuditInput(), filesystemAuditArtifact = readFilesystemAuditArtifactInputs();
-	checkScratchBaseParent(), configFile && saveWriteThroughForPost(env, writeThroughInput);
-	let failOnCaResidue = readFailOnCaResidue(), failOnBlocked = readFailOnBlocked(), trafficArtifact = readTrafficArtifactInputs(), { httpsRules, httpRules, ipRules, urlRules, tlsRules, knownBlockedRules } = readRuleInputs(), annotation = createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), checkUrlAndTlsRuleSupport({
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
+	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
+	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change.");
+	let { urlRules, tlsRules, knownBlockedRules } = rules;
+	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
 		proxyMode,
 		urlRules,
 		tlsRules
-	}, annotation.warning), checkKnownBlockedUrlRuleSupport({
+	}, annotation.warning), deps.checkKnownBlockedUrlRuleSupport({
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning);
-	let aws = readAwsKeyInputs({ proxyEngine }, env);
-	assertNonRootUid(process.getuid());
+	}, annotation.warning), {
+		actionRef,
+		reportActionRef,
+		actionRepo,
+		runInput,
+		proxyEngine,
+		proxyMode,
+		filesystemMode,
+		writeThroughInput,
+		filesystemAudit,
+		filesystemAuditArtifact,
+		failOnCaResidue,
+		failOnBlocked,
+		trafficArtifact,
+		rules,
+		annotation,
+		aws: deps.readAwsKeyInputs({ proxyEngine }, env)
+	};
+}
+function preflight({ filesystemMode, writeThroughInput, filesystemAudit, annotation }, env, deps) {
+	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
-	validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), pinHostCommands(pinningPaths(() => writeThroughInput, env), env), checkPasswordlessSudo(), filesystemMode === "ephemeral" && checkOverlayfsSupport(), filesystemAudit === "record" && checkFilesystemAuditHost();
-	let { overlayRoots, writeThroughPaths } = resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn });
-	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) info(line);
-	let localOverride = await readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	let { overlayRoots, writeThroughPaths } = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn: deps.warn });
+	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, overlayRoots, writeThroughPaths)) deps.info(line);
+	return {
+		overlayRoots,
+		writeThroughPaths
+	};
+}
+async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {
+	let localOverride = await deps.readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 		actionRef,
 		actionRepo,
 		proxyEngine
-	}, {
-		verifyImageDigestOrThrow,
-		log
+	}, deps);
+	return deps.log(`buildcage: proxy image: ${imageRef}`), {
+		imageRef,
+		pullPolicy,
+		composeFile: resolveComposeFile(localOverride)
+	};
+}
+function logConfiguredRules({ rules, aws }, deps) {
+	deps.withLogGroup("buildcage: Configured ACL Rules", () => {
+		deps.logRules("HTTPS", rules.httpsRules), deps.logRules("HTTP", rules.httpRules), deps.logRules("IP", rules.ipRules), deps.logRules("URL", rules.urlRules), deps.logRules("TLS", rules.tlsRules), deps.logRules("Known-blocked (informational only, not sent to proxy ACL)", rules.knownBlockedRules), aws.key && deps.log("AWS access key check: on"), aws.roleAccounts.length > 0 && deps.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
 	});
-	log(`buildcage: proxy image: ${imageRef}`);
-	let composeFile = resolveComposeFile(localOverride);
-	withLogGroup("buildcage: Configured ACL Rules", () => {
-		logRules("HTTPS", httpsRules), logRules("HTTP", httpRules), logRules("IP", ipRules), logRules("URL", urlRules), logRules("TLS", tlsRules), logRules("Known-blocked (informational only, not sent to proxy ACL)", knownBlockedRules), aws.key && console.log("AWS access key check: on"), aws.roleAccounts.length > 0 && console.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
+}
+async function finalizeStep(run, deps) {
+	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1;
+	if (mediation) {
+		for (let file of mediation.files) writeBackMediatedFile(file, annotation, deps) && (runnerFileFailed = !0);
+		try {
+			deps.removeBackingDir(runnerFilesBackingDir);
+		} catch (e) {
+			deps.warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
+		}
+	}
+	for (let set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) try {
+		set("");
+	} catch {}
+	let prepareAudit = () => deps.prepareStepFilesystemAudit({
+		audit,
+		attached: run.auditAttached(),
+		upload: inputs.filesystemAuditArtifact.upload,
+		retentionDays: inputs.filesystemAuditArtifact.retentionDays,
+		containerName,
+		annotation,
+		env,
+		actionRepo,
+		actionRef: reportActionRef,
+		failClosed: proxyMode !== "audit" && failOnBlocked
+	}), filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await deps.reportStepTraffic({
+		containerName,
+		proxyEngine: inputs.proxyEngine,
+		parameters: {
+			mode: proxyMode,
+			allowedHttpsRules: rules.httpsRules,
+			allowedHttpRules: rules.httpRules,
+			allowedIpRules: rules.ipRules,
+			allowedTlsRules: rules.tlsRules,
+			allowedUrlRules: rules.urlRules,
+			knownBlockedRules: rules.knownBlockedRules
+		},
+		annotation,
+		actionRepo,
+		actionRef: reportActionRef,
+		runCommand: inputs.runInput,
+		extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+		failOnBlocked,
+		trafficArtifact: inputs.trafficArtifact,
+		env,
+		moreBlocks: filesystemReport?.blocks,
+		processActivity,
+		closeSummary: !(cancelled && processActivity)
 	});
-	let containerName = generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
+	if (cancelled && processActivity) {
+		let late = await prepareAudit();
+		await deps.writeLateSummary(late.blocks(startedAt), {
+			reported,
+			actionRepo,
+			isAudit: proxyMode === "audit",
+			env,
+			annotation
+		});
+	}
+	return await run.stopProxy(), runnerFileFailed;
+}
+async function runSandboxStep(env, overrides = {}) {
+	let deps = {
+		...realDeps,
+		...overrides
+	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+	logConfiguredRules(inputs, deps);
+	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
 		containerName,
 		filesystemMode,
 		overlayRoots
-	}, saveState);
+	}, deps.saveState);
 	let composeEnv = buildComposeEnv({
 		containerName,
 		proxyMode,
 		proxyEngine,
 		imageRef,
-		httpsRules,
-		httpRules,
-		ipRules,
-		urlRules,
-		tlsRules,
+		httpsRules: rules.httpsRules,
+		httpRules: rules.httpRules,
+		ipRules: rules.ipRules,
+		urlRules: rules.urlRules,
+		tlsRules: rules.tlsRules,
 		awsKey: aws.key,
 		awsRoleAccounts: aws.roleAccounts
-	}, env);
+	}, env), stopProxy = () => deps.stopSandboxProxy({
+		composeFile,
+		projectName,
+		composeEnv,
+		annotation
+	});
 	try {
-		await startSandboxProxy({
+		await deps.startSandboxProxy({
 			composeFile,
 			projectName,
 			containerName,
@@ -74121,20 +74217,15 @@ async function runSandboxStep(env, overrides = {}) {
 			composeEnv
 		});
 	} catch (e) {
-		throw await stopSandboxProxy({
-			composeFile,
-			projectName,
-			composeEnv,
-			annotation
-		}), e;
+		throw await stopProxy(), e;
 	}
-	let cancel = new AbortController(), stopListening = onCancel(() => {
-		cancel.signal.aborted || (info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
+	let cancel = new AbortController(), stopListening = deps.onCancel(() => {
+		cancel.signal.aborted || (deps.info("buildcage: the step was cancelled; stopping the sandbox"), cancel.abort());
 	}), runnerFilesBackingDir = runnerFilesDirFor(containerName), mediation, exitCode = 1, auditAttached = !1;
 	try {
-		let proxyNetns = getContainerNetns(containerName);
+		let proxyNetns = deps.getContainerNetns(containerName);
 		if (proxyNetns === null) throw new SandboxError(`Sandbox proxy container ${containerName} is not running.`, "PROXY_NOT_RUNNING");
-		mediation = mediateRunnerOutputFiles(env, runnerFilesBackingDir), exitCode = await runSandboxedCommand({
+		mediation = deps.mediateRunnerOutputFiles(env, runnerFilesBackingDir), exitCode = await deps.runSandboxedCommand({
 			containerName,
 			proxyNetns,
 			runInput,
@@ -74146,74 +74237,24 @@ async function runSandboxStep(env, overrides = {}) {
 			failOnCaResidue,
 			filesystemAudit: audit,
 			onAuditAttached: () => auditAttached = !0,
-			warn,
+			warn: deps.warn,
 			cancel: cancel.signal,
 			internalMounts: mediation?.mounts,
 			maskedPaths: mediation?.maskedPaths,
 			envOverrides: mediation?.envOverrides
 		});
 	} finally {
-		if (mediation) {
-			for (let file of mediation.files) writeBackMediatedFile(file, annotation, {
-				readBackingFile,
-				writeRunnerFile
-			});
-			try {
-				removeBackingDir(runnerFilesBackingDir);
-			} catch (e) {
-				warn(`Could not remove ${runnerFilesBackingDir}: ${errorMessage(e)}`);
-			}
-		}
-		for (let set of [setTrafficArtifactOutput, setFilesystemAuditOutput]) try {
-			set("");
-		} catch {}
-		let prepareAudit = () => prepareStepFilesystemAudit({
+		await finalizeStep({
+			inputs,
+			env,
+			containerName,
+			stopProxy,
 			audit,
-			attached: auditAttached,
-			upload: filesystemAuditArtifact.upload,
-			retentionDays: filesystemAuditArtifact.retentionDays,
-			containerName,
-			annotation,
-			env,
-			actionRepo,
-			actionRef: reportActionRef,
-			failClosed: proxyMode !== "audit" && failOnBlocked
-		}), cancelled = cancel.signal.aborted, filesystemReport = cancelled ? void 0 : await prepareAudit(), processActivity = audit !== void 0, { startedAt, reported } = await reportStepTraffic({
-			containerName,
-			proxyEngine,
-			parameters: {
-				mode: proxyMode,
-				allowedHttpsRules: httpsRules,
-				allowedHttpRules: httpRules,
-				allowedIpRules: ipRules,
-				allowedTlsRules: tlsRules,
-				allowedUrlRules: urlRules,
-				knownBlockedRules
-			},
-			annotation,
-			actionRepo,
-			actionRef: reportActionRef,
-			runCommand: runInput,
-			extraInputs: (report) => awsExampleInputs(aws, report.timeline),
-			failOnBlocked,
-			trafficArtifact,
-			env,
-			moreBlocks: filesystemReport?.blocks,
-			processActivity,
-			closeSummary: !(cancelled && processActivity)
-		});
-		cancelled && processActivity && await writeLateSummary((await prepareAudit()).blocks(startedAt), {
-			reported,
-			actionRepo,
-			isAudit: proxyMode === "audit",
-			env,
-			annotation
-		}), await stopSandboxProxy({
-			composeFile,
-			projectName,
-			composeEnv,
-			annotation
-		}), stopListening();
+			auditAttached: () => auditAttached,
+			mediation,
+			runnerFilesBackingDir,
+			cancelled: cancel.signal.aborted
+		}, deps) && (process.exitCode = 1), stopListening();
 	}
 	return exitCode;
 }
