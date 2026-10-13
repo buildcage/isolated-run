@@ -48,10 +48,13 @@ node -e '
 ' "$WORKDIR" PATH HOME BC_MULTILINE BC_EQUALS BC_SPACES BC_DOLLAR BC_EMPTY
 
 RUN_INPUT=$(cat <<'SANDBOX'
-# Holds the bundle on disk long enough for the host side to grab this run's
-# config.json while it still exists (the mask means the sandbox can't reach
-# it to check the contents itself).
-sleep 2
+# Holds the bundle on disk until the host side has grabbed this run's
+# config.json (the mask means the sandbox can't reach it to check the contents
+# itself). The host drops ./config-captured into the workspace once it has.
+for _ in $(seq 1 300); do
+  [ -e ./config-captured ] && break
+  sleep 0.1
+done
 
 fail=0
 BASE="/var/tmp/buildcage-$(id -u)"
@@ -133,6 +136,8 @@ for _ in $(seq 1 300); do
   fi
   sleep 0.1
 done
+# Captured or not, so the sandbox does not sit out its whole wait.
+touch "$WORKDIR/config-captured"
 
 wait "$NODE_PID"
 CODE=$?

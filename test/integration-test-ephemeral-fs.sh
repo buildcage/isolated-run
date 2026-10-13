@@ -5,7 +5,8 @@
 # nothing there sets filesystem_mode: at all.
 # The mount-composition/path-resolution rules themselves are already
 # unit-tested (ephemeral-fs.test.ts, oci-config.test.ts); this proves runc
-# actually honors them.
+# actually honors them. The mediated $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY
+# are checked in integration-test-file-commands.sh.
 #
 # One case is left out on purpose: the clear error an overlay probe failure
 # raises isn't exercised here, because it needs an environment where
@@ -52,261 +53,164 @@ echo ""
 # because the base already exists in the right shape.
 sudo rm -rf "/var/tmp/buildcage-$(id -u)"
 
-# --- Case 1+6: $HOME writes (create + delete) during the step never reach
-# the host, whether or not the sandbox itself observes them mid-step.
+# --- Without write_through, one sandbox for every check, since a start is not
+# cheap; the UNEXPECTED lines in out.log say which in-sandbox check gave way.
+# - $HOME writes (create + delete) never reach the host.
+# - A host mount nested under an overlay root, here the workspace under /tmp,
+#   is seen with its contents and written to without the writes reaching the
+#   host. Both a separate filesystem and a bind of the same one, since
+#   overlayfs hides either, plus a mount whose path is longer than one file
+#   name may be.
+# - /tmp and $HOME keep the host's owner and mode, /tmp's root 1777 included,
+#   and a file made under /tmp does not reach the host.
+# - The setup log shows the folded ephemeral paths and a discard line.
+# - The scratch dir (including the overlay upper/work dirs) is fully cleaned
+#   up, compared by listing rather than by the randomly generated name.
 HOME_MARKER="$HOME/.buildcage-ephemeral-test-marker"
 HOME_PRELOADED="$HOME/.buildcage-ephemeral-test-preloaded"
 rm -f "$HOME_MARKER" "$HOME_PRELOADED"
 echo "pre-existing-on-host" >"$HOME_PRELOADED"
-CASE1=$(mktemp -d)
-run_ephemeral "$CASE1" "" '
+TMP_MARKER="/tmp/.buildcage-ephemeral-tmp-marker-$$"
+HOST_ATTRS="$(stat -c '%u:%g %a' /tmp) $(stat -c '%u:%g %a' "$HOME")"
+NONE=$(mktemp -d)
+BIND_SRC=$(mktemp -d)
+DEEP=$(printf 'd%.0s' {1..100})
+DEEP="$DEEP/$DEEP/$DEEP/deep"
+mkdir -p "$NONE/tool" "$NONE/bound" "$NONE/$DEEP"
+sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$NONE/tool"
+sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$NONE/$DEEP"
+echo tool >"$NONE/tool/present"
+echo deep >"$NONE/$DEEP/present"
+echo bound >"$BIND_SRC/present"
+sudo -n mount --bind "$BIND_SRC" "$NONE/bound"
+SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
+BEFORE=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
+BC_DEEP="$DEEP" BC_HOST_ATTRS="$HOST_ATTRS" BC_TMP_MARKER="$TMP_MARKER" \
+  run_ephemeral "$NONE" "" 'rc=0
 touch "$HOME/.buildcage-ephemeral-test-marker"
 rm -f "$HOME/.buildcage-ephemeral-test-preloaded"
-'
-CODE1=$(cat "$CASE1/exit_code")
-if [ "$CODE1" = "0" ] && [ ! -e "$HOME_MARKER" ]; then
+for dir in "$GITHUB_WORKSPACE/tool" "$GITHUB_WORKSPACE/bound" "$GITHUB_WORKSPACE/$BC_DEEP"; do
+  [ -f "$dir/present" ] || { echo "UNEXPECTED: $dir/present not visible"; rc=1; }
+  echo x >"$dir/written" || { echo "UNEXPECTED: $dir not writable"; rc=1; }
+done
+attrs="$(stat -c "%u:%g %a" /tmp) $(stat -c "%u:%g %a" "$HOME")"
+[ "$attrs" = "$BC_HOST_ATTRS" ] || { echo "UNEXPECTED: $attrs, host has $BC_HOST_ATTRS"; rc=1; }
+echo x >"$BC_TMP_MARKER"
+exit $rc'
+CODE_NONE=$(cat "$NONE/exit_code")
+AFTER=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
+LOG_NONE="$NONE/out.log"
+FAILURES_BEFORE_NONE=$FAILURES
+# The leak checks below need the command to have run, or an absent marker
+# would pass them untested.
+if [ "$CODE_NONE" = "0" ]; then
+  pass "a host mount under an overlay root is visible and writable, and /tmp and \$HOME keep the host's owner and mode"
+else
+  fail "a check inside the sandbox gave way (exit $CODE_NONE)"
+fi
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$HOME_MARKER" ]; then
   pass "a file created under \$HOME during the step is not on the host afterwards"
 else
-  fail "a file created under \$HOME during the step leaked to the host (exit $CODE1) -- see $CASE1/out.log"
-  cat "$CASE1/out.log"
+  fail "a file created under \$HOME during the step leaked to the host"
 fi
-if [ -f "$HOME_PRELOADED" ] && [ "$(cat "$HOME_PRELOADED")" = "pre-existing-on-host" ]; then
+if [ "$CODE_NONE" = "0" ] && [ -f "$HOME_PRELOADED" ] &&
+  [ "$(cat "$HOME_PRELOADED")" = "pre-existing-on-host" ]; then
   pass "deleting a pre-existing \$HOME file inside the sandbox does not delete it on the host"
 else
   fail "a pre-existing \$HOME file was actually removed from the host by an in-sandbox delete"
 fi
-rm -f "$HOME_MARKER" "$HOME_PRELOADED"
-rm -rf "$CASE1"
-
-# --- Case 2: $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY are mediated, so a write
-# reaches the runner even in ephemeral with no write_through: entry -- the host
-# writes the real files from the backing copies after the step. Placed under
-# RUNNER_TEMP (as they are for real). GITHUB_ENV is read-only rather than
-# mediated; see integration-test-file-commands.sh.
-CASE2=$(mktemp -d)
-GITHUB_OUTPUT_FILE2=$(mktemp)
-GITHUB_SUMMARY_FILE2=$(mktemp)
-touch "$CASE2/state.env"
-# Not via run_ephemeral: GITHUB_OUTPUT/RUNNER_TEMP need to be set together
-# below, unlike its fixed default env.
-GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE2" \
-GITHUB_WORKSPACE="$CASE2" \
-GITHUB_STATE="$CASE2/state.env" \
-GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE2" \
-RUNNER_TEMP="$(dirname "$GITHUB_OUTPUT_FILE2")" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_FILESYSTEM_MODE="ephemeral" \
-INPUT_WRITE_THROUGH="" \
-INPUT_RUN='echo "mediated_output=1" >> "$GITHUB_OUTPUT"
-echo "MEDIATED_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
-  node "$REPO_ROOT/dist/main.cjs" >"$CASE2/out.log" 2>&1
-CODE2=$?
-if [ "$CODE2" = "0" ] &&
-  grep -q "mediated_output=1" "$GITHUB_OUTPUT_FILE2" &&
-  grep -q MEDIATED_SUMMARY "$GITHUB_SUMMARY_FILE2"; then
-  pass "ephemeral: \$GITHUB_OUTPUT and \$GITHUB_STEP_SUMMARY are mediated back with no write_through: entry"
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$NONE/tool/written" ] && [ ! -e "$BIND_SRC/written" ] &&
+  [ ! -e "$NONE/$DEEP/written" ]; then
+  pass "writes to a host mount under an overlay root are discarded"
 else
-  fail "ephemeral: mediated files were not reflected afterwards (exit $CODE2) -- see $CASE2/out.log"
-  cat "$CASE2/out.log"
+  fail "a write to a host mount under an overlay root reached the host"
 fi
-rm -rf "$CASE2" "$GITHUB_OUTPUT_FILE2" "$GITHUB_SUMMARY_FILE2"
-
-# Case 3: write_through: persists $GITHUB_ENV (still a write_through file),
-# while $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY reach the runner through the
-# mediation without an entry, and this action's own report lands in the summary
-# alongside the command's markdown.
-CASE3=$(mktemp -d)
-GITHUB_ENV_FILE3=$(mktemp)
-GITHUB_OUTPUT_FILE3=$(mktemp)
-GITHUB_SUMMARY_FILE3=$(mktemp)
-touch "$CASE3/state.env"
-FAILURES_BEFORE3=$FAILURES
-GITHUB_ENV="$GITHUB_ENV_FILE3" \
-GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE3" \
-GITHUB_WORKSPACE="$CASE3" \
-GITHUB_STATE="$CASE3/state.env" \
-GITHUB_STEP_SUMMARY="$GITHUB_SUMMARY_FILE3" \
-RUNNER_TEMP="$(dirname "$GITHUB_ENV_FILE3")" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_FILESYSTEM_MODE="ephemeral" \
-INPUT_WRITE_THROUGH='$GITHUB_ENV' \
-INPUT_RUN='echo "SHOULD_PERSIST=1" >> "$GITHUB_ENV"
-echo "persisted_output=1" >> "$GITHUB_OUTPUT"
-echo "SHOULD_PERSIST_SUMMARY" >> "$GITHUB_STEP_SUMMARY"' \
-  node "$REPO_ROOT/dist/main.cjs" >"$CASE3/out.log" 2>&1
-CODE3=$?
-if [ "$CODE3" != "0" ]; then
-  fail "the write_through: step itself failed (exit $CODE3) -- see $CASE3/out.log"
-fi
-if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST "$GITHUB_ENV_FILE3"; then
-  pass "write_through: \$GITHUB_ENV persists an append to it"
+if [ "$CODE_NONE" = "0" ] && [ ! -e "$TMP_MARKER" ]; then
+  pass "a write to /tmp is discarded"
 else
-  fail "write_through: \$GITHUB_ENV did not persist the append"
+  fail "a write to /tmp reached the host"
 fi
-if [ "$CODE3" = "0" ] && grep -q "persisted_output=1" "$GITHUB_OUTPUT_FILE3"; then
-  pass "\$GITHUB_OUTPUT is mediated back beside a write_through: entry"
+if grep -q "^Filesystem mode: ephemeral$" "$LOG_NONE" &&
+  grep -q "^Ephemeral (writes discarded at step end): $HOME$" "$LOG_NONE"; then
+  pass "setup log shows the folded ephemeral paths"
 else
-  fail "\$GITHUB_OUTPUT was not mediated back"
+  fail "setup log is missing the expected filesystem-mode lines"
 fi
-# The report is written from the host after the sandbox exits, so the command's
-# markdown ends up alongside it rather than in place of it.
-if [ "$CODE3" = "0" ] && grep -q SHOULD_PERSIST_SUMMARY "$GITHUB_SUMMARY_FILE3" && grep -q "^## " "$GITHUB_SUMMARY_FILE3"; then
-  pass "\$GITHUB_STEP_SUMMARY carries the command's markdown next to this action's report"
-else
-  fail "\$GITHUB_STEP_SUMMARY did not carry the command's markdown next to the report"
-fi
-if [ "$FAILURES" != "$FAILURES_BEFORE3" ]; then
-  cat "$CASE3/out.log"
-fi
-rm -rf "$CASE3" "$GITHUB_ENV_FILE3" "$GITHUB_OUTPUT_FILE3" "$GITHUB_SUMMARY_FILE3"
-
-# --- Case 4: a missing write_through target under a runner-owned tree
-# ($GITHUB_WORKSPACE) is created runner-owned, and the write persists.
-CASE4=$(mktemp -d)
-run_ephemeral "$CASE4" "./dist" '
-mkdir -p "$GITHUB_WORKSPACE/dist"
-echo "built" > "$GITHUB_WORKSPACE/dist/output.txt"
-'
-CODE4=$(cat "$CASE4/exit_code")
-if [ "$CODE4" = "0" ] && [ -f "$CASE4/dist/output.txt" ]; then
-  pass "write_through: ./dist creates the missing dir runner-owned and persists writes under it"
-else
-  fail "write_through: ./dist did not persist the write (exit $CODE4) -- see $CASE4/out.log"
-  cat "$CASE4/out.log"
-fi
-rm -rf "$CASE4"
-
-# --- Case 4b: a missing write_through target under a tree the runner can't
-# write fails the step before the command runs, and nothing is created.
-# Uses a throwaway /etc subdirectory; needs sudo to clean up in case a
-# failure leaves it behind.
-ETC_TARGET="/etc/buildcage-ephemeral-test-$$"
-sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
-CASE4B=$(mktemp -d)
-run_ephemeral "$CASE4B" "$ETC_TARGET" 'echo UNEXPECTED: the command ran'
-CODE4B=$(cat "$CASE4B/exit_code")
-if [ "$CODE4B" != "0" ] && [ ! -e "$ETC_TARGET" ] &&
-  grep -q "the runner can't create it under \"/etc\"" "$CASE4B/out.log" &&
-  ! grep -q "UNEXPECTED" "$CASE4B/out.log"; then
-  pass "write_through: a missing target under a tree the runner can't write fails the step and creates nothing"
-else
-  fail "write_through: a root-owned missing target did not behave as expected (exit $CODE4B) -- see $CASE4B/out.log"
-  cat "$CASE4B/out.log"
-fi
-sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
-rm -rf "$CASE4B"
-
-# --- Case 5: an existing, already-writable-by-the-runner directory named
-# in write_through: (not one of the fixed overlay candidates) persists writes.
-# Matches integration-test-writable-dir.sh's own use of /opt as a directory
-# CI images make writable by the runner user.
-CASE5=$(mktemp -d)
-rm -f /opt/.buildcage-ephemeral-allow-write-test
-run_ephemeral "$CASE5" "/opt" '
-echo x > /opt/.buildcage-ephemeral-allow-write-test
-'
-CODE5=$(cat "$CASE5/exit_code")
-if [ "$CODE5" = "0" ] && [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
-  pass "write_through: /opt persists a write to an existing, already-writable directory"
-else
-  fail "write_through: /opt did not persist the write (exit $CODE5) -- see $CASE5/out.log"
-  cat "$CASE5/out.log"
-fi
-rm -f /opt/.buildcage-ephemeral-allow-write-test
-rm -rf "$CASE5"
-
-# --- Case 7+8: setup log shows the folded ephemeral/persisted paths, and a
-# discard line is logged before the scratch dir (incl. its upper/work
-# dirs) is removed.
-CASE7=$(mktemp -d)
-run_ephemeral "$CASE7" "\$GITHUB_WORKSPACE" 'true'
-CODE7=$(cat "$CASE7/exit_code")
-LOG7="$CASE7/out.log"
-if [ "$CODE7" = "0" ] &&
-  grep -q "^Filesystem mode: ephemeral$" "$LOG7" &&
-  grep -q "^Ephemeral (writes discarded at step end): $HOME$" "$LOG7" &&
-  grep -q "^Writable (persisted): *$CASE7$" "$LOG7"; then
-  pass "setup log shows the folded ephemeral and persisted paths"
-else
-  fail "setup log is missing the expected filesystem-mode lines (exit $CODE7) -- see $LOG7"
-  cat "$LOG7"
-fi
-if grep -q "^Discarded ephemeral writes under .*$HOME" "$LOG7"; then
+if grep -q "^Discarded ephemeral writes under .*$HOME" "$LOG_NONE"; then
   pass "a discard line is logged for the ephemeral overlay roots"
 else
-  fail "no discard line was logged for the ephemeral overlay roots -- see $LOG7"
+  fail "no discard line was logged for the ephemeral overlay roots"
 fi
-rm -rf "$CASE7"
-
-# --- Case 9: the scratch dir (including the overlay upper/work dirs) is
-# fully cleaned up afterwards, no directory left behind under
-# SANDBOX_SCRATCH_BASE from this run. Compares the directory listing
-# before/after rather than relying on knowing the (randomly generated)
-# container name.
-SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
-BEFORE=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
-CASE9=$(mktemp -d)
-run_ephemeral "$CASE9" "" 'true'
-CODE9=$(cat "$CASE9/exit_code")
-AFTER=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
-if [ "$CODE9" = "0" ] && [ "$BEFORE" = "$AFTER" ]; then
+if [ "$BEFORE" = "$AFTER" ]; then
   pass "the run's scratch dir (including overlay upper/work) is fully cleaned up afterwards"
 else
   fail "the run's scratch dir was not fully cleaned up -- before/after $SCRATCH_BASE listings differ"
   echo "before: $BEFORE"
   echo "after:  $AFTER"
 fi
-rm -rf "$CASE9"
+if [ "$FAILURES" != "$FAILURES_BEFORE_NONE" ]; then
+  cat "$LOG_NONE"
+fi
+sudo -n umount "$NONE/tool" "$NONE/bound" "$NONE/$DEEP"
+rm -rf "$NONE" "$BIND_SRC"
+rm -f "$HOME_MARKER" "$HOME_PRELOADED" "$TMP_MARKER"
 
-# --- Case 10: a host mount nested under an overlay root, here the workspace
-# under /tmp, is seen with its contents and written to without the writes
-# reaching the host. Both a separate filesystem and a bind of the same one,
-# since overlayfs hides either, plus a mount whose path is longer than one
-# file name may be.
-CASE10=$(mktemp -d)
-BIND_SRC=$(mktemp -d)
-DEEP=$(printf 'd%.0s' {1..100})
-DEEP="$DEEP/$DEEP/$DEEP/deep"
-mkdir -p "$CASE10/tool" "$CASE10/bound" "$CASE10/$DEEP"
-sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$CASE10/tool"
-sudo -n mount -t tmpfs -o "mode=0777" tmpfs "$CASE10/$DEEP"
-echo tool >"$CASE10/tool/present"
-echo deep >"$CASE10/$DEEP/present"
-echo bound >"$BIND_SRC/present"
-sudo -n mount --bind "$BIND_SRC" "$CASE10/bound"
-run_ephemeral "$CASE10" "" 'rc=0
-for dir in "$GITHUB_WORKSPACE/tool" "$GITHUB_WORKSPACE/bound" "$GITHUB_WORKSPACE/'"$DEEP"'"; do
-  [ -f "$dir/present" ] || { echo "UNEXPECTED: $dir/present not visible"; rc=1; }
-  echo x >"$dir/written" || { echo "UNEXPECTED: $dir not writable"; rc=1; }
-done
+# --- write_through: a missing target under a runner-owned tree
+# ($GITHUB_WORKSPACE) is created runner-owned, and an existing directory the
+# runner can already write that is not one of the fixed overlay candidates
+# (CI images make /opt writable by the runner user) persists writes too.
+THROUGH=$(mktemp -d)
+rm -f /opt/.buildcage-ephemeral-allow-write-test
+run_ephemeral "$THROUGH" "./dist
+/opt" 'rc=0
+echo "built" > "$GITHUB_WORKSPACE/dist/output.txt" || rc=1
+echo x > /opt/.buildcage-ephemeral-allow-write-test || rc=1
 exit $rc'
-CODE10=$(cat "$CASE10/exit_code")
-if [ "$CODE10" = "0" ] && [ ! -e "$CASE10/tool/written" ] && [ ! -e "$BIND_SRC/written" ] &&
-  [ ! -e "$CASE10/$DEEP/written" ]; then
-  pass "a host mount under an overlay root is visible and writable, and its writes are discarded"
+CODE_THROUGH=$(cat "$THROUGH/exit_code")
+LOG_THROUGH="$THROUGH/out.log"
+FAILURES_BEFORE_THROUGH=$FAILURES
+check_status "write_through: ./dist and /opt: the step held" "$CODE_THROUGH" 0
+# A file on the host is itself the proof it persisted, so each entry is judged
+# on its own whatever the other did.
+if [ -f "$THROUGH/dist/output.txt" ]; then
+  pass "write_through: ./dist creates the missing dir runner-owned and persists writes under it"
 else
-  fail "a host mount under an overlay root was hidden, unwritable, or kept its writes (exit $CODE10) -- see $CASE10/out.log"
-  cat "$CASE10/out.log"
+  fail "write_through: ./dist did not persist the write"
 fi
-sudo -n umount "$CASE10/tool" "$CASE10/bound" "$CASE10/$DEEP"
-rm -rf "$CASE10" "$BIND_SRC"
+if [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
+  pass "write_through: /opt persists a write to an existing, already-writable directory"
+else
+  fail "write_through: /opt did not persist the write"
+fi
+if grep -q "^Writable (persisted): *$THROUGH/dist$" "$LOG_THROUGH" &&
+  grep -q "^Writable (persisted): */opt$" "$LOG_THROUGH"; then
+  pass "setup log shows the persisted paths"
+else
+  fail "setup log is missing the persisted paths"
+fi
+if [ "$FAILURES" != "$FAILURES_BEFORE_THROUGH" ]; then
+  cat "$LOG_THROUGH"
+fi
+rm -f /opt/.buildcage-ephemeral-allow-write-test
+rm -rf "$THROUGH"
 
-# --- Case 11: an overlay root keeps the host's owner and mode, /tmp's root
-# 1777 included, and a file made under it does not reach the host.
-CASE11=$(mktemp -d)
-TMP_MARKER="/tmp/.buildcage-ephemeral-tmp-marker-$$"
-HOST_ATTRS="$(stat -c '%u:%g %a' /tmp) $(stat -c '%u:%g %a' "$HOME")"
-run_ephemeral "$CASE11" "" "attrs=\"\$(stat -c '%u:%g %a' /tmp) \$(stat -c '%u:%g %a' \"\$HOME\")\"
-[ \"\$attrs\" = '$HOST_ATTRS' ] || { echo \"UNEXPECTED: \$attrs, host has $HOST_ATTRS\"; exit 1; }
-echo x >'$TMP_MARKER'"
-CODE11=$(cat "$CASE11/exit_code")
-if [ "$CODE11" = "0" ] && [ ! -e "$TMP_MARKER" ]; then
-  pass "/tmp and \$HOME keep the host's owner and mode, and a write to /tmp is discarded"
+# --- A missing write_through target under a tree the runner can't write fails
+# the step before the command runs, and nothing is created. Uses a throwaway
+# /etc subdirectory; needs sudo to clean up in case a failure leaves it behind.
+ETC_TARGET="/etc/buildcage-ephemeral-test-$$"
+sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
+REFUSED=$(mktemp -d)
+run_ephemeral "$REFUSED" "$ETC_TARGET" 'echo UNEXPECTED: the command ran'
+CODE_REFUSED=$(cat "$REFUSED/exit_code")
+if [ "$CODE_REFUSED" != "0" ] && [ ! -e "$ETC_TARGET" ] &&
+  grep -q "the runner can't create it under \"/etc\"" "$REFUSED/out.log" &&
+  ! grep -q "UNEXPECTED" "$REFUSED/out.log"; then
+  pass "write_through: a missing target under a tree the runner can't write fails the step and creates nothing"
 else
-  fail "/tmp or \$HOME did not keep the host's owner and mode, or a write to /tmp reached the host (exit $CODE11) -- see $CASE11/out.log"
-  cat "$CASE11/out.log"
+  fail "write_through: a root-owned missing target did not behave as expected (exit $CODE_REFUSED) -- see $REFUSED/out.log"
+  cat "$REFUSED/out.log"
 fi
-rm -rf "$CASE11"
-rm -f "$TMP_MARKER"
+sudo -n rm -rf "$ETC_TARGET" 2>/dev/null
+rm -rf "$REFUSED"
 
 assert_results

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Verifies how the sandbox treats real host mounts, by driving dist/main.cjs
 # directly, without the real action wrapper; see test-e2e.yml's
-# enforcement steps for the one case that does. Two mounts, one sandbox,
+# enforcement steps for the one case that does. Three mounts, one sandbox,
 # since a start is not cheap.
 #
 # The first is a bind mount nested under $GITHUB_WORKSPACE: a separate mount
@@ -15,9 +15,9 @@
 # one from a test is not safe, so this mounts an equivalent at a throwaway
 # location outside every writable exception.
 #
-# A second sandbox runs with $HOME spelled through a symlink and a trailing
-# slash, over a directory that is itself a mount with another under it, as
-# when /home links to /var/home on a separate disk. Both must stay writable.
+# The third is $HOME, spelled through a symlink and a trailing slash, over a
+# directory that is itself a mount with another under it, as when /home links
+# to /var/home on a separate disk. Both must stay writable.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -58,11 +58,12 @@ sudo -n mount --bind "$HOME_SRC" "$HOME_REAL"
 sudo -n mount --bind "$HOME_SUB_SRC" "$HOME_REAL/sub"
 touch "$WORKDIR/state.env" "$WORKDIR/summary.md"
 
-# Both checks run whatever the other one did, so one failure does not hide the
-# other's result.
+# Every check runs whatever the others did, so one failure does not hide the
+# others' results.
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_STATE="$WORKDIR/state.env" \
 GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
+HOME="$HOME_LINK/" \
 BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
 INPUT_RUN="rc=0
 
@@ -96,17 +97,6 @@ else
   esac
 fi
 
-exit \$rc
-" \
-  node dist/main.cjs
-CODE=$?
-
-GITHUB_WORKSPACE="$WORKDIR" \
-GITHUB_STATE="$WORKDIR/state.env" \
-GITHUB_STEP_SUMMARY="$WORKDIR/summary.md" \
-HOME="$HOME_LINK/" \
-BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF" \
-INPUT_RUN="rc=0
 for dir in \"\$HOME\" \"\$HOME/sub\"; do
   if echo x > \"\$dir/.buildcage-home-test\" 2>/dev/null; then
     echo \"OK: \$dir is writable\"
@@ -115,26 +105,23 @@ for dir in \"\$HOME\" \"\$HOME/sub\"; do
     rc=1
   fi
 done
+
 exit \$rc
 " \
   node dist/main.cjs
-HOME_CODE=$?
+CODE=$?
 
 echo ""
 echo "=== Sandbox Read-Only Mount Assertions ==="
 echo ""
-# The step's exit status is the two checks and-ed together, so it is the
-# verdict; the UNEXPECTED line above says which one gave way.
+# The step's exit status is the checks and-ed together, so it is the verdict;
+# the UNEXPECTED line above says which one gave way.
 if [ "$CODE" = "0" ]; then
   echo "  PASS  a real mount nested under workdir is visible and writable"
   echo "  PASS  a real securityfs mount not among runc's own default mounts is forced read-only"
-else
-  echo "  FAIL  a nested mount was not writable, or a mount outside every writable path was not read-only (exit $CODE)"
-fi
-if [ "$HOME_CODE" = "0" ]; then
   echo "  PASS  a mounted \$HOME spelled through a symlink, and a mount under it, are writable"
 else
-  echo "  FAIL  a mounted \$HOME spelled through a symlink, or a mount under it, was not writable (exit $HOME_CODE)"
+  echo "  FAIL  a nested mount or the mounted \$HOME was not writable, or a mount outside every writable path was not read-only (exit $CODE)"
 fi
 echo ""
-[ "$CODE" = "0" ] && [ "$HOME_CODE" = "0" ]
+[ "$CODE" = "0" ]

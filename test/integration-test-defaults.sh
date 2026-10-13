@@ -38,6 +38,11 @@ if touch /opt/.buildcage-writable-test 2>/dev/null; then
   echo UNEXPECTED: /opt was writable without a write_through: entry
   exit 1
 fi
+[ -r /etc/hostname ] || { echo UNEXPECTED: /etc was not readable; exit 1; }
+if touch /etc/.buildcage-writable-test 2>/dev/null; then
+  echo UNEXPECTED: /etc was writable
+  exit 1
+fi
 for withheld in ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL INPUT_RUN; do
   if env | grep -q \"^\${withheld}=\"; then
     echo \"UNEXPECTED: \${withheld} reached the sandbox\"
