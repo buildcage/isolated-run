@@ -694,6 +694,14 @@ describe("runSandboxStep", () => {
       expect(mocks.runSandboxedCommand).not.toHaveBeenCalled();
     });
 
+    it("stops the proxy and stops listening when a report throws", async () => {
+      mocks.reportStepTraffic.mockRejectedValue(new Error("render failed"));
+
+      await expect(runSandboxStep(ENV, deps)).rejects.toThrow("render failed");
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
+      expect(stopListening).toHaveBeenCalledTimes(1);
+    });
+
     it("does not catch a cancel while the proxy is still starting", async () => {
       mocks.startSandboxProxy.mockRejectedValue(new Error("compose up failed"));
 
