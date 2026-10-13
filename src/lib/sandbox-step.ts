@@ -489,8 +489,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failClosed: proxyMode !== "audit" && failOnBlocked,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
-  // upload takes a while, so a cancelled step writes the whole summary first,
-  // its notes naming the artifact the upload after it is to make.
+  // upload takes a while, so a cancelled step writes the whole summary first
+  // and uploads after it. The summary then names the artifact before it exists.
   const artifact = cancelled ? readAudit.expected : await readAudit.upload();
   const processActivity = audit !== undefined;
   await deps.reportStepTraffic({

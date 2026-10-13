@@ -5,13 +5,12 @@ import { join } from "node:path";
 import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vitest";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
-import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
+import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 import {
   openWriter,
-  prepareStepFilesystemAudit,
   readStepFilesystemAudit,
   readLines,
   type FilesystemAuditReportDeps,
@@ -91,11 +90,20 @@ async function reportStepFilesystemAudit(
   d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
 ): Promise<void> {
   const { summaries = [], ...overrides } = d;
-  const blocks = (await prepareStepFilesystemAudit(options, overrides)).blocks(options.startedAt);
+  const blocks = await uploadedBlocks(options, overrides);
   if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
 }
 
-describe("prepareStepFilesystemAudit", () => {
+// Uploads first, as a step that ran to the end does, then renders.
+async function uploadedBlocks(
+  options: FilesystemAuditReportOptions & { startedAt?: number },
+  overrides: Partial<FilesystemAuditReportDeps>,
+): Promise<SummaryBlock[]> {
+  const read = readStepFilesystemAudit(options, overrides);
+  return read.blocks(options.startedAt, await read.upload());
+}
+
+describe("readStepFilesystemAudit", () => {
   const base = {
     upload: true,
     retentionDays: 3,
@@ -272,12 +280,10 @@ describe("prepareStepFilesystemAudit", () => {
         .map((r) => JSON.stringify(r))
         .join("\n"),
     });
-    const blocks = (
-      await prepareStepFilesystemAudit(
-        { ...base, audit: AUDIT, annotation: annotation(), env: {} },
-        d,
-      )
-    ).blocks(undefined);
+    const blocks = await uploadedBlocks(
+      { ...base, audit: AUDIT, annotation: annotation(), env: {} },
+      d,
+    );
 
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
       Array(3).fill(
@@ -480,12 +486,10 @@ describe("prepareStepFilesystemAudit", () => {
 
   it("says the rest is not kept when the artifact could not be uploaded", async () => {
     const { deps: d } = deps({ uploadArtifact: async () => undefined });
-    const blocks = (
-      await prepareStepFilesystemAudit(
-        { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-        d,
-      )
-    ).blocks(undefined);
+    const blocks = await uploadedBlocks(
+      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
 
     expect(blocks.find((b) => b.cut !== "keep")?.notice).toContain(
       "the recording could not be uploaded as an artifact, so the rest is not kept",
@@ -672,7 +676,7 @@ describe("prepareStepFilesystemAudit", () => {
   );
 });
 
-describe("prepareStepFilesystemAudit: failures while reading", () => {
+describe("readStepFilesystemAudit: failures while reading", () => {
   const base = {
     upload: true,
     retentionDays: 3,
@@ -767,7 +771,7 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
   });
 });
 
-describe("prepareStepFilesystemAudit: an upload that throws", () => {
+describe("readStepFilesystemAudit: an upload that throws", () => {
   it("only warns, still sets the output, and says the record is not kept", async () => {
     const note = annotation();
     const {
@@ -795,7 +799,7 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to report the filesystem audit: network down",
+      "Could not upload the filesystem audit artifact: network down",
     );
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toContain("the full record could not be uploaded");

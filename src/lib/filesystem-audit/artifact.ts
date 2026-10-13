@@ -7,16 +7,16 @@ import { errorMessage } from "#core/lib/errors.ts";
 
 import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "../artifact-upload.ts";
 
-/**
- * Upload the recording the tracer already wrote, and return the artifact's
- * name, or undefined on failure. The JSON lines carry absolute paths, so
- * treat the artifact as sensitive. Best-effort: a failed upload only warns.
- */
 /** The name uploadFilesystemAuditArtifact uploads under. */
 export function filesystemAuditArtifactName(containerName: string): string {
   return artifactName("buildcage-filesystem-audit", containerName);
 }
 
+/**
+ * Upload the recording the tracer already wrote, and return the artifact's
+ * name, or undefined on failure. The JSON lines carry absolute paths, so
+ * treat the artifact as sensitive. Best-effort: a failed upload only warns.
+ */
 export async function uploadFilesystemAuditArtifact(
   outPath: string,
   containerName: string,

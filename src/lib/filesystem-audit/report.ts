@@ -178,11 +178,11 @@ export interface StepFilesystemAudit {
 const NONE: StepFilesystemAudit = { blocks: () => [] };
 
 export interface ReadStepFilesystemAudit {
-  /** What the notes are to say of the artifact when the summary is written
-   *  before upload has run: the name it is to be uploaded under. */
+  /** The artifact as it will be once uploaded, for a summary written before
+   *  the upload. */
   expected: RecordArtifact;
-  /** Uploads the stripped copy and sets the output; what came of it is what
-   *  the notes say when the summary is written after. Never throws. */
+  /** Uploads the stripped copy, sets the output and returns the artifact as
+   *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
   /** The audit's Job Summary blocks (see StepFilesystemAudit), their notes
    *  saying `artifact` of the record. */
@@ -254,13 +254,11 @@ export function readStepFilesystemAudit(
     return settled({ blocks: () => unreadableSummaryBlocks() });
   }
   const { summary, summaryError, written } = reduced;
+  const artifactOf = (name: string): RecordArtifact =>
+    !upload ? "not-requested" : name ? { name } : "upload-failed";
   const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
   return {
-    expected: !upload
-      ? "not-requested"
-      : written
-        ? { name: filesystemAuditArtifactName(containerName) }
-        : "upload-failed",
+    expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
     upload: async () => {
       let artifactName = "";
       try {
@@ -268,10 +266,10 @@ export function readStepFilesystemAudit(
           artifactName =
             (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
       } catch (e) {
-        annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
+        annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
       }
       setOutput(artifactName);
-      return !upload ? "not-requested" : artifactName ? { name: artifactName } : "upload-failed";
+      return artifactOf(artifactName);
     },
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
@@ -297,19 +295,6 @@ export function readStepFilesystemAudit(
       return withNotices(rendered, () => notice);
     },
   };
-}
-
-/**
- * Uploads the recording before the Job Summary is written, so a cut section's
- * notice can say whether the artifact holds the rest. Never throws.
- */
-export async function prepareStepFilesystemAudit(
-  options: FilesystemAuditReportOptions,
-  overrides: Partial<FilesystemAuditReportDeps> = {},
-): Promise<StepFilesystemAudit> {
-  const read = readStepFilesystemAudit(options, overrides);
-  const artifact = await read.upload();
-  return { blocks: (startedAt) => read.blocks(startedAt, artifact) };
 }
 
 interface Reduced extends ReducedRecording {

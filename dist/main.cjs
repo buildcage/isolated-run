@@ -70159,17 +70159,17 @@ function readStepFilesystemAudit({ audit, attached, upload, retentionDays, conta
 		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: () => unreadableSummaryBlocks() });
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: () => unreadableSummaryBlocks() })) : settled(NONE);
-	let { summary, summaryError, written } = reduced, guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let { summary, summaryError, written } = reduced, artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
-		expected: upload ? written ? { name: filesystemAuditArtifactName(containerName) } : "upload-failed" : "not-requested",
+		expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
 		upload: async () => {
 			let artifactName = "";
 			try {
 				written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
 			} catch (e) {
-				annotation.warning(`Failed to report the filesystem audit: ${errorMessage(e)}`);
+				annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
 			}
-			return setOutput(artifactName), upload ? artifactName ? { name: artifactName } : "upload-failed" : "not-requested";
+			return setOutput(artifactName), artifactOf(artifactName);
 		},
 		blocks: (startedAt, artifact) => {
 			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
