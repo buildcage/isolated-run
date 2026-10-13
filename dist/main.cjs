@@ -70708,349 +70708,6 @@ async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotati
 	});
 }
 //#endregion
-//#region src/core/lib/actions/write-step-summary.ts
-init_core();
-async function writeStepSummary(markdown, summaryFile) {
-	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
-}
-//#endregion
-//#region src/core/lib/report/outcome/annotate.ts
-function applyOutcomeAnnotations(annotation, emissions) {
-	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
-}
-//#endregion
-//#region src/core/lib/log/aggregate.ts
-function entryKey(e) {
-	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-}
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = entryKey(e);
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function targetOf(event) {
-	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
-}
-function requestPath(url) {
-	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
-	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
-}
-function matchesUrlRule({ rule, hostRe, pathRe }, event) {
-	if (event.method === void 0 || event.url === void 0) return !1;
-	let scheme = rule.schemes.find((s) => s === event.protocol);
-	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
-	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
-		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
-	}
-	return hostRe.test(hostPort);
-}
-function buildMatchers(knownBlockedRules) {
-	return knownBlockedRules.map((line) => {
-		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line), compiled = {
-				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
-				pathRe: new RegExp(urlRule.pathRegex)
-			};
-			return {
-				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(compiled, event)
-			};
-		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
-		return {
-			rule: completed,
-			matches: (event) => re.test(targetOf(event))
-		};
-	});
-}
-function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
-	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
-	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
-		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
-			entry,
-			count: 1,
-			expectedAll: index !== -1,
-			bestIndex: index === -1 ? Infinity : index,
-			bestRule: index === -1 ? void 0 : matchers[index].rule
-		});
-	}
-	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
-		...entry,
-		count,
-		expected: !0,
-		expectedBy: bestRule
-	} : {
-		...entry,
-		count,
-		expected: !1
-	}).sort(compareAggregated);
-}
-const RULE_TYPE = {
-	https: "HTTPS",
-	http: "HTTP",
-	tls: "TLS",
-	tcp: "IP",
-	dns: "DNS"
-};
-function toHostRow(event) {
-	return {
-		host: event.host,
-		port: event.port === void 0 ? "-" : String(event.port),
-		ruleType: RULE_TYPE[event.protocol],
-		reason: event.reason ?? "-"
-	};
-}
-function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
-	return {
-		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
-		failed: aggregate(failedRows),
-		blockedCount: blockedEvents.length
-	};
-}
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine,
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
-//#region src/lib/would-refuse.ts
-const KEY_NOT_ALLOWED = "aws-key-not-allowed";
-function refusedKeys(timeline) {
-	let issuers = new Map(), seen = new Map();
-	for (let e of timeline) {
-		let { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
-		issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
-		let keyRef = refusedKeyRef(e);
-		if (!keyRef) continue;
-		let key = seen.get(keyRef) ?? {
-			hosts: new Set(),
-			count: 0
-		};
-		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
-	}
-	let numbered = seen.size > 1;
-	return new Map([...seen].map(([keyRef, key], i) => {
-		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
-		return [keyRef, {
-			...key,
-			label,
-			bare: !numbered && !account
-		}];
-	}));
-}
-function refusedKeyRef(e) {
-	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
-}
-function letThrough(e) {
-	return e.wouldRefuse !== void 0 && e.action !== "block";
-}
-function auditedKey(e) {
-	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
-}
-function keyRefusalLabel(keys) {
-	return (e, reason) => {
-		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
-		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
-	};
-}
-const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
-function wouldRefuseTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
-}
-function wouldRefuseVerdictItems(timeline) {
-	let count = timeline.filter(letThrough).length;
-	return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
-}
-function describeWouldRefuse(timeline) {
-	let count = timeline.filter(letThrough).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
-	};
-}
-function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
-	let heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
-	if (audited.length > 0) {
-		let table = markdownTable([
-			{
-				key: "key",
-				title: `Key (${KEY_NOT_ALLOWED})`
-			},
-			{
-				key: "hosts",
-				title: "Hosts"
-			},
-			{
-				key: "count",
-				title: "Count",
-				align: "right"
-			}
-		], audited.map(({ label, hosts, count }) => {
-			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
-			return {
-				key: label,
-				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
-				count
-			};
-		}));
-		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
-	}
-	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
-		...toHostRow(e),
-		reason: e.wouldRefuse
-	}]));
-	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
-		blocks.push(blocks.length > 0 ? {
-			...host,
-			level: host.level + 1
-		} : host);
-	}
-	return blocks;
-}
-//#endregion
-//#region src/lib/aws-report.ts
-function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!refusedByAwsCheck || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
-	return [
-		...blocks.slice(0, at + 1),
-		link,
-		...blocks.slice(at + 1)
-	];
-}
-//#endregion
-//#region src/lib/report.ts
-function reportTitle(label, processActivity) {
-	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
-	return label ? `${title} — ${label}` : title;
-}
-function summaryFooter(actionRepo) {
-	return trafficFrame(reportFooter(actionRepo));
-}
-function missingReportFrame(title, isAudit) {
-	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
-}
-function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
-	let emissions = describeReportOutcomes(report, {
-		failOnBlocked: failOnBlocked ?? !1,
-		engineLabel: "sandbox"
-	}), wouldRefuse = describeWouldRefuse(report.timeline);
-	wouldRefuse && emissions.push(wouldRefuse);
-	let keys = refusedKeys(report.timeline);
-	return {
-		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-			title: reportTitle(stepLabel, processActivity),
-			section: "🌐 Network",
-			footer: !1,
-			verdictItems: wouldRefuseVerdictItems(report.timeline),
-			stepName: "Start isolated-run",
-			runCommand,
-			extraInputs,
-			actionVersion,
-			refusalLabel: keyRefusalLabel(keys),
-			extraBlocks: (gap, level) => wouldRefuseBlocks(report.timeline, keys, 2, gap, level)
-		}), report, actionRepo, actionRef),
-		emissions
-	};
-}
-const realDeps$3 = {
-	appendFile: node_fs.appendFileSync,
-	fileSize: (path) => (0, node_fs.statSync)(path).size,
-	writeSummary: writeStepSummary
-};
-function summarySize(path, fileSize) {
-	if (!path) return 0;
-	try {
-		return fileSize(path);
-	} catch {
-		return 0;
-	}
-}
-const COMMAND_SEPARATOR = "\n\n---\n\n";
-function commandSummaryBytes(summary) {
-	return summary.length === 0 ? 0 : summary.length + bytes(COMMAND_SEPARATOR);
-}
-function appendCommandSummary(path, summary, overrides = {}) {
-	let { appendFile, fileSize } = {
-		...realDeps$3,
-		...overrides
-	};
-	if (summary.length === 0) return;
-	let separator = summarySize(path, fileSize) > 0 ? COMMAND_SEPARATOR : "";
-	appendFile(path, Buffer.concat([Buffer.from(separator, "utf8"), summary]));
-}
-function fullReportLocation(artifactAvailable) {
-	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
-}
-function reportDidNotFitMessage(artifactAvailable) {
-	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit alongside this step's own output; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
-}
-function reportDidNotFitLine(artifactAvailable) {
-	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
-}
-async function writeSummaryBlocks(blocks, env, { followingBytes = 0, fallbackLine, ...overrides } = {}) {
-	let { fileSize, writeSummary } = {
-		...realDeps$3,
-		...overrides
-	}, used = summarySize(env.GITHUB_STEP_SUMMARY, fileSize) + followingBytes, cutIds = new Set(), fitted = fitStepSummary(blocks, {
-		usedBytes: used,
-		onCut: (b) => {
-			b.id !== void 0 && cutIds.add(b.id);
-		}
-	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
-	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
-		cutIds,
-		wrote
-	};
-}
-async function writeReportSummary(report, annotation, { extraBlocks = [], followingBytes, ...options }, artifactAvailable, env, overrides = {}) {
-	let { appendFile, fileSize, writeSummary } = {
-		...realDeps$3,
-		...overrides
-	}, outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
-		fileSize,
-		writeSummary,
-		followingBytes,
-		fallbackLine: reportDidNotFitLine(artifactAvailable)
-	});
-	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
-}
-//#endregion
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
@@ -73358,7 +73015,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$2 = {
+const realDeps$3 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -73571,7 +73228,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$2,
+		...realDeps$3,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -73966,6 +73623,130 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	};
 }
 //#endregion
+//#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = entryKey(e);
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
+				pathRe: new RegExp(urlRule.pathRegex)
+			};
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(compiled, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
+		return {
+			rule: completed,
+			matches: (event) => re.test(targetOf(event))
+		};
+	});
+}
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
+}
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedEvents.length
+	};
+}
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine,
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
 	let { resolverHosts } = compileRuleSet({
@@ -74069,6 +73850,231 @@ function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 //#endregion
+//#region src/core/lib/actions/write-step-summary.ts
+init_core();
+async function writeStepSummary(markdown, summaryFile) {
+	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+}
+//#endregion
+//#region src/core/lib/report/outcome/annotate.ts
+function applyOutcomeAnnotations(annotation, emissions) {
+	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
+}
+//#endregion
+//#region src/lib/would-refuse.ts
+const KEY_NOT_ALLOWED = "aws-key-not-allowed";
+function refusedKeys(timeline) {
+	let issuers = new Map(), seen = new Map();
+	for (let e of timeline) {
+		let { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
+		issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
+		let keyRef = refusedKeyRef(e);
+		if (!keyRef) continue;
+		let key = seen.get(keyRef) ?? {
+			hosts: new Set(),
+			count: 0
+		};
+		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
+	}
+	let numbered = seen.size > 1;
+	return new Map([...seen].map(([keyRef, key], i) => {
+		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+		return [keyRef, {
+			...key,
+			label,
+			bare: !numbered && !account
+		}];
+	}));
+}
+function refusedKeyRef(e) {
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
+}
+function letThrough(e) {
+	return e.wouldRefuse !== void 0 && e.action !== "block";
+}
+function auditedKey(e) {
+	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
+}
+function keyRefusalLabel(keys) {
+	return (e, reason) => {
+		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
+		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
+	};
+}
+const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
+function wouldRefuseTruncationNote(artifactAvailable) {
+	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+}
+function wouldRefuseVerdictItems(timeline) {
+	let count = timeline.filter(letThrough).length;
+	return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
+}
+function describeWouldRefuse(timeline) {
+	let count = timeline.filter(letThrough).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
+	};
+}
+function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
+	let heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+	if (audited.length > 0) {
+		let table = markdownTable([
+			{
+				key: "key",
+				title: `Key (${KEY_NOT_ALLOWED})`
+			},
+			{
+				key: "hosts",
+				title: "Hosts"
+			},
+			{
+				key: "count",
+				title: "Count",
+				align: "right"
+			}
+		], audited.map(({ label, hosts, count }) => {
+			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
+			return {
+				key: label,
+				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
+				count
+			};
+		}));
+		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
+	}
+	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
+		...toHostRow(e),
+		reason: e.wouldRefuse
+	}]));
+	if (rows.length > 0) {
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
+		blocks.push(blocks.length > 0 ? {
+			...host,
+			level: host.level + 1
+		} : host);
+	}
+	return blocks;
+}
+//#endregion
+//#region src/lib/aws-report.ts
+function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!refusedByAwsCheck || at === -1) return blocks;
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
+	return [
+		...blocks.slice(0, at + 1),
+		link,
+		...blocks.slice(at + 1)
+	];
+}
+//#endregion
+//#region src/lib/report.ts
+function reportTitle(label, processActivity) {
+	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
+	return label ? `${title} — ${label}` : title;
+}
+function summaryFooter(actionRepo) {
+	return trafficFrame(reportFooter(actionRepo));
+}
+function missingReportFrame(title, isAudit) {
+	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
+}
+function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+	let emissions = describeReportOutcomes(report, {
+		failOnBlocked: failOnBlocked ?? !1,
+		engineLabel: "sandbox"
+	}), wouldRefuse = describeWouldRefuse(report.timeline);
+	wouldRefuse && emissions.push(wouldRefuse);
+	let keys = refusedKeys(report.timeline);
+	return {
+		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+			title: reportTitle(stepLabel, processActivity),
+			section: "🌐 Network",
+			footer: !1,
+			verdictItems: wouldRefuseVerdictItems(report.timeline),
+			stepName: "Start isolated-run",
+			runCommand,
+			extraInputs,
+			actionVersion,
+			refusalLabel: keyRefusalLabel(keys),
+			extraBlocks: (gap, level) => wouldRefuseBlocks(report.timeline, keys, 2, gap, level)
+		}), report, actionRepo, actionRef),
+		emissions
+	};
+}
+const realDeps$2 = {
+	appendFile: node_fs.appendFileSync,
+	fileSize: (path) => (0, node_fs.statSync)(path).size,
+	writeSummary: writeStepSummary
+};
+function summarySize(path, fileSize) {
+	if (!path) return 0;
+	try {
+		return fileSize(path);
+	} catch {
+		return 0;
+	}
+}
+const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
+function cutCommandSummary(summary, room) {
+	if (summary.length <= room) return summary;
+	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
+	if (keep < 0) return Buffer.alloc(0);
+	let end = summary.subarray(0, keep).lastIndexOf(10);
+	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
+}
+function moveCommandSummaryLast(path, commandBytes) {
+	if (commandBytes === 0) return !1;
+	let file = (0, node_fs.readFileSync)(path), command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
+	if (ours.length === 0 && kept === command) return !1;
+	let temp = `${path}.buildcage`;
+	return (0, node_fs.writeFileSync)(temp, Buffer.concat([
+		ours,
+		kept.length > 0 ? separator : Buffer.alloc(0),
+		kept
+	])), (0, node_fs.renameSync)(temp, path), kept !== command;
+}
+function fullReportLocation(artifactAvailable) {
+	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+}
+function reportDidNotFitMessage(artifactAvailable) {
+	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
+}
+function reportDidNotFitLine(artifactAvailable) {
+	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
+}
+async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
+	let { fileSize, writeSummary } = {
+		...realDeps$2,
+		...overrides
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
+		usedBytes: used,
+		onCut: (b) => {
+			b.id !== void 0 && cutIds.add(b.id);
+		}
+	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
+	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+		cutIds,
+		wrote
+	};
+}
+async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
+	let { appendFile, fileSize, writeSummary } = {
+		...realDeps$2,
+		...overrides
+	}, outcomes = computeReportOutcomes(report, options);
+	applyOutcomeAnnotations(annotation, outcomes.emissions);
+	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+		fileSize,
+		writeSummary,
+		commandBytes,
+		fallbackLine: reportDidNotFitLine(artifactAvailable)
+	});
+	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+}
+//#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
 const RECORD_FIELDS = new Set([
 	"time",
@@ -74133,12 +74139,13 @@ const realDeps$1 = {
 	readActionVersion,
 	writeReportSummary,
 	writeSummaryBlocks,
+	moveCommandSummaryLast,
 	uploadTrafficArtifact,
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, followingSummaryBytes, afterSummary }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, commandSummaryBytes = 0 }, overrides = {}) {
+	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
 	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), report;
@@ -74151,30 +74158,33 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
 		...rest,
 		...footer
-	], env, annotation, { followingBytes: followingSummaryBytes }, { writeSummaryBlocks }), artifactName = "";
-	if (!report) await writeRest(), afterSummary?.();
-	else {
-		try {
-			await writeReportSummary(report, annotation, {
-				actionRepo,
-				actionRef,
-				runCommand,
-				extraInputs: extraInputs?.(report),
-				actionVersion: readActionVersion(containerName, proxyEngine),
-				stepLabel,
-				processActivity: named,
-				failOnBlocked,
-				extraBlocks: [...rest, ...footer],
-				followingBytes: followingSummaryBytes
-			}, trafficArtifact.upload, env);
-		} catch (e) {
-			fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
-		}
-		if (afterSummary?.(), trafficArtifact.upload) try {
-			artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
-		} catch (e) {
-			annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-		}
+	], env, annotation, { commandBytes: commandSummaryBytes }, { writeSummaryBlocks }), artifactName = "";
+	if (!report) await writeRest();
+	else try {
+		await writeReportSummary(report, annotation, {
+			actionRepo,
+			actionRef,
+			runCommand,
+			extraInputs: extraInputs?.(report),
+			actionVersion: readActionVersion(containerName, proxyEngine),
+			stepLabel,
+			processActivity: named,
+			failOnBlocked,
+			extraBlocks: [...rest, ...footer],
+			commandBytes: commandSummaryBytes
+		}, trafficArtifact.upload, env);
+	} catch (e) {
+		fail(`Failed to write the report summary: ${errorMessage(e)}`), await writeRest();
+	}
+	try {
+		moveCommandSummaryLast(env.GITHUB_STEP_SUMMARY ?? "", commandSummaryBytes) && annotation.warning(COMMAND_SUMMARY_CUT_MESSAGE);
+	} catch (e) {
+		annotation.warning(`Failed to move this step's own Job Summary after the report: ${errorMessage(e)}`);
+	}
+	if (report && trafficArtifact.upload) try {
+		artifactName = await uploadTrafficArtifact(report, containerName, trafficArtifact.retentionDays, annotation) ?? "";
+	} catch (e) {
+		annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
 	}
 	try {
 		setTrafficArtifactOutput(artifactName);
@@ -74182,13 +74192,13 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
 	}
 }
-async function writeMoreSummary(blocks, env, annotation, { followingBytes } = {}, overrides = {}) {
+async function writeMoreSummary(blocks, env, annotation, { commandBytes } = {}, overrides = {}) {
 	let { writeSummaryBlocks } = {
 		...realDeps$1,
 		...overrides
 	};
 	if (blocks.length !== 0) try {
-		await writeSummaryBlocks(blocks, env, { followingBytes });
+		await writeSummaryBlocks(blocks, env, { commandBytes });
 	} catch (e) {
 		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
@@ -74257,7 +74267,6 @@ const realDeps = {
 	readBackingFile,
 	removeBackingDir,
 	writeRunnerFile: (path, content) => (0, node_fs.writeFileSync)(path, content),
-	appendCommandSummary,
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
 	onCancel,
@@ -74284,36 +74293,27 @@ async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { ve
 function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState) {
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
-function readMediatedFile(file, deps) {
-	let read = deps.readBackingFile(file.backingPath);
-	if ("reason" in read) return {
-		file,
-		content: Buffer.alloc(0),
-		failure: read.reason
-	};
-	if (!("bytes" in read)) return {
-		file,
-		content: Buffer.alloc(0)
-	};
-	if (file.variable !== "GITHUB_OUTPUT") return {
-		file,
-		content: read.bytes
-	};
-	let { text, error } = validatedOutputText(read.bytes);
-	return {
-		file,
-		content: Buffer.from(text, "utf8"),
-		failure: error && `was written without what the runner could not read: ${error}`
-	};
-}
-function writeBackMediatedFile({ file, content, failure }, write, annotation) {
-	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0);
-	try {
-		write(file.realPath, content);
-	} catch (e) {
-		return fail(`could not be written: ${errorMessage(e)}`);
+function writeBackMediatedFile(file, annotation, deps) {
+	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), read = deps.readBackingFile(file.backingPath), content = Buffer.alloc(0), failure;
+	if ("reason" in read) failure = read.reason;
+	else if ("bytes" in read) {
+		if (file.variable === "GITHUB_OUTPUT") {
+			let { text, error } = validatedOutputText(read.bytes);
+			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
+		} else content = read.bytes;
 	}
-	return failure ? fail(failure) : !1;
+	try {
+		deps.writeRunnerFile(file.realPath, content);
+	} catch (e) {
+		return {
+			failed: fail(`could not be written: ${errorMessage(e)}`),
+			bytes: 0
+		};
+	}
+	return {
+		failed: failure ? fail(failure) : !1,
+		bytes: content.length
+	};
 }
 function readStepInputs(env, deps) {
 	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
@@ -74379,11 +74379,11 @@ function logConfiguredRules({ rules, aws }, deps) {
 	});
 }
 async function finalizeStep(run, deps) {
-	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1, commandSummary;
+	let { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run, { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs, runnerFileFailed = !1, commandSummaryBytes = 0;
 	if (mediation) {
 		for (let file of mediation.files) {
-			let read = readMediatedFile(file, deps);
-			file.variable === "GITHUB_STEP_SUMMARY" ? commandSummary = read : writeBackMediatedFile(read, deps.writeRunnerFile, annotation) && (runnerFileFailed = !0);
+			let { failed, bytes } = writeBackMediatedFile(file, annotation, deps);
+			failed && (runnerFileFailed = !0), file.variable === "GITHUB_STEP_SUMMARY" && (commandSummaryBytes = bytes);
 		}
 		try {
 			deps.removeBackingDir(runnerFilesBackingDir);
@@ -74428,10 +74428,7 @@ async function finalizeStep(run, deps) {
 		env,
 		moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
 		processActivity,
-		followingSummaryBytes: commandSummaryBytes(commandSummary?.content ?? Buffer.alloc(0)),
-		afterSummary: () => {
-			commandSummary && writeBackMediatedFile(commandSummary, deps.appendCommandSummary, annotation) && (runnerFileFailed = !0);
-		}
+		commandSummaryBytes
 	}), cancelled && await readAudit.upload(), runnerFileFailed;
 }
 async function runSandboxStep(env, overrides = {}) {

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,10 +14,10 @@ import type { InspectReportData, UniversalReportData } from "#core/lib/report/ty
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
 import {
-  appendCommandSummary,
-  commandSummaryBytes,
+  COMMAND_SUMMARY_CUT_MESSAGE,
   computeReportOutcomes,
   missingReportFrame,
+  moveCommandSummaryLast,
   reportTitle,
   writeReportSummary,
   writeSummaryBlocks,
@@ -500,36 +500,65 @@ describe("computeReportOutcomes", () => {
   });
 });
 
-describe("appendCommandSummary", () => {
-  function append(summary: string, held: number | undefined): string[] {
-    const appended: string[] = [];
-    appendCommandSummary("/summary.md", Buffer.from(summary), {
-      fileSize: () => {
-        if (held === undefined) throw new Error("ENOENT");
-        return held;
-      },
-      appendFile: (_, content) => void appended.push(Buffer.from(content).toString()),
-    });
-    return appended;
+describe("moveCommandSummaryLast", () => {
+  const LIMIT = 1024 * 1024 - 8 * 1024;
+  const NOTE = `\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`;
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "buildcage-summary-"));
+    path = join(dir, "step_summary");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function move(command: string, ours: string): { cut: boolean; file: string } {
+    writeFileSync(path, command + ours);
+    const cut = moveCommandSummaryLast(path, Buffer.byteLength(command));
+    return { cut, file: readFileSync(path, "utf8") };
   }
 
-  it("rules the command's summary off from buildcage's part before it", () => {
-    expect(append("mine\n", 10)).toStrictEqual(["\n\n---\n\nmine\n"]);
+  it("puts the command's summary after buildcage's part, under a rule", () => {
+    expect(move("```\nmine\n", "report\n")).toStrictEqual({
+      cut: false,
+      file: "report\n\n\n---\n\n```\nmine\n",
+    });
+    expect(readdirSync(dir)).toStrictEqual(["step_summary"]);
   });
 
-  it.each([0, undefined])("adds no rule when buildcage wrote nothing (size %s)", (held) => {
-    expect(append("mine\n", held)).toStrictEqual(["mine\n"]);
+  it("leaves the file alone when the command wrote nothing", () => {
+    expect(move("", "report\n")).toStrictEqual({ cut: false, file: "report\n" });
   });
 
-  it("appends nothing when the command wrote nothing", () => {
-    expect(append("", 10)).toStrictEqual([]);
+  it("leaves a command's summary that fits alone when buildcage wrote nothing", () => {
+    expect(move("mine\n", "")).toStrictEqual({ cut: false, file: "mine\n" });
   });
 
-  it("counts the rule in the room it takes, and nothing for nothing", () => {
-    expect(commandSummaryBytes(Buffer.from("mine\n"))).toBe(
-      Buffer.byteLength(append("mine\n", 10)[0]),
-    );
-    expect(commandSummaryBytes(Buffer.alloc(0))).toBe(0);
+  it("cuts the command's summary at a line boundary to what buildcage left, with a note", () => {
+    const ours = "r".repeat(LIMIT - 1000) + "\n";
+    const room = 1000 - 1 - "\n\n---\n\n".length;
+    const line = "x".repeat(99) + "\n";
+    const keptLines = Math.floor((room - Buffer.byteLength(NOTE)) / line.length);
+    const { cut, file } = move(line.repeat(100), ours);
+    expect(cut).toBe(true);
+    expect(file).toBe(`${ours}\n\n---\n\n${line.repeat(keptLines)}${NOTE}`);
+    expect(Buffer.byteLength(file)).toBeLessThanOrEqual(LIMIT);
+  });
+
+  it("cuts a command's summary over the limit even when buildcage wrote nothing", () => {
+    const { cut, file } = move("x\n".repeat(LIMIT), "");
+    expect(cut).toBe(true);
+    expect(file.endsWith(`x\n${NOTE}`)).toBe(true);
+    expect(Buffer.byteLength(file)).toBeLessThanOrEqual(LIMIT);
+  });
+
+  it("keeps only the note when no whole line fits", () => {
+    const ours = "r".repeat(LIMIT - 1000) + "\n";
+    expect(move("x".repeat(2000), ours).file).toBe(`${ours}\n\n---\n\n${NOTE}`);
+  });
+
+  it("drops the command's summary and its rule when not even the note fits", () => {
+    const ours = "r".repeat(LIMIT - 10) + "\n";
+    expect(move("mine\n", ours)).toStrictEqual({ cut: true, file: ours });
   });
 });
 
@@ -584,19 +613,19 @@ describe("writeSummaryBlocks", () => {
     expect(wrote).toBe("fallback");
   });
 
-  it("leaves room for what follows the blocks", async () => {
+  it("does not count the command's own summary against the blocks' room", async () => {
     const written: string[] = [];
     const { wrote } = await writeSummaryBlocks(
       [{ id: "frame", priority: 1, level: 1, section: "k", cut: "keep", text: "frame\n" }],
       { GITHUB_STEP_SUMMARY: "/summary.md" },
       {
-        fileSize: () => 0,
+        fileSize: () => 2 * 1024 * 1024,
         writeSummary: async (m) => void written.push(m),
-        followingBytes: 1024 * 1024,
+        commandBytes: 2 * 1024 * 1024,
       },
     );
-    expect(written).toStrictEqual([]);
-    expect(wrote).toBe("nothing");
+    expect(written).toStrictEqual(["frame\n"]);
+    expect(wrote).toBe("blocks");
   });
 
   it("returns the ids of the blocks it cut, by id rather than by notice text", async () => {

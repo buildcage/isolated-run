@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
-import { missingReportFrame, summaryFooter } from "./report.ts";
+import { COMMAND_SUMMARY_CUT_MESSAGE, missingReportFrame, summaryFooter } from "./report.ts";
 import {
   reportStepTraffic,
   writeMoreSummary,
@@ -18,6 +18,7 @@ const mocks = {
   readActionVersion: vi.fn(),
   writeReportSummary: vi.fn(),
   writeSummaryBlocks: vi.fn(),
+  moveCommandSummaryLast: vi.fn(),
   uploadTrafficArtifact: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   readStepLabel: vi.fn(),
@@ -105,7 +106,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
-      { followingBytes: undefined },
+      { commandBytes: 0 },
     );
   });
 
@@ -125,7 +126,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Traffic & Process Activity Report — build", true), block, FOOTER],
       {},
-      { followingBytes: undefined },
+      { commandBytes: 0 },
     );
   });
 
@@ -138,7 +139,7 @@ describe("reportStepTraffic", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
-      { followingBytes: undefined },
+      { commandBytes: 0 },
     );
   });
 
@@ -177,7 +178,7 @@ describe("reportStepTraffic", () => {
       processActivity: false,
       failOnBlocked: true,
       extraBlocks: [FOOTER],
-      followingBytes: undefined,
+      commandBytes: 0,
     });
     expect(mocks.readActionVersion).toHaveBeenCalledWith(CONTAINER, "inspect");
   });
@@ -195,45 +196,62 @@ describe("reportStepTraffic", () => {
     );
   });
 
-  it("leaves room for what follows the summary, with the report or alone", async () => {
+  it("does not count the command's own summary against the report, with it or alone", async () => {
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
-    await reportStepTraffic(
-      options({ moreBlocks: () => [block], followingSummaryBytes: 100 }),
-      deps,
-    );
-    expect(mocks.writeReportSummary.mock.calls[0][2].followingBytes).toBe(100);
+    await reportStepTraffic(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
+    expect(mocks.writeReportSummary.mock.calls[0][2].commandBytes).toBe(9);
 
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
-    await reportStepTraffic(
-      options({ moreBlocks: () => [block], followingSummaryBytes: 100 }),
-      deps,
-    );
-    expect(mocks.writeSummaryBlocks.mock.calls[0][2]).toStrictEqual({ followingBytes: 100 });
+    await reportStepTraffic(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
+    expect(mocks.writeSummaryBlocks.mock.calls[0][2]).toStrictEqual({ commandBytes: 9 });
   });
 
   it.each([
     { case: "the report was written", fetch: true, write: true },
     { case: "the report's write failed", fetch: true, write: false },
     { case: "there was no report", fetch: false, write: true },
-  ])("appends what follows the summary after it and before the upload ($case)", async (c) => {
+  ])("moves the command's summary after the summary and before the upload ($case)", async (c) => {
     if (!c.fetch) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
     if (!c.write) mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
-    const afterSummary = vi.fn();
 
     await reportStepTraffic(
-      options({ moreBlocks: () => [block], trafficArtifact: { upload: true }, afterSummary }),
+      options({
+        env: { GITHUB_STEP_SUMMARY: "/s" },
+        moreBlocks: () => [block],
+        trafficArtifact: { upload: true },
+        commandSummaryBytes: 9,
+      }),
       deps,
     );
 
-    expect(afterSummary).toHaveBeenCalledTimes(1);
-    const after = afterSummary.mock.invocationCallOrder[0];
+    expect(mocks.moveCommandSummaryLast).toHaveBeenCalledExactlyOnceWith("/s", 9);
+    const moved = mocks.moveCommandSummaryLast.mock.invocationCallOrder[0];
     for (const write of [mocks.writeReportSummary, mocks.writeSummaryBlocks]) {
-      for (const order of write.mock.invocationCallOrder) expect(order).toBeLessThan(after);
+      for (const order of write.mock.invocationCallOrder) expect(order).toBeLessThan(moved);
     }
     for (const order of mocks.uploadTrafficArtifact.mock.invocationCallOrder) {
-      expect(order).toBeGreaterThan(after);
+      expect(order).toBeGreaterThan(moved);
     }
+  });
+
+  it("warns when the command's summary was cut to fit", async () => {
+    mocks.moveCommandSummaryLast.mockReturnValue(true);
+    await reportStepTraffic(options({ commandSummaryBytes: 9 }), deps);
+    expect(annotation.warning).toHaveBeenCalledWith(COMMAND_SUMMARY_CUT_MESSAGE);
+  });
+
+  it("only warns when the command's summary cannot be moved", async () => {
+    mocks.moveCommandSummaryLast.mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+    await expect(
+      reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
+    ).resolves.toBeUndefined();
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "Failed to move this step's own Job Summary after the report: EACCES",
+    );
+    expect(mocks.uploadTrafficArtifact).toHaveBeenCalledTimes(1);
   });
 
   it("uploads after the summary, so a failed upload cannot lose the summary", async () => {
@@ -370,17 +388,11 @@ describe("writeMoreSummary", () => {
   const ann = annotation as unknown as ReportStepOptions["annotation"];
 
   it("writes the blocks into what the summary has left", async () => {
-    await writeMoreSummary(
-      [block],
-      { GITHUB_STEP_SUMMARY: "/s" },
-      ann,
-      { followingBytes: 100 },
-      deps,
-    );
+    await writeMoreSummary([block], { GITHUB_STEP_SUMMARY: "/s" }, ann, { commandBytes: 9 }, deps);
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [block],
       { GITHUB_STEP_SUMMARY: "/s" },
-      { followingBytes: 100 },
+      { commandBytes: 9 },
     );
   });
 

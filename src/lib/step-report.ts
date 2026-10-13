@@ -18,7 +18,9 @@ import { failOrWarn } from "./fail-or-warn.ts";
 import { readStepLabel } from "./inputs.ts";
 import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
+  COMMAND_SUMMARY_CUT_MESSAGE,
   missingReportFrame,
+  moveCommandSummaryLast,
   reportTitle,
   summaryFooter,
   writeReportSummary,
@@ -37,6 +39,7 @@ export interface ReportStepDeps {
   readActionVersion: typeof readActionVersion;
   writeReportSummary: typeof writeReportSummary;
   writeSummaryBlocks: typeof writeSummaryBlocks;
+  moveCommandSummaryLast: typeof moveCommandSummaryLast;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
   readStepLabel: typeof readStepLabel;
@@ -47,6 +50,7 @@ const realDeps: ReportStepDeps = {
   readActionVersion,
   writeReportSummary,
   writeSummaryBlocks,
+  moveCommandSummaryLast,
   uploadTrafficArtifact,
   setTrafficArtifactOutput,
   readStepLabel,
@@ -76,11 +80,10 @@ export interface ReportStepOptions {
   /** Whether the step records its process activity, which the title names
    *  when its section is there. */
   processActivity: boolean;
-  /** See WriteSummaryBlocksOptions.followingBytes. */
-  followingSummaryBytes?: number;
-  /** Called once this action's part of the summary is written, before any
-   *  upload, to append what follows it. Must not throw. */
-  afterSummary?: () => void;
+  /** The command's own summary already at the start of the file, moved
+   *  after this action's part once that is written; see
+   *  moveCommandSummaryLast. */
+  commandSummaryBytes?: number;
 }
 
 /**
@@ -108,8 +111,7 @@ export async function reportStepTraffic(
     env,
     moreBlocks = () => [],
     processActivity,
-    followingSummaryBytes,
-    afterSummary,
+    commandSummaryBytes = 0,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
@@ -118,6 +120,7 @@ export async function reportStepTraffic(
     readActionVersion,
     writeReportSummary,
     writeSummaryBlocks,
+    moveCommandSummaryLast,
     uploadTrafficArtifact,
     setTrafficArtifactOutput,
     readStepLabel,
@@ -150,14 +153,13 @@ export async function reportStepTraffic(
           ],
       env,
       annotation,
-      { followingBytes: followingSummaryBytes },
+      { commandBytes: commandSummaryBytes },
       { writeSummaryBlocks },
     );
 
   let artifactName = "";
   if (!report) {
     await writeRest();
-    afterSummary?.();
   } else {
     try {
       await writeReportSummary(
@@ -173,7 +175,7 @@ export async function reportStepTraffic(
           processActivity: named,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
-          followingBytes: followingSummaryBytes,
+          commandBytes: commandSummaryBytes,
         },
         trafficArtifact.upload,
         env,
@@ -182,22 +184,33 @@ export async function reportStepTraffic(
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
       await writeRest();
     }
-    afterSummary?.();
+  }
 
-    // Uploaded even when the summary failed: the command can delete the
-    // summary file, and the artifact is then the only record left.
-    if (trafficArtifact.upload) {
-      try {
-        artifactName =
-          (await uploadTrafficArtifact(
-            report,
-            containerName,
-            trafficArtifact.retentionDays,
-            annotation,
-          )) ?? "";
-      } catch (e) {
-        annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
-      }
+  // Before the upload, which a cancelled step may not outlive. Left in place,
+  // the command's summary still holds all it wrote, only ahead of the report.
+  try {
+    if (moveCommandSummaryLast(env.GITHUB_STEP_SUMMARY ?? "", commandSummaryBytes)) {
+      annotation.warning(COMMAND_SUMMARY_CUT_MESSAGE);
+    }
+  } catch (e) {
+    annotation.warning(
+      `Failed to move this step's own Job Summary after the report: ${errorMessage(e)}`,
+    );
+  }
+
+  // Uploaded even when the summary failed: the artifact is then the only
+  // record left.
+  if (report && trafficArtifact.upload) {
+    try {
+      artifactName =
+        (await uploadTrafficArtifact(
+          report,
+          containerName,
+          trafficArtifact.retentionDays,
+          annotation,
+        )) ?? "";
+    } catch (e) {
+      annotation.warning(`Failed to upload the traffic artifact: ${errorMessage(e)}`);
     }
   }
 
@@ -214,13 +227,13 @@ export async function writeMoreSummary(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
-  { followingBytes }: { followingBytes?: number } = {},
+  { commandBytes }: { commandBytes?: number } = {},
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
   const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await writeSummaryBlocks(blocks, env, { followingBytes });
+    await writeSummaryBlocks(blocks, env, { commandBytes });
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }
