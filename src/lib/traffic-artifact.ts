@@ -7,7 +7,7 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
-import type { AwsTrafficFields } from "../proxy/haproxy-aws-keys.ts";
+import type { AwsTrafficFields } from "../proxy/aws-log.ts";
 import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "./artifact-upload.ts";
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";

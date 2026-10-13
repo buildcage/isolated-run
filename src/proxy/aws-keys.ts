@@ -22,11 +22,15 @@ const ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
  *  @throws {Error} naming every entry that is not one */
 export function parseAwsAccounts(input: string | undefined): string[] {
   const tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean));
-  const invalid = tokens.filter((token) => !ACCOUNT_ID.test(token));
+  const invalid = tokens.filter((token) => !isAwsAccountId(token));
   if (invalid.length > 0) {
     throw new Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
   }
   return [...new Set(tokens)];
+}
+
+export function isAwsAccountId(value: string): boolean {
+  return ACCOUNT_ID.test(value);
 }
 
 export function isAwsAccessKeyId(value: string): boolean {

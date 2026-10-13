@@ -2,7 +2,7 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { TRAFFIC_BLOCK, trafficFrame } from "#core/lib/report/render/render-report-markdown.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
-import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
+import { AWS_REASON_PREFIX } from "../proxy/aws-log.ts";
 import { letThrough, WOULD_REFUSE_BLOCK } from "./would-refuse.ts";
 
 /**

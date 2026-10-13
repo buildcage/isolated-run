@@ -8,9 +8,10 @@ import type { RefusalLabel } from "#core/lib/report/render/inspect-details.ts";
 import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
 
-import { AWS_REASON_PREFIX } from "../proxy/haproxy-aws-keys.ts";
+import { isAwsAccountId } from "../proxy/aws-keys.ts";
+import { awsFieldsOf, type AwsRefusedReason } from "../proxy/aws-log.ts";
 
-const KEY_NOT_ALLOWED = `${AWS_REASON_PREFIX}key-not-allowed`;
+const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsRefusedReason;
 
 /** How many hosts the key table names before counting the rest. */
 const KEY_HOSTS_SHOWN = 3;
@@ -39,8 +40,8 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
   const issuers = new Map<string, string>();
   const seen = new Map<string, Pick<RefusedKey, "hosts" | "count">>();
   for (const e of timeline) {
-    const { issuedKeyRef, assumedAccount } = e.extensions?.aws ?? {};
-    if (issuedKeyRef && assumedAccount && /^\d{12}$/.test(assumedAccount)) {
+    const { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
+    if (issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount)) {
       issuers.set(issuedKeyRef, assumedAccount);
     }
     const keyRef = refusedKeyRef(e);
@@ -63,7 +64,7 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
 
 function refusedKeyRef(e: TrafficEvent): string | undefined {
   const refused = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
-  return refused || e.wouldRefuse === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
+  return refused || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
 }
 
 /** A request audit let through that restrict would refuse. One refused for
@@ -73,15 +74,13 @@ export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: 
 }
 
 function auditedKey(e: TrafficEvent): boolean {
-  return (
-    letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && e.extensions?.aws?.keyRef !== undefined
-  );
+  return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== undefined;
 }
 
 /** aws-key-not-allowed with the key it names, unless that says nothing more. */
 export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
   return (e, reason) => {
-    const keyRef = reason === KEY_NOT_ALLOWED ? e.extensions?.aws?.keyRef : undefined;
+    const keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
     const key = keyRef ? keys.get(keyRef) : undefined;
     return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : undefined;
   };

@@ -245,13 +245,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$6 = getInput) {
+function readFilesystemInputs(notice, getInput$9 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$6("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$9("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$6("write_through"),
-			writable: getInput$6("writable"),
-			allowWrite: getInput$6("allow_write")
+			writeThrough: getInput$9("write_through"),
+			writable: getInput$9("writable"),
+			allowWrite: getInput$9("allow_write")
 		}, notice)
 	};
 }
