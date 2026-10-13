@@ -355,7 +355,7 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
 │   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
 │   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
-│   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links, at image build
+│   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links
 │   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
 │   │                          # image ref), distinct from the top-level compose.yaml below
 │   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
@@ -375,8 +375,8 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # the reference.md/rules.md/inspect-engine.md link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in.
-│                              # Its license texts (GPL, LGPL, MPL, Apache, and curl's, s6-overlay's
-│                              # and QuickJS-ng's) are copied into both images
+│                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
+│                              # QuickJS-ng and the s6-overlay family) are copied into both images
 ├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
 │                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
 └── Makefile                   # Operational commands

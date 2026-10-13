@@ -157,7 +157,8 @@ COPY --from=filesystem-audit-build /out/filesystem-audit /opt/buildcage/bin/file
 COPY LICENSE /opt/buildcage/LICENSE
 COPY docker/universal/files/THIRD_PARTY_LICENSES /opt/buildcage/THIRD_PARTY_LICENSES
 COPY licenses/GPL-2.0.txt licenses/LGPL-2.1.txt licenses/MPL-2.0.txt licenses/Apache-2.0.txt \
-     licenses/curl.txt licenses/QuickJS-ng.txt licenses/s6-overlay.txt /opt/buildcage/licenses/
+     licenses/curl.txt licenses/QuickJS-ng.txt /opt/buildcage/licenses/
+COPY licenses/s6-overlay/ /opt/buildcage/licenses/s6-overlay/
 COPY --from=gen-seccomp-profile-build /out/licenses/ /opt/buildcage/licenses/
 COPY --from=filesystem-audit-build /out/licenses/ /opt/buildcage/licenses/
 
