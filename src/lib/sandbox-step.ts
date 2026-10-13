@@ -217,11 +217,12 @@ function saveCleanupState(
 /**
  * Writes a mediated runner file's real path from what the command left in its
  * backing copy, and returns whether that failed the step and how many bytes
- * it wrote. A write writeRunnerFile refuses fails the step too.
- * $GITHUB_OUTPUT is trimmed to the entries the runner can read; a dropped
- * entry fails the step, since the runner would stop at it. A backing copy the
- * command made unreadable (a symlink, FIFO, one over MAX_OUTPUT_BYTES, or
- * permissions taken away) leaves the real file empty and fails the step too.
+ * it wrote. $GITHUB_OUTPUT is trimmed to the entries the runner can read; a
+ * dropped entry fails the step, since the runner would stop at it. A backing
+ * copy the command made unreadable (a symlink, FIFO, one over
+ * MAX_OUTPUT_BYTES, or permissions taken away) leaves the real file empty and
+ * fails the step too, and so does a real path that is not a regular file (see
+ * writeRunnerFile).
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,

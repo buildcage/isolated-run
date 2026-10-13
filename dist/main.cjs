@@ -72293,7 +72293,9 @@ function readBackingFile(path, deps = realReadBackingDeps) {
 function writeRunnerFile(path, content) {
 	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_WRONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
 	try {
-		if (!(0, node_fs.fstatSync)(fd).isFile()) throw Error("it is not a regular file");
+		let stats = (0, node_fs.fstatSync)(fd);
+		if (!stats.isFile()) throw Error("not a regular file");
+		if (stats.nlink !== 1) throw Error("a hard link to another file");
 		(0, node_fs.ftruncateSync)(fd), (0, node_fs.writeFileSync)(fd, content);
 	} finally {
 		(0, node_fs.closeSync)(fd);

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -269,9 +270,19 @@ describe("writeRunnerFile", () => {
   });
 
   it("refuses a device it can open", () => {
-    expect(() => writeRunnerFile("/dev/null", Buffer.from("a=1\n"))).toThrow(
-      "it is not a regular file",
+    expect(() => writeRunnerFile("/dev/null", Buffer.from("a=1\n"))).toThrow("not a regular file");
+  });
+
+  it("does not write through a hard link", () => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    const target = join(dir, "bashrc");
+    const path = join(dir, "set_output_abc");
+    writeFileSync(target, "kept\n");
+    linkSync(target, path);
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(
+      "a hard link to another file",
     );
+    expect(readFileSync(target, "utf8")).toBe("kept\n");
   });
 });
 
