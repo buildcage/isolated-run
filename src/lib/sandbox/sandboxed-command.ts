@@ -54,7 +54,7 @@ import {
 } from "./nss-db.ts";
 import { buildOciConfig, type SandboxIdentity } from "./oci-config.ts";
 import { writeRunScript, writeResolvConf, writeOciConfig } from "./oci-files.ts";
-import { pathAliases, WritablePathConflictError } from "./paths.ts";
+import { isAtOrUnder, pathAliases, WritablePathConflictError } from "./paths.ts";
 import { runIsolated } from "./run.ts";
 import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
@@ -370,6 +370,25 @@ function prepareReadonlyHostPaths(
 }
 
 /**
+ * The mediated runner files to mask, each also at the other paths `hostMounts`
+ * shows it at in a persisting path (see pathAliases): a bind mount of the
+ * runner's work directory would otherwise hand the command the real file.
+ */
+function maskedRunnerFiles(
+  paths: string[],
+  persisting: string[],
+  hostMounts: MountinfoEntry[],
+  { lstat, readlink }: RunSandboxedCommandDeps,
+): string[] {
+  return paths.flatMap((path) => [
+    path,
+    ...pathAliases(hostMounts, realPathOf(path, { lstat, readlink })).filter((alias) =>
+      persisting.some((root) => isAtOrUnder(alias, root)),
+    ),
+  ]);
+}
+
+/**
  * The uid/gid the sandboxed process runs as. Only supplementary groups are
  * dropped by buildOciConfig; this substitutes the primary GID too, if it's a
  * privileged group. See identity.ts.
@@ -466,7 +485,12 @@ export function assembleBundle(
       readonlyHostPaths,
       renameGuardDirs,
       extraInternalMounts: options.internalMounts,
-      extraMaskedPaths: options.maskedPaths,
+      extraMaskedPaths: maskedRunnerFiles(
+        options.maskedPaths ?? [],
+        layout.persisting,
+        hostMounts,
+        deps,
+      ),
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));

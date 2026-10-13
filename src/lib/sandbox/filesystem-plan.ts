@@ -24,10 +24,10 @@ import { determineOverlayRoots, nestedMountRoots } from "./ephemeral-fs.ts";
 import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
-import { assertScratchBaseNotWritable, isAtOrUnder } from "./paths.ts";
+import { assertScratchBaseNotWritable, isAtOrUnder, pathAliases } from "./paths.ts";
 import { MEDIATED_VARIABLES, type MediatedVariable } from "./runner-output-files.ts";
-import { realPathOf, type SymlinkDeps } from "./symlinks.ts";
-import type { HostMount } from "./types.ts";
+import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
+import type { MountinfoEntry } from "./types.ts";
 import {
   resolveWriteThroughPaths,
   assertNoSymlinkInWriteThrough,
@@ -85,8 +85,9 @@ export interface FilesystemPlan {
   writeThroughPaths: string[];
   /** The runner files whose writes reach the runner, through the mediation
    *  (runner-output-files.ts): every one the step has in persistent mode, and
-   *  in ephemeral mode only those a write_through entry covers. The rest stay
-   *  under the overlay and are discarded with it. */
+   *  in ephemeral mode only those a write_through entry covers, at any path
+   *  the host's mounts show them at. The rest stay under the overlay and are
+   *  discarded with it. */
   mediatedVariables: MediatedVariable[];
 }
 
@@ -101,7 +102,7 @@ export interface ResolveFilesystemPlanDeps {
   mkdir?: (path: string) => void;
   deviceOf?: (path: string) => number;
   realpath?: (path: string) => string;
-  listHostMounts?: () => HostMount[];
+  listHostMounts?: () => MountinfoEntry[];
   isDirectory?: (path: string) => boolean;
 }
 
@@ -136,17 +137,28 @@ export function resolveFilesystemPlan(
   const written = resolveWriteThroughInput(writeThroughInput, env);
   const realpath = deps.realpath ?? realPathOf;
   const resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
+  // Ephemeral mediates only the files an entry covers, which it can do through
+  // another mount of them (see pathAliases).
+  const hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [];
   const runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
     const path = env[variable];
-    return path ? [{ variable, path: onRealRunnerDir(normalize(path), env, realpath) }] : [];
+    if (!path) return [];
+    const real = onRealRunnerDir(normalize(path), env, realpath);
+    // Resolved in full, as the mask's aliases are (see maskedRunnerFiles).
+    const { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = deps;
+    const aliases = pathAliases(hostMounts, realPathOf(real, { lstat, readlink }));
+    return [{ variable, paths: [real, ...aliases] }];
   });
   const mediatedVariables = runnerFiles
     .filter(
-      ({ path }) =>
-        filesystemMode !== "ephemeral" || resolved.some((entry) => isAtOrUnder(path, entry)),
+      ({ paths }) =>
+        filesystemMode !== "ephemeral" ||
+        paths.some((path) => resolved.some((entry) => isAtOrUnder(path, entry))),
     )
     .map(({ variable }) => variable);
-  const writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ path }) => path === p));
+  const writeThroughPaths = resolved.filter(
+    (p) => !runnerFiles.some(({ paths }) => paths.includes(p)),
+  );
 
   // Ahead of the early return below: reaching that with the sentinel under
   // ephemeral would leave the run with no overlay. The CA mount lands where a
@@ -211,7 +223,6 @@ export function resolveFilesystemPlan(
       Boolean(p),
     );
     const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
-    const hostMounts = (deps.listHostMounts ?? listHostMounts)();
     const overlayRoots = [
       ...candidateRoots,
       ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
@@ -220,6 +231,17 @@ export function resolveFilesystemPlan(
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`,
+      "FILESYSTEM_PLAN_FAILED",
+    );
+  }
+}
+
+function readHostMounts(deps: ResolveFilesystemPlanDeps): MountinfoEntry[] {
+  try {
+    return (deps.listHostMounts ?? listHostMounts)();
+  } catch (e) {
+    throw new SandboxError(
+      `Failed to read the host's mount table: ${errorMessage(e)}`,
       "FILESYSTEM_PLAN_FAILED",
     );
   }
