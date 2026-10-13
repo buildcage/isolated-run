@@ -71043,6 +71043,13 @@ function filesystemAuditPaths(containerName, scratchBase) {
 function readPid(readFile, pidFilePath) {
 	return Number(readFile(pidFilePath).trim());
 }
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return;
+	}
+}
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
@@ -72654,7 +72661,7 @@ function extractTracer(containerName, destDir, { exec = defaultExec$1, chmod = n
 function signalTracer(pidFilePath, signal, { readFile, exec }) {
 	try {
 		let pid = readPid(readFile, pidFilePath);
-		pid > 0 && exec("sudo", [
+		pid > 0 && isTracer(pid, readFile) !== !1 && exec("sudo", [
 			"-n",
 			"kill",
 			`-${signal}`,
@@ -72664,7 +72671,7 @@ function signalTracer(pidFilePath, signal, { readFile, exec }) {
 }
 async function haltTracer({ child, exited }, untilRecorded, { outPath, pidFilePath, cancel }, deps) {
 	let { sleep, remove, readTail } = deps;
-	child.kill("SIGTERM"), signalTracer(pidFilePath, "TERM", deps);
+	child.kill("SIGTERM"), exited() || signalTracer(pidFilePath, "TERM", deps);
 	let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
 	for (let waited = 0; !exited(); waited += 100) {
 		if (untilRecorded && recordComplete(readTail, outPath)) {
