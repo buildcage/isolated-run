@@ -107,8 +107,6 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
     },
   };
 }
-/** The rules that judge by a role account, when role accounts are named. */
-type RoleRules = ReturnType<typeof roleRules>;
 
 /**
  * Request rules: record what a request carries, then decide on it.
@@ -264,7 +262,7 @@ function trafficRecord(keyMapFile: string, roles?: RoleRules): string[] {
   ];
 }
 
-/** What the response rules may learn from, or record of, the answer. */
+/** Which answers the response rules read, and which of them may teach a key. */
 function learnFlags(): string[] {
   return [
     "    # Only a redirect answering a registry request the check did not refuse",
@@ -314,6 +312,8 @@ function roleRules(accountFile: string) {
     ],
   };
 }
+
+type RoleRules = ReturnType<typeof roleRules>;
 
 /**
  * Response rules: learn the key in the presigned URL an ECR registry
