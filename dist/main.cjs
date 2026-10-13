@@ -68782,7 +68782,7 @@ function toRow(group) {
 		count: group.count,
 		expected: !0,
 		expectedBy: group.rule,
-		display: `${group.rule} (${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
+		note: `(${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
 }
 //#endregion
@@ -68795,10 +68795,17 @@ const ALIGN_MARKERS = {
 function escapeCell(value) {
 	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
 }
+function codeSpan(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(value) {
+	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
+}
 function markdownTable(formats, rows) {
 	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
 	for (let row of rows) {
-		let cells = formats.map((f) => escapeCell(row[f.key]));
+		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
 		lines.push(`| ${cells.join(" | ")} |`);
 	}
 	return lines.join("\n");
@@ -68812,7 +68819,8 @@ const OUTCOME_MARK = {
 function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 	let formats = [{
 		key: "host",
-		title: "Host"
+		title: "Host",
+		cell: String
 	}, {
 		key: "ruleType",
 		title: "Rule"
@@ -68829,7 +68837,7 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 		title: "Expected",
 		align: "center"
 	}), markdownTable(formats, rows.map((r) => ({
-		host: r.display ?? (r.port === "-" ? r.host : `${r.host}:${r.port}`),
+		host: codeCell(r.port === "-" ? r.host : `${r.host}:${r.port}`) + (r.note ? ` ${r.note}` : ""),
 		ruleType: r.ruleType,
 		reason: r.outcome ? OUTCOME_MARK[r.outcome] + r.reason : r.reason,
 		count: r.count,
@@ -69063,11 +69071,13 @@ function leftOutSection(leftOut) {
 	return md += markdownTable([
 		{
 			key: "method",
-			title: "Method"
+			title: "Method",
+			cell: codeCell
 		},
 		{
 			key: "url",
-			title: "URL"
+			title: "URL",
+			cell: codeCell
 		},
 		{
 			key: "part",
@@ -69459,13 +69469,6 @@ function escapeChar(c) {
 	if (named !== void 0) return named;
 	let cp = Number(c.codePointAt(0));
 	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-}
-function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-	return `${fence}${pad}${text}${pad}${fence}`;
-}
-function codeCell(text) {
-	return codeSpan(text.replace(/\|/g, "\\|"));
 }
 function field(text) {
 	return text.includes(" ") ? `"${text}"` : text;

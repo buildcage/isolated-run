@@ -1,7 +1,8 @@
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import { codeSpan } from "#core/lib/report/render/markdown-table.ts";
 
 import { fmtSpan } from "./agg.ts";
-import { codeSpan, field, markdownRows, pathCell } from "./escape.ts";
+import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { AuditSummary, Executed, RefusedRow, Row } from "./reduce.ts";
