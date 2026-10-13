@@ -352,11 +352,8 @@ static __always_inline void open_failed(u32 slot, struct event *e, long ret, int
 	e->n2 = cut;
 	if (off > PATH_LEN) // never, but the verifier needs the bound
 		return;
-	u8 n = 0;
-	if (off > 1 && e->data[0] != '/') {
-		off = add_base(e, off, dfd, &n, &e->truncated, 1, 0);
-		e->mode = n;
-	}
+	if (off > 1 && e->data[0] != '/')
+		off = add_base(e, off, dfd, 1, 0);
 	e->data_len = off;
 	submit(e);
 }
