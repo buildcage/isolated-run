@@ -18,11 +18,12 @@
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";
 
 import {
-  AWS_API_HOST,
+  AWS_API_SUFFIXES,
   AWS_PUBLIC_HOST,
   AWS_RESOURCE_HOST,
   CODECOMMIT_HOST,
   EC2_HOST,
+  ECR_DUALSTACK_REGISTRY_HOST,
   ECR_REGISTRY_HOST,
   S3_HOST,
   SIGV2_PARAM,
@@ -132,7 +133,7 @@ function credentialFacts(): string[] {
     "    # AWS access key check. req.fhdr, not req.hdr: Authorization holds commas.",
     "    # Each fact is matched once and kept in a variable: an acl is evaluated",
     "    # again on every line that names it.",
-    `    http-request set-var(txn.aws_host) bool(true) if { var(txn.host) -m reg ${AWS_API_HOST} }`,
+    `    http-request set-var(txn.aws_host) bool(true) if { var(txn.host) -m end ${AWS_API_SUFFIXES.join(" ")} }`,
     "    acl aws_host var(txn.aws_host) -m bool",
     `    http-request set-var(txn.aws_resource_host) bool(true) if aws_host { var(txn.host) -m reg ${AWS_RESOURCE_HOST} }`,
     "    acl aws_resource_host var(txn.aws_resource_host) -m bool",
@@ -271,8 +272,9 @@ function learnFlags(): string[] {
   return [
     "    # Only a redirect answering a registry request the check did not refuse",
     "    # can teach a key, and only over TLS, where the registry's certificate",
-    "    # was verified.",
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    "    # was verified. Each name's regex runs only on a host under its domain.",
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
     "    # Any answer over TLS names the account of its role, but only one to a",
     "    # request the check let through can teach a key. A plaintext answer",
     "    # could have been rewritten on the way.",
