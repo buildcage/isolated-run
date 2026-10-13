@@ -30,7 +30,7 @@ import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
 import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
 
-import { commandSummaryClosers } from "./command-summary.ts";
+import { closeCommandSummary } from "./command-summary.ts";
 import { buildComposeEnv } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
@@ -252,8 +252,7 @@ function writeBackMediatedFile(
     } else {
       // The step's own summary, with whatever it left open closed so the
       // report fitted after it (see report.ts) is not swallowed.
-      const closers = commandSummaryClosers(read.bytes.toString("utf8"));
-      content = Buffer.concat([read.bytes, Buffer.from(closers, "utf8")]);
+      content = closeCommandSummary(read.bytes);
     }
   }
   // An empty read is the command removing its backing file: the real file is
