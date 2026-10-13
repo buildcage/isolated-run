@@ -18,7 +18,7 @@
  * command has exited by then, so nothing races the read.
  *
  * $GITHUB_ENV, $GITHUB_PATH and $GITHUB_STATE are left as they are: read-only in
- * the sandbox, never mediated (see host-commands.ts).
+ * the sandbox, never mediated (see host-protected-paths.ts).
  */
 
 import {
