@@ -31,7 +31,7 @@ import {
   STS_HOST,
   formName,
 } from "./aws-hosts.ts";
-import type { AwsTrafficFields } from "./aws-log.ts";
+import { AWS_REASON_PREFIX, AWS_REFUSED_VERDICTS, type AwsTrafficFields } from "./aws-log.ts";
 
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
@@ -42,23 +42,6 @@ export interface AwsKeyCheck {
   /** The base64 HMAC key a run's key references are made with. */
   refSecret: string;
 }
-
-/** Starts every reason the check refuses with. */
-export const AWS_REASON_PREFIX = "aws-";
-
-/** The verdicts restrict mode refuses on, each logged as `reason=aws-<verdict>`. */
-export const AWS_REFUSED_VERDICTS = [
-  "no-credential",
-  "ambiguous-credential",
-  "unsupported-credential",
-  "unreadable",
-  "key-not-allowed",
-  "role-not-allowed",
-] as const;
-
-/** A reason the check refuses with. */
-export type AwsRefusedReason =
-  `${typeof AWS_REASON_PREFIX}${(typeof AWS_REFUSED_VERDICTS)[number]}`;
 
 // A form body is read whole up to this size, less its headers, so a credential
 // cannot sit past what was read. SQS SendMessage, the largest form request, is

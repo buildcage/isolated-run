@@ -9,10 +9,9 @@ import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
-import { awsFieldsOf } from "../proxy/aws-log.ts";
-import type { AwsRefusedReason } from "../proxy/haproxy-aws-keys.ts";
+import { awsFieldsOf, type AwsRefusedReason } from "../proxy/aws-log.ts";
 
-const KEY_NOT_ALLOWED: AwsRefusedReason = "aws-key-not-allowed";
+const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsRefusedReason;
 
 /** How many hosts the key table names before counting the rest. */
 const KEY_HOSTS_SHOWN = 3;

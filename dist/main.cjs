@@ -69875,8 +69875,6 @@ function isAwsAccountId(value) {
 function isAwsAccessKeyId(value) {
 	return ACCESS_KEY_ID.test(value);
 }
-//#endregion
-//#region src/proxy/aws-log.ts
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
 }
@@ -73613,22 +73611,6 @@ async function writeStepSummary(markdown, summaryFile) {
 function applyOutcomeAnnotations(annotation, emissions) {
 	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
 }
-//#endregion
-//#region src/proxy/aws-hosts.ts
-const AMAZONAWS_TLDS = [
-	"com",
-	"com\\.cn",
-	"eu"
-], DUALSTACK_NAMES = [
-	"api\\.aws",
-	"api\\.amazonwebservices\\.com\\.cn",
-	"api\\.amazonwebservices\\.eu"
-], AMAZONAWS_DOMAINS = `amazonaws\\.(${AMAZONAWS_TLDS.join("|")})`, DUALSTACK_DOMAINS = `(${DUALSTACK_NAMES.join("|")})`, AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
-[...AMAZONAWS_TLDS.map((tld) => `amazonaws\\.${tld}`), ...DUALSTACK_NAMES].map((domain) => `.${domain.replaceAll("\\.", ".")}`);
-const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`, apiHost = (service, vpceService = service) => `^${service}(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHost(vpceService)}`;
-apiHost("sts"), `${apiHost("ec2", "ec2(-fips)?")}`, `${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${DUALSTACK_DOMAINS}${AMAZONAWS_DOMAINS}${DUALSTACK_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}`, `${AMAZONAWS_DOMAINS}`, `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` + vpceHost("git-codecommit(-fips)?");
-const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
-formName("awsaccesskeyid"), formName("x-amz-credential"), formName("rolearn"), formName("action");
 //#endregion
 //#region src/lib/would-refuse.ts
 const KEY_NOT_ALLOWED = "aws-key-not-allowed";
