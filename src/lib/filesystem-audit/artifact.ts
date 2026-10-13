@@ -12,6 +12,11 @@ import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "../
  * name, or undefined on failure. The JSON lines carry absolute paths, so
  * treat the artifact as sensitive. Best-effort: a failed upload only warns.
  */
+/** The name uploadFilesystemAuditArtifact uploads under. */
+export function filesystemAuditArtifactName(containerName: string): string {
+  return artifactName("buildcage-filesystem-audit", containerName);
+}
+
 export async function uploadFilesystemAuditArtifact(
   outPath: string,
   containerName: string,
@@ -20,7 +25,7 @@ export async function uploadFilesystemAuditArtifact(
   { upload = uploadViaActionsArtifact }: { upload?: UploadArtifact } = {},
 ): Promise<string | undefined> {
   try {
-    const name = artifactName("buildcage-filesystem-audit", containerName);
+    const name = filesystemAuditArtifactName(containerName);
     await upload(name, [outPath], dirname(outPath), { retentionDays });
     console.log(`Uploaded the filesystem audit as ${name}`);
     return name;

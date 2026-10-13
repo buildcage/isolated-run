@@ -74,25 +74,15 @@ export interface ReportStepOptions {
    */
   moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
   /** Whether the step records its process activity, which the title names
-   *  when its section is there or still to come. */
+   *  when its section is there. */
   processActivity: boolean;
-  /** False leaves the footer to a part of the summary written later. */
-  closeSummary?: boolean;
-}
-
-export interface ReportedTraffic {
-  /** The proxy's start, undefined when unknown. */
-  startedAt: number | undefined;
-  /** Whether the report, with its title, made it into the summary. */
-  reported: boolean;
 }
 
 /**
  * Fetch the proxy's report, write the Job Summary, and upload the traffic
  * artifact if one was asked for. The rest of the summary, `moreBlocks`, is
  * written with the report, or under a title of its own when there is no report
- * to write. Resolves to the proxy's start and whether the report was written,
- * for a part of the summary written later.
+ * to write.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail_on_blocked it also fails the step: a report that
@@ -113,10 +103,9 @@ export async function reportStepTraffic(
     env,
     moreBlocks = () => [],
     processActivity,
-    closeSummary = true,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
-): Promise<ReportedTraffic> {
+): Promise<void> {
   const {
     fetchReport,
     readActionVersion,
@@ -140,9 +129,9 @@ export async function reportStepTraffic(
   // cannot take the rest of the summary down with it.
   const stepLabel = readStepLabel();
   const rest = moreBlocks(report?.startedAt);
-  const footer = closeSummary ? [summaryFooter(actionRepo)] : [];
+  const footer = [summaryFooter(actionRepo)];
   // A section that failed to render leaves nothing for the title to name.
-  const named = closeSummary ? processActivity && rest.length > 0 : processActivity;
+  const named = processActivity && rest.length > 0;
   const writeRest = () =>
     writeMoreSummary(
       rest.length === 0
@@ -155,12 +144,9 @@ export async function reportStepTraffic(
       env,
       annotation,
       { writeSummaryBlocks },
-      // buildcage's first write, so a rule marks where it follows the command.
-      true,
     );
 
   let artifactName = "";
-  let reported = false;
   if (!report) {
     await writeRest();
   } else {
@@ -182,7 +168,6 @@ export async function reportStepTraffic(
         trafficArtifact.upload,
         env,
       );
-      reported = true;
     } catch (e) {
       fail(`Failed to write the report summary: ${errorMessage(e)}`);
       await writeRest();
@@ -210,52 +195,21 @@ export async function reportStepTraffic(
   } catch (e) {
     fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
   }
-  return { startedAt: report?.startedAt, reported };
 }
 
-export interface LateSummaryOptions {
-  /** See ReportedTraffic.reported. */
-  reported: boolean;
-  actionRepo: string;
-  isAudit: boolean;
-  env: NodeJS.ProcessEnv;
-  annotation: Annotation;
-}
-
-/**
- * Writes what follows a report written with `closeSummary: false`, then the
- * footer. Opens under its own title when the report was not written; writes
- * nothing when neither has anything to say.
- */
-export async function writeLateSummary(
-  blocks: SummaryBlock[],
-  { reported, actionRepo, isAudit, env, annotation }: LateSummaryOptions,
-  overrides: Partial<ReportStepDeps> = {},
-): Promise<void> {
-  const { readStepLabel } = { ...realDeps, ...overrides };
-  if (!reported && blocks.length === 0) return;
-  const head = reported ? [] : [missingReportFrame(reportTitle(readStepLabel(), true), isAudit)];
-  await writeMoreSummary(
-    [...head, ...blocks, summaryFooter(actionRepo)],
-    env,
-    annotation,
-    overrides,
-  );
-}
-
-/** Fits `blocks` into what the Job Summary has left and writes them; never
- *  throws, as a failure here only costs that part of the summary. */
+/** Fits `blocks` into what the Job Summary has left and writes them, after a
+ *  rule when the command wrote a summary of its own; never throws, as a
+ *  failure here only costs that part of the summary. */
 export async function writeMoreSummary(
   blocks: SummaryBlock[],
   env: NodeJS.ProcessEnv,
   annotation: Annotation,
   overrides: Partial<ReportStepDeps> = {},
-  separateFromExisting = false,
 ): Promise<void> {
   const { writeSummaryBlocks } = { ...realDeps, ...overrides };
   if (blocks.length === 0) return;
   try {
-    await writeSummaryBlocks(blocks, env, { separateFromExisting });
+    await writeSummaryBlocks(blocks, env, { separateFromExisting: true });
   } catch (e) {
     annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
   }

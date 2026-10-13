@@ -36,7 +36,7 @@ import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
-import { prepareStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -80,7 +80,7 @@ import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-
 import { realPathOf } from "./sandbox/symlinks.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { validatedOutputText } from "./step-output-file.ts";
-import { reportStepTraffic, writeLateSummary } from "./step-report.ts";
+import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 
@@ -157,8 +157,7 @@ const realDeps = {
   stopSandboxProxy,
   runSandboxedCommand,
   reportStepTraffic,
-  writeLateSummary,
-  prepareStepFilesystemAudit,
+  readStepFilesystemAudit,
   mediateRunnerOutputFiles,
   readBackingFile,
   removeBackingDir,
@@ -477,25 +476,24 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
       // says so.
     }
   }
-  const prepareAudit = () =>
-    deps.prepareStepFilesystemAudit({
-      audit,
-      attached: run.auditAttached(),
-      upload: inputs.filesystemAuditArtifact.upload,
-      retentionDays: inputs.filesystemAuditArtifact.retentionDays,
-      containerName,
-      annotation,
-      env,
-      actionRepo,
-      actionRef: reportActionRef,
-      failClosed: proxyMode !== "audit" && failOnBlocked,
-    });
-  // The runner kills a cancelled step seconds after cancelling it, and a
-  // large recording takes a while to read and upload, so the traffic report
-  // goes first and the audit takes what the summary has left.
-  const filesystemReport = cancelled ? undefined : await prepareAudit();
+  const readAudit = deps.readStepFilesystemAudit({
+    audit,
+    attached: run.auditAttached(),
+    upload: inputs.filesystemAuditArtifact.upload,
+    retentionDays: inputs.filesystemAuditArtifact.retentionDays,
+    containerName,
+    annotation,
+    env,
+    actionRepo,
+    actionRef: reportActionRef,
+    failClosed: proxyMode !== "audit" && failOnBlocked,
+  });
+  // The runner kills a cancelled step seconds after cancelling it, and an
+  // upload takes a while, so a cancelled step writes the whole summary first,
+  // its notes naming the artifact the upload after it is to make.
+  const artifact = cancelled ? readAudit.expected : await readAudit.upload();
   const processActivity = audit !== undefined;
-  const { startedAt, reported } = await deps.reportStepTraffic({
+  await deps.reportStepTraffic({
     containerName,
     proxyEngine: inputs.proxyEngine,
     parameters: {
@@ -515,21 +513,10 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,
-    moreBlocks: filesystemReport?.blocks,
+    moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
     processActivity,
-    // The audit written below closes the summary instead.
-    closeSummary: !(cancelled && processActivity),
   });
-  if (cancelled && processActivity) {
-    const late = await prepareAudit();
-    await deps.writeLateSummary(late.blocks(startedAt), {
-      reported,
-      actionRepo,
-      isAudit: proxyMode === "audit",
-      env,
-      annotation,
-    });
-  }
+  if (cancelled) await readAudit.upload();
   return runnerFileFailed;
 }
 

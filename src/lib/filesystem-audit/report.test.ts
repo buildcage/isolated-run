@@ -12,6 +12,7 @@ import { renderAuditSummaryBlocks } from "./render.ts";
 import {
   openWriter,
   prepareStepFilesystemAudit,
+  readStepFilesystemAudit,
   readLines,
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
@@ -767,7 +768,7 @@ describe("prepareStepFilesystemAudit: failures while reading", () => {
 });
 
 describe("prepareStepFilesystemAudit: an upload that throws", () => {
-  it("only warns, and still sets the output", async () => {
+  it("only warns, still sets the output, and says the record is not kept", async () => {
     const note = annotation();
     const {
       deps: d,
@@ -796,7 +797,66 @@ describe("prepareStepFilesystemAudit: an upload that throws", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to report the filesystem audit: network down",
     );
-    expect(summaries).toEqual([]);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toContain("the full record could not be uploaded");
+    expect(outputs).toEqual([""]);
+  });
+});
+
+describe("readStepFilesystemAudit", () => {
+  const options = {
+    upload: true,
+    retentionDays: 3,
+    containerName: "buildcage-proxy-deadbeef",
+    actionRepo: "buildcage/isolated-run",
+    actionRef: "v2",
+    failClosed: false,
+    attached: true,
+    audit: AUDIT,
+    env: { GITHUB_WORKSPACE: "/work" },
+  };
+
+  // A cancelled step writes the summary first and uploads after it.
+  it("renders before the upload, naming the artifact the upload is to make", async () => {
+    const { deps: d, uploads, outputs } = deps();
+    const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
+
+    expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
+    const text = joinSummaryBlocks(read.blocks(undefined, read.expected));
+    expect(text).toContain(
+      "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact",
+    );
+    expect(uploads).toEqual([]);
+
+    await expect(read.upload()).resolves.toStrictEqual({
+      name: "buildcage-filesystem-audit-deadbeef",
+    });
+    expect(uploads).toHaveLength(1);
+    expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("expects no artifact when none was asked for, or there is no copy to upload", () => {
+    const { deps: d } = deps();
+    expect(
+      readStepFilesystemAudit({ ...options, upload: false, annotation: annotation() }, d).expected,
+    ).toBe("not-requested");
+    const { deps: empty } = deps({ raw: "" });
+    expect(readStepFilesystemAudit({ ...options, annotation: annotation() }, empty).expected).toBe(
+      "upload-failed",
+    );
+  });
+
+  it("uploads nothing and sets the output empty when there is no recording to read", async () => {
+    const { deps: d, uploads, outputs } = deps();
+    const read = readStepFilesystemAudit(
+      { ...options, audit: undefined, annotation: annotation() },
+      d,
+    );
+
+    expect(read.expected).toBe("not-requested");
+    expect(read.blocks(undefined, read.expected)).toStrictEqual([]);
+    await expect(read.upload()).resolves.toBe("not-requested");
+    expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
   });
 });

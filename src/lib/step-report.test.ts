@@ -5,7 +5,6 @@ import { reportParams } from "#core/lib/test/report-data.node.ts";
 import { missingReportFrame, summaryFooter } from "./report.ts";
 import {
   reportStepTraffic,
-  writeLateSummary,
   writeMoreSummary,
   type ReportStepDeps,
   type ReportStepOptions,
@@ -93,14 +92,6 @@ describe("reportStepTraffic", () => {
     // Recorded, but its section failed to render.
     await reportStepTraffic(options({ processActivity: true, moreBlocks: () => [] }), deps);
     expect(mocks.writeReportSummary.mock.calls[1][2].processActivity).toBe(false);
-    // Written later, so named for what is to come.
-    await reportStepTraffic(options({ processActivity: true, closeSummary: false }), deps);
-    expect(mocks.writeReportSummary.mock.calls[2][2].processActivity).toBe(true);
-  });
-
-  it("leaves the footer to a later write when asked", async () => {
-    await reportStepTraffic(options({ closeSummary: false }), deps);
-    expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([]);
   });
 
   it("writes the rest of the summary alone when there is no report", async () => {
@@ -126,14 +117,13 @@ describe("reportStepTraffic", () => {
       options({
         moreBlocks: () => [block],
         processActivity: true,
-        closeSummary: false,
         parameters: reportParams({ mode: "audit" }),
       }),
       deps,
     );
 
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
-      [missingReportFrame("Traffic & Process Activity Report — build", true), block],
+      [missingReportFrame("Traffic & Process Activity Report — build", true), block, FOOTER],
       {},
       { separateFromExisting: true },
     );
@@ -241,7 +231,7 @@ describe("reportStepTraffic", () => {
 
       await expect(
         reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
-      ).resolves.toMatchObject({ startedAt: undefined });
+      ).resolves.toBeUndefined();
 
       expect(mocks.writeReportSummary).not.toHaveBeenCalled();
       if (fails) {
@@ -261,9 +251,7 @@ describe("reportStepTraffic", () => {
   it("fails the step when writing the summary fails under restrict with fail_on_blocked", async () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toMatchObject({
-      startedAt: undefined,
-    });
+    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to write the report summary: summary file is gone; failing the step under restrict with fail_on_blocked",
     );
@@ -290,7 +278,7 @@ describe("reportStepTraffic", () => {
 
     await expect(
       reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
-    ).resolves.toMatchObject({ startedAt: undefined });
+    ).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to upload the traffic artifact: artifact service down",
     );
@@ -327,29 +315,11 @@ describe("reportStepTraffic", () => {
       throw new Error("Missing file at path: /github/output");
     });
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toMatchObject({
-      startedAt: undefined,
-    });
+    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to set the traffic_artifact_name output: Missing file at path: /github/output; failing the step under restrict with fail_on_blocked",
     );
     expect(process.exitCode).toBe(1);
-  });
-
-  it("resolves to the proxy's start and whether the report was written", async () => {
-    mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
-    await expect(reportStepTraffic(options(), deps)).resolves.toStrictEqual({
-      startedAt: 1_791_244_800,
-      reported: true,
-    });
-    mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
-    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toStrictEqual(
-      { startedAt: 1_791_244_800, reported: false },
-    );
-    mocks.fetchReport.mockRejectedValue(new Error("proxy is gone"));
-    await expect(reportStepTraffic(options({ failOnBlocked: false }), deps)).resolves.toStrictEqual(
-      { startedAt: undefined, reported: false },
-    );
   });
 });
 
@@ -362,9 +332,7 @@ describe("writeMoreSummary", () => {
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [block],
       { GITHUB_STEP_SUMMARY: "/s" },
-      {
-        separateFromExisting: false,
-      },
+      { separateFromExisting: true },
     );
   });
 
@@ -379,48 +347,5 @@ describe("writeMoreSummary", () => {
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to write the Job Summary: summary file is gone",
     );
-  });
-});
-
-describe("writeLateSummary", () => {
-  const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
-  const late = {
-    actionRepo: "buildcage/isolated-run",
-    isAudit: false,
-    env: {},
-    annotation: annotation as unknown as ReportStepOptions["annotation"],
-  };
-
-  it("closes a written report's summary after the blocks", async () => {
-    await writeLateSummary([block], { ...late, reported: true }, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
-      [block, FOOTER],
-      {},
-      {
-        separateFromExisting: false,
-      },
-    );
-    await writeLateSummary([], { ...late, reported: true }, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenLastCalledWith(
-      [FOOTER],
-      {},
-      {
-        separateFromExisting: false,
-      },
-    );
-  });
-
-  it("opens under a title of its own when the report was not written", async () => {
-    await writeLateSummary([block], { ...late, reported: false }, deps);
-    expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
-      [missingReportFrame("Traffic & Process Activity Report — build", false), block, FOOTER],
-      {},
-      { separateFromExisting: false },
-    );
-  });
-
-  it("writes nothing when neither has anything to say", async () => {
-    await writeLateSummary([], { ...late, reported: false }, deps);
-    expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
 });

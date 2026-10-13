@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { InvalidInputError } from "#core/lib/actions/inputs.ts";
+import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { SandboxError } from "./errors.ts";
+import type { RecordArtifact } from "./filesystem-audit/render.ts";
+import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import {
   finalizeStep,
   preflight,
@@ -57,8 +60,7 @@ const mocks = {
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
   reportStepTraffic: vi.fn(),
-  writeLateSummary: vi.fn(),
-  prepareStepFilesystemAudit: vi.fn(),
+  readStepFilesystemAudit: vi.fn(),
   mediateRunnerOutputFiles: vi.fn(),
   readBackingFile: vi.fn(),
   removeBackingDir: vi.fn(),
@@ -80,6 +82,16 @@ const deps = mocks as unknown as SandboxStepDeps;
 const stopListening = vi.fn();
 
 const DIGEST = "sha256:" + "a".repeat(64);
+
+/** A read recording, its upload and blocks spied on. */
+function readAudit<T extends Partial<ReadStepFilesystemAudit>>(over: T = {} as T) {
+  return {
+    expected: "not-requested" as RecordArtifact,
+    upload: vi.fn(async (): Promise<RecordArtifact> => "not-requested"),
+    blocks: vi.fn((): SummaryBlock[] => []),
+    ...over,
+  };
+}
 
 const RUNNER_FILES = ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const;
 
@@ -139,8 +151,8 @@ beforeEach(() => {
   mocks.startSandboxProxy.mockResolvedValue(undefined);
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
-  mocks.reportStepTraffic.mockResolvedValue({ startedAt: undefined, reported: true });
-  mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks: () => [] });
+  mocks.reportStepTraffic.mockResolvedValue(undefined);
+  mocks.readStepFilesystemAudit.mockReturnValue(readAudit());
   mocks.onCancel.mockReturnValue(stopListening);
   // Mirrors the real mediation: a backing file per variable the step has.
   mocks.mediateRunnerOutputFiles.mockImplementation(
@@ -246,41 +258,39 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("prepares the audit first and writes its summary with the traffic report", async () => {
-    const blocks = vi.fn(() => []);
-    mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
+  it("uploads the audit first and writes its summary with the traffic report", async () => {
+    const read = readAudit({ upload: vi.fn(async () => ({ name: "uploaded" })) });
+    mocks.readStepFilesystemAudit.mockReturnValue(read);
     mocks.readFilesystemAuditInput.mockReturnValue("record");
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
-      moreBlocks: blocks,
-      processActivity: true,
-      closeSummary: true,
-    });
-    expect(orderOf(mocks.prepareStepFilesystemAudit)).toBeLessThan(
-      orderOf(mocks.reportStepTraffic),
-    );
+    const report = mocks.reportStepTraffic.mock.calls[0][0];
+    expect(report.processActivity).toBe(true);
+    report.moreBlocks(1_700_000_000);
+    expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "uploaded" });
+    expect(read.upload).toHaveBeenCalledTimes(1);
+    expect(orderOf(read.upload)).toBeLessThan(orderOf(mocks.reportStepTraffic));
   });
 
   it("tells the report whether the tracer attached", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
     await runSandboxStep(ENV, deps);
-    expect(mocks.prepareStepFilesystemAudit.mock.calls[0][0].attached).toBe(false);
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].attached).toBe(false);
 
     mocks.runSandboxedCommand.mockImplementation(async ({ onAuditAttached }) => {
       onAuditAttached?.();
       throw new Error("the command failed to run");
     });
     await expect(runSandboxStep(ENV, deps)).rejects.toThrow("the command failed to run");
-    expect(mocks.prepareStepFilesystemAudit.mock.calls[1][0].attached).toBe(true);
+    expect(mocks.readStepFilesystemAudit.mock.calls[1][0].attached).toBe(true);
 
     mocks.runSandboxedCommand.mockImplementation(async ({ onAuditAttached }) => {
       onAuditAttached?.();
       return 0;
     });
     await runSandboxStep(ENV, deps);
-    expect(mocks.prepareStepFilesystemAudit.mock.calls[2][0].attached).toBe(true);
+    expect(mocks.readStepFilesystemAudit.mock.calls[2][0].attached).toBe(true);
   });
 
   it("leaves the audit off by default", async () => {
@@ -724,9 +734,7 @@ describe("runSandboxStep", () => {
 
       expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.alloc(0));
       expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.writeRunnerFile));
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(
-        orderOf(mocks.prepareStepFilesystemAudit),
-      );
+      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.readStepFilesystemAudit));
       expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(annotation.error).not.toHaveBeenCalled();
     });
@@ -740,7 +748,7 @@ describe("runSandboxStep", () => {
       expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
       expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.setTrafficArtifactOutput));
       expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
-        orderOf(mocks.prepareStepFilesystemAudit),
+        orderOf(mocks.readStepFilesystemAudit),
       );
     });
 
@@ -958,12 +966,11 @@ describe("runSandboxStep", () => {
       expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
-    it("writes the traffic report before the audit once cancelled, and the audit after it", async () => {
-      const block = { kind: "text", text: "audit" };
-      const blocks = vi.fn(() => [block]);
-      mocks.prepareStepFilesystemAudit.mockResolvedValue({ blocks });
+    // The upload is what takes long, so the summary goes out before it.
+    it("writes the whole summary before the upload once cancelled, naming the artifact to come", async () => {
+      const read = readAudit({ expected: { name: "to-come" } });
+      mocks.readStepFilesystemAudit.mockReturnValue(read);
       mocks.readFilesystemAuditInput.mockReturnValue("record");
-      mocks.reportStepTraffic.mockResolvedValue({ startedAt: 1_700_000_000, reported: false });
       mocks.runSandboxedCommand.mockImplementation(async () => {
         cancelListener()();
         return 143;
@@ -971,42 +978,14 @@ describe("runSandboxStep", () => {
 
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
-        moreBlocks: undefined,
-        closeSummary: false,
-      });
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
-      expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(
-        orderOf(mocks.prepareStepFilesystemAudit),
-      );
-      expect(blocks).toHaveBeenCalledWith(1_700_000_000);
-      expect(mocks.writeLateSummary.mock.calls[0][0]).toStrictEqual([block]);
-      expect(mocks.writeLateSummary.mock.calls[0][1]).toMatchObject({
-        reported: false,
-        actionRepo: "buildcage/isolated-run",
-        isAudit: false,
-        env: ENV,
-      });
-      expect(orderOf(mocks.writeLateSummary)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
-    });
-
-    it("lets the traffic report close the summary when cancelled with no audit", async () => {
-      mocks.runSandboxedCommand.mockImplementation(async () => {
-        cancelListener()();
-        return 143;
-      });
-      await runSandboxStep(ENV, deps);
-      expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
-        processActivity: false,
-        closeSummary: true,
-      });
-      expect(mocks.writeLateSummary).not.toHaveBeenCalled();
-    });
-
-    it("writes no separate audit summary when not cancelled", async () => {
-      mocks.readFilesystemAuditInput.mockReturnValue("record");
-      await runSandboxStep(ENV, deps);
-      expect(mocks.writeLateSummary).not.toHaveBeenCalled();
+      const report = mocks.reportStepTraffic.mock.calls[0][0];
+      expect(report.processActivity).toBe(true);
+      report.moreBlocks(1_700_000_000);
+      expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "to-come" });
+      expect(read.upload).toHaveBeenCalledTimes(1);
+      expect(orderOf(mocks.readStepFilesystemAudit)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(read.upload));
+      expect(orderOf(read.upload)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
     });
   });
 });
@@ -1076,7 +1055,6 @@ describe("finalizeStep", () => {
 
     expect(mocks.readBackingFile).not.toHaveBeenCalled();
     expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
-    expect(mocks.writeLateSummary).not.toHaveBeenCalled();
   });
 
   it("says a runner file it could not write back failed the step, and still reports", async () => {
