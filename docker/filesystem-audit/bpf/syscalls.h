@@ -29,6 +29,7 @@ struct path_call {
 	u32 val1;      ///< a chmod's new mode, or a chown's new uid
 	u32 val2;      ///< a chown's new gid
 	u32 empty_dfd; ///< an empty p1 names dfd1's own file (AT_EMPTY_PATH)
+	u32 by_fd;     ///< no p1: the call names dfd1's own file
 };
 
 /**
@@ -53,16 +54,16 @@ struct path_call {
  */
 const volatile long nr_unlinkat = -1, nr_unlink = -1, nr_rmdir = -1;
 const volatile long nr_renameat2 = -1, nr_renameat = -1, nr_rename = -1;
-const volatile long nr_fchmodat = -1, nr_fchmodat2 = -1, nr_chmod = -1;
-const volatile long nr_fchownat = -1, nr_chown = -1, nr_lchown = -1;
+const volatile long nr_fchmodat = -1, nr_fchmodat2 = -1, nr_chmod = -1, nr_fchmod = -1;
+const volatile long nr_fchownat = -1, nr_chown = -1, nr_lchown = -1, nr_fchown = -1;
 const volatile long nr_utimensat = -1, nr_futimesat = -1, nr_utime = -1, nr_utimes = -1;
-const volatile long nr_setxattr = -1, nr_lsetxattr = -1;
+const volatile long nr_setxattr = -1, nr_lsetxattr = -1, nr_fsetxattr = -1;
 const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = -1;
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
-const volatile long nr_truncate = -1;
+const volatile long nr_truncate = -1, nr_ftruncate = -1;
 
 /**
- * A syscall's argument @p i (0 to 3), from the register it was passed in.
+ * A syscall's argument @p i (0 to 4), from the register it was passed in.
  * They still hold it when the call returns, save arm64's first, which the
  * return value overwrites and orig_x0 keeps.
  */
@@ -70,7 +71,7 @@ static __always_inline u64 sys_arg(struct pt_regs *regs, int i)
 {
 	struct pt_regs___x86 *x = (void *)regs;
 	if (bpf_core_field_exists(x->di))
-		return i == 0 ? x->di : i == 1 ? x->si : i == 2 ? x->dx : x->r10;
+		return i == 0 ? x->di : i == 1 ? x->si : i == 2 ? x->dx : i == 3 ? x->r10 : x->r8;
 	struct pt_regs___arm64 *a = (void *)regs;
 	return i == 0 ? a->orig_x0 : a->regs[i];
 }
@@ -94,9 +95,27 @@ static __always_inline long current_sys_nr(void)
 #define OP(k, ok, quiet, d1, a1, d2, a2)						\
 	({ p->kind = k; p->kind_ok = ok; p->quiet_err = quiet;				\
 	   p->dfd1 = d1; p->p1 = a1; p->dfd2 = d2; p->p2 = a2;			\
-	   p->val1 = 0; p->val2 = 0; p->empty_dfd = 0; 1; })
+	   p->val1 = 0; p->val2 = 0; p->empty_dfd = 0; p->by_fd = 0; 1; })
 #define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
 #define EMPTY_DFD(f) ({ p->empty_dfd = (f) != 0; 1; })
+/**
+ * Marks p as made through descriptor @p fd alone, which AT_FDCWD is not: it
+ * names no file, so is not taken for the working directory.
+ */
+static __always_inline int fd_only(struct path_call *p, int fd)
+{
+	if (fd == AT_FDCWD)
+		return 0;
+	p->by_fd = 1;
+	return 1;
+}
+
+/**
+ * A change made through descriptor d alone. Its hook records it when it
+ * succeeds, but a read-only mount refuses fchmod and fchown, and an
+ * append-only file ftruncate, before the hook runs.
+ */
+#define FD_OP(k, d) (OP(k, 0, 0, d, 0, 0, 0) && fd_only(p, d))
 
 /**
  * Making a name. The kernel refuses one on a read-only mount before the
@@ -108,16 +127,14 @@ static __always_inline long current_sys_nr(void)
 #define ENOSYS 38
 
 /**
- * utimensat, utime, utimes, futimesat and {,l}setxattr are the attribute
+ * utimensat, utime, utimes, futimesat and {,l,f}setxattr are the attribute
  * changes with no security_path_* hook of their own; recorded here, success
  * and failure alike. A NULL path (futimens) changes the file dfd refers to;
  * with AT_FDCWD it names nothing and fails.
  */
 static __always_inline int attr_op(struct path_call *p, int dfd, u64 path)
 {
-	if (!path && dfd == AT_FDCWD)
-		return 0;
-	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0);
+	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0) && (path || fd_only(p, dfd));
 }
 
 /**
@@ -141,19 +158,27 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct path_c
 	if (nr == nr_fchmodat)
 		return OP(K_CHMOD_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), 0);
 	if (nr == nr_fchmodat2) // ENOSYS: a kernel before 6.6, so nothing was tried
-		return OP(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), 0);
+		return OP(K_CHMOD_FAILED, 0, ENOSYS, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), 0) &&
+		       EMPTY_DFD(ARG(3) & AT_EMPTY_PATH);
 	if (nr == nr_chmod)
 		return OP(K_CHMOD_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), 0);
+	if (nr == nr_fchmod)
+		return FD_OP(K_CHMOD_FAILED, ARG(0)) && VALS(ARG(1), 0);
 	if (nr == nr_fchownat)
-		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), ARG(3));
+		return OP(K_CHOWN_FAILED, 0, 0, ARG(0), ARG(1), 0, 0) && VALS(ARG(2), ARG(3)) &&
+		       EMPTY_DFD(ARG(4) & AT_EMPTY_PATH);
 	if (nr == nr_chown || nr == nr_lchown)
 		return OP(K_CHOWN_FAILED, 0, 0, AT_FDCWD, ARG(0), 0, 0) && VALS(ARG(1), ARG(2));
+	if (nr == nr_fchown)
+		return FD_OP(K_CHOWN_FAILED, ARG(0)) && VALS(ARG(1), ARG(2));
 	if (nr == nr_utimensat)
 		return attr_op(p, ARG(0), ARG(1)) && EMPTY_DFD(ARG(3) & AT_EMPTY_PATH);
 	if (nr == nr_futimesat)
 		return attr_op(p, ARG(0), ARG(1));
 	if (nr == nr_utime || nr == nr_utimes || nr == nr_setxattr || nr == nr_lsetxattr)
 		return attr_op(p, AT_FDCWD, ARG(0));
+	if (nr == nr_fsetxattr)
+		return attr_op(p, ARG(0), 0);
 	if (nr == nr_mkdirat)
 		return CREATE(K_MKDIR_FAILED, ARG(0), ARG(1), 0, 0);
 	if (nr == nr_mkdir)
@@ -172,7 +197,20 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct path_c
 		return CREATE(K_LINK_FAILED, AT_FDCWD, ARG(0), AT_FDCWD, ARG(1));
 	if (nr == nr_truncate)
 		return CREATE(K_TRUNCATE_FAILED, AT_FDCWD, ARG(0), 0, 0);
+	if (nr == nr_ftruncate)
+		return FD_OP(K_TRUNCATE_FAILED, ARG(0));
 	return 0;
+}
+
+/**
+ * Whether the call names its file by descriptor: by no name, or by an empty
+ * one with AT_EMPTY_PATH.
+ */
+static __always_inline int names_fd(struct path_call *p)
+{
+	char c = 1;
+	return p->by_fd ||
+	       (p->empty_dfd && bpf_probe_read_user(&c, 1, (void *)p->p1) == 0 && c == 0);
 }
 
 /** Emits the call as it ended with @p ret. */
@@ -181,9 +219,9 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	if (is_restart(ret) || (ret < 0 && -ret == call->quiet_err))
 		return;
 	u32 kind = ret < 0 ? call->kind : call->kind_ok;
-	// Only an attribute change names its file by descriptor alone (futimens);
-	// any other call given no name names nothing.
-	if (kind == 0 || (!call->p1 && kind != K_ATTR && kind != K_ATTR_FAILED))
+	// A call given no name names nothing, save one made through a
+	// descriptor alone.
+	if (kind == 0 || (!call->p1 && !call->by_fd))
 		return;
 	struct event *e = start(slot, kind);
 	if (!e)
@@ -208,7 +246,7 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	// flags holds val1 instead for an op with one name.
 	// An empty string reads as 1 byte, or as 0 before Linux 6.16.
 	if (!call->p1 || (call->empty_dfd && (r == 0 || r == 1))) {
-		// No name (futimens), or an empty one (AT_EMPTY_PATH): the
+		// No name (futimens, fchmod), or an empty one (AT_EMPTY_PATH): the
 		// descriptor's path. One closed by the time the call returned
 		// names nothing, so a change made through it counts in untracked.
 		e->data[0] = 0;
@@ -218,6 +256,11 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 				bump(&untracked);
 			return;
 		}
+		// A pipe, socket, device or memfd is no file a step protects, and
+		// dd's ftruncate of /dev/null fails as a matter of course.
+		if (ret < 0 && (e->marks & (MARK_INTERNAL | MARK_SPECIAL)))
+			return;
+		e->marks |= MARK_DESCRIPTOR;
 	} else if (r > 1 && e->data[0] != '/') {
 		off = add_base(e, off, call->dfd1, 1, e->n1);
 	}

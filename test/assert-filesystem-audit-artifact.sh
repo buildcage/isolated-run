@@ -60,6 +60,19 @@ holds "A refused chmod is recorded with its mode" \
   'any(.[]; .kind == "chmod" and .failed and .mode == "0777" and (.path | endswith("/root-owned.txt")))'
 holds "A refused chown is recorded with its owner" \
   'any(.[]; .kind == "chown" and .failed and .owner == "1:2" and (.path | endswith("/root-owned.txt")))'
+# /usr/bin/env is a symlink on some runners, so the file it leads to is matched.
+holds "A chmod through a descriptor the read-only root refused is recorded" \
+  'any(.[]; .kind == "chmod" and .err == 30 and .mode == "4755" and .comm == "python3" and (.path | startswith("/usr/")))'
+holds "A chown through a descriptor the read-only root refused is recorded" \
+  'any(.[]; .kind == "chown" and .err == 30 and .owner == "1:2" and .comm == "python3" and (.path | startswith("/usr/")))'
+holds "A chown through an empty name and AT_EMPTY_PATH is recorded under the descriptor's file" \
+  'any(.[]; .kind == "chown" and .err == 30 and .owner == "3:4" and .comm == "python3" and (.path | startswith("/usr/")))'
+holds "A truncate through a descriptor not open for writing is recorded" \
+  'any(.[]; .kind == "truncate" and .err == 22 and (.path | endswith("/fd-truncate.txt")))'
+holds_not "A truncate through a descriptor on /dev/null is not recorded" \
+  'any(.[]; .kind == "truncate" and .path == "/dev/null")'
+holds "An xattr set through a descriptor is recorded" \
+  'any(.[]; .kind == "attr" and (.path | endswith("/fd-xattr.txt")))'
 holds "A symlink's longest target is recorded whole" \
   'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)'
 

@@ -633,7 +633,11 @@ that name as `name` where it differs from `path`. These names are best-effort: t
 command's memory when the call returns, so another thread can rewrite one first, or change
 directory so that a relative one is joined to another, and a process tracing the command can change
 the call's arguments. A failed open's flags are read the same way, but its name is the kernel's
-copy, unless the kernel refused the name as too long, when it is read like the others. A path too deep to record in full is shown cut, with `…/`. A failed open's name too long to record in full is
+copy, unless the kernel refused the name as too long, when it is read like the others. A change
+through a descriptor alone that fails before the kernel reaches its file, as `fchmod` on a read-only
+mount, and an `fsetxattr`, are recorded under the file the descriptor held when the call returned.
+Another thread can swap the descriptor first for another file, or close it or swap it for a pipe,
+which leaves no record. A path too deep to record in full is shown cut, with `…/`. A failed open's name too long to record in full is
 shown cut at its end, with `…`. A row's command name is the one
 the process gave itself, not a thread's, so it says which process acted, not which binary, and a
 process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
@@ -655,9 +659,9 @@ spells a path. What it can do:
   init runs as the step's user, so the step can trace it, and the init's own records are left out.
   GitHub-hosted runners only let a process trace its descendants.
 - Use an operation the tracer does not record: an inode flag change through `ioctl`, as `chattr`
-  makes, an extended attribute change other than through
-  `setxattr` or `lsetxattr`, a failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name
-  that is already there, or one made by `bind(2)` that the kernel refuses before reaching its file.
+  makes, an extended attribute change other than through `setxattr`, `lsetxattr` or `fsetxattr`, a
+  failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name that is already there, or one
+  made by `bind(2)` that the kernel refuses before reaching its file.
 - Look a file up, or read a link's target or an extended attribute. `stat`, `access`, `readlink`,
   `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command then
   does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.

@@ -137,7 +137,7 @@ struct linux_binprm {
  * arguments in.
  */
 struct pt_regs___x86 {
-	unsigned long di, si, dx, r10, orig_ax;
+	unsigned long di, si, dx, r10, r8, orig_ax;
 } __attribute__((preserve_access_index));
 
 struct pt_regs___arm64 {

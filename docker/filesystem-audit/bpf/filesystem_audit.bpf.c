@@ -530,7 +530,9 @@ static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id
  * Reports a held path change when its syscall returns: as done if it
  * succeeded (a truncating open returns a descriptor), else as failed with the
  * errno, unless the call is one recorded from its exit (see classify()),
- * whose record then stands for the failure.
+ * whose record then stands for the failure. A call through a descriptor alone
+ * is the exception: its hold has the file the hook saw, which a thread
+ * swapping the descriptor before the exit cannot change.
  */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
@@ -547,16 +549,17 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	// left for this call to find; it belongs to no call now returning, so it
 	// is dropped as untracked rather than reported against the wrong one.
 	int held = head && head->err == (u32)nr;
+	int fd_held = held && names_fd(&call);
 	if (head && !held) {
 		bump(&untracked);
 		release(&k, tails_for(head->data_len));
 	} else if (head) {
 		u32 t = tails_for(head->data_len);
-		if (!is_restart(ret) && (ret >= 0 || !watched))
+		if (!is_restart(ret) && (ret >= 0 || !watched || fd_held))
 			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
-	if (watched)
+	if (watched && !fd_held)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
 		open_returned(slot, regs, id, nr, ret);
