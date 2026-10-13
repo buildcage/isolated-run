@@ -1,7 +1,7 @@
 #!/bin/bash
 # A `run:` step that makes no outbound connection at all must still pass in
 # restrict mode. Drives dist/main.cjs directly, without the real action
-# wrapper; see test-e2e.yml's test_sandbox_enforcement for the one case
+# wrapper; see test-e2e.yml's enforcement steps for the one case
 # that does exercise the real action.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Verifies write_through: by driving dist/main.cjs directly, without the real
-# action wrapper; see test-e2e.yml's test_sandbox_enforcement for the one
+# action wrapper; see test-e2e.yml's enforcement steps for the one
 # case that does exercise the real action. Covers an existing path, a missing
 # one (created as the runner and kept, written to or not), a missing one two
 # levels under a root-owned 1777 parent (created as the runner), `/` on its
