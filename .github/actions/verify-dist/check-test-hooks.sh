@@ -7,6 +7,7 @@
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck disable=SC2046 # bundle names have no spaces
 [ "$#" -gt 0 ] || set -- $(git ls-files 'dist/*.cjs' 'report/dist/*.cjs')
 if [ "$#" -eq 0 ]; then
   echo "::error::No dist bundle to check."

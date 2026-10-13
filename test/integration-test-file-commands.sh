@@ -130,10 +130,10 @@ WHOLE_CODE=$?
 # The same files through a bind mount of the work directory that write_through
 # names: what is read-only at one path has to be at the other too.
 ALIAS="/mnt/buildcage-test-alias-$$"
-sudo -n mkdir -p "$ALIAS" && sudo -n mount --bind "$WORKDIR" "$ALIAS" || {
+if ! sudo -n mkdir -p "$ALIAS" || ! sudo -n mount --bind "$WORKDIR" "$ALIAS"; then
   echo "  FAIL  could not bind-mount the work directory onto $ALIAS"
   exit 1
-}
+fi
 trap 'sudo -n umount "$ALIAS"; sudo -n rmdir "$ALIAS"; rm -rf "$WORKDIR"' EXIT
 for name in env path state; do touch "$COMMANDS/${name}_alias"; done
 echo "=== persistent, write_through: $ALIAS ==="

@@ -40,6 +40,7 @@ PROXY_NETNS=$(docker inspect --format '{{.NetworkSettings.SandboxKey}}' "$CONTAI
 
 mkdir -p "$WORKDIR/bundle"
 echo '{}' >"$WORKDIR/bundle/config.json"
+# shellcheck disable=SC2024 # the log is the caller's own file
 sudo -n ./scripts/run-isolated.sh \
   --proxy-netns "$PROXY_NETNS" \
   --runc /bin/false \
@@ -79,6 +80,7 @@ check_no_leftovers "launch failure"
 # The same call once the container behind --proxy-netns is gone must fail
 # closed before setting anything up.
 docker rm -f "$CONTAINER_NAME" >/dev/null
+# shellcheck disable=SC2024
 sudo -n ./scripts/run-isolated.sh \
   --proxy-netns "$PROXY_NETNS" \
   --runc /bin/false \
