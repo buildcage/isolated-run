@@ -472,8 +472,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     try {
       set("");
     } catch {
-      // Only an I/O error on the runner's file fails this, and the traffic
-      // report's own append after it meets the same error and says so.
+      // The traffic report's own append after it meets the same failure and
+      // says so.
     }
   }
   const prepareAudit = () =>

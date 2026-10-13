@@ -78,7 +78,12 @@ if [ "$MODE" = ephemeral ]; then
     echo "UNEXPECTED: GITHUB_OUTPUT could not be rewritten in place"
     rc=1
   fi
-  echo "DISCARDED_SUMMARY" >>"$GITHUB_STEP_SUMMARY"
+  if echo "DISCARDED_SUMMARY" >>"$GITHUB_STEP_SUMMARY"; then
+    echo "OK: GITHUB_STEP_SUMMARY is writable"
+  else
+    echo "UNEXPECTED: GITHUB_STEP_SUMMARY was not writable"
+    rc=1
+  fi
 fi
 if [ "$OPENED" = none ]; then
   if touch /opt/.buildcage-whole-test 2>/dev/null; then

@@ -340,12 +340,14 @@ describe("nestedMountRoots", () => {
 
 describe("formatFilesystemPlanLog", () => {
   it("returns [] for persistent mode", () => {
-    expect(formatFilesystemPlanLog("persistent", ["/home/runner"], ["/tmp/x"])).toStrictEqual([]);
+    expect(formatFilesystemPlanLog("persistent", ["/home/runner"], ["/tmp/x"], [])).toStrictEqual(
+      [],
+    );
   });
 
   it("lists the mode, folded overlay roots, then write_through entries for ephemeral mode", () => {
     expect(
-      formatFilesystemPlanLog("ephemeral", ["/home/runner", "/tmp"], [ENV.GITHUB_WORKSPACE]),
+      formatFilesystemPlanLog("ephemeral", ["/home/runner", "/tmp"], [ENV.GITHUB_WORKSPACE], []),
     ).toStrictEqual([
       "Filesystem mode: ephemeral",
       "Ephemeral (writes discarded at step end): /home/runner",
@@ -363,7 +365,7 @@ describe("formatFilesystemPlanLog", () => {
   });
 
   it("emits only the mode line when there is nothing to fold either way", () => {
-    expect(formatFilesystemPlanLog("ephemeral", [], [])).toStrictEqual([
+    expect(formatFilesystemPlanLog("ephemeral", [], [], [])).toStrictEqual([
       "Filesystem mode: ephemeral",
     ]);
   });

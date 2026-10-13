@@ -70804,12 +70804,12 @@ function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync
 		};
 	});
 }
-function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, writtenBack = []) {
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
 	if (mode !== "ephemeral") return [];
 	let lines = ["Filesystem mode: ephemeral"];
 	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
 	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
-	for (let name of writtenBack) lines.push(`Written back after the step:             $${name}`);
+	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
 	return lines;
 }
 //#endregion
