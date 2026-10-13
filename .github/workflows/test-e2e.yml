@@ -43,6 +43,7 @@ jobs:
               - 'rolldown.scripts.config.js'
               - 'tsconfig.json'
               - '.dockerignore'
+              - 'licenses/*.txt'
               - '.github/actions/setup-vp/**'
               - '.github/workflows/test-e2e.yml'
               - 'action.yml'
