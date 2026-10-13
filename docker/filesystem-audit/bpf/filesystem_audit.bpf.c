@@ -549,16 +549,17 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	// left for this call to find; it belongs to no call now returning, so it
 	// is dropped as untracked rather than reported against the wrong one.
 	int held = head && head->err == (u32)nr;
+	int fd_held = held && names_fd(&call);
 	if (head && !held) {
 		bump(&untracked);
 		release(&k, tails_for(head->data_len));
 	} else if (head) {
 		u32 t = tails_for(head->data_len);
-		if (!is_restart(ret) && (ret >= 0 || !watched || call.by_fd))
+		if (!is_restart(ret) && (ret >= 0 || !watched || fd_held))
 			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
 		release(&k, t);
 	}
-	if (watched && !(held && call.by_fd))
+	if (watched && !fd_held)
 		op_exit(slot, &call, ret);
 	if (is_open_nr(nr))
 		open_returned(slot, regs, id, nr, ret);

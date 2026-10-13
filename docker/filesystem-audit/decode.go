@@ -79,8 +79,9 @@ const (
 )
 
 const (
-	markInternal = 1
-	markUnlinked = 2
+	markInternal   = 1
+	markUnlinked   = 2
+	markDescriptor = 4
 )
 
 const fmodeExec = 0x20 // FMODE_EXEC
@@ -354,20 +355,10 @@ func decode(raw []byte) (record, error) {
 	}
 	// A change through a descriptor alone (futimens, fchmod) names no file,
 	// so its path is the descriptor's own.
-	if byDescriptor[kind] && cstr(data) == "" {
+	if marks&markDescriptor != 0 {
 		applyMarks(&r, marks, false)
 	}
 	return r, nil
-}
-
-// byDescriptor holds the kinds a change made through a descriptor alone is
-// recorded as.
-var byDescriptor = map[filesystemAuditKind]bool{
-	filesystemAuditKindK_ATTR:            true,
-	filesystemAuditKindK_ATTR_FAILED:     true,
-	filesystemAuditKindK_CHMOD_FAILED:    true,
-	filesystemAuditKindK_CHOWN_FAILED:    true,
-	filesystemAuditKindK_TRUNCATE_FAILED: true,
 }
 
 // permBits renders a mode's permission bits in octal, four digits at least.

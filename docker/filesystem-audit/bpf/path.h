@@ -146,8 +146,14 @@ static __always_inline u32 leaf(struct event *e, u32 off, struct dentry *d, u8 *
 }
 
 #define MNT_INTERNAL 0x4000
-#define MARK_INTERNAL 1 ///< on a kernel-internal mount, as a memfd is
-#define MARK_UNLINKED 2 ///< deleted, or an O_TMPFILE never linked
+#define MARK_INTERNAL 1   ///< on a kernel-internal mount, as a memfd is
+#define MARK_UNLINKED 2   ///< deleted, or an O_TMPFILE never linked
+#define MARK_DESCRIPTOR 4 ///< the path is a descriptor's own file, not a name's
+#define MARK_SPECIAL 8    ///< neither a regular file nor a directory
+
+#define S_IFMT 0170000
+#define S_IFREG 0100000
+#define S_IFDIR 0040000
 
 /**
  * Marks a file as d_path would show it (the unlinked test is d_unlinked's),
@@ -202,9 +208,14 @@ static __always_inline u32 append_base(struct event *e, u32 off, int dfd, u8 *n,
 	}
 	asm volatile("" : "+r"(off)); // as in leaf
 	// A descriptor's own file is marked; the reader applies it only where the
-	// path is that file (futimens).
-	if (dfd != AT_FDCWD && mark_file(e, d, m))
-		return leaf(e, off, d, n);
+	// path is that file (MARK_DESCRIPTOR).
+	if (dfd != AT_FDCWD) {
+		u32 type = BPF_CORE_READ(d, d_inode, i_mode) & S_IFMT;
+		if (type != S_IFREG && type != S_IFDIR)
+			e->marks |= MARK_SPECIAL;
+		if (mark_file(e, d, m))
+			return leaf(e, off, d, n);
+	}
 	return walk_path(e, off, first, d, m, n, trunc);
 }
 

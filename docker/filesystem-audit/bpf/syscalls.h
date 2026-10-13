@@ -99,13 +99,23 @@ static __always_inline long current_sys_nr(void)
 #define VALS(v1, v2) ({ p->val1 = v1; p->val2 = v2; 1; })
 #define EMPTY_DFD(f) ({ p->empty_dfd = (f) != 0; 1; })
 /**
+ * Marks p as made through descriptor @p fd alone, which AT_FDCWD is not: it
+ * names no file, so is not taken for the working directory.
+ */
+static __always_inline int fd_only(struct path_call *p, int fd)
+{
+	if (fd == AT_FDCWD)
+		return 0;
+	p->by_fd = 1;
+	return 1;
+}
+
+/**
  * A change made through descriptor d alone. Its hook records it when it
  * succeeds, but a read-only mount refuses fchmod and fchown, and an
- * append-only file ftruncate, before the hook runs. AT_FDCWD names no file
- * here, so it is not taken for the working directory.
+ * append-only file ftruncate, before the hook runs.
  */
-#define FD_OP(k, d)									\
-	((int)(d) != AT_FDCWD && OP(k, 0, 0, d, 0, 0, 0) && ({ p->by_fd = 1; 1; }))
+#define FD_OP(k, d) (OP(k, 0, 0, d, 0, 0, 0) && fd_only(p, d))
 
 /**
  * Making a name. The kernel refuses one on a read-only mount before the
@@ -124,9 +134,7 @@ static __always_inline long current_sys_nr(void)
  */
 static __always_inline int attr_op(struct path_call *p, int dfd, u64 path)
 {
-	if (!path && dfd == AT_FDCWD)
-		return 0;
-	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0) && ({ p->by_fd = !path; 1; });
+	return OP(K_ATTR_FAILED, K_ATTR, 0, dfd, path, 0, 0) && (path || fd_only(p, dfd));
 }
 
 /**
@@ -194,6 +202,17 @@ static __always_inline int classify(long nr, struct pt_regs *regs, struct path_c
 	return 0;
 }
 
+/**
+ * Whether the call names its file by descriptor: by no name, or by an empty
+ * one with AT_EMPTY_PATH.
+ */
+static __always_inline int names_fd(struct path_call *p)
+{
+	char c = 1;
+	return p->by_fd ||
+	       (p->empty_dfd && bpf_probe_read_user(&c, 1, (void *)p->p1) == 0 && c == 0);
+}
+
 /** Emits the call as it ended with @p ret. */
 static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 {
@@ -237,10 +256,11 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 				bump(&untracked);
 			return;
 		}
-		// A pipe, socket or memfd is no file a step protects, and
-		// ftruncate on a pipe fails as a matter of course.
-		if (ret < 0 && call->by_fd && (e->marks & MARK_INTERNAL))
+		// A pipe, socket, device or memfd is no file a step protects, and
+		// dd's ftruncate of /dev/null fails as a matter of course.
+		if (ret < 0 && (e->marks & (MARK_INTERNAL | MARK_SPECIAL)))
 			return;
+		e->marks |= MARK_DESCRIPTOR;
 	} else if (r > 1 && e->data[0] != '/') {
 		off = add_base(e, off, call->dfd1, 1, e->n1);
 	}

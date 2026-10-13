@@ -112,10 +112,6 @@ struct {
 	__type(value, u32);
 } shared_seen SEC(".maps");
 
-#define S_IFMT 0170000
-#define S_IFREG 0100000
-#define S_IFDIR 0040000
-
 /**
  * Sets bit in *bits, reporting whether it was clear. Not atomic: two processes
  * racing on a shared entry can each report the same bit, never neither.

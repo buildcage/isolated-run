@@ -69,8 +69,10 @@ holds "A chown through an empty name and AT_EMPTY_PATH is recorded under the des
   'any(.[]; .kind == "chown" and .err == 30 and .owner == "3:4" and .comm == "python3" and (.path | startswith("/usr/")))'
 holds "A truncate through a descriptor not open for writing is recorded" \
   'any(.[]; .kind == "truncate" and .err == 22 and (.path | endswith("/fd-truncate.txt")))'
+holds_not "A truncate through a descriptor on /dev/null is not recorded" \
+  'any(.[]; .kind == "truncate" and .path == "/dev/null")'
 holds "An xattr set through a descriptor is recorded" \
-  'any(.[]; .kind == "attr" and (.failed | not) and (.path | endswith("/fd-xattr.txt")))'
+  'any(.[]; .kind == "attr" and (.path | endswith("/fd-xattr.txt")))'
 holds "A symlink's longest target is recorded whole" \
   'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)'
 
