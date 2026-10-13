@@ -26,3 +26,15 @@ export function filesystemAuditPaths(
 export function readPid(readFile: (path: string) => string, pidFilePath: string): number {
   return Number(readFile(pidFilePath).trim());
 }
+
+/**
+ * Whether pid is still the tracer: a pidfile that outlived it may name a
+ * reused pid. comm is truncated to 15 bytes.
+ */
+export function isTracer(pid: number, readFile: (path: string) => string): boolean {
+  try {
+    return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+  } catch {
+    return false;
+  }
+}

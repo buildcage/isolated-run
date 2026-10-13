@@ -15,7 +15,7 @@ import { buildDockerCpArgs } from "#core/lib/docker/args.ts";
 
 import { cancelledBeforeRun } from "../errors.ts";
 import { auditUnavailable, hostCannotAudit } from "./filesystem-audit-host.ts";
-import { readPid } from "./filesystem-audit-paths.ts";
+import { isTracer, readPid } from "./filesystem-audit-paths.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
 const CGROUP_ROOT = "/sys/fs/cgroup";
@@ -216,7 +216,7 @@ function signalTracer(
 ): void {
   try {
     const pid = readPid(readFile, pidFilePath);
-    if (pid > 0) exec("sudo", ["-n", "kill", `-${signal}`, String(pid)]);
+    if (pid > 0 && isTracer(pid, readFile)) exec("sudo", ["-n", "kill", `-${signal}`, String(pid)]);
   } catch {
     // The tracer is already gone, or its pidfile cannot be read.
   }
@@ -242,7 +242,8 @@ export async function haltTracer(
 ): Promise<void> {
   const { sleep, remove, readTail } = deps;
   child.kill("SIGTERM");
-  signalTracer(pidFilePath, "TERM", deps);
+  // A tracer that died during the step left its pidfile behind.
+  if (!exited()) signalTracer(pidFilePath, "TERM", deps);
   // Read each round, so a cancel that comes while waiting cuts the wait.
   const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
   for (let waited = 0; !exited(); waited += READY_POLL_MS) {

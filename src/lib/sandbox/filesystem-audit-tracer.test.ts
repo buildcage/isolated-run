@@ -14,6 +14,10 @@ import {
 const CONTAINER = "buildcage-proxy-abcd1234";
 const DEST = "/var/tmp/buildcage-0/sandbox-abcd1234";
 
+/** The pidfile, and /proc/<pid>/comm naming the tracer. */
+const tracerFiles = (pidfile: string) => (path: string) =>
+  path.endsWith("/comm") ? "filesystem-audi\n" : pidfile;
+
 describe("cgroupFsPath", () => {
   it("joins the cgroupsPath onto the cgroup root", () => {
     expect(cgroupFsPath("/system.slice/runner.service/buildcage-proxy-abcd1234")).toBe(
@@ -235,7 +239,7 @@ describe("startFilesystemAudit", () => {
       sleep: async () => {},
       remove,
       exec,
-      readFile: () => "999\n",
+      readFile: tracerFiles("999\n"),
     });
     await handle.stop();
 
@@ -298,7 +302,7 @@ describe("startFilesystemAudit", () => {
       sleep: async () => {},
       remove,
       exec,
-      readFile: () => "999\n",
+      readFile: tracerFiles("999\n"),
       readTail: () => '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n',
     });
     await handle.stop();
@@ -327,7 +331,7 @@ describe("startFilesystemAudit", () => {
           if (args[2] === "-KILL") resolveExit();
           return "";
         },
-        readFile: () => "999\n",
+        readFile: tracerFiles("999\n"),
         readTail: () => "",
       },
     );
@@ -355,7 +359,7 @@ describe("startFilesystemAudit", () => {
             if (args[2] === "-KILL") resolveExit();
             return "";
           },
-          readFile: () => "999\n",
+          readFile: tracerFiles("999\n"),
           readTail: () => '{"kind":"open"}\n',
         },
       );
@@ -461,7 +465,7 @@ describe("haltTracer", () => {
         if (args[2] === "-KILL") s.exit();
         return "";
       }),
-      readFile: vi.fn(() => pidfile),
+      readFile: vi.fn(tracerFiles(pidfile)),
       readTail: vi.fn(tail),
     };
   }
@@ -521,6 +525,26 @@ describe("haltTracer", () => {
     s.exit();
     await halted;
     expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath);
+  });
+
+  it("sends no signal through sudo to a tracer that died during the step", async () => {
+    const s = stubborn();
+    s.exit();
+    const d = deps(s, () => "");
+    await haltTracer(s.tracer, true, OPTIONS, d);
+    expect(d.exec).not.toHaveBeenCalled();
+    expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath);
+  });
+
+  it("sends no signal to a pid that is no longer the tracer", async () => {
+    const s = stubborn();
+    const d = deps(s, () => "");
+    d.readFile.mockImplementation((path: string) => (path.endsWith("/comm") ? "bash\n" : "777\n"));
+    const halted = haltTracer(s.tracer, true, OPTIONS, d);
+    await vi.waitFor(() => expect(d.sleep).toHaveBeenCalledTimes(300));
+    s.exit();
+    await halted;
+    expect(d.exec).not.toHaveBeenCalled();
   });
 
   it("shortens the wait once the step is cancelled", async () => {

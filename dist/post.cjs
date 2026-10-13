@@ -393,6 +393,13 @@ function filesystemAuditPaths(containerName, scratchBase) {
 function readPid(readFile, pidFilePath) {
 	return Number(readFile(pidFilePath).trim());
 }
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return !1;
+	}
+}
 //#endregion
 //#region src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
@@ -717,13 +724,6 @@ function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.
 		removeFile(pidFilePath);
 	}
 	removeFile(outPath), removeFile(stepPath);
-}
-function isTracer(pid, readFile) {
-	try {
-		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
-	} catch {
-		return !1;
-	}
 }
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
