@@ -234,18 +234,21 @@ describe("createAuditSummary", () => {
       syscall: "socketcall",
       killed: true,
     });
+    expect(many).toContain("`p10` and at least 198 more)");
     expect(lines(many)).toContain("! p199 syscall:unshare");
     expect(many).not.toContain("p200");
     expect(lines(many)).toContain("! old syscall:32-bit socketcall (killed)");
-    const hidden = render(...Array.from({ length: 200 }, (_, i) => refused(`p${i}`)), {
-      kind: "syscall",
-      comm: "late",
-      syscall: "bpf",
-      err: 1,
-      failed: true,
-    });
-    expect(hidden).toContain("`bpf` (`late`)");
+    const late = (comm: string): object => ({ ...refused(comm), syscall: "bpf" });
+    const hidden = render(
+      ...Array.from({ length: 200 }, (_, i) => refused(`p${i}`)),
+      late("late"),
+      late("later"),
+    );
+    expect(hidden).toContain(
+      "`bpf` (`late` and at least 1 more), `unshare` (`p0`, `p1`, `p10` and 197 more).",
+    );
     expect(lines(hidden)).toContain("! late syscall:bpf");
+    expect(hidden).not.toContain("later");
     expect(render({ kind: "syscall", comm: "x" })).toContain(
       "> 🚫 Refused system calls: `?` (`x`).",
     );

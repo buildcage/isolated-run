@@ -69426,13 +69426,16 @@ function markdownRows(header, rows) {
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### ⚙️ Process Activity";
 function refusedNote(rows) {
-	let byName = new Map(), killed = new Set(), anyKilled = !1;
+	let byName = new Map(), cut = new Set(), killed = new Set(), anyKilled = !1;
 	for (let { syscall, comm } of inRecordingOrder(rows)) {
 		anyKilled ||= syscall.killed;
 		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
-		syscall.killed || byName.set(syscall.name, comms), comm && comms.add(comm);
+		syscall.killed || byName.set(syscall.name, comms), syscall.cut && cut.add(comms), comm && comms.add(comm);
 	}
-	let list = (items, shown) => items.slice(0, shown).join(", ") + (items.length > shown ? ` and ${items.length - shown} more` : ""), comms = (c) => list([...c].map(codeSpan), 3), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
+	let list = (items, shown, more = !1) => {
+		let left = Math.max(items.length - shown, 0) + +!!more;
+		return items.slice(0, shown).join(", ") + (left > 0 ? ` and ${more ? "at least " : ""}${left} more` : "");
+	}, comms = (c) => list([...c].map(codeSpan), 3, cut.has(c)), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
 	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
 		let by = killed.size ? `: ${comms(killed)}` : "";
 		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
@@ -69880,7 +69883,7 @@ function createAuditSummary(prefixes) {
 		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
@@ -69891,8 +69894,12 @@ function createAuditSummary(prefixes) {
 			if (r.kind === "syscall") {
 				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
-					r.killed || refusedNames.add(name), row = {
+					let first = r.killed ? void 0 : refusedFirst.get(name);
+					if (refused.size >= 200 && first) {
+						first.syscall.cut = !0;
+						return;
+					}
+					row = {
 						agg: newAgg(),
 						flags: "!",
 						comm,
@@ -69901,7 +69908,7 @@ function createAuditSummary(prefixes) {
 							name,
 							killed: !!r.killed
 						}
-					}, refused.set(key, row);
+					}, refused.set(key, row), !r.killed && !first && refusedFirst.set(name, row);
 				}
 				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 				return;

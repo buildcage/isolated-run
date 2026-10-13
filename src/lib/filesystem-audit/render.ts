@@ -20,21 +20,29 @@ const REFUSED_SHOWN = 10;
 const REFUSED_COMMS_SHOWN = 3;
 
 // Each refused syscall with the commands it was refused to, in the order
-// first refused, then each command killed for a 32-bit one.
+// first refused, then each command killed for a 32-bit one. Commands left
+// without a row count as at least one more.
 function refusedNote(rows: RefusedRow[]): string {
   const byName = new Map<string, Set<string>>();
+  const cut = new Set<Set<string>>();
   const killed = new Set<string>();
   let anyKilled = false;
   for (const { syscall, comm } of inRecordingOrder(rows)) {
     anyKilled ||= syscall.killed;
     const comms = syscall.killed ? killed : (byName.get(syscall.name) ?? new Set<string>());
     if (!syscall.killed) byName.set(syscall.name, comms);
+    if (syscall.cut) cut.add(comms);
     if (comm) comms.add(comm);
   }
-  const list = (items: string[], shown: number): string =>
-    items.slice(0, shown).join(", ") +
-    (items.length > shown ? ` and ${items.length - shown} more` : "");
-  const comms = (c: Set<string>): string => list([...c].map(codeSpan), REFUSED_COMMS_SHOWN);
+  const list = (items: string[], shown: number, more = false): string => {
+    const left = Math.max(items.length - shown, 0) + (more ? 1 : 0);
+    return (
+      items.slice(0, shown).join(", ") +
+      (left > 0 ? ` and ${more ? "at least " : ""}${left} more` : "")
+    );
+  };
+  const comms = (c: Set<string>): string =>
+    list([...c].map(codeSpan), REFUSED_COMMS_SHOWN, cut.has(c));
   const names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : ""));
   const parts = [];
   if (names.length) parts.push(`Refused system calls: ${list(names, REFUSED_SHOWN)}`);
