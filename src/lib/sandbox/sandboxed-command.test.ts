@@ -299,6 +299,33 @@ describe("runSandboxedCommand", () => {
     ]);
   });
 
+  it("leaves a runner file unmasked at a path ephemeral discards the writes to", async () => {
+    const output = "/home/runner/work/_temp/_runner_file_commands/set_output_abc";
+    mocks.listHostMounts.mockReturnValue([
+      { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
+      { mountPoint: "/mnt/alias", fsType: "ext4", device: "8:1", root: "/home/runner/work" },
+      {
+        mountPoint: "/home/runner/alias",
+        fsType: "ext4",
+        device: "8:1",
+        root: "/home/runner/work",
+      },
+    ]);
+    await runSandboxedCommand(
+      options({
+        filesystemMode: "ephemeral",
+        writeThroughPaths: ["/mnt/alias"],
+        maskedPaths: [output],
+      }),
+      deps,
+    );
+
+    expect(mocks.buildOciConfig.mock.calls[0][1].extraMaskedPaths).toStrictEqual([
+      output,
+      "/mnt/alias/_temp/_runner_file_commands/set_output_abc",
+    ]);
+  });
+
   it("trusts the proxy's CA under the inspect engine", async () => {
     await runSandboxedCommand(options({ proxyEngine: "inspect" }), deps);
 

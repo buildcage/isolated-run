@@ -72393,10 +72393,13 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
 		let path = env[variable];
 		if (!path) return [];
-		let real = onRealRunnerDir((0, node_path.normalize)(path), env, realpath);
+		let real = onRealRunnerDir((0, node_path.normalize)(path), env, realpath), { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = deps;
 		return [{
 			variable,
-			paths: [real, ...pathAliases(hostMounts, real)]
+			paths: [real, ...pathAliases(hostMounts, realPathOf(real, {
+				lstat,
+				readlink
+			}))]
 		}];
 	}), mediatedVariables = runnerFiles.filter(({ paths }) => filesystemMode !== "ephemeral" || paths.some((path) => resolved.some((entry) => isAtOrUnder(path, entry)))).map(({ variable }) => variable), writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ paths }) => paths.includes(p)));
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {

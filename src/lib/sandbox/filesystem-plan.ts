@@ -26,7 +26,7 @@ import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder, pathAliases } from "./paths.ts";
 import { MEDIATED_VARIABLES, type MediatedVariable } from "./runner-output-files.ts";
-import { realPathOf, type SymlinkDeps } from "./symlinks.ts";
+import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { MountinfoEntry } from "./types.ts";
 import {
   resolveWriteThroughPaths,
@@ -86,8 +86,8 @@ export interface FilesystemPlan {
   /** The runner files whose writes reach the runner, through the mediation
    *  (runner-output-files.ts): every one the step has in persistent mode, and
    *  in ephemeral mode only those a write_through entry covers, at any path
-   *  the host's mounts show them at. The rest stay
-   *  under the overlay and are discarded with it. */
+   *  the host's mounts show them at. The rest stay under the overlay and are
+   *  discarded with it. */
   mediatedVariables: MediatedVariable[];
 }
 
@@ -144,7 +144,10 @@ export function resolveFilesystemPlan(
     const path = env[variable];
     if (!path) return [];
     const real = onRealRunnerDir(normalize(path), env, realpath);
-    return [{ variable, paths: [real, ...pathAliases(hostMounts, real)] }];
+    // Resolved in full, as the mask's aliases are (see maskedRunnerFiles).
+    const { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = deps;
+    const aliases = pathAliases(hostMounts, realPathOf(real, { lstat, readlink }));
+    return [{ variable, paths: [real, ...aliases] }];
   });
   const mediatedVariables = runnerFiles
     .filter(

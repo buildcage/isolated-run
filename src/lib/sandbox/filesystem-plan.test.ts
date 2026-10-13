@@ -294,6 +294,21 @@ describe("resolveFilesystemPlan", () => {
         expect(covered.writeThroughPaths).toStrictEqual(["/mnt/alias/_temp"]);
       });
 
+      it("finds the mounts of a runner file reached through a symlink", () => {
+        const covered = resolveFilesystemPlan("ephemeral", "/mnt/commands", FILES_ENV, {
+          exists: alwaysExists,
+          lstat: (p) => ({ isSymbolicLink: () => p.endsWith("/_runner_file_commands") }),
+          readlink: () => "/srv/commands",
+          deviceOf: () => 1,
+          realpath: (p) => p,
+          listHostMounts: () => [
+            { mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" },
+            { mountPoint: "/mnt/commands", fsType: "ext4", device: "8:1", root: "/srv/commands" },
+          ],
+        });
+        expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
+      });
+
       it("mediates a file write_through names there, and drops it from the binds", () => {
         const named = aliased("/mnt/alias/_temp/_runner_file_commands/set_output_abc");
         expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
