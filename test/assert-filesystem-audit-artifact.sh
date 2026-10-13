@@ -1,23 +1,18 @@
 #!/bin/bash
 # Checks the recording test-e2e.yml's filesystem audit step uploaded.
-# Usage: assert-filesystem-audit-artifact.sh <recording.jsonl>
+# Usage: assert-filesystem-audit-artifact.sh <the downloaded artifact's directory>
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
-f="$1"
+shopt -s nullglob
+recordings=("$1"/*.jsonl)
+if [ "${#recordings[@]}" -ne 1 ]; then
+  echo "::error::expected one recording in $1, found ${#recordings[@]}"
+  exit 1
+fi
+f="${recordings[0]}"
 
-# has/lacks <label> <grep args...>; holds/holds_not <label> <jq filter
-# over all events>
-has() {
-  local label="$1"
-  shift
-  if grep -q "$@" "$f"; then pass "$label"; else fail "$label"; fi
-}
-lacks() {
-  local label="$1"
-  shift
-  if grep -q "$@" "$f"; then fail "$label -- found: $(grep -m1 "$@" "$f")"; else pass "$label"; fi
-}
+# holds/holds_not <label> <jq filter over the events as one array>
 holds() {
   if jq -se "$2" "$f" > /dev/null; then pass "$1"; else fail "$1"; fi
 }
@@ -37,20 +32,20 @@ echo "::group::Recorded events (first lines)"
 head -20 "$f"
 echo "::endgroup::"
 
-has "A write is recorded" '"kind":"write"'
+assert_file_has "$f" "A write is recorded" '"kind":"write"'
 # overlayfs opens a layer's directories with O_NOATIME (0o1000000) on its own
 # behalf; none of those may pass for the step's.
 holds_not "No O_NOATIME open is recorded" \
   'any(.[]; .kind == "open" and ((.flags // 0) / 262144 | floor) % 2 == 1)'
 # buildcage's own exec wrappers and scratch files must not leak.
-lacks "buildcage's own wrappers are left out" -E '"comm":"(setpriv|buildcage-init|run-script\.sh)"'
-lacks "buildcage's scratch files are left out" '/var/tmp/buildcage-'
-lacks "A program's arguments are not recorded" 'buildcage-audit-sentinel-arg'
+assert_file_lacks "$f" "buildcage's own wrappers are left out" -E '"comm":"(setpriv|buildcage-init|run-script\.sh)"'
+assert_file_lacks "$f" "buildcage's scratch files are left out" '/var/tmp/buildcage-'
+assert_file_lacks "$f" "A program's arguments are not recorded" 'buildcage-audit-sentinel-arg'
 
 # A program run by a relative name is recorded under the file it resolved to,
 # the script itself rather than its interpreter, with the name it was run by
 # beside it.
-has "run.sh is recorded under its path and the name it was run by" \
+assert_file_has "$f" "run.sh is recorded under its path and the name it was run by" \
   -E '"kind":"exec",[^}]*"path":"/[^"]*/A/run\.sh","name":"\./run\.sh"'
 holds "run.sh's interpreter is recorded as the image its exec mapped" \
   'any(.[]; .kind == "mmap" and .path == "/usr/bin/dash" and .image == true)'

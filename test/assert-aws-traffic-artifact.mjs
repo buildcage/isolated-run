@@ -7,6 +7,10 @@ import { readFileSync } from "node:fs";
 import { assertResults, check } from "./helpers.mjs";
 
 const { ROLE_ACCOUNT, SWITCHED_ACCOUNT } = process.env;
+if (!ROLE_ACCOUNT || !SWITCHED_ACCOUNT) {
+  console.log("::error::ROLE_ACCOUNT and SWITCHED_ACCOUNT must be set");
+  process.exit(1);
+}
 const rows = JSON.parse(readFileSync(process.argv[2], "utf8")).filter(
   (r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST",
 );

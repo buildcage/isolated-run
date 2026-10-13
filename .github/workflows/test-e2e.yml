@@ -300,7 +300,7 @@ jobs:
           name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
           path: ${{ runner.temp }}/audit
       - name: The artifact holds the step's events with buildcage's own stripped out
-        run: ./test/assert-filesystem-audit-artifact.sh "$(ls ${{ runner.temp }}/audit/*.jsonl)"
+        run: ./test/assert-filesystem-audit-artifact.sh "$RUNNER_TEMP/audit"
 
       - name: The tracer and the sandbox's cgroup are gone after the step
         run: |
