@@ -112,7 +112,7 @@ function inRecordingOrder<R extends Row>(rows: R[]): R[] {
 }
 
 export interface RenderOptions {
-  /** The section's title. May carry untrusted input: the heading escapes it. */
+  /** May carry untrusted input: the heading escapes it. */
   title: string;
   /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
   startedAt: number | undefined;

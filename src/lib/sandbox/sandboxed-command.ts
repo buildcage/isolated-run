@@ -70,9 +70,8 @@ import type { BuiltOciSpec, MountEntry, MountinfoEntry, OverlayDirs } from "./ty
 const SANDBOX_IP = "198.19.255.101";
 
 /**
- * The steps this function sequences. Declared rather than imported straight
- * into the body so a test can watch the order and the arguments without
- * standing in for ten modules at once; each one is tested in its own file.
+ * The steps runSandboxedCommand sequences, injected so a test can watch their
+ * order and arguments; each is tested in its own file.
  */
 export interface RunSandboxedCommandDeps {
   withScratchDir: typeof withScratchDir;
@@ -162,11 +161,9 @@ export interface RunSandboxedCommandOptions {
   filesystemAudit?: FilesystemAuditPaths;
   /** Called once the tracer has attached. */
   onAuditAttached?: () => void;
-  /** Where this module's own warnings go: a scratch dir that would not
-   *  unmount, the environment variables a shell cannot export, and NSS not
-   *  answering the primary group check. Passed in
-   *  rather than chosen here: which emitter those land on is the caller's
-   *  decision, not the sandbox's. */
+  /** Where this module's own warnings go (a scratch dir that would not
+   *  unmount, variables a shell cannot export, NSS not answering the primary
+   *  group check); the caller picks the emitter. */
   warn: Warn;
   /** Aborted when the step is cancelled; see runIsolated. */
   cancel?: AbortSignal;
@@ -223,10 +220,8 @@ function extractBootstrap(
   { extractRuncBootstrap }: RunSandboxedCommandDeps,
 ): RuncBootstrap {
   try {
-    // Extracted into this run's own scratch dir; see extractRuncBootstrap.
-    // Run natively on the runner host (not `docker exec`, which would
-    // resolve against the container's kernel/arch instead of the real
-    // one); see gen-seccomp-profile/main.go.
+    // Run on the host, not via `docker exec`, so the seccomp profile matches
+    // the real kernel and arch; see gen-seccomp-profile/main.go.
     return extractRuncBootstrap({ containerName, destDir: dir });
   } catch (e) {
     throw asSandboxError(
@@ -447,11 +442,9 @@ export function assembleBundle(
   try {
     const { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } =
       writeBundleFiles(dir, options, deps);
-    // Real host mount table, read now (before run-isolated.sh's `mount
-    // --rbind /` duplicates it into rootfsBindDir) so buildOciConfig can
-    // force every real submount read-only individually; root.readonly
-    // alone only covers the top-level rootfs mount (see
-    // computeReadonlyHostMounts).
+    // Read before run-isolated.sh's `mount --rbind /` duplicates it, so
+    // buildOciConfig can make each real submount read-only: root.readonly
+    // covers only the top-level mount (see computeReadonlyHostMounts).
     const hostMounts = listHostMounts();
     const { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(
       layout.persisting,
@@ -494,11 +487,9 @@ export function assembleBundle(
     });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
-    // A step in here that already speaks to the user keeps its own words
-    // (resolveSandboxGid's UNSAFE_PRIMARY_GID passes through asSandboxError),
-    // and so do the writable-path guards buildOciConfig runs, which
-    // resolveFilesystemPlan reports under the same code when its own early
-    // copy catches the input first.
+    // An error already worded for the user keeps its words (asSandboxError
+    // passes UNSAFE_PRIMARY_GID through). The writable-path guards take the
+    // code resolveFilesystemPlan's early copy reports the same input under.
     if (e instanceof WritablePathConflictError) {
       throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
     }

@@ -395,11 +395,9 @@ function reduce(
   return { ...reduced, written };
 }
 
-// Debug-only mirror, matching writeReportSummary's: GITHUB_STEP_SUMMARY is
-// per-step and cannot be read back, so this repo's own e2e reads a copy, and
-// the raw recording (before stripping) feeds the test fixtures. The env reads
-// stay inside the build-time test-hooks guard so a normal build tree-shakes
-// the whole body out and dist carries neither variable (see rolldown.config.js).
+// Debug-only mirror, as in writeReportSummary; the raw recording (before
+// stripping) also feeds the test fixtures. The env reads stay inside the
+// test-hooks guard so dist carries neither variable (see rolldown.config.js).
 function mirrorForDebug(
   env: NodeJS.ProcessEnv,
   deps: FilesystemAuditReportDeps,

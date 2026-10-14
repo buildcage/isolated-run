@@ -52,8 +52,8 @@ while the step runs.
 - **Seeing what an install ran.** The executed table lists every program the step started, so a
   `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **Seeing what was refused.** A flag followed by `!`, such as `w!`, is an access the sandbox, a
-  file's permissions or a read-only location refused, such as a write to `/usr/local/bin`, which
-  the sandbox makes read-only, or a read of `/etc/shadow`.
+  file's permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox
+  makes read-only, or a read of `/etc/shadow`.
 
 ## Does it fit your step?
 
@@ -171,14 +171,14 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
-- **Accessed Paths**, folded, has one row per program and path: the programs in the order they first
-  ran, and each one's paths in path order, the workspace first, then `$HOME`, then the rest. A
-  program is named as in the executed table, a script run through its `#!` line by its own path. One
-  that names `/usr/bin/env`, as `#!/usr/bin/env node` does, runs `node` in turn, and what it does
-  then shows under `node`. A process that forks without running anything counts as its parent's
-  program, and the step's own shell, which runs the `run` script, shows as `bash`. Running a program
-  is left to the executed table. A `dir/**` row does not say which path under it was refused. The
-  details fold each command's paths on their own, so they often name it; the artifact always does.
+- **Accessed Paths**, folded, has one row per program and path: programs in the order they first
+  ran, each one's paths in path order (the workspace, then `$HOME`, then the rest). A program is
+  named as in the executed table, a script run through its `#!` line by its own path; a script
+  starting `#!/usr/bin/env node` runs `node` in turn, and what follows shows under `node`. A process
+  that forks without running anything counts as its parent's program, and the step's own shell,
+  which runs the `run` script, shows as `bash`. Running a program is left to the executed table. A
+  `dir/**` row does not say which path under it was refused. The details fold each command's paths
+  on their own, so they often name it; the artifact always does.
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -405,8 +405,9 @@ tracer caught:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
 - `untracked` counts calls it could not follow because too many files were open, or too many calls
-  in progress, at once, and calls whose record it had to cut short or drop. The tracer's tally in the step log ends with `tails-peak=<used>/<max>`: the
-  most room for long paths it needed at once, out of the room it has.
+  in progress, at once, and calls whose record it had to cut short or drop. The tracer's tally in
+  the step log ends with `tails-peak=<used>/<max>`: the most room for long paths it needed at once,
+  out of the room it has.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
 
@@ -501,16 +502,17 @@ itself can do to the record, and what the record can be trusted for.
 
 ## Limits
 
-- **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap,
-  the filesystem details give way first and this section's tables after the traffic report's
-  communication log; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full
-  order. A part that does not fit is cut at a line, with a note after what is kept, or replaced by
-  the note when none of it fits. The note names the artifact, which still holds every access, or
-  says how to ask for one, or that the record was not kept when the upload failed.
+- **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
+  process details give way first, and this section's tables after the traffic report's timeline;
+  [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
+  does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
+  of it fits. The note names the artifact, which still holds every access, or says how to ask for
+  one, or, when the upload failed, that the record was not kept.
 - **One part too large.** The accessed-paths table or the details that alone would pass 300 KB
   folds the directories, `..` paths and memfds it otherwise keeps on rows of their own (see
   [Paths](#paths)). One that would pass 1 MiB even so keeps the rows that fit in it, takes no new
-  ones, and ends with a note; the Job Summary's cap then decides how much of it prints. It
-  is left out whole, under a note that says why, when not one row fits, or once its folded tree holds
-  more than 200,000 files and directories, every directory on the way counted, and each program's
-  counted apart in the table and each command's in the details. When the table is left out, the details go with it.
+  ones, and ends with a note; the Job Summary's cap then decides how much of it prints. It is left
+  out whole, under a note that says why, when not one row fits, or once its folded tree holds more
+  than 200,000 files and directories, counting every directory on the way and each program's tree
+  apart in the table, each command's in the details. When the table is left out, the details go
+  with it.

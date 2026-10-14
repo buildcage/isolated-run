@@ -5,12 +5,9 @@
 # passthrough and CA trust end-to-end (see
 # test/inspect-restrict-scenarios.sh for the scenario list itself).
 #
-# Also checks the CA-injection design (see
-# src/lib/sandbox/ca-trust.ts): this sandbox's rootfs is the real host `/`,
-# so CA trust is injected as mounts, torn down with the rest of the
-# sandbox's mount namespace, never written to the host. That is a
-# regression risk unique to this repo, so it is checked here rather than
-# only in theory.
+# Also checks CA injection (src/lib/sandbox/ca-trust.ts): the sandbox's rootfs
+# is the real host `/`, so CA trust must arrive as mounts torn down with the
+# sandbox's mount namespace, never written to the host.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -53,12 +50,11 @@ GET ~^https://ok\.wildcard\.example\.com/regexexact$
 # Its port half matches any text, so a Host of
 # anyport.example.com:x.evil.example.net:80 would match it.
 GET ~^https?://anyport\.example\.com:.*/.*$
-# Never requested: this puts a character haproxy's own config parser
-# folds in front of real haproxy. Unescaped, the ' would open a quoted
-# string, so haproxy refuses the config and this test fails, which is the
-# point. A pattern that stayed valid when cut short would regress in
-# silence. (A '#' is rejected at input as a comment written without its
-# space, so it never reaches the config.)
+# Never requested: puts a character haproxy's config parser folds in front of
+# real haproxy. Unescaped, the ' would open a quoted string and haproxy would
+# refuse the config, failing this test rather than letting a cut-short pattern
+# regress in silence. ('#' never reaches the config: input
+# parsing rejects it as a comment written without its space.)
 GET ~^https://blocked\.example\.com/frag(x|'z)$" \
   INPUT_FAIL_ON_BLOCKED="false" \
   INPUT_RUN="bash $REPO_ROOT/test/inspect-restrict-scenarios.sh"

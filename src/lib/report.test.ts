@@ -34,11 +34,9 @@ function options(
 const markdownOf = (...args: Parameters<typeof computeReportOutcomes>): string =>
   joinSummaryBlocks(computeReportOutcomes(...args).blocks);
 
-// blocked rows are already expected to be annotated by the time a Report
-// reaches computeReportOutcomes: this mirrors that, applying
-// parameters.knownBlockedRules the same way. The blocked outcome only ever
-// touches ReportDataCommon fields, so a universal-shaped fixture exercises
-// it just as well as an inspect-shaped one would.
+// Annotates blocked rows with parameters.knownBlockedRules, as a Report has them
+// by the time it reaches computeReportOutcomes. The blocked outcome reads only
+// ReportDataCommon fields, so a universal-shaped fixture covers inspect too.
 function report(overrides: Partial<UniversalReportData> = {}): UniversalReportData {
   const params = overrides.parameters ?? reportParams();
   return {
@@ -74,10 +72,8 @@ describe("missingReportFrame", () => {
   });
 });
 
-// The decision matrix itself is tested elsewhere; these only verify that the
-// annotations and the rendered markdown combine correctly. Markdown content
-// itself is covered by render-report-markdown.test.ts, which
-// computeReportOutcomes delegates to.
+// Only that the annotations and the rendered markdown combine correctly; the
+// markdown itself is covered by render-report-markdown.test.ts.
 describe("computeReportOutcomes", () => {
   /** The blocked-connections check, which is always the first emission. */
   const blockedOutcome = (r: UniversalReportData | InspectReportData, failOnBlocked = true) =>

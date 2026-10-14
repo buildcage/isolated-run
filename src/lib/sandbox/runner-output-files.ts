@@ -16,8 +16,7 @@
  * bind-mounted file but works for a regular file inside a bound directory. Only
  * the directory is a mount point. The command can still replace a backing file
  * with a symlink or FIFO of its own, so the host reads each back by lstat and
- * takes only a regular file, never following a link or blocking on a pipe; the
- * command has exited by then, so nothing races the read.
+ * takes only a regular file, never following a link or blocking on a pipe.
  *
  * $GITHUB_ENV, $GITHUB_PATH and $GITHUB_STATE are left as they are: read-only in
  * the sandbox, never mediated (see host-protected-paths.ts).
@@ -93,13 +92,11 @@ const realMediateDeps: MediateDeps = {
 };
 
 /**
- * Sets up the mediation for `variables`, each set in `env`: those the
- * filesystem plan lets reach the runner (FilesystemPlan.mediatedVariables). The
- * backing directory is created at `backingDir`, which must be somewhere the
- * sandbox cannot see (runnerFilesDirFor), so the command reaches it
- * only through the bind and cannot rename or replace it. The caller owns its
- * lifetime, reading the files back before removing it. Returns undefined when
- * `variables` is empty, so the caller leaves the sandbox untouched.
+ * Sets up the mediation for `variables` (FilesystemPlan.mediatedVariables),
+ * each set in `env`. `backingDir` must be somewhere the sandbox cannot see
+ * (runnerFilesDirFor), so the command reaches it only through the bind and
+ * cannot rename or replace it. The caller reads the files back and removes
+ * it. Returns undefined when `variables` is empty.
  */
 export function mediateRunnerOutputFiles(
   env: NodeJS.ProcessEnv,

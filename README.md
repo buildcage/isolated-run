@@ -260,7 +260,7 @@ A name refused at resolution, before any connection, has no port. A bare `teleme
 
 One rule per line, and on `inspect` a line can also be a URL rule (a method and a URL, the
 `allowed_url_rules` syntax) to acknowledge a single endpoint on a host whose other traffic is
-allowed — a telemetry POST to an API you otherwise use, say:
+allowed, such as a telemetry POST to an API you otherwise use:
 
 ```yaml
 known_blocked_rules: |
@@ -275,10 +275,10 @@ Any other blocked request to that host still fails the step. See
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
 refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
 counts what needs a look: requests refused, requests `restrict` would refuse, connections that
-failed and requests nothing acted on. It is a CAUTION when a request was refused or the report is
-incomplete and a WARNING otherwise; with nothing to count, a plain line takes its place. The tables
-follow, refusals marked 🚫 and failed connections ⚠️. When the [filesystem
-audit](./docs/filesystem-audit.md) is on, a **Process Activity Report** section follows the report.
+failed and requests nothing acted on. It is a CAUTION when a request was refused unexpectedly or the
+report is incomplete, and a WARNING otherwise; with nothing to count, a plain line replaces it. In
+the tables that follow, refusals are marked 🚫 and failed connections ⚠️. With the [filesystem
+audit](./docs/filesystem-audit.md) on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather
@@ -426,8 +426,7 @@ is gone.
 > Summary this action writes its own report to. That report and the `traffic_artifact_name` and
 > `filesystem_audit_artifact_name` outputs are unaffected either way: all are written from the runner
 > host after the sandboxed command has exited, outside the overlay. A `$GITHUB_OUTPUT` kept this way
-> is rewritten first to what the runner can read of it, and a file it cannot read to the end fails
-> the step.
+> is trimmed to the entries the runner can read, and a dropped entry fails the step.
 
 Name only what a later step needs, usually the build output. Everything else the command writes is
 discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
@@ -689,19 +688,19 @@ reported as blocked; see
 ### The Job Summary size cap
 
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
-the whole summary rather than truncating it. The report comes first and takes its room first: what
-the command wrote follows it, cut at a line boundary with a note when it does not fit what is left.
-When the report, with its Process Activity section if the filesystem audit was on, would push the
-step over that limit, its parts give way in order: the process details, the timeline, the Process
-Activity tables, then the allowed table, the blocked and failed one, then the ⚠️ tables of requests
+the whole summary rather than truncating it. The report is written first; what the command wrote
+follows it, cut at a line boundary with a note and a warning when it does not fit in what is left.
+When the report itself, with its Process Activity section if the filesystem audit was on, would
+pass the limit, its parts give way in this order: the process details, the timeline, the Process
+Activity tables, the allowed table, the blocked and failed table, the ⚠️ tables of requests
 `restrict` would refuse, and last the `restrict` example. A part that does not fit is cut at a line
 boundary with a note after what is kept, or replaced by the note when nothing of it fits; the
-example is always replaced whole rather than printed in part. Once a table is cut, the timeline is
-left out with it, under that one note. The Process Activity parts follow the same rule in their
-order, Executed Programs, Accessed Paths, then the details: once one is cut, those after it are left
-out under its note. The report is written to the Job Summary only, so what was cut is recovered
-from the [traffic artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own
-artifact for its section; when neither was uploaded, it is not kept anywhere.
+example is only ever replaced whole. Once a table is cut, the timeline is left out under the same
+note. The Process Activity parts (Executed Programs, Accessed Paths, then the details) follow the
+same rule: once one is cut, those after it are left out under its note. The report is written to
+the Job Summary only, so what was cut is recovered from the [traffic
+artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for its
+section; when neither was uploaded, it is not kept anywhere.
 
 ## FAQ
 

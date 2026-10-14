@@ -10,9 +10,9 @@ import {
   type ReportStepOptions,
 } from "./step-report.ts";
 
-// What is left to check here is the order they run in, what each one is
-// handed, and that a failure anywhere in the sequence still leaves the caller
-// able to tear the proxy down.
+// Each dependency is tested in its own file; these check the order they run in,
+// what each is handed, and that a failure anywhere still lets the caller tear
+// the proxy down.
 const mocks = {
   fetchReport: vi.fn(),
   readActionVersion: vi.fn(),
@@ -318,9 +318,8 @@ describe("reportStepTraffic", () => {
     );
   });
 
-  // The real uploadTrafficArtifact warns for itself and resolves, so this is
-  // the outer guarantee rather than a path it takes: whatever the upload does,
-  // this function still returns and the step is not failed over the upload.
+  // The real uploadTrafficArtifact never rejects; this pins the outer guarantee
+  // that an upload failure neither throws nor fails the step.
   it("only warns when the artifact upload fails", async () => {
     mocks.uploadTrafficArtifact.mockRejectedValue(new Error("artifact service down"));
 

@@ -18,8 +18,8 @@ describe("resolveFilesystemPlan", () => {
     GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
     RUNNER_TEMP: "/home/runner/work/_temp",
   };
-  // Everything "exists" by default (candidates + write_through targets) unless
-  // a test narrows it, which keeps each test focused on the one thing it checks.
+  // Everything "exists" by default (candidates and write_through targets)
+  // unless a test narrows it.
   const alwaysExists = () => true;
   const notLink = () => ({ isSymbolicLink: () => false });
 
@@ -218,10 +218,8 @@ describe("resolveFilesystemPlan", () => {
       realpath: (p) => p,
     });
     expect(plan.writeThroughPaths).toStrictEqual([]);
-    // RUNNER_TEMP is nested under HOME in this fixture's ENV (as on a real
-    // GitHub-hosted runner), so it folds away; GITHUB_WORKSPACE is also
-    // nested under HOME here, so it folds away too: only HOME and /tmp
-    // are left.
+    // RUNNER_TEMP and GITHUB_WORKSPACE sit under HOME here, as on a
+    // GitHub-hosted runner, so they fold away.
     expect(plan.overlayRoots.sort()).toStrictEqual([ENV.HOME, "/tmp"].sort());
   });
 
@@ -380,9 +378,8 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
-    // Self-hosted-style ENV: GITHUB_WORKSPACE isn't nested under HOME here, so
-    // its own overlay survives folding. That is what lets this exercise, end to
-    // end, a candidate that merely contains a narrower write_through entry.
+    // Self-hosted layout: GITHUB_WORKSPACE is not under HOME, so it keeps its
+    // own overlay, one that contains a narrower write_through entry.
     const selfHostedEnv = { ...ENV, GITHUB_WORKSPACE: "/workspace" };
     const mkdir = vi.fn();
     const plan = resolveFilesystemPlan("ephemeral", "./dist", selfHostedEnv, {
@@ -396,8 +393,6 @@ describe("resolveFilesystemPlan", () => {
     });
     expect(plan.writeThroughPaths).toStrictEqual(["/workspace/dist"]);
     expect(mkdir.mock.calls).toStrictEqual([["/workspace/dist"]]);
-    // RUNNER_TEMP still folds away under HOME as usual; GITHUB_WORKSPACE
-    // keeps its own overlay since it isn't nested under HOME here.
     expect(plan.overlayRoots.sort()).toStrictEqual([ENV.HOME, "/tmp", "/workspace"].sort());
   });
 
@@ -459,10 +454,7 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("wraps a determineOverlayRoots failure as FILESYSTEM_PLAN_FAILED, not a write_through problem", () => {
-    // exists() throwing here isn't about write_through's own input at all:
-    // it's determineOverlayRoots reading one of the fixed candidate paths
-    // (e.g. a permissions error on $HOME), so it must not come back
-    // labeled as a write_through syntax issue.
+    // exists() fails on a fixed candidate path, not on write_through's input.
     expect.assertions(2);
     try {
       resolveFilesystemPlan("ephemeral", "", ENV, {

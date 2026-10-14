@@ -126,7 +126,6 @@ function* treeLines(top: Map<string, Node>, fanout: number): Generator<[string, 
   }
 }
 
-// Visits a node and every node below it.
 function forEachInSubtree(node: Node, visit: (n: Node) => void): void {
   const stack = [node];
   while (stack.length > 0) {

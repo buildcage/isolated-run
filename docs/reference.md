@@ -293,8 +293,8 @@ known_blocked_rules: |
 
 A URL rule marks only requests that carry the method and path it names, so it acknowledges one
 endpoint on a host while any other blocked request to the same host still fails the step. A
-host-level refusal — a name the resolver refused, or a connection blocked before any request was
-read — carries no method or path, so it is matched by a host rule, never a URL rule. Port handling
+host-level refusal (a name the resolver refused, or a connection blocked before any request was
+read) carries no method or path, so it is matched by a host rule, never a URL rule. Port handling
 follows each form: a host rule with no port reads as `:*`, a URL rule with no port as the scheme's
 default (`443`/`80`), exactly as in the allow inputs.
 
@@ -682,9 +682,9 @@ each one's usual causes and what to do.
 
 These are refusals like `not-allowed`: they are 🚫 rows in **Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. `known_blocked_rules` marks them as expected the same way, matching the
-host or URL whatever the reason, and in `restrict` the report no longer links to
-[Troubleshooting](./aws.md#troubleshooting) once every one is expected. In `audit` mode nothing is
-refused: a warning annotation counts the requests `restrict` would have refused, and the report
+host or URL whatever the reason, and in `restrict` the report links to
+[Troubleshooting](./aws.md#troubleshooting) only while one is not expected. In `audit` mode nothing
+is refused: a warning annotation counts the requests `restrict` would have refused, and the report
 counts them under **⚠️ Restrict Would Refuse** for each host and reason, or for each key under
 `aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
 links for every request `restrict`'s rules would refuse, including ones a rule would then mark
@@ -786,9 +786,9 @@ short form.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
   fails before the command runs. A 32-bit system call in the step kills the thread that made it,
   with `SIGSYS`.
-- The step's Job Summary gets a **Process Activity** section listing the programs it ran and how
-  often, and every path it touched, with a flag for each action, and folded below them one row per
-  command and path.
+- The step's Job Summary gets a **Process Activity Report** section after the traffic report: the
+  programs the step ran and how often, every path each program touched with a flag for each action,
+  and, folded below them, one row per command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact
   named `buildcage-filesystem-audit-<id>`, whose name the `filesystem_audit_artifact_name` output
   carries; `filesystem_audit_retention_days` sets how long it is kept. It leaves out each program's
@@ -940,20 +940,20 @@ non-isolated step.
 
 ### `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`
 
-These two the command writes freely, so where its writes would reach the runner this action mediates
-them: the command writes action-owned backing copies bound into the sandbox, the real files are kept
-out of its reach (at any other path a bind mount shows them at, too), and after the step the action
-reads the copies back and writes the real files itself, failing the step if one is not a regular
-file already there (GitHub's runner creates both before the step). That is every step in
+The command writes these two freely, so wherever its writes would reach the runner this action
+mediates them: the command writes action-owned backing copies bound into the sandbox, the real files
+are kept out of its reach (at any other path a bind mount shows them at, too), and after the step
+the action reads the copies back and writes the real files itself. A real file that is not already
+a regular file fails the step (GitHub's runner creates both before the step). That is every step in
 `persistent` mode. In `ephemeral` mode they are discarded with the overlay like any other write,
-unless `write_through` names the file or a directory it is in (`$RUNNER_TEMP`, say), at any of those
-paths; only then are they mediated and written back, without a bind of their own.
+unless `write_through` names the file or a directory it is in (`$RUNNER_TEMP`, say), by any of the
+paths it is shown at; only then are they mediated and written back, without a bind of their own.
+
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
-the step); `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report and cut
-to what the report leaves of GitHub's limit (see [Traffic artifact](#traffic-artifact) and the
-step's Job Summary).
-`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the
-sandbox as before.
+the step). `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report, cut to
+what the report leaves of GitHub's limit (see
+[The Job Summary size cap](../README.md#the-job-summary-size-cap)). `$GITHUB_ENV`, `$GITHUB_PATH`
+and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox.
 
 ### Paths under `/run`
 

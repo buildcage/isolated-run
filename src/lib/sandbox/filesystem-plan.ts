@@ -3,15 +3,10 @@
  * write_through targets, resolved and pre-created, plus the overlay roots
  * `filesystem_mode: ephemeral` ends up needing.
  *
- * Lives here rather than beside either half it calls: it coordinates
- * write-through.ts and ephemeral-fs.ts, so putting it in one of them would
- * make the two depend on each other. Translating their errors into
- * SandboxError is its own job too: both throw error classes of their own,
- * and nothing else in sandbox/ turns those into a caller-facing code.
- *
- * validateFilesystemInputs lives here rather than beside the input reads for
- * the same reason: which paths a write_through: entry may name is decided by
- * the mounts the sandbox makes for itself, not by how the input was spelled.
+ * Its own module so write-through.ts and ephemeral-fs.ts need not depend on
+ * each other; it also turns their own error classes into SandboxError codes.
+ * validateFilesystemInputs is here, not beside the input reads, because which
+ * paths an entry may name depends on the sandbox's own mounts.
  */
 import { join, normalize, relative } from "node:path";
 
@@ -37,13 +32,10 @@ import {
 } from "./write-through.ts";
 
 /**
- * Validates write_through: paths against the filesystem mode. Pure, no I/O.
- * Deliberately called on its own, ahead of
- * checkPasswordlessSudo()/checkOverlayfsSupport() in the step, so a plain input
- * mistake is rejected immediately rather than only after those privileged
- * preflight checks have already run. That early call passes the paths as
- * resolveWriteThroughInput spells them; resolveFilesystemPlan's call, on the
- * paths it mounts, is the authoritative one.
+ * Validates write_through: paths against the filesystem mode, with no I/O.
+ * The step calls it early, on the paths as written, so a plain mistake fails
+ * before the privileged preflights; resolveFilesystemPlan's call, on the paths
+ * it mounts, is the authoritative one.
  */
 export function validateFilesystemInputs(
   filesystemMode: FilesystemMode,
@@ -123,10 +115,9 @@ export function resolveWriteThroughInput(
 }
 
 /**
- * Resolves + pre-creates the write_through targets (write-through.ts) and, in
- * ephemeral mode, folds the overlay-root candidates down to what's actually
- * needed (ephemeral-fs.ts). Throws SandboxError, never those modules' own
- * error classes directly, so a caller doesn't need to know about those.
+ * Resolves and pre-creates the write_through targets (write-through.ts) and,
+ * in ephemeral mode, folds the overlay-root candidates down to what is needed
+ * (ephemeral-fs.ts). Throws only SandboxError.
  */
 export function resolveFilesystemPlan(
   filesystemMode: FilesystemMode,
@@ -193,10 +184,8 @@ export function resolveFilesystemPlan(
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
-  // Before anything is created: buildOciConfig rejects a path overlapping the
-  // sandbox's own scratch base outright, so checking it here keeps a doomed
-  // input from leaving freshly-created directories behind. Its own check
-  // stays as the authoritative one: this is the early copy.
+  // Early copy of buildOciConfig's authoritative check, so an input it would
+  // reject leaves no freshly-created directories behind.
   try {
     assertScratchBaseNotWritable(writeThroughPaths);
   } catch (e) {
@@ -212,10 +201,8 @@ export function resolveFilesystemPlan(
   if (filesystemMode !== "ephemeral")
     return { overlayRoots: [], writeThroughPaths, mediatedVariables };
 
-  // Separate try/catch from the above: this only touches the fixed
-  // $HOME, $RUNNER_TEMP, /tmp and $GITHUB_WORKSPACE candidates and the host
-  // mount table, not write_through's own input, so a failure here (e.g. a permissions error reading one of
-  // those paths) must not be mislabeled as a write_through syntax problem.
+  // Its own code: a failure reading the fixed candidates or the mount table is
+  // not a write_through input problem.
   try {
     // Real paths, as write_through's are, so the two compare.
     const { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
