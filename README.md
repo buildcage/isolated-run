@@ -316,15 +316,14 @@ name:
   with:
     proxy_mode: audit # shows what restrict would refuse
     aws_key_check: true
-    allowed_url_rules: |
-      * https://ecs.us-east-1.amazonaws.com/
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-Once the report shows nothing `restrict` would refuse, switch to `restrict`. A step that assumes
-roles of its own, as the CDK does, also names the roles' accounts in `allowed_aws_role_accounts`.
-The check needs the `inspect` engine. [AWS access key check](./docs/aws.md) covers adopting it, the
-refusal reasons, and the IAM settings for what it cannot see.
+Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
+step that assumes roles of its own, as the CDK does, also names the roles' accounts in
+`allowed_aws_role_accounts`. The check needs the `inspect` engine.
+[AWS access key check](./docs/aws.md) covers adopting it, the refusal reasons, and the IAM settings
+for what it cannot see.
 
 ## How `run` is executed
 

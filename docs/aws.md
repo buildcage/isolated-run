@@ -56,10 +56,11 @@ as its SNS topic; IAM closes those, see
   fails the step there, in `audit` too.
 - An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. Without one, or with a value that is
   not an access key ID, the step fails before the proxy starts, in `audit` too.
-- No Docker inside the step. The isolated command
-  [cannot use Docker](../README.md#inside-the-sandbox), so `docker push` to ECR, a CDK app with
-  Docker image assets or Docker bundling, and `sam build --use-container` fail there. Build and push
-  images in a step of their own, or with [Buildcage for Docker](https://github.com/buildcage/docker).
+
+A deploy step often needs Docker too, which no isolated command can use, with the check or without
+([Inside the sandbox](../README.md#inside-the-sandbox)): `docker push` to ECR, a CDK app with Docker
+image assets or Docker bundling, and `sam build --use-container` fail there. Build and push images in
+a step of their own, or with [Buildcage for Docker](https://github.com/buildcage/docker).
 
 Run `aws-actions/configure-aws-credentials` as an ordinary step before this one. Its own STS call
 does not pass through the proxy, and the temporary credentials it exports, an `ASIA…` key, are the
@@ -67,9 +68,9 @@ key the step starts with.
 
 Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:
 
-- **A profile or `~/.aws/credentials`.** A step that signs with a profile's key, or alternates
-  between two static keys, cannot use the check. Put the key to check in `AWS_ACCESS_KEY_ID`, or run
-  those commands in a step without the check.
+- **A profile, `~/.aws/credentials` or `credential_process`.** A step that signs with a profile's
+  key, or alternates between two static keys, cannot use the check. Put the key to check in
+  `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check.
 - **An EC2 instance profile or a container credentials endpoint**, as on a self-hosted runner on EC2
   or ECS. Run `configure-aws-credentials` in an earlier step with `role-to-assume`: it assumes that
   role from the instance's credentials and exports the role's keys in `AWS_ACCESS_KEY_ID`. Add
@@ -278,8 +279,7 @@ line in Communication details ends in:
   (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
   `aws.keyRef` has the account in `aws.assumedAccount`.
 - `key N` alone, or nothing after the reason when it is the only key refused, from one of:
-  - A profile, `~/.aws/credentials` or `credential_process`. Put the key to check in
-    `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check.
+  - A profile, `~/.aws/credentials` or `credential_process`; see [What it needs](#what-it-needs).
   - `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn. Get the
     credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
   - An STS answer the proxy could not read, because the client asked for JSON with
@@ -288,10 +288,10 @@ line in Communication details ends in:
 
 ### `aws-no-credential`
 
-An unsigned request to a host that serves every account:
+An unsigned request to a host the proxy treats as serving every account:
 
 - A Cognito user pool call made without AWS credentials, or the IAM Identity Center portal. Sign it,
-  or run it in a step without the check.
+  or move it to a step of its own without the check, whose URL rules allow only that host.
 - `AssumeRoleWithWebIdentity` with no `allowed_aws_role_accounts`, or not sent as a form, or
   `AssumeRoleWithSAML`. Name the role's account, send the call as an SDK does, or get the
   credentials before the step.
@@ -364,12 +364,13 @@ use one:
     "Action": "*",
     "Resource": "*",
     "Condition": {
-      "StringNotEqualsIfExists": { "aws:ResourceAccount": ["111111111111"] }
+      "StringNotEqualsIfExists": { "aws:ResourceAccount": ["111111111111", "222222222222"] }
     }
   }
   ```
 
-  This is a starting point: a real policy needs exceptions, such as resources AWS services own,
+  List every account the step deploys to, those in `allowed_aws_role_accounts` included, or the
+  role cannot assume its roles there. This is a starting point: a real policy needs exceptions, such as resources AWS services own,
   which AWS's
   [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
   lists.
@@ -390,7 +391,7 @@ use one:
   `aws-role-not-allowed`, and with none listed the call stays `aws-no-credential`.
   `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from `GetSessionToken`, IAM
   Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
-  learned. Get those credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
+  learned.
 - Keys are learned only from STS answers and ECR registry redirects received over HTTPS, to a
   request the key check did not refuse, so in `audit` mode a request it would refuse teaches no key.
   An STS answer over plain HTTP names no account in the restrict example either. A host that names a
