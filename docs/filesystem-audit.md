@@ -147,7 +147,7 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 | `/usr/bin/dash`       |    12 |
 
 ▶ Accessed Paths (4)
-R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path                  |
 | --------------------- | ------ | --------------------- |
 | `/usr/local/bin/node` | RWD    | `./node_modules/**`   |
