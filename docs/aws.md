@@ -8,8 +8,7 @@
 
 `aws_key_check: true` refuses a request to an AWS API unless it is signed with the key the step
 was given. `allowed_aws_role_accounts` names the accounts whose roles the step may switch to, so
-the keys those roles get pass too. [Getting started](#getting-started) walks through adopting it,
-including for a step that switches roles, as the CDK does.
+the keys those roles get pass too. [Getting started](#getting-started) walks through adopting it.
 
 ## Why URL rules are not enough
 
@@ -213,8 +212,7 @@ after the switch. [Troubleshooting](#troubleshooting) says what each needs.
 An E2E test logging in to a Cognito user pool calls it without AWS credentials. The pool a call
 reaches is named by `ClientId` in its body, so the proxy cannot protect it, with the check or
 without, and refuses it as `aws-no-credential`. Keep the check on the deploy step, and run the test
-as a step of its own whose URL rules allow Cognito only. The check stays on where it works, and the
-traffic it cannot protect is kept to that one step:
+as a step of its own whose URL rules allow Cognito only:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -242,9 +240,8 @@ see, so it is refused as `aws-unsupported-credential`. Call Bedrock with the rol
 
 A presigned URL carries the key of whoever signed it, such as Lambda `GetFunction`'s
 `Code.Location` or a vendor's download link, and is refused as `aws-key-not-allowed`. Download it
-in a step without the check. To see whose it is,
-`aws sts get-access-key-info --access-key-id <key-id>`, with the key ID from the URL's
-`X-Amz-Credential`, names the account it belongs to.
+in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key
+ID from the URL's `X-Amz-Credential`, names the account it belongs to.
 
 That does not work when one command both signs AWS requests and fetches such a URL, as `crane copy`
 does from a registry that keeps its layers in S3 into ECR. Such a command has to run in a step
@@ -258,9 +255,9 @@ A refused request names its reason, such as `aws-key-not-allowed`, under **⚠�
 Refuse** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
 reason up below.
 
-A refusal you expect to keep can go in `known_blocked_rules` like any other: it matches the host or
-URL whatever the reason, and the refusal then no longer fails `restrict`. The `audit` preview still
-counts it; see [Reference](./reference.md#aws-access-key-check).
+To accept a refusal you expect, list its host or URL in `known_blocked_rules` as for any other: it
+then no longer fails `restrict`, though the `audit` preview still counts it. See
+[Reference](./reference.md#aws-access-key-check).
 
 ### `aws-key-not-allowed`
 

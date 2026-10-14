@@ -301,12 +301,11 @@ address that only `inspect` sees. The fields are listed in
 > `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver.
 
-A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
-rules. Most AWS APIs, such as STS or CloudFormation, name no resource in the URL, though, and reach
-whichever account signs the request, so a compromised dependency could sign with a key of its own
-and send data to its author's account. `aws_key_check: true` accepts only the key the step was
-given in `AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts
-you name:
+Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
+account signs the request, so a compromised dependency could sign with its own key and send data to
+its author's account. `aws_key_check: true` accepts only the key the step was given in
+`AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts you
+name:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
@@ -324,9 +323,8 @@ you name:
 
 Once the report shows nothing `restrict` would refuse, switch to `restrict`. A step that switches
 roles of its own, as the CDK does, also names the roles' accounts in `allowed_aws_role_accounts`.
-The check needs the `inspect` engine. See [AWS access key check](./docs/aws.md) for how to adopt it
-from an `audit` run, what each refusal reason means, and the IAM settings that close what it cannot
-see.
+The check needs the `inspect` engine. [AWS access key check](./docs/aws.md) covers adopting it, the
+refusal reasons, and the IAM settings for what it cannot see.
 
 ## How `run` is executed
 
