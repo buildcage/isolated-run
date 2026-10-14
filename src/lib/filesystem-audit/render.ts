@@ -9,7 +9,7 @@ import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { AuditSummary, Executed, PathRow, RefusedRow, Row } from "./reduce.ts";
 
 const LEGEND =
-  "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
+  "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
 // After the traffic report's closing </details>, a heading with no blank line
 // before it would read as part of that HTML block.
 const heading = (title: string): string => `\n${reportHeading(title, false).trimEnd()}`;

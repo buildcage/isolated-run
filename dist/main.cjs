@@ -69695,7 +69695,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function refusedNote(rows) {
 	let byName = new Map(), cut = new Set(), killed = new Set(), anyKilled = !1;
 	for (let { syscall, comm } of inRecordingOrder(rows)) {

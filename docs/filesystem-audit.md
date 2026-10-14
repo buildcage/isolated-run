@@ -118,7 +118,7 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 | `/usr/bin/dash`       |    12 |
 
 ▶ Accessed Paths (4)
-R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
 | Program               | Access | Path                  |
 | --------------------- | ------ | --------------------- |
 | `/usr/local/bin/node` | RWD    | `./node_modules/**`   |
@@ -164,8 +164,9 @@ From the top:
 - **A credential file read by something other than its tool.** A row such as `R ~/.npmrc`,
   `R ~/.ssh/**` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
   every run, and npm and a package's install script both show as `node`, so the program alone does
-  not tell them apart. The artifact, if uploaded, gives each read's process and its parent, which
-  separate npm itself from a script it started.
+  not tell them apart. The details do: npm names itself after its command, such as `npm ci`, while
+  a script it starts shows under its own name, such as `node`. The artifact, if uploaded, also gives
+  each read's parent process.
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
   `$GITHUB_PATH` is refused (`w!`) unless `write_through` names it, since both are read-only in the
@@ -381,8 +382,8 @@ are absent rather than `false`.
 
 `path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the
 kernel names without a path (such as `pipe:[1234]`), a path too deep to record in full (`…/…`), and
-the relative name of a failed call or an attribute change whose directory could not be read. A failed
-open's `path` and `name` end in `…` where its name was too long to record in full.
+the relative name of a failed call or an attribute change whose directory could not be read. A
+failed open's `path` and `name` end in `…` where its name was too long to record in full.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as
@@ -559,8 +560,8 @@ only the first read and the first write after each open count, whichever program
 - The sandbox's own setup, and the step's shell reading its script.
 - The kernel writing a core dump when a process crashes, where `core_pattern` names a path: the file
   is created and written by the kernel, not through a system call, so neither is recorded. Reading
-  that file afterwards is. GitHub-hosted runners pipe core dumps to a handler, which does not write a
-  file here.
+  that file afterwards is. GitHub-hosted runners pipe core dumps to a handler, which does not write
+  a file here.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.
