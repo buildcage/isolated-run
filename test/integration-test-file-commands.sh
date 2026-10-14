@@ -6,13 +6,13 @@
 # third run also tries to move $RUNNER_TEMP aside, and writes to /opt, which
 # no other entry opens. The fourth reaches the files through a bind mount that
 # write_through names. See sandboxReadonlyFileCommands and renameGuardDirs in
-# sandbox/host-commands.ts.
+# sandbox/host-protected-paths.ts.
 #
-# The ephemeral run also checks the other half: GITHUB_OUTPUT, named in
-# write_through, is mediated, so the command writes a backing copy it can
-# rewrite in place (sed -i, which would EBUSY against a bind-mounted file), and
-# the host writes the real file from it. GITHUB_STEP_SUMMARY, not named, stays
-# under the overlay and is discarded, while this action's report still lands.
+# The ephemeral run also checks the mediated files: GITHUB_OUTPUT, named in
+# write_through, can be rewritten in place with sed -i (which would EBUSY on a
+# bind-mounted file), and the host writes the real file from it.
+# GITHUB_STEP_SUMMARY, not named, stays under the overlay and is discarded,
+# while this action's report still lands.
 # The persistent run's GITHUB_STEP_SUMMARY is mediated too, and lands after the
 # report. See runner-output-files.ts.
 set -uo pipefail

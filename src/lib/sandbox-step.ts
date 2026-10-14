@@ -1,12 +1,9 @@
 /**
  * The whole `run:` step, in the order its parts have to happen in.
  *
- * Its own module rather than the entry point's body because almost none of
- * this is wiring: which check runs before which decides what a misconfigured
- * workflow is told, and whether a failure leaves a container or a
- * freshly-created directory behind. Those orderings are only visible from
- * here, so this is where they are tested, same reasoning as step-report.ts
- * and sandbox/sandboxed-command.ts.
+ * Kept out of the entry point so the ordering can be tested: which check runs
+ * first decides what a misconfigured workflow is told, and whether a failure
+ * leaves a container or a freshly-created directory behind.
  */
 
 import * as core from "@actions/core";
@@ -109,15 +106,12 @@ function onCancel(listener: () => void): () => void {
 /* v8 ignore stop */
 
 /**
- * The steps this function sequences. Injected rather than imported straight
- * into the body so a test can watch the order and the arguments without
- * standing in for twenty modules at once; each one is tested in its own file.
- *
- * Pure steps are left out on purpose and run for real (resolveWriteThroughInput,
- * deriveProjectName, buildComposeEnv, resolveComposeFile,
- * formatFilesystemPlanLog, resolveBuildcageImageRef, and pinningPaths with
- * realPathOf injected): what a test wants to see of those is the value that
- * reached the next step, not the call.
+ * The steps runSandboxStep sequences, injected so a test can watch their order
+ * and arguments; each is tested in its own file. Pure steps
+ * (resolveWriteThroughInput, deriveProjectName, buildComposeEnv,
+ * resolveComposeFile, formatFilesystemPlanLog, resolveBuildcageImageRef, and
+ * pinningPaths with realPathOf injected) run for real: a test checks the value
+ * they pass on, not the call.
  */
 const realDeps = {
   applyConfigFile,
@@ -264,10 +258,9 @@ type StepInputs = ReturnType<typeof readStepInputs>;
  */
 export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { log, notice } = deps;
-  // A local-path `uses: ./` names no ref. Verification takes it empty so it
-  // hard-fails instead of pinning the floating major-version image, which can
-  // drift from the vendored code; the report keeps a valid `uses:` line via the
-  // fallback.
+  // A local-path `uses: ./` names no ref. Verification takes it empty and
+  // hard-fails rather than pin the floating major-version image, which can
+  // drift from the vendored code; the report's `uses:` line uses the fallback.
   const actionRef = env.GITHUB_ACTION_REF ?? "";
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
@@ -286,7 +279,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice);
   const filesystemAudit = deps.readFilesystemAuditInput();
   const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
-  // Before the first write under the scratch base, the one just below.
+  // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
   if (configFile) deps.saveWriteThroughForPost(env, writeThroughInput);
@@ -296,15 +289,14 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const trafficArtifact = deps.readTrafficArtifactInputs();
   const rules = deps.readRuleInputs();
 
-  // Same gate as writeReportSummary(): suppresses annotations when this
-  // script isn't running as the real action.
+  // Suppresses annotations outside a real action run, as writeReportSummary does.
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
   if (filesystemAudit === "record") {
     annotation.warning("filesystem_audit is experimental and may change.");
   }
 
-  // Pure checks, so a rule the engine cannot enforce fails (or, in audit,
-  // warns) before any privileged setup.
+  // A rule the engine cannot enforce fails (in audit, warns) before any
+  // privileged setup.
   const { urlRules, tlsRules, knownBlockedRules } = rules;
   deps.checkUrlAndTlsRuleSupport(
     { proxyEngine, proxyMode, urlRules, tlsRules },
@@ -353,11 +345,9 @@ export function preflight(
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(deps.getuid!());
 
-  // Cheap, pure input check, so a plain mistake (an unset variable, or
-  // write_through: / under filesystem_mode: ephemeral) is rejected immediately
-  // rather than only after the privileged preflight checks below have already
-  // run (checkOverlayfsSupport in particular performs a real sudo/unshare/mount
-  // probe). resolveFilesystemPlan re-checks the real paths on the host.
+  // A plain input mistake (an unset variable, or write_through: / under
+  // ephemeral) fails before the sudo/unshare/mount probes below.
+  // resolveFilesystemPlan re-checks the real paths on the host.
   const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
   deps.validateFilesystemInputs(filesystemMode, writeThrough);
   if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
@@ -368,16 +358,13 @@ export function preflight(
     env,
   );
 
-  // Fail fast, before image verification or starting the proxy container, if
-  // the runner can't support the isolation setup at all.
+  // Before image verification and the proxy start.
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
 
-  // Resolved/pre-created here (not inside runSandboxedCommand) so a bad
-  // write_through entry, or a target that can't be created, fails before the
-  // proxy container ever starts, same reasoning as checkPasswordlessSudo
-  // above.
+  // Here rather than in runSandboxedCommand, so a bad write_through entry or
+  // an uncreatable target fails before the proxy starts.
   const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
     warn: deps.warn,
   });
@@ -444,11 +431,10 @@ export interface StepRun {
 export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise<boolean> {
   const { inputs, env, containerName, audit, mediation, runnerFilesBackingDir, cancelled } = run;
   const { annotation, proxyMode, failOnBlocked, actionRepo, reportActionRef, rules } = inputs;
-  // Write $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY back from their backing
-  // copies before this action writes its own: the artifact-name outputs via
-  // @actions/core (last-write-wins over anything the command set), and the
-  // reports, which the command's summary is moved behind afterwards. Written
-  // now, it outlives a step cancelled before the reports are done.
+  // Before this action's own writes: its artifact-name outputs must win over
+  // anything the command set, and the command's summary is moved behind the
+  // reports later. Written now, it survives a step cancelled before the
+  // reports are done.
   let runnerFileFailed = false;
   let commandSummaryBytes = 0;
   if (mediation) {
@@ -585,21 +571,15 @@ export async function runSandboxStep(
     cancel.abort();
   });
 
-  // The command writes action-owned backing copies of $GITHUB_OUTPUT and
-  // $GITHUB_STEP_SUMMARY, bound into the sandbox, with the real files masked
-  // from it; the host reads the copies back and writes the real files itself
-  // after the step. The backing directory sits beside the sandbox's scratch
-  // dir, not in it, so it outlives the command. The scratch base is hidden from
-  // the sandbox (/tmp is writable there), so the command reaches the directory
-  // only through the bind and cannot move it aside. It is removed below, or by
-  // the post step after a hard kill. The path is settled here (no I/O), but the
-  // directory is only created inside the try, so a failure there still tears
-  // the proxy down in the finally.
+  // Beside the scratch dir, not in it, so it outlives the command; the scratch
+  // base is hidden from the sandbox, so the command reaches the directory only
+  // through its bind and cannot move it aside (see runner-output-files.ts).
+  // Removed in finalizeStep, or by the post step after a hard kill. Created
+  // inside the try so a failure still stops the proxy.
   const runnerFilesBackingDir = runnerFilesDirFor(containerName);
   let mediation: RunnerOutputMediation | undefined;
 
-  // 1 unless the isolated command itself reports otherwise: every way out of
-  // the block below that isn't the command's own exit code is a failure.
+  // Every way out of the block below other than the command's exit is a failure.
   let exitCode = 1;
   let auditAttached = false;
   try {

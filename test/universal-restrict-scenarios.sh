@@ -202,10 +202,8 @@ else
 fi
 
 # [HTTP keep-alive - allowed then blocked: a second request on a reused
-# HTTP/1.1 keep-alive connection must be judged on its own merits, not
-# inherit the first request's decision. Verified against the report by
-# test/integration-test-universal-restrict.sh, since this script only sees
-# curl/nc exit status, not the proxy's log.]
+# connection is judged on its own, not by the first one's decision. Checked
+# against the report by test/integration-test-universal-restrict.sh.]
 echo "=== [HTTP keep-alive - allowed then blocked] ==="
 ( (printf 'GET / HTTP/1.1\r\nHost: allowed.example.com\r\n\r\n'; sleep 1; \
   printf 'GET / HTTP/1.1\r\nHost: blocked.example.com\r\nConnection: close\r\n\r\n'; sleep 1) \

@@ -75,10 +75,7 @@ export interface ReportOutcomes {
   emissions: OutcomeEmission[];
 }
 
-/**
- * Pure decision + rendering step, kept free of process.env/file I/O so it's
- * testable without touching the filesystem.
- */
+/** Decides and renders without process.env or file I/O, so a test needs no files. */
 export function computeReportOutcomes(
   report: Report,
   {
@@ -272,15 +269,10 @@ export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions 
 }
 
 /**
- * Side-effecting half of the report step: computeReportOutcomes() decides what
- * to say; this sets the annotations and the exit code, then writes the Job
- * Summary.
- * `artifactAvailable` only affects the wording of a truncation notice if the
- * report turns out to be too large for GitHub's own per-step limit: it
- * does not gate whether truncation happens.
- *
- * The summary's two destinations come from `env` rather than being read here,
- * so a test decides where it goes the same way the runner does.
+ * Sets the annotations and the exit code computeReportOutcomes() decides on,
+ * then writes the Job Summary. `artifactAvailable` only changes the wording of
+ * a truncation notice, not whether truncation happens. The summary's
+ * destinations come from `env`, so a test sets them the way the runner does.
  */
 export async function writeReportSummary(
   report: Report,
@@ -328,11 +320,9 @@ export async function writeReportSummary(
     );
   }
 
-  // Debug-only mirror: GITHUB_STEP_SUMMARY is unique per step and can't be
-  // reassigned, so a later step has no way to read this step's copy back.
-  // This repo's own e2e assertions read it instead; see
-  // test/assert-sandbox.sh. A test hook, so a normal build drops it; see
-  // rolldown.config.js.
+  // Debug-only mirror for this repo's e2e (test/assert-sandbox.sh): a later step
+  // cannot read GITHUB_STEP_SUMMARY back. A normal build drops it (see
+  // rolldown.config.js).
   if (process.env.BUILDCAGE_BUILD_TEST_HOOKS === "1") {
     const debugSummaryFile = env.BUILDCAGE_RUN_DEBUG_SUMMARY_FILE;
     // A debug copy that cannot be written must not read as a failed summary.

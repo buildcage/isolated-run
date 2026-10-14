@@ -616,35 +616,33 @@ accepted limitation as the staging directory under
 the same user outside any sandbox can, as can a job sharing the machine and the user, which
 [Where it will not run](#where-it-will-not-run) rules out. An artifact uploaded under
 `upload_filesystem_audit_artifact: true` can be downloaded by any job in the run and anyone who can
-read the repository until it expires. It leaves out each
-program's arguments, but not the names commands pass for files: a secret a command tries to open,
-or uses as a symlink's target, is kept.
+read the repository until it expires. It leaves out each program's arguments, but not the names
+commands pass for files: a secret a command tries to open, or uses as a symlink's target, is kept.
 
 **Falsifying what it says.** A successful access and a program the step ran are recorded with the
 path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate
-counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A
-failed record means only that the call returned an error: the step can install its own seccomp
-filter to fail a call before the kernel looks at the file. An open
-refused after the kernel reached its file is recorded as failed with the path it resolved. Any
-other failed call, and an attribute change through `utimensat`, `utime`,
-`utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the name the command passed,
-joined to its working directory or directory descriptor without resolving `..`; the artifact keeps
-that name as `name` where it differs from `path`. These names are best-effort: they are read from the
-command's memory when the call returns, so another thread can rewrite one first, or change
-directory so that a relative one is joined to another, and a process tracing the command can change
-the call's arguments. A failed open's flags are read the same way, but its name is the kernel's
-copy, unless the kernel refused the name as too long, when it is read like the others. A change
-through a descriptor alone that fails before the kernel reaches its file, as `fchmod` on a read-only
-mount, and an `fsetxattr`, are recorded under the file the descriptor held when the call returned.
-Another thread can swap the descriptor first for another file, or close it or swap it for a pipe,
-which leaves no record. A path too deep to record in full is shown cut, with `…/`. A failed open's name too long to record in full is
-shown cut at its end, with `…`. A row's command name is the one
-the process gave itself, not a thread's, so it says which process acted, not which binary, and a
-process named `run-script.sh` is shown as the step's shell, `bash`. A memfd's name is whatever its creator chose,
-so it is quoted after `memfd:` and never reads as a path. A control, format, separator, invisible or
-blank character, a space at either end, a quote, a backslash or a byte that is not UTF-8 in a name
-is shown escaped, and the details quote a name holding a space, so no name can rewrite the Job
-Summary or pass for another.
+counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed
+record means only that the call returned an error: the step can install its own seccomp filter to
+fail a call before the kernel looks at the file. An open refused after the kernel reached its file
+is recorded as failed with the path it resolved. Any other failed call, and an attribute change
+through `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under
+the name the command passed, joined to its working directory or directory descriptor without
+resolving `..`; the artifact keeps that name as `name` where it differs from `path`. These names are
+best-effort: they are read from the command's memory when the call returns, so another thread can
+rewrite one first, or change directory so that a relative one is joined to another, and a process
+tracing the command can change the call's arguments. A failed open's flags are read the same way,
+but its name is the kernel's copy, unless the kernel refused the name as too long, when it is read
+like the others. A change through a descriptor alone that fails before the kernel reaches its file,
+as `fchmod` on a read-only mount, and an `fsetxattr`, are recorded under the file the descriptor
+held when the call returned. Another thread can swap the descriptor first for another file, or close
+it or swap it for a pipe, which leaves no record. A path too deep to record in full is shown cut,
+with `…/`. A failed open's name too long to record in full is shown cut at its end, with `…`. A
+row's command name is the one the process gave itself, not a thread's, so it says which process
+acted, not which binary, and a process named `run-script.sh` is shown as the step's shell, `bash`. A
+memfd's name is whatever its creator chose, so it is quoted after `memfd:` and never reads as a
+path. A control, format, separator, invisible or blank character, a space at either end, a quote, a
+backslash or a byte that is not UTF-8 in a name is shown escaped, and the details quote a name
+holding a space, so no name can rewrite the Job Summary or pass for another.
 
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
 holds no capability. Nor can it make a system call through a 32-bit ABI, numbered apart from the
@@ -677,10 +675,10 @@ spells a path. What it can do:
   access stays in the artifact when one was uploaded, which needs
   `upload_filesystem_audit_artifact: true`, off by default.
 
-Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2,
-BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep
-a partial record. A tracer that exits during the step, as one does when the step fills the disk it
-writes to, also fails the step, after the command, with the record cut where it stopped.
+Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2, BTF
+or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep a partial
+record. A tracer that exits during the step, as one does when the step fills the disk it writes to,
+also fails the step, after the command, with the record cut where it stopped.
 
 ## Hardening
 
@@ -758,26 +756,25 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `env:` passes an empty value through, which `ssh` treats as no agent at all.
 - **Planting something for a later step.** The filesystem is read-only outside
   `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP`, which is also where it can persist.
-  `$GITHUB_OUTPUT` is mediated wherever the command's writes to it reach the runner -- the command
-  writes a backing copy the action validates and writes to the real file (see
-  [reference](reference.md#github_output-and-github_step_summary)) -- so it
-  sets outputs for later steps as an un-sandboxed step would, but not by writing a file a payload
-  could ride in. A payload can still ride `~/.bashrc`, `~/.npmrc` and anything else under a writable
-  exception, a later step's `config_file` included. `GITHUB_ENV`,
-  `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is read-only inside the sandbox in either
-  mode and mounted over itself, and each directory between it and the outermost path above it whose
-  writes persist is made a mount point, so none of them can be renamed or replaced. One reached
-  through a symlink in such a path fails the step, and one the host also shows at a second path
-  through a bind mount is read-only there too. The runner's install directory and its
-  `_actions` directory, which later steps and post steps run code from, are protected the same way.
-  What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post step at once, and
-  `write_through:` can open either by naming it. Only this action's post step reads `GITHUB_STATE`.
-  Workflow commands printed to stdout are not stopped: in a job that sets
+  `$GITHUB_OUTPUT` is mediated wherever the command's writes to it reach the runner: the command
+  writes a backing copy that the action validates and writes to the real file (see
+  [reference](reference.md#github_output-and-github_step_summary)). It sets outputs for later steps
+  as an un-sandboxed step would, but not by writing a file a payload could ride in. A payload can
+  still ride `~/.bashrc`, `~/.npmrc` and anything else under a writable exception, a later step's
+  `config_file` included. `GITHUB_ENV`, `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is
+  read-only inside the sandbox in either mode and mounted over itself, and each directory between it
+  and the outermost path above it whose writes persist is made a mount point, so none of them can be
+  renamed or replaced. One reached through a symlink in such a path fails the step, and one the host
+  also shows at a second path through a bind mount is read-only there too. The runner's install
+  directory and its `_actions` directory, which later steps and post steps run code from, are
+  protected the same way. What `GITHUB_ENV` and `GITHUB_PATH` set reaches every later step and post
+  step at once, and `write_through:` can open either by naming it. Only this action's post step
+  reads `GITHUB_STATE`. Workflow commands printed to stdout are not stopped: in a job that sets
   `ACTIONS_ALLOW_UNSECURE_COMMANDS: true`, `::set-env::` and `::add-path::` reach later steps the
-  way the two files would.
-  `filesystem_mode: ephemeral` closes this off for everything except what `write_through:` names.
-  Naming only the outputs a later step needs, such as `./dist`, also discards a payload planted
-  elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in `persistent` mode.
+  way the two files would. `filesystem_mode: ephemeral` closes this off for everything except what
+  `write_through:` names. Naming only the outputs a later step needs, such as `./dist`, also
+  discards a payload planted elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in
+  `persistent` mode.
 
   That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
   left in `$HOME`, such as a `core.fsmonitor` in `~/.gitconfig` or a script in `~/.gradle/init.d`,
@@ -789,25 +786,24 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 - **The Job Summary.** The report is rendered from the runner host after the command has exited, and
   a name or URL is escaped before it is written into a table, so the command cannot edit its own
-  report. Its own summary comes after the report, so a code fence, comment or HTML element it leaves
-  open has nothing after it to hide or wrap. `$GITHUB_STEP_SUMMARY` is mediated wherever the
-  command's writes to it reach the runner (under `ephemeral` they otherwise go with the overlay): the
-  command writes a backing copy bound into the sandbox, the real file is masked from it, and the host
-  writes the real file after the step -- the report first, then the command's own summary after a
-  horizontal rule. Because the real file is out of the command's reach, a symlink, FIFO, directory
-  or permission it leaves on the backing copy reaches nothing: a copy that is not a regular file, or
-  that it made unreadable, is read back as empty and fails the step, never followed or blocked on.
-  The mask needs the real file to exist, so the host writes it only if it is already a regular file,
-  never creating it or following a symlink or hard link at its path; otherwise the step fails.
-  The backing directory sits under `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the
-  command reaches it only through the bind and cannot move it aside. Filling the backing copy to
-  GitHub's 1 MiB Job Summary limit cannot push the report out -- GitHub drops a summary over the
-  limit whole -- because the report takes its room first and the command's summary is cut to what
-  is left, with a note and a warning annotation saying so. The step's verdict is decided and applied
-  as annotations before any summary is written, so what reaches the summary never changes what the
-  step enforces. Where the report is meant to be an audit
-  trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the step
-  ends, and is not a file a later step can append a line to.
+  report. The command's own summary comes after the report, so a code fence, comment or HTML element
+  it leaves open has nothing after it to hide or wrap. `$GITHUB_STEP_SUMMARY` is mediated wherever
+  the command's writes to it reach the runner (under `ephemeral` they otherwise go with the
+  overlay): the command writes a backing copy bound into the sandbox, the real file is masked from
+  it, and the host writes the real file after the step, the report first and then the command's
+  summary after a horizontal rule. A symlink, FIFO, directory or permission the command leaves on
+  the backing copy therefore reaches nothing: a copy that is not a regular file, or that it made
+  unreadable, is read back as empty and fails the step, never followed or blocked on. The mask needs
+  the real file to exist, so the host writes it only if it is already a regular file, never creating
+  it or following a symlink or hard link at its path; otherwise the step fails. The backing
+  directory sits under `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the command
+  reaches it only through the bind and cannot move it aside. Filling the backing copy to GitHub's
+  1 MiB limit, past which GitHub drops the whole summary, cannot push the report out: the report
+  takes its room first, and the command's summary is cut to what is left, with a note and a warning
+  annotation. The step's verdict is applied as annotations before any summary is written, so what
+  reaches the summary never changes what the step enforces. Where the report is meant to be an
+  audit trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the
+  step ends, and is not a file a later step can append a line to.
 - **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,
   which reads workflow commands from it as from any step. `::add-mask::` registers a string as a
   secret, so the runner replaces it with `***` wherever it appears for the rest of the job, this
