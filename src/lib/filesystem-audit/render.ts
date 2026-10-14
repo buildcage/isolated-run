@@ -158,9 +158,8 @@ function byProgramAndPath(paths: PathRow[]): PathRow[] {
     .map((k) => k.row);
 }
 
-// Folded, as the paths outnumber what a reader takes in at a glance, unless
-// given up, when its note stands in the open. The flags are explained where
-// they first appear.
+// Folded, as its rows run long; a table given up leaves its note in the open.
+// The flags are explained where they first appear.
 function pathsBlock(
   rows: PathRow[] | undefined,
   cause: CutCause | undefined,

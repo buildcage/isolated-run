@@ -331,6 +331,24 @@ describe("renderAuditSummaryBlocks: tables", () => {
     expect(lines(md)).toEqual(["R java ./a", 'R "VM Thread" ./b']);
   });
 
+  it("names a fork after its parent even when the parent has accessed nothing yet", () => {
+    const md = render(
+      { kind: "fork", pid: 2, ppid: 1, comm: "bash" },
+      { kind: "read", pid: 2, comm: "renamed", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "bash", path: "/work/b" },
+    );
+    expect(programRows(md)).toEqual(["| `bash` | R | `./a` |", "| `bash` | R | `./b` |"]);
+  });
+
+  it("hands the parent's program on through a fork record that names no command", () => {
+    const md = render(
+      { kind: "exec", pid: 1, comm: "make", path: "/usr/bin/make" },
+      { kind: "fork", pid: 2, ppid: 1 },
+      { kind: "write", pid: 2, comm: "make", path: "/work/out" },
+    );
+    expect(programRows(md)).toEqual(["| `/usr/bin/make` | W | `./out` |"]);
+  });
+
   it("prints a path's Markdown as itself and escapes only what would break the row", () => {
     const md = render(
       { kind: "read", comm: "a", path: "/work/x|y" },

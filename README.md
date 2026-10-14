@@ -274,12 +274,11 @@ Any other blocked request to that host still fails the step. See
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
 refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
-counts what needs a look: a CAUTION for requests refused or a report that is incomplete, a WARNING
-for requests `restrict` would refuse, connections that failed and requests nothing acted on, and a
-plain line when there is none.
-The tables follow, refusals marked 🚫 and failed connections ⚠️. When the
-[filesystem audit](./docs/filesystem-audit.md) is on, a **Process Activity Report** section follows
-the report.
+counts what needs a look: requests refused, requests `restrict` would refuse, connections that
+failed and requests nothing acted on. It is a CAUTION when a request was refused or the report is
+incomplete and a WARNING otherwise, and a plain line says nothing was refused when there is nothing
+to look at. The tables follow, refusals marked 🚫 and failed connections ⚠️. When the [filesystem
+audit](./docs/filesystem-audit.md) is on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather

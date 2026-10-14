@@ -15,6 +15,7 @@ import {
   canonical,
   components,
   DELETED,
+  DELETED_MARK,
   marked,
   MEMFD,
   MEMFD_PREFIX,
@@ -191,7 +192,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     limit,
     loose,
     nodes: limits.nodes,
-    rowBytes: (p, rank) => relLength(p) + relLength(ranks[Number(rank)].key) + 16,
+    rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16,
   });
   const details = new Lines({
     fanout,
@@ -204,14 +205,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // Each program run, with how many times it ran.
   const executed = new Map<string, number>();
   let executedBytes = 0;
-  // The program each process runs, by its rank: the order programs first ran
-  // in, as the executed table names them. An exec sets it, naming a script
-  // rather than its interpreter, and a fork hands the parent's on. A process
-  // with no exec in the step's records, as the step's shell, goes by its
-  // command name, ranked by its first access. The paths are kept by rank, as a
-  // marked path holds the NUL a key ends at.
-  const programs = new Map<string, number>();
-  const ranks: { key: string; name: boolean }[] = [];
+  // Each pid's program, by its rank in the order programs first ran. An exec
+  // sets it, naming a script rather than its interpreter, and a fork hands
+  // the parent's on; a process with no exec in the step's records, as its
+  // shell, goes by its command name. The paths are keyed by rank, as a marked
+  // path holds the NUL a key ends at.
+  const programs = new Map<number | undefined, number>();
+  const ranks: { shown: Shown; bytes: number }[] = [];
   const rankOf = new Map<string, number>();
   const rank = (key: string, name: boolean): number => {
     const id = `${name ? "n" : "p"}${key}`;
@@ -219,8 +219,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r === undefined) {
       r = ranks.length;
       rankOf.set(id, r);
-      ranks.push({ key, name });
+      const s = name ? { path: escapeForDisplay(key) } : shown(key);
+      ranks.push({ shown: s, bytes: s.path.length + (s.deleted ? DELETED_MARK.length : 0) });
     }
+    return r;
+  };
+  const programOf = (pid: number | undefined, comm: string): number => {
+    let r = programs.get(pid);
+    if (r === undefined) programs.set(pid, (r = rank(comm, true)));
     return r;
   };
   let ended = false;
@@ -237,8 +243,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const proc = procOf(added, r);
     if (!counted) return;
     if (r.kind === "fork") {
-      const parent = programs.get(`${r.ppid}/${added.get(r.ppid) ?? 0}`);
-      if (parent !== undefined) programs.set(proc, parent);
+      // The fork's comm is the parent's, copied to the child.
+      programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
     }
     if (r.kind === "end") {
       ended = true;
@@ -275,7 +281,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     if (r.kind === "exec" && r.path) {
       const p = normalize(canonical(marked(r, r.path), prefixes));
-      programs.set(`${r.pid}/${added.get(r.pid)}`, rank(p, false));
+      programs.set(r.pid, rank(p, false));
       const runs = executed.get(p);
       if (runs !== undefined) executed.set(p, runs + 1);
       else if (executedBytes <= limit) {
@@ -306,11 +312,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       details.add(x, parts);
       // The executed table lists what ran, so this one leaves it out.
-      let program = programs.get(proc);
-      if (program === undefined) {
-        program = rank(x.comm, true);
-        programs.set(proc, program);
-      }
+      const program = programOf(r.pid, x.comm);
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
     }
   };
@@ -343,19 +345,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return lines?.length || !part.cut ? lines : undefined;
   };
 
-  const program = (r: number): Shown & { rank: number } => {
-    const { key, name } = ranks[r];
-    return { ...(name ? { path: escapeForDisplay(key) } : shown(key)), rank: r };
-  };
-
   const finish = (): AuditSummary => {
-    // The paths are kept by program where the details are by command.
     const byPath = kept(paths)?.map(({ comm, path, agg }) => ({
       agg,
       flags: fmtFlags(agg),
       comm: "",
       ...shown(path),
-      program: program(Number(comm)),
+      program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));

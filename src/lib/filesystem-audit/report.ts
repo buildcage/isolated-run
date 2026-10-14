@@ -41,7 +41,7 @@ import {
   type RecordArtifact,
 } from "./render.ts";
 
-const PROCESS_ACTIVITY_TITLE = "Process Activity Report";
+export const PROCESS_ACTIVITY_TITLE = "Process Activity Report";
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */

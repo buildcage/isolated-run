@@ -70270,7 +70270,7 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, rank) => relLength(p) + relLength(ranks[Number(rank)].key) + 16
+		rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16
 	}), details = new Lines({
 		fanout,
 		keep,
@@ -70280,19 +70280,23 @@ function createAuditSummary(prefixes) {
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
 	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], rankOf = new Map(), rank = (key, name) => {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
-		return r === void 0 && (r = ranks.length, rankOf.set(id, r), ranks.push({
-			key,
-			name
-		})), r;
+		if (r === void 0) {
+			r = ranks.length, rankOf.set(id, r);
+			let s = name ? { path: escapeForDisplay(key) } : shown(key);
+			ranks.push({
+				shown: s,
+				bytes: s.path.length + (s.deleted ? 10 : 0)
+			});
+		}
+		return r;
+	}, programOf = (pid, comm) => {
+		let r = programs.get(pid);
+		return r === void 0 && programs.set(pid, r = rank(comm, !0)), r;
 	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
-			if (r.kind === "fork") {
-				let parent = programs.get(`${r.ppid}/${added.get(r.ppid) ?? 0}`);
-				parent !== void 0 && programs.set(proc, parent);
-			}
-			if (r.kind === "end") {
+			if (r.kind === "fork" && programs.set(r.pid, programOf(r.ppid, r.comm ?? "")), r.kind === "end") {
 				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
 				return;
 			}
@@ -70320,7 +70324,7 @@ function createAuditSummary(prefixes) {
 			}
 			if (r.kind === "exec" && r.path) {
 				let p = normalize$2(canonical(marked(r, r.path), prefixes));
-				programs.set(`${r.pid}/${added.get(r.pid)}`, rank(p, !1));
+				programs.set(r.pid, rank(p, !1));
 				let runs = executed.get(p);
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
 			}
@@ -70337,8 +70341,8 @@ function createAuditSummary(prefixes) {
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path);
 				details.add(x, parts);
-				let program = programs.get(proc);
-				program === void 0 && (program = rank(x.comm, !0), programs.set(proc, program)), paths.add({
+				let program = programOf(r.pid, x.comm);
+				paths.add({
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
@@ -70366,12 +70370,6 @@ function createAuditSummary(prefixes) {
 	})), kept = (part) => {
 		let lines = part.finish();
 		return lines?.length || !part.cut ? lines : void 0;
-	}, program = (r) => {
-		let { key, name } = ranks[r];
-		return {
-			...name ? { path: escapeForDisplay(key) } : shown(key),
-			rank: r
-		};
 	};
 	return {
 		observe,
@@ -70382,7 +70380,10 @@ function createAuditSummary(prefixes) {
 				flags: fmtFlags(agg),
 				comm: "",
 				...shown(path),
-				program: program(Number(comm))
+				program: {
+					...ranks[Number(comm)].shown,
+					rank: Number(comm)
+				}
 			})), log = byPath && rows(kept(details));
 			return {
 				ended,
