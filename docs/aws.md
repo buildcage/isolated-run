@@ -101,9 +101,8 @@ A step passes the check when:
 
 ### What it does not support
 
-The ones that come up most in CI are Bedrock API keys, Cognito user pool calls made without AWS
-credentials, and presigned URLs someone else signed; [Common setups](#common-setups) shows how to
-arrange each. The rest are rarer:
+The ones that come up most in CI are Bedrock API keys and presigned URLs someone else signed;
+[Common setups](#common-setups) shows how to arrange each. The rest are rarer:
 
 - S3 Express One Zone directory buckets, and S3 uploads from an HTML form (a POST policy).
 - Calls to APIs that take a form, such as STS, IAM, CloudFormation, SNS, EC2 and SES v1, over about
@@ -111,7 +110,9 @@ arrange each. The rest are rarer:
   from an older SDK.
 - Old SDKs and hand-written clients signing with Signature Version 2 or 3, and the services that
   take only those, such as Amazon SimpleDB.
-- Keys from `GetSessionToken`, SAML or IAM Identity Center, and the IAM Identity Center portal.
+- Unsigned calls to a host that serves every account, such as a Cognito user pool sign-in or the
+  IAM Identity Center portal.
+- Keys from `GetSessionToken`, SAML or IAM Identity Center.
 
 [Troubleshooting](#troubleshooting) says what to do for each, under the reason the report gives.
 
@@ -224,32 +225,6 @@ after the switch. [Troubleshooting](#troubleshooting) says what each needs.
 
 ## Common setups
 
-### Cognito in an E2E test
-
-An E2E test logging in to a Cognito user pool calls it without AWS credentials. The pool a call
-reaches is named by `ClientId` in its body, so the proxy cannot protect it, with the check or
-without, and refuses it as `aws-no-credential`. Keep the check on the deploy step, and run the test
-as a step of its own whose URL rules allow Cognito only. That step can still reach `cognito-idp`
-with any key, which is the risk you accept there:
-
-```yaml
-- uses: buildcage/isolated-run@<sha>
-  with:
-    aws_key_check: true
-    allowed_url_rules: |
-      * https://ecs.us-east-1.amazonaws.com/
-    run: aws ecs update-service --cluster app --service web --force-new-deployment
-- uses: buildcage/isolated-run@<sha>
-  with:
-    allowed_url_rules: |
-      POST https://cognito-idp.us-east-1.amazonaws.com/
-      * https://app.example.com/**
-    run: npx playwright test
-```
-
-`configure-aws-credentials` exports the deploy role's credentials to every later step of the job,
-the test included. Run the test in a job of its own, or before `configure-aws-credentials`.
-
 ### Bedrock
 
 The Bearer token in `AWS_BEARER_TOKEN_BEDROCK`, a Bedrock API key, names no account the proxy can
@@ -316,8 +291,7 @@ line in Communication details ends in:
 An unsigned request to a host that serves every account:
 
 - A Cognito user pool call made without AWS credentials, or the IAM Identity Center portal. Sign it,
-  or run it in a step of its own without the check; see
-  [Cognito in an E2E test](#cognito-in-an-e2e-test).
+  or run it in a step without the check.
 - `AssumeRoleWithWebIdentity` with no `allowed_aws_role_accounts`, or not sent as a form, or
   `AssumeRoleWithSAML`. Name the role's account, send the call as an SDK does, or get the
   credentials before the step.
