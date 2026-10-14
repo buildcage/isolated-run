@@ -3,7 +3,7 @@ module github.com/buildcage/gen-seccomp-profile
 go 1.25.0
 
 require (
-	github.com/moby/profiles/seccomp v0.2.3
+	github.com/moby/profiles/seccomp v0.2.4
 	github.com/opencontainers/runtime-spec v1.3.0
 )
 
