@@ -58,9 +58,10 @@ as its SNS topic; IAM closes those, see
   not an access key ID, the step fails before the proxy starts, in `audit` too.
 
 A deploy step often needs Docker too, which no isolated command can use, with the check or without
-([Inside the sandbox](../README.md#inside-the-sandbox)): `docker push` to ECR, a CDK app with Docker
-image assets or Docker bundling, and `sam build --use-container` fail there. Build and push images in
-a step of their own, or with [Buildcage for Docker](https://github.com/buildcage/docker).
+([Inside the sandbox](../README.md#inside-the-sandbox)). `docker push` to ECR and
+`sam build --use-container` fail there; build and push images in a step of their own, or with
+[Buildcage for Docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
+and Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
 
 Run `aws-actions/configure-aws-credentials` as an ordinary step before this one. Its own STS call
 does not pass through the proxy, and the temporary credentials it exports, an `ASIA…` key, are the
@@ -134,7 +135,8 @@ would refuse. A step that uses only the credentials it is given needs `aws_key_c
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-`audit` needs no URL rules; the report writes them for `restrict`, as below.
+`audit` needs no URL rules; the report writes them for `restrict`, as below. They allow what the run
+reached, so read them before switching.
 
 A step that assumes roles of its own, as the CDK does, also names the accounts those roles are in.
 `allowed_aws_role_accounts` works only with `aws_key_check: true`; without it the step fails. Start
@@ -353,7 +355,9 @@ the request body, not in the URL, so the proxy cannot see it. Requests like thes
 
 Each route above needs your role to be allowed to act on a resource in another account, so IAM can
 close them. Set these on the role the step assumes, and on the CloudFormation service role if you
-use one:
+use one. With the CDK, the step acts through the bootstrap roles it assumes, `cdk-*-deploy-role`,
+`cdk-*-file-publishing-role` and the rest, and CloudFormation through `cdk-*-cfn-exec-role`, so set
+them on those, through a customized bootstrap template:
 
 - **Deny access to resources outside your accounts** with the `aws:ResourceAccount` condition key,
   or `aws:ResourceOrgID` if you use AWS Organizations:
@@ -369,11 +373,12 @@ use one:
   }
   ```
 
-  List every account the step deploys to, those in `allowed_aws_role_accounts` included, or the
-  role cannot assume its roles there. This is a starting point: a real policy needs exceptions, such as resources AWS services own,
-  which AWS's
+  Add it as a statement to an existing policy. List every account the step deploys to, those in
+  `allowed_aws_role_accounts` included, or the role cannot assume its roles there. A real policy
+  also needs exceptions for resources AWS owns, such as the SSM public parameters under `/aws/service/`
+  that the CDK reads to look up an AMI; AWS's
   [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
-  lists.
+  lists them.
 
 - **Name the account in every `sts:AssumeRole` resource.** A resource such as
   `arn:aws:iam::*:role/cdk-*`, common in CDK setups, lets the role assume a role of that name in any
