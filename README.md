@@ -315,16 +315,18 @@ you name:
     aws-region: us-east-1
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
+    proxy_mode: audit # shows what restrict would refuse
     aws_key_check: true
     allowed_url_rules: |
       * https://ecs.us-east-1.amazonaws.com/
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-A step that switches roles of its own, as the CDK does, also names the roles' accounts in
-`allowed_aws_role_accounts`. The check needs the `inspect` engine. See
-[AWS access key check](./docs/aws.md) for how to adopt it from an `audit` run, what each refusal
-reason means, and the IAM settings that close what it cannot see.
+Once the report shows nothing `restrict` would refuse, switch to `restrict`. A step that switches
+roles of its own, as the CDK does, also names the roles' accounts in `allowed_aws_role_accounts`.
+The check needs the `inspect` engine. See [AWS access key check](./docs/aws.md) for how to adopt it
+from an `audit` run, what each refusal reason means, and the IAM settings that close what it cannot
+see.
 
 ## How `run` is executed
 

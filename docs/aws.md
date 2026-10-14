@@ -8,23 +8,8 @@
 
 `aws_key_check: true` refuses a request to an AWS API unless it is signed with the key the step
 was given. `allowed_aws_role_accounts` names the accounts whose roles the step may switch to, so
-the keys those roles get pass too.
-
-```yaml
-- uses: aws-actions/configure-aws-credentials@<sha>
-  with:
-    role-to-assume: arn:aws:iam::111111111111:role/deploy
-    aws-region: us-east-1
-- uses: buildcage/isolated-run@<sha>
-  with:
-    aws_key_check: true
-    allowed_url_rules: |
-      * https://ecs.us-east-1.amazonaws.com/
-    run: aws ecs update-service --cluster app --service web --force-new-deployment
-```
-
-[Getting started](#getting-started) walks through adopting it, including for a step that switches
-roles, as the CDK does.
+the keys those roles get pass too. [Getting started](#getting-started) walks through adopting it,
+including for a step that switches roles, as the CDK does.
 
 ## Why URL rules are not enough
 
@@ -51,9 +36,10 @@ path, before the request leaves the runner.
 
 ## What it stops and what it doesn't
 
-With the check on, a request to a host that serves every account passes only when it is signed with
-the key the step started with, or with a key STS issued for a role in an account you named. A key
-carried in from anywhere else is refused, and so is a request with no signature at all.
+With the check on, a request signed for an AWS API passes only when the proxy knows its key: mainly
+the key the step started with, and the keys STS issues for roles in the accounts you named. A key
+carried in from anywhere else is refused, and so are most unsigned requests to a host that serves
+every account. [How the check decides](#how-the-check-decides) has the exact rules.
 
 The check looks at whose key signed a request, not at whose resource the request is for. A request
 signed with your own key can still publish to another account's SNS topic or assume a role there.
@@ -100,9 +86,21 @@ A step passes the check when:
   host that names its resource, such as a public S3 bucket, or to a public host such as
   `checkip.amazonaws.com`. Only the URL rules decide those.
 
-Two uses that come up often in CI are refused whatever the setup: Bedrock API keys, and Cognito user
-pool calls made without AWS credentials. [Common setups](#common-setups) shows how to arrange them,
-and [Troubleshooting](#troubleshooting) lists the rarer refusals by the reason the report gives.
+### What it refuses whatever the setup
+
+The ones that come up most in CI are Bedrock API keys, Cognito user pool calls made without AWS
+credentials, and presigned URLs someone else signed; [Common setups](#common-setups) shows how to
+arrange each. The rest are rarer:
+
+- S3 Express One Zone directory buckets, and S3 uploads from an HTML form (a POST policy).
+- Calls to APIs that take a form, such as STS, IAM, CloudFormation, SNS, EC2 and SES v1, over about
+  4 MiB or compressed: SES v1 `SendRawEmail` with large attachments, or CloudWatch `PutMetricData`
+  from an older SDK.
+- Old SDKs and hand-written clients signing with Signature Version 2 or 3, and the services that
+  take only those, such as Amazon SimpleDB.
+- Keys from `GetSessionToken`, SAML or IAM Identity Center, and the IAM Identity Center portal.
+
+[Troubleshooting](#troubleshooting) says what to do for each, under the reason the report gives.
 
 ## Getting started
 
@@ -171,20 +169,25 @@ every request, so one no URL rule allows can carry an `aws-` reason too.
 
 A key's row names up to three of the hosts its requests went to. Keys are numbered in the order they
 first appear, unless the run refused only one. A key an STS answer in the run issued names the
-account of its role; a `key N` with no `from a role in` is one no STS answer issued, such as a
-long-lived key.
+account of its role. A `key N` with no `from a role in` came from somewhere else, such as a
+profile, or from an STS answer the proxy could not read;
+[`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
 
-In `restrict` the same requests are refused and listed under **🚫 Blocked Hosts**. Either way,
-**Communication details** names the key on each of them:
+**Communication details** names the key on each of those requests:
 
 ```
 ⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)
 ```
 
-In `restrict`, a refused one ends in `-> aws-key-not-allowed, key 1 from a role in 222222222222`.
 With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
 `wouldRefuse`. If the section does not fit the Job Summary even so, it is cut and a warning
 annotation says so.
+
+In `restrict` the URL rules decide first, so a request none of them allows is refused as
+`not-allowed` rather than with an `aws-` reason. The ones they allow and the check refuses are
+listed under **🚫 Blocked Hosts**. In Communication details a refused one ends in
+`-> aws-key-not-allowed, key 1 from a role in 222222222222`, and the traffic artifact gives its
+reason in `reason`.
 
 The report's **Switch to restrict mode** example includes `aws_key_check: true`, and
 `allowed_aws_role_accounts` with the accounts given and each account the run switched to a role in,
