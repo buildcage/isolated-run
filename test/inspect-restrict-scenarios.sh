@@ -52,7 +52,7 @@ CODE=$($C https://allowed.example.com/public/../private/secret)
 check_status "GET /public/../private/secret" "$CODE" "403"
 
 # RFC 9112 §3.2.4's asterisk-form: a request-target that is not a path, so it
-# matches no rule and is refused. The point of the case is the report, which
+# matches no rule and is blocked. The point of the case is the report, which
 # must name allowed.example.com rather than a host built from an empty path.
 echo "=== [Request target is not a path] ==="
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
@@ -95,7 +95,7 @@ echo "=== [Non-standard TLS port 9443] ==="
 OUT=$($S https://allowed.example.com:9443/public/pkg.tgz)
 check_ok "GET :9443/public/pkg.tgz" "$OUT" "PUBLIC GET"
 
-# blocked.example.com is otherwise always refused (see [Blocked host]
+# blocked.example.com is otherwise always blocked (see [Blocked host]
 # below), so reaching it here proves the ~regex rule itself granted access.
 echo "=== [Regex URL rule - host, port and path all matched] ==="
 OUT=$($S https://blocked.example.com:9443/public/pkg.tgz)
@@ -128,7 +128,7 @@ echo "=== [Regex URL rule - host anchored, path left open] ==="
 OUT=$($S https://ok.wildcard.example.com/regexpub/deep/pkg.tgz)
 check_ok "GET ok.wildcard.example.com/regexpub/deep/pkg.tgz" "$OUT" "ROOT GET"
 
-echo "=== [Regex URL rule - neighbouring host refused] ==="
+echo "=== [Regex URL rule - neighbouring host blocked] ==="
 CODE=$($C https://not-ok.wildcard.example.com/regexpub/pkg.tgz)
 check_status "GET not-ok.wildcard.example.com/regexpub/pkg.tgz" "$CODE" "403"
 
@@ -175,7 +175,7 @@ SLOW=$(mktemp -d)
 
 # Allowlisted and resolvable, with nothing listening there. The connection
 # never completes, so no certificate is ever accepted on it, and
-# integration-test-inspect-restrict.sh checks that is reported as a refusal
+# integration-test-inspect-restrict.sh checks that is reported as a block
 # rather than as an outage.
 echo "=== [Origin connection never completes] (checked at the end) ==="
 $C https://deadend.example.com/ > "$SLOW/deadend-https" &
@@ -190,7 +190,7 @@ echo "=== [Allowlisted name that does not resolve] (checked at the end) ==="
 $C https://absent.example.com/ > "$SLOW/absent" &
 
 # Allowlisted and resolvable, but the origin's certificate is signed by nobody
-# the proxy trusts, so it refuses to carry the connection rather than reach an
+# the proxy trusts, so it blocks the connection rather than reach an
 # origin it cannot authenticate.
 echo "=== [Origin certificate not trusted] (checked at the end) ==="
 $C https://impostor.example.com/ > "$SLOW/impostor" &
@@ -216,13 +216,13 @@ check_status "GET aborted.example.com" "$?" "90"
 
 # [Bytes that are not an HTTP request, on a port no allowed_ip_rules or
 # allowed_tls_rules entry covers: anything that is not a TLS handshake reaches
-# the plain stage, which reads it as a request and refuses it.
-# integration-test-inspect-restrict.sh checks the report counts that refusal.]
+# the plain stage, which reads it as a request and blocks it.
+# integration-test-inspect-restrict.sh checks the report counts that block.]
 echo "=== [Not an HTTP request at all] ==="
 ( (printf 'NOT-HTTP\r\n\r\n'; sleep 1) | nc -w 5 10.200.0.100 5432 > /dev/null 2>&1 || true) &
 echo "  bytes sent (a blocked row expected in the report)"
 
-# [A request that parsed and named no host, which the stage refuses ahead of
+# [A request that parsed and named no host, which the stage blocks ahead of
 # the rules: there is nothing to match and nothing to resolve. The inspect
 # counterpart of universal-restrict-scenarios.sh's own case.]
 echo "=== [HTTP - missing-host-header] ==="
@@ -339,7 +339,7 @@ OUT=$($S http://10.200.0.100:9080/anything)
 check_ok "GET http://10.200.0.100:9080/anything" "$OUT" "ROOT GET"
 
 # Same address, on a port only the URL rule's :80 default would cover:
-# refusing it proves the ~regex ip rule's own literal port (9080) is
+# blocking it proves the ~regex ip rule's own literal port (9080) is
 # enforced, not "any port".
 echo "=== [Regex IP rule - other port not covered] ==="
 CODE=$($C http://10.200.0.100:8080/anything)
@@ -365,7 +365,7 @@ echo "=== [SSRF via allowlisted name resolving inward] ==="
 CODE=$($C --insecure https://metadata.example.com/latest/meta-data)
 check_status "GET metadata.example.com (resolves to 169.254.169.254)" "$CODE" "403"
 
-# RFC1918 is exempt on purpose, so only the runner's address list refuses it.
+# RFC1918 is exempt on purpose, so only the runner's address list blocks it.
 echo "=== [SSRF via allowlisted name resolving back to the runner] ==="
 CODE=$($C --insecure https://runner.example.com/)
 check_status "GET runner.example.com (resolves to an address the runner holds)" "$CODE" "403"

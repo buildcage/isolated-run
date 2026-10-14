@@ -76,7 +76,7 @@ echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
 $C --max-time 20 http://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-http" &
 
 # [TLS ClientHello with no SNI extension at all. There is no name to judge, so
-# the connection is refused on that alone, audit mode or not; the report
+# the connection is blocked on that alone, audit mode or not; the report
 # records the address it was headed for, which is the proxy's own.]
 echo "=== [HTTPS - missing-sni] ==="
 (printf '\x16\x03\x01\x00\x2d\x01\x00\x00\x29\x03\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00' \

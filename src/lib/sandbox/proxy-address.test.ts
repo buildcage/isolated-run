@@ -14,7 +14,7 @@ describe("PROXY_ADDRESS", () => {
 
 describe("PROXY_SUBNET", () => {
   it("is the network the sandbox's veth link puts both ends on", () => {
-    // The internal-address guard refuses PROXY_SUBNET; a link outside it
+    // The internal-address guard blocks PROXY_SUBNET; a link outside it
     // would leave the sandbox's own address reachable by name.
     const script = readFileSync(
       new URL("../../../scripts/run-isolated.sh", import.meta.url),

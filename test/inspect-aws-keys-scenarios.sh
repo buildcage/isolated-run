@@ -220,7 +220,7 @@ echo "=== [EC2 reads the body as a form whatever the Content-Type] ==="
 EC2=https://ec2.us-east-1.amazonaws.com/
 check_status "a form POST signed with the start key" \
   "$($C -X POST -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/x-www-form-urlencoded" --data "Action=DescribeRegions&Version=2016-11-15" $EC2)" "200"
-# A non-form Content-Type is refused: EC2 reads the body as a form, so a SigV2
+# A non-form Content-Type is blocked: EC2 reads the body as a form, so a SigV2
 # there would slip past the form-body check behind the start-key header.
 check_status "a JSON Content-Type POST hiding the attacker's SigV2, start key in the header" \
   "$($C -X POST -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "Content-Type: application/json" --data "Action=DescribeRegions&Version=2016-11-15&AWSAccessKeyId=${AKIA}TESTATTACKER0001&SignatureVersion=2&Signature=ab" $EC2)" "403"

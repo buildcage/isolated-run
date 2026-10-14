@@ -13,7 +13,7 @@ SUMMARY=$(cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE")
 assert_report_complete
 
 assert_summary_contains "example.com:443" "allowed URL-rule host recorded in report"
-assert_summary_contains "not-allowed" "the out-of-rule POST recorded with its refusal reason"
+assert_summary_contains "not-allowed" "the out-of-rule POST recorded with its block reason"
 assert_summary_contains "neverssl.com:443" "host outside allowed_url_rules recorded as blocked"
 assert_summary_contains "TLS github.com:443" "the allowed_tls_rules passthrough recorded, never decrypted"
 

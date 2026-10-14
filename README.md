@@ -10,7 +10,7 @@
 
 A workflow `run:` step, and every tool and dependency it invokes, can connect anywhere on the
 network. Buildcage runs the command behind an allowlist: it reaches only the destinations you name,
-and anything else is refused and reported.
+and anything else is blocked and reported.
 
 - The command doesn't change: no proxy to configure, no certificate to install, and it runs as the
   same user with the same `$HOME` as the rest of the job, so credentials, caches and toolchains set
@@ -130,7 +130,7 @@ writes survive a `filesystem_mode: ephemeral` step and which the overlay discard
 [filesystem audit example](.github/workflows/example-filesystem-audit.yml) records what an npm
 install touches. The AWS access key check runs against a real AWS account
 ([audit](.github/workflows/example-aws-key-check-audit.yml) ·
-[restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and refusing a
+[restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and blocking a
 key the step was not given.
 
 ## Engines
@@ -140,7 +140,7 @@ key the step was not given.
 |                                               | `inspect`<br>terminates TLS, checks method and URL         | `universal`<br>reads the SNI only, checks host and port |
 | --------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
 | A rule can say                                | `GET\|HEAD https://registry.npmjs.org/**`                  | `registry.npmjs.org:443`                                |
-| Allow a fetch, refuse a publish, same host    | ✅                                                         | -                                                       |
+| Allow a fetch, block a publish, same host     | ✅                                                         | -                                                       |
 | The report shows                              | Every request with its URL                                 | Host and port                                           |
 | The command's TLS                             | Terminated and re-signed with a CA generated for that step | Untouched                                               |
 | Certificate pinning, or a bundled trust store | -                                                          | ✅                                                      |
@@ -175,7 +175,7 @@ If you forget a domain the command needs, `restrict` blocks it and the step fail
 destination named, which is why it is worth running `audit` first.
 
 `audit` also lets a connection made straight to an address through. Under `universal` that includes
-cloud metadata (`169.254.169.254`) and the runner's own addresses; `inspect` still refuses those
+cloud metadata (`169.254.169.254`) and the runner's own addresses; `inspect` still blocks those
 unless a rule names the address as its host.
 
 ### Rules for the `inspect` engine
@@ -253,7 +253,7 @@ known_blocked_rules: |
   telemetry.example.com
 ```
 
-A name refused at resolution, before any connection, has no port. A bare `telemetry.example.com` (or
+A name blocked at resolution, before any connection, has no port. A bare `telemetry.example.com` (or
 `telemetry.example.com:*`) covers it; `telemetry.example.com:443` does not, since no port was involved.
 
 One rule per line, and on `inspect` a line can also be a URL rule (a method and a URL, the
@@ -271,17 +271,17 @@ Any other blocked request to that host still fails the step. See
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
-refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
-counts what needs a look: requests refused, requests `restrict` would refuse, connections that
-failed and requests nothing acted on. It is a CAUTION when a request was refused unexpectedly or the
+blocked from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
+counts what needs a look: requests blocked, requests `restrict` would block, connections that
+failed and requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the
 report is incomplete, and a WARNING otherwise; with nothing to count, a plain line replaces it. In
-the tables that follow, refusals are marked 🚫 and failed connections ⚠️. With the [filesystem
+the tables that follow, blocked requests are marked 🚫 and failed connections ⚠️. With the [filesystem
 audit](./docs/filesystem-audit.md) on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
-URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather
-than a bare host. A query parameter that names a credential has its value replaced, see
-[Credentials in a URL](docs/security.md#credentials-in-a-url).
+URL, status and size, so a blocked entry names the URL that was attempted rather than a bare host.
+A query parameter that names a credential has its value replaced, see [Credentials in a
+URL](docs/security.md#credentials-in-a-url).
 
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
 or written, since it can't show that nothing was blocked. Set `fail_on_blocked: false` to report
@@ -314,7 +314,7 @@ name:
     aws-region: us-east-1
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
-    proxy_mode: audit # shows what restrict would refuse
+    proxy_mode: audit # shows what restrict would block
     aws_key_check: true
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
@@ -322,7 +322,7 @@ name:
 Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
 step that assumes roles of its own, as the CDK does, also names the roles' accounts in
 `allowed_aws_role_accounts`. The check needs the `inspect` engine.
-[AWS access key check](./docs/aws.md) covers adopting it, the refusal reasons, and the IAM settings
+[AWS access key check](./docs/aws.md) covers adopting it, the block reasons, and the IAM settings
 for what it cannot see.
 
 ## How `run` is executed
@@ -593,7 +593,7 @@ data, or source you do not publish. For the full threat model, see
   destination has a stable name.
 - `universal` never sees the method or the path. They travel inside TLS, so neither is enforced and
   neither reaches the report or the traffic artifact. A request fronted behind an allowed SNI is
-  invisible to it as well, while `inspect` matches on the real `Host` and refuses it. See
+  invisible to it as well, while `inspect` matches on the real `Host` and blocks it. See
   [Domain fronting](./docs/security.md#domain-fronting).
 - The generated allowlist covers only what the engine classified. `allowed_tls_rules` and
   `allowed_ip_rules` come back exactly as the audit run was configured with them, since nothing
@@ -723,7 +723,7 @@ follows it, cut at a line boundary with a note and a warning when it does not fi
 When the report itself, with its Process Activity section if the filesystem audit was on, would
 pass the limit, its parts give way in this order: the process details, the timeline, the Process
 Activity tables, the allowed table, the blocked and failed table, the ⚠️ tables of requests
-`restrict` would refuse, and last the `restrict` example. A part that does not fit is cut at a line
+`restrict` would block, and last the `restrict` example. A part that does not fit is cut at a line
 boundary with a note after what is kept, or replaced by the note when nothing of it fits; the
 example is only ever replaced whole. Once a table is cut, the timeline is left out under the same
 note. The Process Activity parts (Executed Programs, Accessed Paths, then the details) follow the
@@ -785,13 +785,13 @@ firewall-enabled runner image.
 
 ## Documentation
 
-| Doc                                            | What's in it                                                         |
-| ---------------------------------------------- | -------------------------------------------------------------------- |
-| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output        |
-| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it                  |
-| [AWS Access Key Check](./docs/aws.md)          | What `aws_key_check` stops, how to adopt it, and its refusal reasons |
-| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance    |
-| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout                |
+| Doc                                            | What's in it                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output      |
+| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it                |
+| [AWS Access Key Check](./docs/aws.md)          | What `aws_key_check` stops, how to adopt it, and its block reasons |
+| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance  |
+| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout              |
 
 ## Contributing
 

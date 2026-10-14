@@ -13,7 +13,7 @@ jobs:
 
     steps:
       # Same command as the audit example, with the rules that run produced. npm
-      # publish is a PUT, so it's refused: no rule here covers that method.
+      # publish is a PUT, so it's blocked: no rule here covers that method.
       # fail_on_blocked is false only because this example blocks on purpose;
       # leave it at its default so a real workflow fails on a disallowed request.
       - name: Install dependencies with outbound network isolation
@@ -29,5 +29,5 @@ jobs:
             npm init -y
             npm install --ignore-scripts @hono/node-server
 
-            # Refused: the report names the full URL, not just the host.
+            # Blocked: the report names the full URL, not just the host.
             curl -sS --max-time 5 -o /dev/null https://example.com/ || true

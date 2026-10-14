@@ -208,7 +208,7 @@ Where no request parsed, no rule ran and the fields read `[-] (HTTP) "-" -`.
 What the report makes of those is in
 [Requests that never arrived whole](./reference.md#requests-that-never-arrived-whole).
 
-`universal` also reads the resolver's log (`/var/log/coredns`), since a name CoreDNS refused never
+`universal` also reads the resolver's log (`/var/log/coredns`), since a name CoreDNS blocked never
 reaches HAProxy at all: it is the only trace of a name looked up but never connected to.
 
 **`inspect`'s proxy log is richer**, since it terminates TLS and sees each request whole; it reads the
@@ -233,8 +233,8 @@ reader splitting a URL back apart would take the host for `registry.npmjs.org-`.
 prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
 dot, as the rules do before matching it.
 
-With the AWS access key check on, both request lines carry `wr=<reason|->` after `dst=`: in `audit`,
-the reason `restrict` would have refused the request for (`aws-key-not-allowed`,
+With the AWS access key check on, both request lines carry `wb=<reason|->` after `dst=`: in `audit`,
+the reason `restrict` would have blocked the request for (`aws-key-not-allowed`,
 `aws-no-credential`, `aws-ambiguous-credential`, `aws-unsupported-credential`, `aws-unreadable` or
 `aws-role-not-allowed`), and
 `-` otherwise. `restrict` logs the same reasons as `reason=`. Then come `aws.key=`,
@@ -242,7 +242,7 @@ the reason `restrict` would have refused the request for (`aws-key-not-allowed`,
 reads back as the traffic artifact's `aws` object, each `-` where it has no value. See
 [AWS access key check](./aws.md).
 
-`ts` is HAProxy's termination state and `reason` the refusal reason where the rule that refused
+`ts` is HAProxy's termination state and `reason` the block reason where the rule that blocked
 knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
 make; the passthrough stage terminates no TLS and logs no such field. `fcerr` is haproxy's error
@@ -400,7 +400,7 @@ hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left ou
 
 - SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
   SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body or spelled other than
-  exactly in the query are refused as `aws-unsupported-credential` without their key being read.
+  exactly in the query are blocked as `aws-unsupported-credential` without their key being read.
 - A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
   the body can be 4 MiB less the headers. Matching stops at a NUL byte, so a body holding one is
   `aws-unreadable` as well.

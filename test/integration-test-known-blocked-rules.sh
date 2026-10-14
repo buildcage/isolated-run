@@ -5,7 +5,7 @@
 #
 # blocked.example.com is a name in the fixture origin's resolver
 # (compose.test-universal.yaml), so the blocked request this is built on stays
-# inside the fixture's own zone: no rule permits it, and the proxy refuses it
+# inside the fixture's own zone: no rule permits it, and the proxy blocks it
 # without ever asking an upstream resolver about it.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"

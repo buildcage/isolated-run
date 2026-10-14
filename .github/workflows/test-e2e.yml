@@ -651,14 +651,14 @@ jobs:
             echo "=== URL-allowed host, over TLS the proxy terminated (proves CA trust) ==="
             curl -fsS --max-time 10 https://example.com/ > /dev/null
 
-            echo "=== method outside the rule must be refused ==="
+            echo "=== method outside the rule must be blocked ==="
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST https://example.com/)
             if [ "$CODE" != "403" ]; then
               echo "UNEXPECTED: POST https://example.com/ returned $CODE, not 403"
               exit 1
             fi
 
-            echo "=== host outside allowed_url_rules must be refused ==="
+            echo "=== host outside allowed_url_rules must be blocked ==="
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://neverssl.com/)
             if [ "$CODE" != "403" ]; then
               echo "UNEXPECTED: https://neverssl.com/ returned $CODE, not 403"
@@ -898,7 +898,7 @@ jobs:
             POST https://sts.us-east-1.amazonaws.com/
           aws_key_check: true
           allowed_aws_role_accounts: ${{ steps.accounts.outputs.role }},${{ steps.accounts.outputs.switched }}
-          # The refusal below is expected.
+          # The block below is expected.
           fail_on_blocked: false
           upload_traffic_artifact: true
           traffic_artifact_retention_days: 1
@@ -930,7 +930,7 @@ jobs:
               *) echo "UNEXPECTED: signed as $arn, not the web identity session"; exit 1 ;;
             esac
 
-            echo "=== a key from outside the step must be refused ==="
+            echo "=== a key from outside the step must be blocked ==="
             # AWS's documented example key ID, built at run time so the file
             # holds no key-shaped literal.
             if out=$(env -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="AKIA$(printf IOSFODNN7EXAMPLE)" AWS_SECRET_ACCESS_KEY=example \
@@ -941,7 +941,7 @@ jobs:
             echo "$out"
             # STS's own answer to an unknown key: the call left the proxy.
             if grep -q InvalidClientTokenId <<<"$out"; then
-              echo "UNEXPECTED: STS, not the proxy, refused the call"
+              echo "UNEXPECTED: STS rejected the call, so the proxy did not block it"
               exit 1
             fi
 
@@ -976,7 +976,7 @@ jobs:
           SWITCHED_ACCOUNT: ${{ steps.accounts.outputs.switched }}
         run: node test/assert-aws-traffic-artifact.mjs "$RUNNER_TEMP/aws-traffic/traffic.json"
 
-      # No account named: the switched role's key is one restrict would refuse,
+      # No account named: the switched role's key is one restrict would block,
       # and the report names its account for the workflow to check.
       - name: Call STS with the AWS access key check in audit mode
         id: audit

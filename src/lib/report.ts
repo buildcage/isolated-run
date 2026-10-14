@@ -26,16 +26,16 @@ import {
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { withAwsTroubleshootingLink } from "./aws-report.ts";
-import { TRAFFIC_PRIORITIES, WOULD_REFUSE_PRIORITY } from "./summary-priorities.ts";
+import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
 import {
-  describeWouldRefuse,
-  keyRefusalLabel,
-  refusedKeys,
-  WOULD_REFUSE_BLOCK,
-  wouldRefuseBlocks,
-  wouldRefuseTruncationNote,
-  wouldRefuseVerdictItems,
-} from "./would-refuse.ts";
+  blockedKeys,
+  describeWouldBlock,
+  keyBlockLabel,
+  WOULD_BLOCK_ID,
+  wouldBlockTables,
+  wouldBlockTruncationNote,
+  wouldBlockVerdictItems,
+} from "./would-block.ts";
 
 export type Report = ReportData;
 
@@ -92,20 +92,20 @@ export function computeReportOutcomes(
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",
   });
-  const wouldRefuse = describeWouldRefuse(report.timeline);
-  if (wouldRefuse) emissions.push(wouldRefuse);
-  const keys = refusedKeys(report.timeline);
+  const wouldBlock = describeWouldBlock(report.timeline);
+  if (wouldBlock) emissions.push(wouldBlock);
+  const keys = blockedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     title: reportTitle(stepLabel),
     // The step closes its summary itself, after the process activity.
     footer: false,
-    verdictItems: wouldRefuseVerdictItems(report.timeline),
+    verdictItems: wouldBlockVerdictItems(report.timeline),
     stepName: "Start isolated-run",
     runCommand,
     extraInputs,
     actionVersion,
-    refusalLabel: keyRefusalLabel(keys),
-    extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap),
+    blockLabel: keyBlockLabel(keys),
+    extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY, gap),
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
@@ -292,8 +292,8 @@ export async function writeReportSummary(
   const { cutIds, wrote } = await writeSummaryBlocks(
     [
       ...withNotices(outcomes.blocks, (b) =>
-        b.id === WOULD_REFUSE_BLOCK
-          ? wouldRefuseTruncationNote(artifactAvailable)
+        b.id === WOULD_BLOCK_ID
+          ? wouldBlockTruncationNote(artifactAvailable)
           : trafficNotice(b, artifactAvailable),
       ),
       ...extraBlocks,
@@ -310,10 +310,10 @@ export async function writeReportSummary(
   // already held left no room under GitHub's limit.
   if (wrote !== "blocks") {
     annotation.warning(reportDidNotFitMessage(artifactAvailable));
-  } else if (cutIds.has(WOULD_REFUSE_BLOCK)) {
+  } else if (cutIds.has(WOULD_BLOCK_ID)) {
     // The section's own notice is easy to miss below the fold.
     annotation.warning(
-      "The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
+      "The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
           ? "The buildcage-traffic artifact uploaded for this run has every request."
           : "Set upload_traffic_artifact: true to get every request as an artifact."),

@@ -37,7 +37,7 @@ runInspectConfigGenerator((write) => {
   const key = std.getenv("ALLOWED_AWS_KEY")?.trim() ?? "";
   const accounts = parseAwsAccounts(std.getenv("ALLOWED_AWS_ROLE_ACCOUNTS"));
   if (key === "") {
-    // Accounts with no key to start from would refuse every signed request.
+    // Accounts with no key to start from would block every signed request.
     if (accounts.length > 0) throw new Error("AWS role accounts given without an access key");
     return undefined;
   }

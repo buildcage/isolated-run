@@ -80,10 +80,10 @@ assert_summary_contains "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex r
 assert_summary_contains "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
-# No rule refused this one and none can clear it, so it is tabled apart.
-assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
+# No rule blocked this one and none can clear it, so it is tabled apart.
+assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the blocks"
 assert_summary_contains "| \`absent.example.com:443\` | HTTPS | ⚠️ dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"
-# The opposite case: a connection that never completed is a refusal, because
+# The opposite case: a connection that never completed is a block, because
 # nothing on it was ever authenticated. It reads like an outage and is counted
 # anyway.
 assert_summary_contains "| \`deadend.example.com:443\` | HTTPS | 🚫 origin-connect-failed |" \
@@ -95,7 +95,7 @@ assert_summary_contains "| \`impostor.example.com:443\` | HTTPS | 🚫 origin-un
 # The same host over plaintext, where no certificate was ever going to be
 # checked, so nothing was hidden by the connection failing.
 assert_summary_contains "| \`deadend.example.com:80\` | HTTP | ⚠️ origin-unreachable |" \
-  "a plaintext connection that failed is a failure, not a refusal"
+  "a plaintext connection that failed is a failure, not a block"
 assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-allowed" "out-of-rule POST recorded with its reason"
 # `OPTIONS *` carries no path, so no URL can spell what it asked for and the
 # row names the method and the host instead. The host is the point: built from
@@ -103,7 +103,7 @@ assert_summary_contains "POST https://allowed.example.com/public/pkg.tgz -> not-
 assert_summary_contains "OPTIONS HTTPS allowed.example.com:443 -> not-allowed" "a target that is not a path is recorded against the host the request carried"
 assert_summary_contains "https://absent.example.com/ -> dns-failed" "unresolvable allowlisted name recorded as dns-failed"
 assert_summary_contains "https://v6only.example.com/ -> dns-failed" "allowlisted name with AAAA records only recorded as dns-failed"
-assert_summary_contains "exfil?token=*** -> not-allowed" "the refused URL's credential parameter was replaced"
+assert_summary_contains "exfil?token=*** -> not-allowed" "the blocked URL's credential parameter was replaced"
 # The summary is as readable as the run; the traffic artifact is where the
 # value itself survives.
 if grep -qF "token=SECRET-VALUE" <<< "$SUMMARY"; then
@@ -113,15 +113,15 @@ else
 fi
 # The marker is last on the log line the report is built from, so finding it
 # proves nothing was cut.
-assert_summary_contains "end=TAIL-MARKER -> not-allowed" "the ~1.3KB refused URL was recorded whole"
+assert_summary_contains "end=TAIL-MARKER -> not-allowed" "the ~1.3KB blocked URL was recorded whole"
 assert_summary_contains "TLS tlspass.example.com:443" "the TLS passthrough is in the timeline, never decrypted"
 if grep -qF "TLS tlsany" <<< "$SUMMARY"; then
   fail "an SNI holding a colon was passed through"
 else
   pass "an SNI holding a colon was not passed through"
 fi
-assert_summary_contains "-> invalid-host" "a Host holding a colon was refused as invalid-host"
-assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowed" "the DNS-only exfiltration attempt was refused and recorded"
+assert_summary_contains "-> invalid-host" "a Host holding a colon was blocked as invalid-host"
+assert_summary_contains "DNS secret-in-a-name.attacker.example -> dns-not-allowed" "the DNS-only exfiltration attempt was blocked and recorded"
 # No rule can name an address backwards, so a row for one could never be taken
 # away by writing a rule. The resolver records it under a verb of its own
 # instead. An invented name under the same zone is judged like any other, or
@@ -143,12 +143,12 @@ else
   pass "a service-discovery lookup under an allowed host was not reported as blocked"
 fi
 # Only a service name under a host the rules allow is treated that way. The
-# refusal names its own remedy: the host below the name, which is what a rule
+# block names its own remedy: the host below the name, which is what a rule
 # can be written against.
 if grep -qiE '_mongodb\._tcp\.secret-in-a-name\.attacker\.example.*dns-service-not-allowed' <<< "$SUMMARY"; then
-  pass "a service name under a host no rule allows was refused with a reason of its own"
+  pass "a service name under a host no rule allows was blocked with a reason of its own"
 else
-  fail "a service name under a host no rule allows was not reported as refused"
+  fail "a service name under a host no rule allows was not reported as blocked"
 fi
 if grep -qE 'DNS allowed\.example\.com ->' <<< "$SUMMARY"; then
   fail "a name that merely resolved is in the timeline (should be dropped as redundant)"
@@ -170,11 +170,11 @@ fi
 assert_summary_matches "⚠️ .*: HTTPS abandoned\.example\.com:443 -> client-tls-failed$" \
   "a failed client handshake is in the timeline, named by its SNI" \
   "the failed client handshake is missing from the timeline"
-# No rule takes the row above away, so the refused lookup for the same name has
+# No rule takes the row above away, so the blocked lookup for the same name has
 # to survive: it is the only row a reader can act on.
 assert_summary_contains "| \`aborted.example.com\` | DNS | 🚫 dns-not-allowed |" \
-  "the refused lookup for the same name is still its own Blocked row"
-# A refusal made before a whole request arrived is still a refusal, so it is in
+  "the blocked lookup for the same name is still its own Blocked row"
+# A block made before a whole request arrived is still a block, so it is in
 # the table and in fail_on_blocked. The plain stage has no SNI to name it by:
 # bytes sent to an address are named by it, as the ip rule that could pass them
 # would be, and a request to a name lands on the proxy's own address, which
@@ -182,7 +182,7 @@ assert_summary_contains "| \`aborted.example.com\` | DNS | 🚫 dns-not-allowed 
 # shellcheck disable=SC2016 # the backticks are a code span's, not a command
 if grep -qF '| `10.200.0.100:5432` | IP | 🚫 bad-request |' <<< "$SUMMARY" \
   && grep -qE '^\| `\(unknown\):[0-9]+` \| HTTP \| 🚫 missing-host-header \|' <<< "$SUMMARY"; then
-  pass "both refusals that named no host are in the Blocked Hosts table"
+  pass "both blocks that named no host are in the Blocked Hosts table"
 else
   fail "the Blocked Hosts table is missing the rows for requests that named no host"
 fi
