@@ -375,8 +375,8 @@ them on those, through a customized bootstrap template:
 
   Add it as a statement to an existing policy. List every account the step deploys to, those in
   `allowed_aws_role_accounts` included, or the role cannot assume its roles there. A real policy
-  also needs exceptions for resources AWS owns, such as the SSM public parameters under `/aws/service/`
-  that the CDK reads to look up an AMI; AWS's
+  also needs exceptions for resources AWS owns, such as the SSM public parameters under
+  `/aws/service/` that the CDK reads to look up an AMI; AWS's
   [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
   lists them.
 
