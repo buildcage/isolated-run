@@ -28,12 +28,8 @@ runner host get slightly slower; see [What changes in the step](#what-changes-in
 - **Finding what `write_through` needs** under `filesystem_mode: ephemeral`: the audit shows where
   the step wrote, so you keep only what a later step reads. See
   [Choosing `write_through`](#choosing-write_through).
-- **Checking what a dependency read**, such as a credential file under `~/.ssh` or `~/.npmrc`.
-- **Seeing what an install ran**, such as a `postinstall` script starting `curl` or a binary it just
-  downloaded.
-- **Seeing what was refused**: a write to a read-only path, or a read the file's permissions denied.
-
-[What to look for](#what-to-look-for) shows how each of the last three appears in the summary.
+- **Checking what a dependency read, ran, or was refused.** See
+  [What to look for](#what-to-look-for).
 
 ## Before you turn it on
 
@@ -223,10 +219,9 @@ paths `write_through` names. To name only what a later step needs:
    temporary name and then renames into place shows `M` under the temporary name; its new name is
    the `to` on its `rename` line in the artifact.
 3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
-   rest is what ephemeral discards on purpose. Once it is settled, the artifact is no longer
-   needed.
+   rest is what ephemeral discards on purpose.
 
-A build that sets outputs and writes `./dist` ends up with:
+A build that sets outputs and writes `./dist` ends up with this, the artifact no longer needed:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
