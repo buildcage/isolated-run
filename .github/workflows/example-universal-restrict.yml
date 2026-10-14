@@ -24,6 +24,7 @@ jobs:
           proxy_engine: universal
           allowed_https_rules: |
             repo.maven.apache.org:443
+            repository.apache.org:443
           fail_on_blocked: false
           run: |
             mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
