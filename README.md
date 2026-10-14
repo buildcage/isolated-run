@@ -130,7 +130,7 @@ writes survive a `filesystem_mode: ephemeral` step and which the overlay discard
 [filesystem audit example](.github/workflows/example-filesystem-audit.yml) records what an npm
 install touches. The AWS access key check runs against a real AWS account
 ([audit](.github/workflows/example-aws-key-check-audit.yml) ·
-[restrict](.github/workflows/example-aws-key-check-restrict.yml)), switching to a role and refusing a
+[restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and refusing a
 key the step was not given.
 
 ## Engines
@@ -321,7 +321,7 @@ name:
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-Once the report shows nothing `restrict` would refuse, switch to `restrict`. A step that switches
+Once the report shows nothing `restrict` would refuse, switch to `restrict`. A step that assumes
 roles of its own, as the CDK does, also names the roles' accounts in `allowed_aws_role_accounts`.
 The check needs the `inspect` engine. [AWS access key check](./docs/aws.md) covers adopting it, the
 refusal reasons, and the IAM settings for what it cannot see.
