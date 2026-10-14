@@ -869,7 +869,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 ### Rough edges
 
 - **A name with no IPv4 address never resolves.** The proxy resolves and connects over IPv4 only, so
-  an allowed name with AAAA records and no A record is blocked on every attempt, in `audit` too, and
+  an allowed name with AAAA records and no A record fails on every attempt, in `audit` too, and is
   reported as `dns-failed` in the same words a lookup that merely timed out gets. No rule clears it,
   since nothing about it is a rule decision. Where the host offers an IPv4 address under a different
   name, allow that one instead.

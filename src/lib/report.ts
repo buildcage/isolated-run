@@ -28,9 +28,9 @@ import type { ReportData } from "#core/lib/report/types.ts";
 import { withAwsTroubleshootingLink } from "./aws-report.ts";
 import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
 import {
+  blockedKeys,
   describeWouldBlock,
   keyBlockLabel,
-  blockedKeys,
   WOULD_BLOCK_ID,
   wouldBlockTables,
   wouldBlockTruncationNote,
