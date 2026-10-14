@@ -45,7 +45,6 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
     runCommand: "npm ci",
     failOnBlocked: true,
     trafficArtifact: { upload: false },
-    processActivity: false,
     ...overrides,
   };
 }
@@ -74,25 +73,16 @@ describe("reportStepTraffic", () => {
     );
   });
 
-  it("writes the rest of the summary with the report, timed from the proxy's start", async () => {
+  it("writes the rest of the summary with the report, timed from the proxy's start and titled with the step's label", async () => {
     mocks.fetchReport.mockResolvedValue({ engine: "inspect", startedAt: 1_791_244_800 });
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
     const moreBlocks = vi.fn(() => [block]);
 
     await reportStepTraffic(options({ moreBlocks }), deps);
 
-    expect(moreBlocks).toHaveBeenCalledWith(1_791_244_800);
+    expect(moreBlocks).toHaveBeenCalledWith(1_791_244_800, "build");
     expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([block, FOOTER]);
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
-  });
-
-  it("names the process activity in the title only when its section is there", async () => {
-    const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
-    await reportStepTraffic(options({ processActivity: true, moreBlocks: () => [block] }), deps);
-    expect(mocks.writeReportSummary.mock.calls[0][2].processActivity).toBe(true);
-    // Recorded, but its section failed to render.
-    await reportStepTraffic(options({ processActivity: true, moreBlocks: () => [] }), deps);
-    expect(mocks.writeReportSummary.mock.calls[1][2].processActivity).toBe(false);
   });
 
   it("writes the rest of the summary alone when there is no report", async () => {
@@ -102,7 +92,7 @@ describe("reportStepTraffic", () => {
 
     await reportStepTraffic(options({ moreBlocks }), deps);
 
-    expect(moreBlocks).toHaveBeenCalledWith(undefined);
+    expect(moreBlocks).toHaveBeenCalledWith(undefined, "build");
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
       {},
@@ -110,21 +100,20 @@ describe("reportStepTraffic", () => {
     );
   });
 
-  it("titles the rest after what it holds, in the report's mode", async () => {
+  it("titles the missing report in the report's mode", async () => {
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
 
     await reportStepTraffic(
       options({
         moreBlocks: () => [block],
-        processActivity: true,
         parameters: reportParams({ mode: "audit" }),
       }),
       deps,
     );
 
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
-      [missingReportFrame("Traffic & Process Activity Report — build", true), block, FOOTER],
+      [missingReportFrame("Outbound Traffic Report — build", true), block, FOOTER],
       {},
       { commandBytes: 0 },
     );
@@ -175,7 +164,6 @@ describe("reportStepTraffic", () => {
       extraInputs: ["aws_key_check: true"],
       actionVersion: "1.2.3",
       stepLabel: "build",
-      processActivity: false,
       failOnBlocked: true,
       extraBlocks: [FOOTER],
       commandBytes: 0,

@@ -74,12 +74,10 @@ export interface ReportStepOptions {
   env: NodeJS.ProcessEnv;
   /**
    * The rest of the step's Job Summary, given the proxy's start (undefined
-   * when unknown), fitted into GitHub's limit together with the report.
+   * when unknown) and the step's label for its titles, fitted into GitHub's
+   * limit together with the report.
    */
-  moreBlocks?: (startedAt: number | undefined) => SummaryBlock[];
-  /** Whether the step records its process activity, which the title names
-   *  when its section is there. */
-  processActivity: boolean;
+  moreBlocks?: (startedAt: number | undefined, stepLabel: string | undefined) => SummaryBlock[];
   /** The command's own summary already at the start of the file, moved
    *  after this action's part once that is written; see
    *  moveCommandSummaryLast. */
@@ -110,7 +108,6 @@ export async function reportStepTraffic(
     trafficArtifact,
     env,
     moreBlocks = () => [],
-    processActivity,
     commandSummaryBytes = 0,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
@@ -138,16 +135,14 @@ export async function reportStepTraffic(
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.
   const stepLabel = readStepLabel();
-  const rest = moreBlocks(report?.startedAt);
+  const rest = moreBlocks(report?.startedAt, stepLabel);
   const footer = [summaryFooter(actionRepo)];
-  // A section that failed to render leaves nothing for the title to name.
-  const named = processActivity && rest.length > 0;
   const writeRest = () =>
     writeMoreSummary(
       rest.length === 0
         ? []
         : [
-            missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
+            missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
             ...rest,
             ...footer,
           ],
@@ -172,7 +167,6 @@ export async function reportStepTraffic(
           extraInputs: extraInputs?.(report),
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel,
-          processActivity: named,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
           commandBytes: commandSummaryBytes,

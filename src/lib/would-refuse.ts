@@ -100,7 +100,7 @@ export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
 /** The verdict line's count of the requests restrict would refuse, if any. */
 export function wouldRefuseVerdictItems(timeline: TrafficEvent[]): string[] {
   const count = timeline.filter(letThrough).length;
-  return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
+  return count === 0 ? [] : [`${count} restrict would refuse`];
 }
 
 /**
@@ -116,7 +116,7 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
     shouldFail: false,
     message:
       `${count} request(s) restrict mode would refuse. ` +
-      "The 🚨 Restrict Would Refuse section counts them by key or by host and reason.",
+      "The ⚠️ Restrict Would Refuse section counts them by key or by host and reason.",
   };
 }
 
@@ -126,17 +126,15 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
  * own, one row per key whatever the host: every request a key not allowed signs
  * is refused, and a row for each host would bury the other refusals. The rest
  * are counted by host and reason, as in Blocked Hosts. The first block opens
- * with `gap`, the blank line renderReportBlocks owes a block before it, and
- * `level` is the host tables' heading level.
+ * with `gap`, the blank line renderReportBlocks owes a block before it.
  */
 export function wouldRefuseBlocks(
   timeline: TrafficEvent[],
   keys: Map<string, RefusedKey>,
   priority: number,
   gap: string,
-  level: string,
 ): SummaryBlock[] {
-  const heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`;
+  const heading = `${gap}### ⚠️ Restrict Would Refuse\n\n`;
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {

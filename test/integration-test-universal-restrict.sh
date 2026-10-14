@@ -67,7 +67,7 @@ assert_summary_contains "| \`10.200.0.100:8443\` | IP |" "an allowed address rec
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.101:8443\` | IP | 🚫 ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
 # No rule refused these and none can clear them, so they are tabled apart.
-assert_summary_contains "#### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
+assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:80\` | HTTP | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed on the HTTP path too"
 assert_summary_contains "| \`v6only.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed"

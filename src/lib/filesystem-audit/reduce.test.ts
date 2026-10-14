@@ -113,12 +113,19 @@ function lines(md: string): string[] {
   return m ? m[1].split("\n").map((l) => l.replace(/\s+/g, " ").trim()) : [];
 }
 
-// The rows of the "Accessed Paths" table.
-function tableRows(md: string): string[] {
+// The "Accessed Paths" table's rows, verbatim.
+function programRows(md: string): string[] {
   const m = md.match(
-    /#### Accessed Paths\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /<summary>Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
+}
+
+// The same rows as path and access alone, for a test of the paths.
+function tableRows(md: string): string[] {
+  return programRows(md).map((row) =>
+    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
+  );
 }
 
 const render = (...records: object[]): string =>
@@ -133,7 +140,7 @@ describe("createAuditSummary", () => {
 
   it("warns unless the tracer's end line is there and counts nothing lost", () => {
     const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
-    const warning = "### ⚙️ Process Activity\n\n> ❗ **This record is incomplete.**";
+    const warning = "## Process Activity Report\n\n> ❗ **This record is incomplete.**";
     expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("❗");
     expect(render(read)).toContain(warning); // cut short before the end line
     const dropped = render(read, { kind: "end", dropped: 3, untracked: 0 });
@@ -151,7 +158,7 @@ describe("createAuditSummary", () => {
       "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
       "> accesses may be missing from this summary and from the artifact.\n";
     const skipped = render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 15779 });
-    expect(skipped).toContain(`### ⚙️ Process Activity\n\n${note}`);
+    expect(skipped).toContain(`## Process Activity Report\n\n${note}`);
     expect(skipped).not.toContain("incomplete");
     expect(lines(skipped)).toEqual(["R cat /etc/hostname"]);
     // Both, the incomplete warning first.
@@ -290,15 +297,15 @@ describe("createAuditSummary", () => {
     );
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
-    expect(`</details>\n${md}`).toContain("</details>\n\n### ⚙️ Process Activity\n");
+    expect(`</details>\n${md}`).toContain("</details>\n\n## Process Activity Report\n");
     // Below the executed table, which shows no flags.
-    expect(md.indexOf("#### Accessed Paths\n\n<sub>R read")).toBeGreaterThan(
-      md.indexOf("#### Executed Programs"),
+    expect(md.indexOf("<summary>Accessed Paths")).toBeGreaterThan(
+      md.indexOf("### Executed Programs"),
     );
     expect(md.split("<sub>R read")).toHaveLength(2);
     // With no accessed paths table, the details are the first to show flags.
     const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
-    expect(ran).not.toContain("#### Accessed Paths");
+    expect(ran).not.toContain("<summary>Accessed Paths");
     expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
   });
 
@@ -604,20 +611,21 @@ describe("createAuditSummary", () => {
     }
   });
 
-  it("orders rows without times by workspace, home, then the rest, then path and command", () => {
+  it("orders rows without times by workspace, home, then the rest, then path and command, and the table's by program first", () => {
     const md = render(
-      { kind: "read", comm: "b", path: "/etc/x" },
-      { kind: "read", comm: "a", path: "/etc/x" },
-      { kind: "read", comm: "c", path: "/home/u/y" },
-      { kind: "read", comm: "c", path: "/work/b" },
-      { kind: "read", comm: "c", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "b", path: "/etc/x" },
+      { kind: "read", pid: 2, comm: "a", path: "/etc/x" },
+      { kind: "read", pid: 3, comm: "c", path: "/home/u/y" },
+      { kind: "read", pid: 3, comm: "c", path: "/work/b" },
+      { kind: "read", pid: 3, comm: "c", path: "/work/a" },
     );
     expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
-    expect(tableRows(md)).toEqual([
-      "| `./a` | R |",
-      "| `./b` | R |",
-      "| `~/y` | R |",
-      "| `/etc/x` | R |",
+    expect(programRows(md)).toEqual([
+      "| `b` | R | `/etc/x` |",
+      "| `a` | R | `/etc/x` |",
+      "| `c` | R | `./a` |",
+      "| `c` | R | `./b` |",
+      "| `c` | R | `~/y` |",
     ]);
   });
 
@@ -1091,15 +1099,15 @@ describe("createAuditSummary: limits", () => {
 
   it("keeps the rows that fit and notes the cut, rather than drop the table and the details", () => {
     // Paths with ".." under different directories, which no fold joins. A
-    // table row counts 19 bytes and a details row 12.
+    // table row counts 25 bytes and a details row 12.
     const md = limited(
       { bytes: 40 },
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
-    expect(tableRows(md)).toEqual(["| `/a/../f` | R |", "| `/b/../f` | R |"]);
-    expect(section(md, "#### Accessed Paths", "<details>")).toContain(CUT);
+    expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
+    expect(section(md, "<summary>Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
-    expect(section(md, "<details>")).toContain(CUT);
+    expect(section(md, "🔍")).toContain(CUT);
   });
 
   it("puts the note in place of a table and the details too large to print even folded", () => {
@@ -1108,9 +1116,9 @@ describe("createAuditSummary: limits", () => {
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
-    expect(section(md, "#### Executed Programs", "#### Accessed Paths")).toContain("`/usr/bin/c`");
+    expect(section(md, "### Executed Programs", CUT)).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
-    expect(section(md, "#### Accessed Paths")).toContain(CUT);
+    expect(md).not.toContain("<summary>Accessed Paths");
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -1131,14 +1139,16 @@ describe("createAuditSummary: limits", () => {
   });
 
   it("cuts only the details when the table still fits", () => {
+    // One program renaming itself, which the details tell apart.
     const records = Array.from({ length: 20 }, (_, i) => ({
       kind: "read",
+      pid: 1,
       comm: `command-${i}`,
       path: "/tmp/x",
     }));
     const md = limited({ bytes: 200 }, ...records);
-    expect(section(md, "#### Accessed Paths", "<details>")).toContain("| `/tmp/x` | R |");
-    expect(section(md, "<details>")).toContain(CUT);
+    expect(programRows(md)).toEqual(["| `command-0` | R | `/tmp/x` |"]);
+    expect(section(md, "🔍")).toContain(CUT);
   });
 
   it("stops listing new programs once the executed table outgrows the limit, still counting runs", () => {
@@ -1170,13 +1180,13 @@ describe("createAuditSummary: limits", () => {
     );
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
-    expect(md).not.toContain("#### Accessed Paths");
+    expect(md).not.toContain("<summary>Accessed Paths");
     expect(md).not.toContain("<details>");
   });
 
   it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {
     const md = limited({ nodes: 5 }, ...tmpFiles(5));
-    expect(section(md, "#### Accessed Paths")).toContain(
+    expect(md).toContain(
       "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
         "the recording could not be uploaded as an artifact, so the rest is not kept._",
     );
@@ -1188,20 +1198,21 @@ describe("createAuditSummary: limits", () => {
     const files = ["a", "b", "c"].map((f) => ({ kind: "write", comm: "c", path: `/x/${f}` }));
     const md = limited({ nodes: 4 }, ...files);
     expect(md).not.toContain("too many distinct paths");
-    expect(md).toContain("| `/x/**` | W |");
+    expect(tableRows(md)).toEqual(["| `/x/**` | W |"]);
   });
 
   it("gives the details their own cause when only they outgrow the bound", () => {
-    // Each command has a tree of its own in the details, so they hold more paths.
+    // Each command has a tree of its own in the details, so one program
+    // renaming itself holds more paths there.
     const md = limited(
       { nodes: 6 },
-      { kind: "read", comm: "a", path: "/x/f" },
-      { kind: "read", comm: "a", path: "/y/g" },
-      { kind: "read", comm: "b", path: "/x/f" },
-      { kind: "read", comm: "b", path: "/y/g" },
+      { kind: "read", pid: 1, comm: "a", path: "/x/f" },
+      { kind: "read", pid: 1, comm: "a", path: "/y/g" },
+      { kind: "read", pid: 1, comm: "b", path: "/x/f" },
+      { kind: "read", pid: 1, comm: "b", path: "/y/g" },
     );
-    expect(section(md, "#### Accessed Paths", "<details>")).toContain("`/x/f`");
-    expect(section(md, "<details>")).toContain("too many distinct paths to summarize");
+    expect(section(md, "<summary>Accessed Paths", "🔍")).toContain("`/x/f`");
+    expect(section(md, "🔍")).toContain("too many distinct paths to summarize");
   });
 
   it("counts the directories a walk does not explain once the lines are spelled out", () => {
@@ -1214,7 +1225,7 @@ describe("createAuditSummary: limits", () => {
     expect(tableRows(limited({ bytes: 1000 }, ...records))).toHaveLength(10);
     // Only spelled out at the end do they pass the limit, and fold there.
     expect(tableRows(limited({ bytes: 150 }, ...records))).toEqual(["| `/tmp/**` | RA |"]);
-    expect(section(limited({ bytes: 10 }, ...records), "#### Accessed Paths")).toContain(CUT);
+    expect(limited({ bytes: 10 }, ...records)).toContain(CUT);
   });
 
   it("shows a library's read once it remembers no more loads", () => {

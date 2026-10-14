@@ -98,9 +98,9 @@ A host that falls short fails the step before the command runs, with the reason;
     run: npm ci
 ```
 
-The step's Job Summary gets a **⚙️ Process Activity** section after the traffic report, and its
-title becomes `Traffic & Process Activity Report`. The full record, with every access in order, is
-uploaded only when asked for, as the traffic artifact is:
+The step's Job Summary gets a **Process Activity Report** section after the traffic report. The
+full record, with every access in order, is uploaded only when asked for, as the traffic artifact
+is:
 
 ```yaml
 - id: build
@@ -123,7 +123,7 @@ run.
 Each step with the audit on gets its own section and its own artifact,
 `buildcage-filesystem-audit-<id>`, where `<id>` is the same random suffix as that step's traffic
 artifact, so several steps in one job never collide. Each section follows its step's traffic
-report, whose heading carries the step's `label`, so set `label` to tell the steps apart.
+report, and both headings carry the step's `label`, so set `label` to tell the steps apart.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
 default, and a value above the repository's maximum is lowered to it, with a warning. A value that
@@ -135,25 +135,25 @@ like the traffic artifact.
 ## Reading the summary
 
 ```
-### ⚙️ Process Activity
+## Process Activity Report
 > 🚫 Refused system calls: io_uring_setup (node).
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
 
-#### Executed Programs
+### Executed Programs
 | Path                  | Count |
 | --------------------- | ----: |
 | `/usr/local/bin/node` |     1 |
 | `/usr/bin/dash`       |    12 |
 
-#### Accessed Paths
+▶ Accessed Paths (4)
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
-| Path                  | Access |
-| --------------------- | ------ |
-| `./node_modules/**`   | RWD    |
-| `./package.json`      | R      |
-| `/etc/**`             | Rr!    |
-| `/usr/local/bin/node` | w!     |
+| Program               | Access | Path                  |
+| --------------------- | ------ | --------------------- |
+| `/usr/local/bin/node` | RWD    | `./node_modules/**`   |
+| `/usr/local/bin/node` | R      | `./package.json`      |
+| `/usr/local/bin/node` | Rr!    | `/etc/**`             |
+| `/usr/local/bin/node` | w!     | `/usr/local/bin/node` |
 
 🔍 Process details
 first-last access since the proxy started · flags · command · path
@@ -171,10 +171,14 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
-- **Accessed Paths** combines every command's actions on a path in one row, in path order: the
-  workspace first, then `$HOME`, then the rest. Running a program is left to the executed table.
-  A `dir/**` row does not say which path under it was refused. The details fold each command's
-  paths on their own, so they often name it; the artifact always does.
+- **Accessed Paths**, folded, has one row per program and path: the programs in the order they
+  first ran, and each one's paths in path order, the workspace first, then `$HOME`, then the rest.
+  A program is the file the process ran, as the executed table names it, so a script run through
+  its `#!` line is named rather than its interpreter, and a process that forks without running
+  anything counts as its parent's program. The step's own shell, which runs the `run` script,
+  shows as `bash`. Running a program is left to the executed table. A `dir/**` row does not say
+  which path under it was refused. The details fold each command's paths on their own, so they
+  often name it; the artifact always does.
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
@@ -239,8 +243,8 @@ That changes once a table or the details would pass 300 KB, more rows than anyon
 of those directories then folds once five entries directly under it are not themselves among them,
 keeping those that are on rows of their own: `/` folds into `/**` but `/home/runner` still shows its
 own rows. Paths with `..` fold the same way once five share what comes before their first `..`,
-into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (in the details,
-five of one command's). A program run still never folds.
+into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (five of one
+program's in the table, of one command's in the details). A program run still never folds.
 
 Which path a row is shown under:
 
@@ -508,5 +512,5 @@ itself can do to the record, and what the record can be trusted for.
   [Paths](#paths)). One that would pass 1 MiB even so keeps the rows that fit in it, takes no new
   ones, and ends with a note; the Job Summary's cap then decides how much of it prints. It
   is left out whole, under a note that says why, when not one row fits, or once its folded tree holds
-  more than 200,000 files and directories, every directory on the way counted, and each command's
-  counted apart in the details. When the table is left out, the details go with it.
+  more than 200,000 files and directories, every directory on the way counted, and each program's
+  counted apart in the table and each command's in the details. When the table is left out, the details go with it.

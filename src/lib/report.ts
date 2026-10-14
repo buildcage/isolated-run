@@ -40,8 +40,7 @@ import {
 export type Report = ReportData;
 
 /** `label` is untrusted input; the renderer escapes the whole title. */
-export function reportTitle(label: string | undefined, processActivity: boolean): string {
-  const title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
+export function reportTitle(label: string | undefined, title = "Outbound Traffic Report"): string {
   return label ? `${title} — ${label}` : title;
 }
 
@@ -60,8 +59,6 @@ export function missingReportFrame(title: string, isAudit: boolean): SummaryBloc
 
 export interface ComputeReportOutcomesOptions {
   stepLabel?: string;
-  /** Whether the step's summary has a process activity section after the report. */
-  processActivity?: boolean;
   actionRepo: string;
   actionRef: string;
   runCommand?: string;
@@ -86,7 +83,6 @@ export function computeReportOutcomes(
   report: Report,
   {
     stepLabel,
-    processActivity = false,
     failOnBlocked,
     actionRepo,
     actionRef,
@@ -103,8 +99,7 @@ export function computeReportOutcomes(
   if (wouldRefuse) emissions.push(wouldRefuse);
   const keys = refusedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-    title: reportTitle(stepLabel, processActivity),
-    section: "🌐 Network",
+    title: reportTitle(stepLabel),
     // The step closes its summary itself, after the process activity.
     footer: false,
     verdictItems: wouldRefuseVerdictItems(report.timeline),
@@ -113,8 +108,7 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
     refusalLabel: keyRefusalLabel(keys),
-    extraBlocks: (gap, level) =>
-      wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap, level),
+    extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, WOULD_REFUSE_PRIORITY, gap),
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
@@ -327,7 +321,7 @@ export async function writeReportSummary(
   } else if (cutIds.has(WOULD_REFUSE_BLOCK)) {
     // The section's own notice is easy to miss below the fold.
     annotation.warning(
-      "The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
+      "The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
           ? "The buildcage-traffic artifact uploaded for this run has every request."
           : "Set upload_traffic_artifact: true to get every request as an artifact."),

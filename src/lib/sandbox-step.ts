@@ -488,7 +488,6 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
   // upload takes a while, so a cancelled step writes the whole summary first
   // and uploads after it. The summary then names the artifact before it exists.
   const artifact = cancelled ? readAudit.expected : await readAudit.upload();
-  const processActivity = audit !== undefined;
   await deps.reportStepTraffic({
     containerName,
     proxyEngine: inputs.proxyEngine,
@@ -509,8 +508,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,
-    moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
-    processActivity,
+    moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
     commandSummaryBytes,
   });
   if (cancelled) await readAudit.upload();

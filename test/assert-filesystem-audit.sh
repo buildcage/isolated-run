@@ -9,8 +9,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 f="$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"
 sections=$(mktemp -d)
 trap 'rm -rf "$sections"' EXIT
-sed -n '/^#### Executed/,/^#### Accessed/p' "$f" > "$sections/executed.md"
-sed -n '/^#### Accessed/,/<details>/p' "$f" > "$sections/accessed.md"
+sed -n '/^### Executed/,/^<summary>Accessed/p' "$f" > "$sections/executed.md"
+sed -n '/^<summary>Accessed/,/^<\/details>/p' "$f" > "$sections/accessed.md"
 
 # The line a row is first on, or nothing.
 line_of() { grep -nE -m1 "$1" "$f" | cut -d: -f1 || true; }
@@ -19,7 +19,7 @@ echo ""
 echo "=== Filesystem Audit Summary Assertions ==="
 echo ""
 
-assert_file_has "$f" "The summary has the Process Activity section" "Process Activity"
+assert_file_has "$f" "The summary has the Process Activity section" "^## Process Activity Report"
 # The tracer stopped on SIGTERM and wrote its whole record.
 assert_file_lacks "$f" "The record is not marked incomplete" "This record is incomplete"
 # The probe writes show as a flagged, command-tagged line under the
@@ -37,14 +37,17 @@ else
   fail "The probe's write, move and delete rows run in that order -- lines: '$w' '$m' '$d'"
 fi
 
-# The tables list what ran and how often, and what was touched, across
-# commands. python3 is a symlink, so it shows as the versioned file it runs.
+# The tables list what ran and how often, and what each program touched,
+# folded. python3 is a symlink, so it shows as the versioned file it runs, and
+# a script runs under its own name.
 assert_file_has "$f" "python3 is listed as the versioned file it runs" -E '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$'
 assert_file_has "$f" "run.sh is listed as run once" -F '| `./A/run.sh` | 1 |'
+assert_file_has "$f" "The accessed table is folded" -E '^<summary>Accessed Paths \([0-9]+\)</summary>$'
 # Running a program is left to the executed table.
-assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -E '\| [A-Za-z!]*X[A-Za-z!]* \|$'
-assert_file_has "$f" "futimens.txt is in the accessed table" -F '| `./futimens.txt` | WA |'
-assert_file_has "$f" "empty-name.txt is in the accessed table" -F '| `./empty-name.txt` | WA |'
+assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -E '\| [A-Za-z!]*X[A-Za-z!]* \| `'
+assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | W | `./probe.txt` |'
+assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
+assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
 assert_file_has "$f" "The summary has the process details" '<summary>🔍 Process details</summary>'
 assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3 +\./futimens\.txt$'
 assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3 +\./empty-name\.txt$'
@@ -53,7 +56,7 @@ assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3 +\./emp
 # new file's times through the descriptor; uutils' does not.
 a=
 if [[ "$(touch --version)" == *'GNU coreutils'* ]]; then a=A; fi
-assert_file_has "$f" "A subshell's write is in the accessed table" -F "| \`./subshell.txt\` | W$a |"
+assert_file_has "$sections/accessed.md" "A subshell's write is under touch in the accessed table" -E "^\\| \`[^\`]*/touch\` \\| W$a \\| \`\\./subshell\\.txt\` \\|$"
 assert_file_has "$f" "A subshell's write has a details row" -E " W$a +touch +\./subshell\.txt$"
 
 # Relative names show under the directory they resolved against.

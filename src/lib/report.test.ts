@@ -56,9 +56,11 @@ function report(overrides: Partial<UniversalReportData> = {}): UniversalReportDa
 }
 
 describe("reportTitle", () => {
-  it("names the process activity only when the step records it, then the label", () => {
-    expect(reportTitle(undefined, false)).toBe("Outbound Traffic Report");
-    expect(reportTitle("npm ci", true)).toBe("Traffic & Process Activity Report — npm ci");
+  it("names the report, then the label", () => {
+    expect(reportTitle(undefined)).toBe("Outbound Traffic Report");
+    expect(reportTitle("npm ci", "Process Activity Report")).toBe(
+      "Process Activity Report — npm ci",
+    );
   });
 });
 
@@ -168,7 +170,7 @@ describe("computeReportOutcomes", () => {
         ],
       };
       const markdown = markdownOf(r, options());
-      expect(markdown).toMatch(/#### 🚨 Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
+      expect(markdown).toMatch(/### ⚠️ Restrict Would Refuse\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
     });
 
     it("is left out when known_blocked_rules expects every such refusal", () => {
@@ -270,7 +272,7 @@ describe("computeReportOutcomes", () => {
     });
     /** The section's tables, each as its rows. */
     const tables = (markdown: string): string[][] => {
-      const start = markdown.indexOf("### 🚨");
+      const start = markdown.indexOf("### ⚠️ Restrict");
       const section = markdown.slice(start, markdown.indexOf("\n### ", start + 1));
       return section
         .split("\n\n")
@@ -335,10 +337,10 @@ describe("computeReportOutcomes", () => {
         }),
       );
       expect(markdown).toContain(
-        "#### 🚨 Restrict Would Refuse\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
+        "### ⚠️ Restrict Would Refuse\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
       );
       // Every request audit let through that restrict would refuse, by key or by host.
-      expect(markdown).toMatch(/^\*\*🚨 7 restrict would refuse\*\*$/m);
+      expect(markdown).toMatch(/^> 7 restrict would refuse$/m);
       expect(tables(markdown)).toStrictEqual([
         [
           "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
@@ -351,15 +353,15 @@ describe("computeReportOutcomes", () => {
         ],
       ]);
       expect(details(markdown)).toContain(
-        "🚨 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)",
+        "⚠️ 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)",
       );
       expect(details(markdown)).toContain(
-        "🚨 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
+        "⚠️ 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would refuse: aws-key-not-allowed, key 2)",
       );
       expect(details(markdown)).toContain(
         "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)",
       );
-      const section = markdown.slice(markdown.indexOf("### 🚨"), markdown.indexOf("🛡️"));
+      const section = markdown.slice(markdown.indexOf("### ⚠️ Restrict"), markdown.indexOf("🛡️"));
       expect(section).not.toContain("assumed in this run");
     });
 
@@ -420,7 +422,7 @@ describe("computeReportOutcomes", () => {
       "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
     );
     expect(markdown).toContain("| `s3.amazonaws.com:443` | HTTPS | 🚫 aws-key-not-allowed | 1 |");
-    expect(markdown).not.toContain("### 🚨");
+    expect(markdown).not.toContain("### ⚠️ Restrict");
   });
 
   it("warns about a request no rule decided, naming this action", () => {
@@ -462,15 +464,15 @@ describe("computeReportOutcomes", () => {
     expect(markdown).toMatch(/run: \|\n\s+npm install/);
   });
 
-  it("titles a step that records its process activity for both, and puts its tables under Network", () => {
+  it("titles the report with the step's label and leaves the footer to the step", () => {
     const markdown = markdownOf(
       report({
         passed: [{ host: "a.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 }],
       }),
-      options({ stepLabel: "build", processActivity: true }),
+      options({ stepLabel: "build" }),
     );
     expect(markdown).toMatch(
-      /^## Traffic & Process Activity Report — build\n\n\*\*✅ Nothing was refused\*\*\n\n### 🌐 Network\n\n#### ✅ Allowed Hosts\n/,
+      /^## Outbound Traffic Report — build\n\nResult: ✅ Nothing was refused\n\n### ✅ Allowed Hosts\n/,
     );
     // The step closes the summary after the process activity.
     expect(markdown).not.toMatch(/Reported by/);
@@ -847,7 +849,7 @@ describe("writeReportSummary", () => {
       );
 
       expect(warning).toHaveBeenCalledWith(
-        `The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. ${says}`,
+        `The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. ${says}`,
       );
     },
   );

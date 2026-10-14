@@ -43,7 +43,7 @@ assert_summary_contains "| \`internal.wildcard.example.com:443\` | HTTPS | 🚫 
 assert_summary_contains "| \`internal.wildcard.example.com:80\` | HTTP | 🚫 internal-address |" "internal-address guard (HTTP) stays active in audit mode"
 assert_summary_contains "| \`runner.wildcard.example.com:443\` | HTTPS | 🚫 internal-address |" "the runner's own addresses stay guarded in audit mode"
 assert_summary_contains "| \`runner.wildcard.example.com:80\` | HTTP | 🚫 internal-address |" "the runner's own addresses stay guarded (HTTP) in audit mode"
-assert_summary_contains "#### 🚫 Blocked / ⚠️ Failed Hosts" "audit marks an unresolvable name as a failure too"
+assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "audit marks an unresolvable name as a failure too"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "unresolvable name still recorded as dns-failed"
 assert_summary_contains "| HTTPS | 🚫 missing-sni |" "a TLS ClientHello with no SNI is blocked in audit mode too, reason missing-sni"
 assert_summary_contains "| HTTP | 🚫 missing-host-header |" "an HTTP request with no Host header is blocked in audit mode too, reason missing-host-header"
