@@ -32,6 +32,7 @@ Docker build's `RUN` steps rather than a workflow step, use
 - [Engines](#engines)
 - [Inputs](#inputs)
 - [The report](#the-report)
+- [AWS access key check](#aws-access-key-check)
 - [How `run` is executed](#how-run-is-executed)
 - [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
@@ -215,11 +216,8 @@ allowed_ip_rules: |
   10.0.0.0/8:443
 ```
 
-A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
-rules. Most AWS APIs name no resource in the URL, though, and reach whichever account signs the
-request; for those, `aws_key_check` (**experimental**) accepts only the step's own key, and
-`allowed_aws_role_accounts` adds the keys issued for roles in the accounts you name. See
-[AWS access key check](./docs/aws.md).
+A step that calls AWS APIs needs more than URL rules; see
+[AWS access key check](#aws-access-key-check).
 
 ### Rules for the `universal` engine
 
@@ -296,6 +294,37 @@ and per name lookup, with the method, URL, status, size and the address it resol
 uploaded even when the step fails. Under `universal` it omits the method, URL, status and resolved
 address that only `inspect` sees. The fields are listed in
 [Reference](./docs/reference.md#traffic-artifact).
+
+## AWS access key check
+
+> [!WARNING]
+> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
+> error messages may still change in a future release without following semver.
+
+A step that deploys to AWS names the buckets, registries and other resources it uses in its URL
+rules. Most AWS APIs, such as STS or CloudFormation, name no resource in the URL, though, and reach
+whichever account signs the request, so a compromised dependency could sign with a key of its own
+and send data to its author's account. `aws_key_check: true` accepts only the key the step was
+given in `AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts
+you name:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@<sha>
+  with:
+    role-to-assume: arn:aws:iam::111111111111:role/deploy
+    aws-region: us-east-1
+- uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
+  with:
+    aws_key_check: true
+    allowed_url_rules: |
+      * https://ecs.us-east-1.amazonaws.com/
+    run: aws ecs update-service --cluster app --service web --force-new-deployment
+```
+
+A step that switches roles of its own, as the CDK does, also names the roles' accounts in
+`allowed_aws_role_accounts`. The check needs the `inspect` engine. See
+[AWS access key check](./docs/aws.md) for how to adopt it from an `audit` run, what each refusal
+reason means, and the IAM settings that close what it cannot see.
 
 ## How `run` is executed
 
@@ -755,12 +784,13 @@ firewall-enabled runner image.
 
 ## Documentation
 
-| Doc                                            | What's in it                                                      |
-| ---------------------------------------------- | ----------------------------------------------------------------- |
-| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output     |
-| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it               |
-| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance |
-| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout             |
+| Doc                                            | What's in it                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output        |
+| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it                  |
+| [AWS Access Key Check](./docs/aws.md)          | What `aws_key_check` stops, how to adopt it, and its refusal reasons |
+| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance    |
+| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout                |
 
 ## Contributing
 
