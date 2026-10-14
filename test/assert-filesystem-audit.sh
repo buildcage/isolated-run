@@ -37,9 +37,8 @@ else
   fail "The probe's write, move and delete rows run in that order -- lines: '$w' '$m' '$d'"
 fi
 
-# The tables list what ran and how often, and what each program touched,
-# folded. python3 is a symlink, so it shows as the versioned file it runs, and
-# a script runs under its own name.
+# The tables list what ran and how often, and, folded, what each program
+# touched. python3 is a symlink, so it shows as the versioned file it runs.
 assert_file_has "$f" "python3 is listed as the versioned file it runs" -E '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$'
 assert_file_has "$f" "run.sh is listed as run once" -F '| `./A/run.sh` | 1 |'
 assert_file_has "$f" "The accessed table is folded" -E '^<summary>Accessed Paths \([0-9]+\)</summary>$'

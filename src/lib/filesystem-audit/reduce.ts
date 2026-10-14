@@ -207,8 +207,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let executedBytes = 0;
   // Each pid's program, by its rank in the order programs first ran. An exec
   // sets it, naming a script rather than its interpreter, and a fork hands
-  // the parent's on; a process with no exec in the step's records, as its
-  // shell, goes by its command name. The paths are keyed by rank, as a marked
+  // the parent's on; a process with no exec in the step's records, such as
+  // the step's shell, goes by its command name. The paths are keyed by rank, as a marked
   // path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
   const ranks: { shown: Shown; bytes: number }[] = [];

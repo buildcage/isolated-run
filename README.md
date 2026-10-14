@@ -276,8 +276,8 @@ Every step appends its own section to the Job Summary: the hosts it reached, the
 refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
 counts what needs a look: requests refused, requests `restrict` would refuse, connections that
 failed and requests nothing acted on. It is a CAUTION when a request was refused or the report is
-incomplete and a WARNING otherwise, and a plain line says nothing was refused when there is nothing
-to look at. The tables follow, refusals marked 🚫 and failed connections ⚠️. When the [filesystem
+incomplete and a WARNING otherwise; with nothing to count, a plain line takes its place. The tables
+follow, refusals marked 🚫 and failed connections ⚠️. When the [filesystem
 audit](./docs/filesystem-audit.md) is on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,

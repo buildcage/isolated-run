@@ -611,7 +611,7 @@ describe("createAuditSummary", () => {
     }
   });
 
-  it("orders rows without times by workspace, home, then the rest, then path and command, and the table's by program first", () => {
+  it("orders untimed rows by workspace, home, the rest, then path and command, the table's by program first", () => {
     const md = render(
       { kind: "read", pid: 1, comm: "b", path: "/etc/x" },
       { kind: "read", pid: 2, comm: "a", path: "/etc/x" },

@@ -171,14 +171,14 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
-- **Accessed Paths**, folded, has one row per program and path: the programs in the order they
-  first ran, and each one's paths in path order, the workspace first, then `$HOME`, then the rest.
-  A program is the file the process ran, as the executed table names it, so a script run through
-  its `#!` line is named rather than its interpreter, and a process that forks without running
-  anything counts as its parent's program. The step's own shell, which runs the `run` script,
-  shows as `bash`. Running a program is left to the executed table. A `dir/**` row does not say
-  which path under it was refused. The details fold each command's paths on their own, so they
-  often name it; the artifact always does.
+- **Accessed Paths**, folded, has one row per program and path: the programs in the order they first
+  ran, and each one's paths in path order, the workspace first, then `$HOME`, then the rest. A
+  program is named as in the executed table, a script run through its `#!` line by its own path. One
+  that names `/usr/bin/env`, as `#!/usr/bin/env node` does, runs `node` in turn, and what it does
+  then shows under `node`. A process that forks without running anything counts as its parent's
+  program, and the step's own shell, which runs the `run` script, shows as `bash`. Running a program
+  is left to the executed table. A `dir/**` row does not say which path under it was refused. The
+  details fold each command's paths on their own, so they often name it; the artifact always does.
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
