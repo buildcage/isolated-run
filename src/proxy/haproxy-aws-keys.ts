@@ -12,7 +12,7 @@
  *
  * Only one credential is matched, SigV4's or SigV4a's, in the Authorization
  * header or a presigned URL, as current SDKs send it. Any other AWS
- * credential is refused without reading its key.
+ * credential is blocked without reading its key.
  */
 
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";
@@ -31,7 +31,7 @@ import {
   STS_HOST,
   formName,
 } from "./aws-hosts.ts";
-import { AWS_REASON_PREFIX, AWS_REFUSED_VERDICTS, type AwsTrafficFields } from "./aws-log.ts";
+import { AWS_REASON_PREFIX, AWS_BLOCKED_VERDICTS, type AwsTrafficFields } from "./aws-log.ts";
 
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
@@ -51,7 +51,7 @@ const FORM_BODY_LIMIT = 4 * 1024 * 1024;
 // The key ID in a Location's query credential.
 export const LOCATION_CREDENTIAL = "^[^?#]*[?]([^#]*&)?X-Amz-Credential=([A-Za-z0-9]+)(%2F|/).*$";
 // SigV4's or SigV4a's Authorization header, in the spelling SDKs send. Any
-// other spelling is not matched, and so refused as another scheme.
+// other spelling is not matched, and so blocked as another scheme.
 export const SIGV4_HEADER = "^AWS4-(HMAC-SHA256|ECDSA-P256-SHA256)\\s+Credential=[A-Za-z0-9]+/";
 const FORM_ROLE_ARN = formName("rolearn");
 const FORM_ACTION = formName("action");
@@ -87,7 +87,7 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
 
 /**
  * Request rules: record what a request carries, then decide on it.
- * `audit` decides too, for the log, but refuses nothing.
+ * `audit` decides too, for the log, but blocks nothing.
  */
 export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit"): string[] {
   const roles = check.accountFile ? roleRules(check.accountFile) : undefined;
@@ -102,7 +102,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
   ];
 }
 
-/** What credential a request carries, and whether it is one the check refuses
+/** What credential a request carries, and whether it is one the check blocks
  *  unread. */
 function credentialFacts(): string[] {
   return [
@@ -132,7 +132,7 @@ function credentialFacts(): string[] {
     `    http-request set-var(txn.aws_query) bool(true) if aws_host { query -m reg -i (^|&)${SIGV4_PARAM}= }`,
     "    acl aws_query var(txn.aws_query) -m bool",
     `    acl aws_query_many query -m reg -i (^|&)${SIGV4_PARAM}=.*&${SIGV4_PARAM}=`,
-    "    # Refused without reading the key: SigV2 in the header or the query,",
+    "    # Blocked without reading the key: SigV2 in the header or the query,",
     "    # SigV3's header, and any other Authorization. On a host that names a",
     "    # resource, only a scheme starting with AWS is: a Bearer or Basic token",
     "    # there, such as ECR's or CodeArtifact's, is left to the URL rules.",
@@ -196,7 +196,7 @@ function unsignedAndSts(): string[] {
   ];
 }
 
-/** The verdict, and in restrict the refusal. */
+/** The verdict, and in restrict the block. */
 function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
   return [
     "    # Where a credential could be out of sight: a form body that is",
@@ -217,14 +217,14 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
     "    http-request set-var(txn.aws) str(unsupported-credential) if aws_unsupported",
     "    http-request set-var(txn.aws) str(unreadable) if aws_form { req.hdr(content-encoding) -m reg -i ^(?!identity$) } or aws_form !{ req.hdr(content-length) -m found }",
     "    http-request set-var(txn.aws) str(unreadable) if aws_form { req.body_len,sub(txn.aws_body_size) lt 0 } or aws_form { req.body,length,sub(txn.aws_body_len) lt 0 }",
-    `    acl aws_refused var(txn.aws) -m str ${AWS_REFUSED_VERDICTS.join(" ")}`,
+    `    acl aws_blocked var(txn.aws) -m str ${AWS_BLOCKED_VERDICTS.join(" ")}`,
     ...(mode === "restrict"
       ? [
-          `    http-request set-var-fmt(txn.reason) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
-          "    http-request deny deny_status 403 if aws_refused",
+          `    http-request set-var-fmt(txn.reason) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_blocked`,
+          "    http-request deny deny_status 403 if aws_blocked",
         ]
       : [
-          `    http-request set-var-fmt(txn.would_block) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
+          `    http-request set-var-fmt(txn.would_block) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_blocked`,
         ]),
   ];
 }
@@ -249,11 +249,11 @@ function trafficRecord(roles?: RoleRules): string[] {
 /** Which answers the response rules read, and which of them may teach a key. */
 function learnFlags(): string[] {
   return [
-    "    # Only a redirect answering a registry request the check did not refuse",
+    "    # Only a redirect answering a registry request the check did not block",
     "    # can teach a key, and only over TLS, where the registry's certificate",
     "    # was verified. Each regex runs only on a host it could match.",
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
     "    # Any answer over TLS names the account of its role, but only one to a",
     "    # request the check let through can teach a key. A plaintext answer",
     "    # could have been rewritten on the way.",
@@ -306,7 +306,7 @@ type RoleRules = ReturnType<typeof roleRules>;
  * Response rules: learn the key in the presigned URL an ECR registry
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
- * of them. Only an answer over TLS to a request the check did not refuse
+ * of them. Only an answer over TLS to a request the check did not block
  * teaches one. The account of the role, and a reference to the key, are
  * recorded from any answer over TLS, named or not and allowed or not, so one
  * run shows every account to name, a chain of roles included.
@@ -314,7 +314,7 @@ type RoleRules = ReturnType<typeof roleRules>;
  * Only ECR writes that Location, over a connection whose certificate the
  * proxy verified, so a build cannot put its own key there. The role ARN is
  * AWS's own, not the caller's. A body larger than the buffer is read only in
- * part, so a key past it is not learned and its requests are refused.
+ * part, so a key past it is not learned and its requests are blocked.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   return [

@@ -16,7 +16,7 @@ assert_report_complete
 case "$MODE" in
   restrict)
     assert_summary_contains "POST https://sts.us-east-1.amazonaws.com/ -> aws-key-not-allowed" \
-      "a call signed with a key from outside the step is refused as aws-key-not-allowed"
+      "a call signed with a key from outside the step is blocked as aws-key-not-allowed"
     ;;
   audit)
     : "${SWITCHED_ACCOUNT:?SWITCHED_ACCOUNT must be set}"

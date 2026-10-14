@@ -1,6 +1,6 @@
 #!/bin/bash
 # Drives dist/main.cjs against a real inspect-engine proxy with the AWS access
-# key check on: restrict refuses what the check refuses (scenarios in
+# key check on: restrict blocks what the check blocks (scenarios in
 # test/inspect-aws-keys-scenarios.sh), audit lets it through and notes it, and
 # a step with no key to start from, or under proxy_engine: universal, fails
 # before the proxy starts.
@@ -47,14 +47,14 @@ fi
 SUMMARY=$(cat "$TMPDIR/restrict.md")
 assert_report_complete
 assert_summary_contains "https://cloudformation.us-east-1.amazonaws.com/ -> aws-key-not-allowed" \
-  "a request signed with a key of the build's own is refused as aws-key-not-allowed"
+  "a request signed with a key of the build's own is blocked as aws-key-not-allowed"
 assert_summary_contains "POST https://sts.us-east-1.amazonaws.com/ -> aws-no-credential" \
-  "an unsigned STS call is refused as aws-no-credential"
-assert_summary_contains "-> aws-ambiguous-credential" "a request with two credentials is refused as aws-ambiguous-credential"
-assert_summary_contains "-> aws-role-not-allowed" "a web identity call for another account's role is refused as aws-role-not-allowed"
-assert_summary_contains "-> aws-unreadable" "a body the check cannot read through is refused as aws-unreadable"
+  "an unsigned STS call is blocked as aws-no-credential"
+assert_summary_contains "-> aws-ambiguous-credential" "a request with two credentials is blocked as aws-ambiguous-credential"
+assert_summary_contains "-> aws-role-not-allowed" "a web identity call for another account's role is blocked as aws-role-not-allowed"
+assert_summary_contains "-> aws-unreadable" "a body the check cannot read through is blocked as aws-unreadable"
 assert_summary_contains "-> aws-unsupported-credential" \
-  "a credential other than SigV4's is refused as aws-unsupported-credential"
+  "a credential other than SigV4's is blocked as aws-unsupported-credential"
 if grep -qF "${AKIA}TESTSTARTKEY0001" "$TMPDIR/restrict.log"; then
   fail "the starting key reached the step's log"
 else
@@ -73,7 +73,7 @@ aws_step audit \
     curl -sS --max-time 10 -o /dev/null -X POST -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTFOREIGNKEY01/x' https://sqs.us-east-1.amazonaws.com/"
 RUN_EXIT=$?
 if [ "$RUN_EXIT" = "0" ]; then
-  pass "audit refused nothing"
+  pass "audit blocked nothing"
 else
   fail "the step failed in audit mode (exit $RUN_EXIT)"
   cat "$TMPDIR/audit.log"

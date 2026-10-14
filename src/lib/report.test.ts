@@ -126,7 +126,7 @@ describe("computeReportOutcomes", () => {
   describe("the AWS key check's troubleshooting link", () => {
     const LINK =
       "\n<sub>*For an `aws-` reason, see [what to do](https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md#troubleshooting).*</sub>\n";
-    const refused = (reason: string): TrafficEvent => ({
+    const blocked = (reason: string): TrafficEvent => ({
       time: 1,
       action: "block",
       protocol: "https",
@@ -135,14 +135,14 @@ describe("computeReportOutcomes", () => {
       reason,
     });
     const restrict = (reason: string): InspectReportData => {
-      const timeline = [refused(reason)];
+      const timeline = [blocked(reason)];
       return {
         ...report({ blockedCount: 1, blocked: annotateKnownBlocked(timeline, []), timeline }),
         engine: "inspect",
       };
     };
 
-    it("follows the Blocked Hosts table when the check refused a request", () => {
+    it("follows the Blocked Hosts table when the check blocked a request", () => {
       const markdown = markdownOf(restrict("aws-key-not-allowed"), options());
       expect(markdown).toMatch(/### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For an `aws-` reason/);
       expect(markdown).toContain(LINK);
@@ -169,9 +169,9 @@ describe("computeReportOutcomes", () => {
       expect(markdown).toMatch(/### ⚠️ Restrict Would Block\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
     });
 
-    it("is left out when known_blocked_rules expects every such refusal", () => {
+    it("is left out when known_blocked_rules expects every such block", () => {
       const knownBlockedRules = ["sts.amazonaws.com"];
-      const timeline = [refused("aws-key-not-allowed")];
+      const timeline = [blocked("aws-key-not-allowed")];
       const r: InspectReportData = {
         ...report({
           parameters: reportParams({ knownBlockedRules }),
@@ -186,14 +186,14 @@ describe("computeReportOutcomes", () => {
       expect(markdown).not.toContain("aws.md");
     });
 
-    it("is left out when no refusal is the check's", () => {
+    it("is left out when no block is the check's", () => {
       const markdown = markdownOf(restrict("not-allowed"), options());
       expect(markdown).not.toContain("aws.md");
     });
 
     it("is left out when a request blocked for another reason only carries wb=", () => {
       const timeline: TrafficEvent[] = [
-        { ...refused("ip-not-allowed"), wouldBlock: "aws-key-not-allowed" },
+        { ...blocked("ip-not-allowed"), wouldBlock: "aws-key-not-allowed" },
       ];
       const r: InspectReportData = {
         ...report({ blockedCount: 1, blocked: annotateKnownBlocked(timeline, []), timeline }),
@@ -234,7 +234,7 @@ describe("computeReportOutcomes", () => {
           audited,
           audited,
           { ...audited, wouldBlock: undefined },
-          // Refused already, so counted under Blocked Hosts instead.
+          // Blocked already, so counted under Blocked Hosts instead.
           { ...audited, action: "block", reason: "ip-not-allowed" },
         ],
       }),
@@ -318,7 +318,7 @@ describe("computeReportOutcomes", () => {
             ...wouldBlock(7, "s3.amazonaws.com", "aws-ambiguous-credential"),
             extensions: { aws: { keyRef: "aaaa1111" } },
           },
-          // Refused for another reason, so in Blocked Hosts alone, though its line names the key.
+          // Blocked for another reason, so in Blocked Hosts alone, though its line names the key.
           {
             ...signed(8, "sqs.amazonaws.com", "aaaa1111"),
             action: "block",
@@ -375,7 +375,7 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("numbers no key when the run refused one alone, and leaves a bare key out of the log", () => {
+    it("numbers no key when the run blocked one alone, and leaves a bare key out of the log", () => {
       const one = markdownOf(
         audit([assumed("222222222222", "aaaa1111"), signed(1, "s3.amazonaws.com", "aaaa1111")]),
         options(),
@@ -392,8 +392,8 @@ describe("computeReportOutcomes", () => {
     });
   });
 
-  it("names the key of a request restrict refused in Communication details, leaving the table alone", () => {
-    const refused: TrafficEvent = {
+  it("names the key of a request restrict blocked in Communication details, leaving the table alone", () => {
+    const blocked: TrafficEvent = {
       time: 1,
       action: "block",
       protocol: "https",
@@ -407,8 +407,8 @@ describe("computeReportOutcomes", () => {
     const r: InspectReportData = {
       ...report({
         blockedCount: 1,
-        blocked: annotateKnownBlocked([refused], []),
-        timeline: [assumed("222222222222", "aaaa1111"), refused],
+        blocked: annotateKnownBlocked([blocked], []),
+        timeline: [assumed("222222222222", "aaaa1111"), blocked],
         startedAt: 0,
       }),
       engine: "inspect",

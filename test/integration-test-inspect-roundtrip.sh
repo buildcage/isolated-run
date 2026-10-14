@@ -56,7 +56,7 @@ echo "--- audit-phase exit code: $AUDIT_EXIT ---"
 if [ "$AUDIT_EXIT" = "0" ]; then
   pass "audit mode enforced nothing, so the step succeeded"
 else
-  fail "the audit-phase step failed (should never refuse anything)"
+  fail "the audit-phase step failed (should never block anything)"
 fi
 
 SUMMARY=$(cat "$TMPDIR/audit.md")
@@ -122,7 +122,7 @@ cat "$TMPDIR/restrict.log"
 echo ""
 echo "--- restrict-phase exit code: $RESTRICT_EXIT ---"
 if [ "$RESTRICT_EXIT" = "0" ]; then
-  pass "the generated rules permit everything the audit run did, and refuse what it never did"
+  pass "the generated rules permit everything the audit run did, and block what it never did"
 else
   fail "one or more round-trip scenarios failed (see log above)"
 fi

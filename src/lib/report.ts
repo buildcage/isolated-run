@@ -29,8 +29,8 @@ import { withAwsTroubleshootingLink } from "./aws-report.ts";
 import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
 import {
   describeWouldBlock,
-  keyRefusalLabel,
-  refusedKeys,
+  keyBlockLabel,
+  blockedKeys,
   WOULD_BLOCK_ID,
   wouldBlockTables,
   wouldBlockTruncationNote,
@@ -94,7 +94,7 @@ export function computeReportOutcomes(
   });
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
-  const keys = refusedKeys(report.timeline);
+  const keys = blockedKeys(report.timeline);
   const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
     title: reportTitle(stepLabel),
     // The step closes its summary itself, after the process activity.
@@ -104,7 +104,7 @@ export function computeReportOutcomes(
     runCommand,
     extraInputs,
     actionVersion,
-    refusalLabel: keyRefusalLabel(keys),
+    blockLabel: keyBlockLabel(keys),
     extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY, gap),
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);

@@ -27,9 +27,9 @@ jobs:
 
       # Same command as the audit example, with the rules that run produced and
       # the account it marked for checking, kept in a repository variable. The
-      # compromised dependency's call is refused even though the URL rule allows
+      # compromised dependency's call is blocked even though the URL rule allows
       # its host. fail_on_blocked is false only because this example blocks on
-      # purpose; leave it at its default so a real workflow fails on a refusal.
+      # purpose; leave it at its default so a real workflow fails on a block.
       - name: Call AWS with outbound network isolation
         uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
         env:

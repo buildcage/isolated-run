@@ -50,7 +50,7 @@ assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" "allowed.example
 assert_summary_contains "| \`sub.wildcard.example.com:443\` | HTTPS |" "wildcard-matched name recorded as allowed"
 # Each of these is the near miss for a rule the scenarios also request on its
 # matching side. From inside the sandbox every one of them looks the same,
-# "not 200", so the reason is what tells a rule that refused the name from a
+# "not 200", so the reason is what tells a rule that blocked the name from a
 # fixture that was never reachable in the first place.
 assert_summary_contains "| \`not-ok.regex.example.com:443\` | HTTPS | 🚫 not-allowed |" "an anchorless regex did not match a name merely containing it, reason not-allowed"
 assert_summary_contains "| \`deep.sub.wildcard.example.com:443\` | HTTPS | 🚫 not-allowed |" "a wildcard did not reach a nested subdomain, reason not-allowed"
@@ -66,8 +66,8 @@ assert_summary_contains "| \`10.200.0.100:80\` | IP | 🚫 ip-not-allowed |" "di
 assert_summary_contains "| \`10.200.0.100:8443\` | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.101:8443\` | IP | 🚫 ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
-# No rule refused these and none can clear them, so they are tabled apart.
-assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
+# No rule blocked these and none can clear them, so they are tabled apart.
+assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the blocks"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:80\` | HTTP | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed on the HTTP path too"
 assert_summary_contains "| \`v6only.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "allowlisted name with AAAA records only recorded as dns-failed"
@@ -84,9 +84,9 @@ assert_summary_contains "| HTTP | 🚫 missing-host-header |" "an HTTP request w
 assert_summary_contains "x__-__t__buildcage__allowed___https___forged.example.com:443\` | HTTPS | 🚫 invalid-sni |" \
   "the forged SNI was sanitized into a single blocked row"
 assert_summary_contains "| \`tlsany.example.com_x.evil.example.net:443\` | HTTPS | 🚫 invalid-sni |" \
-  "an SNI holding a colon was refused before a ~ rule's port pattern could match it"
+  "an SNI holding a colon was blocked before a ~ rule's port pattern could match it"
 assert_summary_contains "| \`tlsany.example.com_x.evil.example.net:80\` | HTTP | 🚫 invalid-host |" \
-  "a plaintext Host holding a colon was refused the same way"
+  "a plaintext Host holding a colon was blocked the same way"
 
 # Allowed Hosts has no reason column, so its row is a prefix of the Blocked
 # Hosts row for the same host; search that section alone.
@@ -133,7 +133,7 @@ assert_present_in_allowed() {
 }
 
 # The other direction: keepalive.wildcard.example.com is requested once, as
-# the second request on a connection whose first was refused. Scoped to the
+# the second request on a connection whose first was blocked. Scoped to the
 # Allowed Hosts table, since a blocked row for it would start with the same
 # text.
 assert_present_in_allowed "| \`keepalive.wildcard.example.com:80\` | HTTP |" \

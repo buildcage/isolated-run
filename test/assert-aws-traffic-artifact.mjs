@@ -46,15 +46,15 @@ check(
   "A request signed with the key AssumeRoleWithWebIdentity issued is recorded",
 );
 
-const refused = rows.filter((r) => r.action === "block" && r.reason === "aws-key-not-allowed");
+const blocked = rows.filter((r) => r.action === "block" && r.reason === "aws-key-not-allowed");
 check(
-  refused.length > 0,
-  "The call signed with a key from outside the step is recorded as refused",
+  blocked.length > 0,
+  "The call signed with a key from outside the step is recorded as blocked",
 );
 const known = new Set(allowed.map((r) => r.aws?.keyRef).filter(Boolean));
 check(
-  refused.every((r) => r.aws?.keyRef && !known.has(r.aws.keyRef)),
-  "Each refused call carries a keyRef, none of a key the check let through",
+  blocked.every((r) => r.aws?.keyRef && !known.has(r.aws.keyRef)),
+  "Each blocked call carries a keyRef, none of a key the check let through",
 );
 
 assertResults(() => console.log(JSON.stringify(rows, null, 2)));

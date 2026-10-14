@@ -117,7 +117,7 @@ else
 fi
 
 # The SNI is the client's to choose, so it must decide neither way: a name there
-# must not refuse the allowed address, and the allowed address there must not
+# must not block the allowed address, and the allowed address there must not
 # open another one. curl never sends an address as SNI; openssl does.
 echo "=== [Direct IP - allowed, SNI names a host] ==="
 check_status "10.200.0.100:8443 with SNI allowed.example.com" \
@@ -184,7 +184,7 @@ else
 fi
 
 # [SSRF - allowlisted name resolving to a runner address]
-# RFC1918 is exempt on purpose, so only the runner's address list refuses it.
+# RFC1918 is exempt on purpose, so only the runner's address list blocks it.
 echo "=== [HTTPS - SSRF back to the runner] ==="
 CODE=$($C --max-time 5 https://runner.wildcard.example.com/ 2>/dev/null || echo "000")
 if [ "$CODE" != "200" ]; then
@@ -210,7 +210,7 @@ echo "=== [HTTP keep-alive - allowed then blocked] ==="
  | nc -w 5 allowed.example.com 80 > /dev/null 2>&1 || true) &
 echo "  requests sent over one keep-alive connection (checked against the report)"
 
-# The other direction, which the pair above cannot show: a refusal must not
+# The other direction, which the pair above cannot show: a block must not
 # carry over either. keepalive.wildcard.example.com is requested here and
 # nowhere else, so the report showing it as allowed is this connection's
 # second request and nothing else.
@@ -221,7 +221,7 @@ echo "=== [HTTP keep-alive - blocked then allowed] ==="
 echo "  requests sent over one keep-alive connection (checked against the report)"
 
 # [TLS ClientHello with no SNI extension at all. There is no name to judge,
-# so the connection is refused on that alone; the report records the
+# so the connection is blocked on that alone; the report records the
 # address it was headed for, which is the proxy's own.]
 echo "=== [HTTPS - missing-sni] ==="
 (printf '\x16\x03\x01\x00\x2d\x01\x00\x00\x29\x03\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xff\x01\x00' \

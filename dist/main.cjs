@@ -15737,7 +15737,7 @@ function discoveryZoneLines(proxyAddress, ttlSeconds, parentRegex) {
 }
 function serviceZoneLines(proxyAddress, ttlSeconds) {
 	return [
-		"# Every other service name: refused like any other name, but recorded apart",
+		"# Every other service name: blocked like any other name, but recorded apart",
 		"# so the report can say the remedy is the host below it rather than the name",
 		"# itself, which no rule can make resolve.",
 		". {",
@@ -15847,7 +15847,7 @@ function deniesEverything(rules, mode) {
 }
 function ruleBlock(rules, mode, scheme) {
 	let lines = [];
-	if (mode === "audit") return lines.push("    # audit records without enforcing, so nothing is refused here.", ""), lines;
+	if (mode === "audit") return lines.push("    # audit records without enforcing, so nothing is blocked here.", ""), lines;
 	if (deniesEverything(rules, mode)) return lines.push("    # No rules for this scheme, so nothing is permitted.", "    http-request deny", ""), lines;
 	rules.some((r) => r.hostMatch === "hostPort") && lines.push("    http-request set-var-fmt(txn.host_port) %[var(txn.host)]:%[dst_port]"), rules.some((r) => r.hostMatch === "hostBareFull") && lines.push(`    acl is_default_port dst_port ${DEFAULT_PORT$1[scheme]}`, "    http-request set-var-fmt(txn.host_full) %[var(txn.host)]:%[dst_port]");
 	let aclForHost = new Map(), hostAclOf = new Map();
@@ -16062,7 +16062,7 @@ const PLAIN_REQUEST_TIMEOUTS = [
 ];
 function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
 	let { mode, extension } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${extension ? " wb=%[var(txn.would_block),regsub([^A-Za-z0-9._-],_,g)]" + (extension.logFields ? logFieldTokens(extension.logFields) : "") : ""}${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
-	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Refused in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Refused in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is refused. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (extension && (l.push(...extension.requestRules(mode)), scheme === "https" && l.push(...extension.responseRules())), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a refusal must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
+	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Blocked in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Blocked in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is blocked. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (extension && (l.push(...extension.requestRules(mode)), scheme === "https" && l.push(...extension.responseRules())), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a blocked request must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
 }
 //#endregion
 //#region src/core/lib/acl/haproxy-sections.ts
@@ -16112,7 +16112,7 @@ function resolversSection() {
 function originBackends(systemCaFile) {
 	return [
 		"# The only place a request reaches the origin, so where its certificate is",
-		"# checked; a refused request never gets here. The SNI is the port-free",
+		"# checked; a blocked request never gets here. The SNI is the port-free",
 		"# txn.host the rules judged, since a certificate is verified against a name,",
 		"# not a name and port.",
 		"backend origin_tls",
@@ -68970,9 +68970,9 @@ function formatElapsedFixed(elapsedSeconds) {
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt, refusalLabel = () => void 0) {
+function renderInspectDetailsBody(timeline, startedAt, blockLabel = () => void 0) {
 	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, refusalLabel)).join("\n")}\n\`\`\`\n\n`;
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel)).join("\n")}\n\`\`\`\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -68980,8 +68980,8 @@ const MARK = {
 	incomplete: "⚠️",
 	failed: "⚠️"
 };
-function renderEvent(event, startedAt, refusalLabel) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`;
+function renderEvent(event, startedAt, blockLabel) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`;
 	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
@@ -69214,7 +69214,7 @@ const trafficFrame = (text) => ({
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", blockLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
 	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(trafficFrame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
@@ -69253,7 +69253,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 	}
 	let bottom = "";
 	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(trafficFrame(`${gap()}_(no communication)_\n\n`));
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt, refusalLabel);
+	let details = renderInspectDetailsBody(report.timeline, report.startedAt, blockLabel);
 	return details && blocks.push({
 		id: TRAFFIC_BLOCK.log,
 		priority: priorities[TRAFFIC_BLOCK.log],
@@ -69415,12 +69415,12 @@ function isAwsAccessKeyId(value) {
 //#endregion
 //#region src/lib/would-block.ts
 const KEY_NOT_ALLOWED = "aws-key-not-allowed";
-function refusedKeys(timeline) {
+function blockedKeys(timeline) {
 	let issuers = new Map(), seen = new Map();
 	for (let e of timeline) {
 		let { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
 		issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
-		let keyRef = refusedKeyRef(e);
+		let keyRef = blockedKeyRef(e);
 		if (!keyRef) continue;
 		let key = seen.get(keyRef) ?? {
 			hosts: new Set(),
@@ -69438,7 +69438,7 @@ function refusedKeys(timeline) {
 		}];
 	}));
 }
-function refusedKeyRef(e) {
+function blockedKeyRef(e) {
 	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
 }
 function letThrough(e) {
@@ -69447,7 +69447,7 @@ function letThrough(e) {
 function auditedKey(e) {
 	return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
 }
-function keyRefusalLabel(keys) {
+function keyBlockLabel(keys) {
 	return (e, reason) => {
 		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
 		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
@@ -69512,8 +69512,8 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 //#endregion
 //#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!refusedByAwsCheck || at === -1) return blocks;
+	let blockedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!blockedByAwsCheck || at === -1) return blocks;
 	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
 	return [
 		...blocks.slice(0, at + 1),
@@ -69870,7 +69870,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		engineLabel: "sandbox"
 	}), wouldBlock = describeWouldBlock(report.timeline);
 	wouldBlock && emissions.push(wouldBlock);
-	let keys = refusedKeys(report.timeline);
+	let keys = blockedKeys(report.timeline);
 	return {
 		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
 			title: reportTitle(stepLabel),
@@ -69880,7 +69880,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 			runCommand,
 			extraInputs,
 			actionVersion,
-			refusalLabel: keyRefusalLabel(keys),
+			blockLabel: keyBlockLabel(keys),
 			extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, 2, gap)
 		}), report, actionRepo, actionRef),
 		emissions
@@ -73874,7 +73874,7 @@ function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
 }
-function isRefusal(terminationState) {
+function isBlock(terminationState) {
 	let cause = terminationState[0];
 	if (cause === "P" || cause === "S") return !0;
 	let phase = terminationState[1];
@@ -73931,7 +73931,7 @@ function extensionFields(tokens) {
 function parseProxyLine(line, isAudit) {
 	let trimmed = line.trim(), request = REQUEST.exec(trimmed);
 	if (request) {
-		let r = request.groups, fcerr = r.fcerr ?? "", incomplete = r.method === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(r.ts, r.method), tlsError = r.scheme === "https" ? r.tlserr : void 0, reason = incomplete ?? (isRefusal(r.ts) ? reasonFor(r.reason, r.ts, tlsError, r.method) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = r.method !== BAD_REQUEST_METHOD, scheme = r.scheme, sent = splitHostPort(r.host), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(r.sni, r.dstHost) : void 0, event = {
+		let r = request.groups, fcerr = r.fcerr ?? "", incomplete = r.method === "<BADREQ>" && fcerr.startsWith("SSL_") && fcerr !== "SSL_FATAL" ? "client-tls-failed" : incompleteReason(r.ts, r.method), tlsError = r.scheme === "https" ? r.tlserr : void 0, reason = incomplete ?? (isBlock(r.ts) ? reasonFor(r.reason, r.ts, tlsError, r.method) : void 0), namedByHandshake = reason !== void 0 && (incomplete !== void 0 || REQUESTLESS_REASONS.has(reason)), parsedRequest = r.method !== BAD_REQUEST_METHOD, scheme = r.scheme, sent = splitHostPort(r.host), host = ruleHost(sent.host), authority = sent.port === void 0 ? host : `${host}:${sent.port}`, unnamed = namedByHandshake ? hostBeforeRequest(r.sni, r.dstHost) : void 0, event = {
 			time: Number(r.ms) / 1e3,
 			action: incomplete === void 0 ? actionFor(reason, isAudit) : "incomplete",
 			protocol: unnamed?.byAddress ? "tcp" : scheme,
@@ -73951,7 +73951,7 @@ function parseProxyLine(line, isAudit) {
 	}
 	let pass = PASSTHROUGH.exec(trimmed);
 	if (pass) {
-		let reason = isRefusal(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
+		let reason = isBlock(pass[4]) ? reasonFor(pass[5], pass[4], void 0, "-") : void 0, sni = pass[8], event = {
 			time: Number(pass[1]) / 1e3,
 			action: actionFor(reason, isAudit),
 			protocol: pass[2],
@@ -73976,19 +73976,19 @@ async function scanInspectLog(lines, isAudit = !1, allowsName) {
 		let match = START$1.exec(trimmed);
 		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
-	return refuseUnpassedAddresses(events), allowsName && refuseUnallowedNames(events, allowsName), {
+	return blockUnpassedAddresses(events), allowsName && blockUnallowedNames(events, allowsName), {
 		events,
 		startedAt,
 		headIntact: headIntact ?? !1,
 		unparsed
 	};
 }
-function refuseUnpassedAddresses(events) {
+function blockUnpassedAddresses(events) {
 	let served = new Set();
 	for (let event of events) (event.protocol === "http" || event.protocol === "https") && event.action !== "incomplete" && served.add(event.destination);
 	for (let event of events) event.action === "incomplete" && event.protocol === "tcp" && (CLIENT_ENDED_REASONS.has(event.reason) && served.has(event.destination) || (event.action = "block", event.reason = "ip-not-allowed"));
 }
-function refuseUnallowedNames(events, allowsName) {
+function blockUnallowedNames(events, allowsName) {
 	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
 async function scanInspectDnsLog(lines, isAudit = !1) {
@@ -74015,15 +74015,15 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 			});
 			continue;
 		}
-		let refused = DNS_SERVICE_DENIED.exec(trimmed);
-		if (!refused) {
+		let blockedService = DNS_SERVICE_DENIED.exec(trimmed);
+		if (!blockedService) {
 			DNS_LINE.test(trimmed) && unparsed++;
 			continue;
 		}
-		service.has(refused[2]) || service.set(refused[2], {
-			time: timeOf(refused[1]),
-			host: refused[2],
-			queryType: refused[3]
+		service.has(blockedService[2]) || service.set(blockedService[2], {
+			time: timeOf(blockedService[1]),
+			host: blockedService[2],
+			queryType: blockedService[3]
 		});
 	}
 	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
@@ -74089,13 +74089,13 @@ async function scanHaproxyLog(lines, isAudit) {
 			headIntact ??= !1;
 			let [, ms, decision, ruleType, target, reason, bytes] = m;
 			if (decision !== passedDecision && decision !== "BLOCKED") continue;
-			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), refused = decision === "BLOCKED" && !failed, event = {
+			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), blocked = decision === "BLOCKED" && !failed, event = {
 				time: Number(ms) / 1e3,
-				action: failed ? "failed" : refused ? "block" : isAudit ? "audit" : "allow",
+				action: failed ? "failed" : blocked ? "block" : isAudit ? "audit" : "allow",
 				protocol: PROTOCOL[ruleType] ?? "tcp",
 				host
 			};
-			port !== void 0 && (event.port = Number(port)), refused || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
+			port !== void 0 && (event.port = Number(port)), blocked || failed ? event.reason = reason : bytes !== "-" && (event.bytes = Number(bytes)), events.push(event);
 			continue;
 		}
 		let none = NO_REQUEST.exec(line);

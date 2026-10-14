@@ -27,7 +27,7 @@ const CHECK = {
 };
 
 describe("EC2's API host", () => {
-  it("refuses a non-form Content-Type POST to EC2", () => {
+  it("blocks a non-form Content-Type POST to EC2", () => {
     const rules = awsKeyRequestRules(CHECK, "restrict").join("\n");
     const rule =
       rules
@@ -107,9 +107,9 @@ describe("awsKeyExtension", () => {
 });
 
 describe("awsKeyRequestRules", () => {
-  it("refuses in restrict, and only names what restrict would block in audit", () => {
+  it("blocks in restrict, and only names what restrict would block in audit", () => {
     const restrict = awsKeyRequestRules(CHECK, "restrict").join("\n");
-    expect(restrict.includes("http-request deny deny_status 403 if aws_refused")).toBe(true);
+    expect(restrict.includes("http-request deny deny_status 403 if aws_blocked")).toBe(true);
     const audit = awsKeyRequestRules(CHECK, "audit").join("\n");
     expect(audit.includes("txn.would_block")).toBe(true);
     expect(audit.includes("deny")).toBe(false);
@@ -344,12 +344,12 @@ describe("a key ECR issues", () => {
     }
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
       ),
     ).toBe(true);
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_refused { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
       ),
     ).toBe(true);
     // The on.aws name's regex runs only behind a suffix test that every

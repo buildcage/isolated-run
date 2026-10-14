@@ -7,7 +7,7 @@
 # ALLOWED_TLS_RULES is cleared for this phase on purpose (see
 # integration-test-inspect-roundtrip.sh): the URL rules learned from the audit
 # run have to stand alone, so the TLS passthrough the audit run made must now
-# be refused.
+# be blocked.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 

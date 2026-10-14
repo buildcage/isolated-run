@@ -4,21 +4,21 @@ import { toHostRow } from "#core/lib/report/build/aggregate.ts";
 import type { OutcomeEmission } from "#core/lib/report/outcome/annotate.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
-import type { RefusalLabel } from "#core/lib/report/render/inspect-details.ts";
+import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
 import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
-import { awsFieldsOf, type AwsRefusedReason } from "../proxy/aws-log.ts";
+import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
 
-const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsRefusedReason;
+const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
 
 /** How many hosts the key table names before counting the rest. */
 const KEY_HOSTS_SHOWN = 3;
 
-export interface RefusedKey {
+export interface BlockedKey {
   /** "key 2 from a role in 111111111111"; the number is left out when the
-   *  run refused one key alone, and the account when no STS answer in the
+   *  run blocked one key alone, and the account when no STS answer in the
    *  run issued the key. */
   label: string;
   /** Whether the label is "key" alone, which names nothing a log line could use. */
@@ -31,20 +31,20 @@ export interface RefusedKey {
 }
 
 /**
- * Every key aws-key-not-allowed refused, or in audit would block, by keyRef,
+ * Every key aws-key-not-allowed blocked, or in audit would block, by keyRef,
  * numbered in the order each first appeared. A role assumed in an account not
- * given has every later request signed with its key refused, so the report
+ * given has every later request signed with its key blocked, so the report
  * names the account of the role whose AssumeRole answer issued the key.
  */
-export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
+export function blockedKeys(timeline: TrafficEvent[]): Map<string, BlockedKey> {
   const issuers = new Map<string, string>();
-  const seen = new Map<string, Pick<RefusedKey, "hosts" | "count">>();
+  const seen = new Map<string, Pick<BlockedKey, "hosts" | "count">>();
   for (const e of timeline) {
     const { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
     if (issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount)) {
       issuers.set(issuedKeyRef, assumedAccount);
     }
-    const keyRef = refusedKeyRef(e);
+    const keyRef = blockedKeyRef(e);
     if (!keyRef) continue;
     const key = seen.get(keyRef) ?? { hosts: new Set(), count: 0 };
     seen.set(keyRef, key);
@@ -62,12 +62,12 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
   );
 }
 
-function refusedKeyRef(e: TrafficEvent): string | undefined {
-  const refused = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
-  return refused || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
+function blockedKeyRef(e: TrafficEvent): string | undefined {
+  const blocked = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
+  return blocked || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
 }
 
-/** A request audit let through that restrict would block. One refused for
+/** A request audit let through that restrict would block. One blocked for
  *  another reason is in Blocked Hosts already. */
 export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldBlock: string } {
   return e.wouldBlock !== undefined && e.action !== "block";
@@ -78,7 +78,7 @@ function auditedKey(e: TrafficEvent): boolean {
 }
 
 /** aws-key-not-allowed with the key it names, unless that says nothing more. */
-export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
+export function keyBlockLabel(keys: Map<string, BlockedKey>): BlockLabel {
   return (e, reason) => {
     const keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
     const key = keyRef ? keys.get(keyRef) : undefined;
@@ -131,7 +131,7 @@ export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | 
  */
 export function wouldBlockTables(
   timeline: TrafficEvent[],
-  keys: Map<string, RefusedKey>,
+  keys: Map<string, BlockedKey>,
   priority: number,
   gap: string,
 ): SummaryBlock[] {
