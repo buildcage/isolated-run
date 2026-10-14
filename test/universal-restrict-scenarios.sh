@@ -147,18 +147,20 @@ fi
 SLOW=$(mktemp -d)
 
 echo "=== [HTTPS - dns-failed (NXDOMAIN)] (checked at the end) ==="
-($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
+($C https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
 
 echo "=== [HTTPS - dns-failed (AAAA only, no A record)] (checked at the end) ==="
-($C --max-time 5 https://v6only.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/v6only-https" &
+($C https://v6only.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/v6only-https" &
 
 # The HTTP path resolves through a do-resolve pair of its own, so the HTTPS
 # cases above say nothing about it.
+# Plain HTTP sits out inspect-delay (5s) before its two lookups; waiting for
+# the 503 keeps the proxy's row ahead of the report.
 echo "=== [HTTP - dns-failed (AAAA only, no A record)] (checked at the end) ==="
-($C --max-time 5 http://v6only.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/v6only-http" &
+$C --max-time 20 http://v6only.wildcard.example.com/ > "$SLOW/v6only-http" &
 
 echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
-($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-http" &
+$C --max-time 20 http://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-http" &
 
 # [SSRF - allowlisted name resolving to an internal address (169.254.169.254)]
 # internal.wildcard.example.com matches the *.wildcard.example.com allowlist
@@ -266,8 +268,8 @@ check_slow() {
 }
 check_slow nxdomain.wildcard.example.com nxdomain-https
 check_slow v6only.wildcard.example.com v6only-https
-check_slow "v6only.wildcard.example.com HTTP" v6only-http
-check_slow "nxdomain.wildcard.example.com HTTP" nxdomain-http
+check_status "v6only.wildcard.example.com HTTP" "$(cat "$SLOW/v6only-http")" "503"
+check_status "nxdomain.wildcard.example.com HTTP" "$(cat "$SLOW/nxdomain-http")" "503"
 rm -rf "$SLOW"
 
 # Last, by which time a link-local address would have arrived.
