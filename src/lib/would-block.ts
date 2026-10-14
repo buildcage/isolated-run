@@ -87,7 +87,7 @@ export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
 }
 
 /** Names the summary blocks of Restrict Would Block, for picking their notice. */
-export const WOULD_BLOCK_SUMMARY_BLOCK = "traffic-would-block";
+export const WOULD_BLOCK_ID = "traffic-would-block";
 
 /** What the report says where the Job Summary's size limit cut Restrict Would Block. */
 export function wouldBlockTruncationNote(artifactAvailable: boolean): string {
@@ -123,12 +123,13 @@ export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | 
 /**
  * Restrict Would Block: the requests audit let through that the AWS access
  * key check would block in restrict. aws-key-not-allowed gets a table of its
- * own, one row per key whatever the host: every request a key not allowed signs
- * is refused, and a row for each host would bury the other refusals. The rest
- * are counted by host and reason, as in Blocked Hosts. The first block opens
- * with `gap`, the blank line renderReportBlocks owes a block before it.
+ * own, one row per key whatever the host: every request a key not allowed
+ * signs is blocked, and a row for each host would bury the other blocked
+ * requests. The rest are counted by host and reason, as in Blocked Hosts. The
+ * first block opens with `gap`, the blank line renderReportBlocks owes a block
+ * before it.
  */
-export function wouldBlockSummaryBlocks(
+export function wouldBlockTables(
   timeline: TrafficEvent[],
   keys: Map<string, RefusedKey>,
   priority: number,
@@ -151,7 +152,7 @@ export function wouldBlockSummaryBlocks(
         return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
       }),
     );
-    blocks.push(trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, heading, table, "\n"));
+    blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
   }
   const rows = aggregate(
     timeline.flatMap((e) =>
@@ -161,7 +162,7 @@ export function wouldBlockSummaryBlocks(
   if (rows.length > 0) {
     const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    const host = trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, before, table, "\n");
+    const host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
     // Nest the host table under the key table when both print: once a block is
     // cut, fitStepSummary skips the deeper ones of its section, so the section's
     // truncation notice appears once rather than on each table in turn. They

@@ -80,7 +80,7 @@ else
 fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
 assert_summary_contains "(restrict would block: aws-key-not-allowed, key 1)" \
-  "the timeline says restrict would have refused the request"
+  "the timeline says restrict would have blocked the request"
 assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would block: aws-key-not-allowed, key 2 from a role in 111111111111\)" \
   "an AssumeRole answer to a key restrict would block taught no key" \
   "an AssumeRole answer to a key restrict would block taught its key"

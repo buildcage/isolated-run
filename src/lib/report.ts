@@ -31,8 +31,8 @@ import {
   describeWouldBlock,
   keyRefusalLabel,
   refusedKeys,
-  WOULD_BLOCK_SUMMARY_BLOCK,
-  wouldBlockSummaryBlocks,
+  WOULD_BLOCK_ID,
+  wouldBlockTables,
   wouldBlockTruncationNote,
   wouldBlockVerdictItems,
 } from "./would-block.ts";
@@ -105,7 +105,7 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
     refusalLabel: keyRefusalLabel(keys),
-    extraBlocks: (gap) => wouldBlockSummaryBlocks(report.timeline, keys, WOULD_BLOCK_PRIORITY, gap),
+    extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY, gap),
   });
   const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
 
@@ -292,7 +292,7 @@ export async function writeReportSummary(
   const { cutIds, wrote } = await writeSummaryBlocks(
     [
       ...withNotices(outcomes.blocks, (b) =>
-        b.id === WOULD_BLOCK_SUMMARY_BLOCK
+        b.id === WOULD_BLOCK_ID
           ? wouldBlockTruncationNote(artifactAvailable)
           : trafficNotice(b, artifactAvailable),
       ),
@@ -310,7 +310,7 @@ export async function writeReportSummary(
   // already held left no room under GitHub's limit.
   if (wrote !== "blocks") {
     annotation.warning(reportDidNotFitMessage(artifactAvailable));
-  } else if (cutIds.has(WOULD_BLOCK_SUMMARY_BLOCK)) {
+  } else if (cutIds.has(WOULD_BLOCK_ID)) {
     // The section's own notice is easy to miss below the fold.
     annotation.warning(
       "The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " +

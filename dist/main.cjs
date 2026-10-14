@@ -69453,7 +69453,7 @@ function keyRefusalLabel(keys) {
 		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
 	};
 }
-const WOULD_BLOCK_SUMMARY_BLOCK = "traffic-would-block";
+const WOULD_BLOCK_ID = "traffic-would-block";
 function wouldBlockTruncationNote(artifactAvailable) {
 	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
@@ -69469,7 +69469,7 @@ function describeWouldBlock(timeline) {
 		message: `${count} request(s) restrict mode would block. The ⚠️ Restrict Would Block section counts them by key or by host and reason.`
 	};
 }
-function wouldBlockSummaryBlocks(timeline, keys, priority, gap) {
+function wouldBlockTables(timeline, keys, priority, gap) {
 	let heading = `${gap}### ⚠️ Restrict Would Block\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
@@ -69494,14 +69494,14 @@ function wouldBlockSummaryBlocks(timeline, keys, priority, gap) {
 				count
 			};
 		}));
-		blocks.push(trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, heading, table, "\n"));
+		blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
 	}
 	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
 		...toHostRow(e),
 		reason: e.wouldBlock
 	}]));
 	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, before, table, "\n");
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
 		blocks.push(blocks.length > 0 ? {
 			...host,
 			level: host.level + 1
@@ -69512,7 +69512,7 @@ function wouldBlockSummaryBlocks(timeline, keys, priority, gap) {
 //#endregion
 //#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_SUMMARY_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (!refusedByAwsCheck || at === -1) return blocks;
 	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
 	return [
@@ -69881,7 +69881,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 			extraInputs,
 			actionVersion,
 			refusalLabel: keyRefusalLabel(keys),
-			extraBlocks: (gap) => wouldBlockSummaryBlocks(report.timeline, keys, 2, gap)
+			extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, 2, gap)
 		}), report, actionRepo, actionRef),
 		emissions
 	};

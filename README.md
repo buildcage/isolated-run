@@ -275,13 +275,13 @@ blocked from, and, in `audit`, the allowlist to switch to `restrict` with. An al
 counts what needs a look: requests blocked, requests `restrict` would block, connections that
 failed and requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the
 report is incomplete, and a WARNING otherwise; with nothing to count, a plain line replaces it. In
-the tables that follow, refusals are marked 🚫 and failed connections ⚠️. With the [filesystem
+the tables that follow, blocked requests are marked 🚫 and failed connections ⚠️. With the [filesystem
 audit](./docs/filesystem-audit.md) on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
-URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather
-than a bare host. A query parameter that names a credential has its value replaced, see
-[Credentials in a URL](docs/security.md#credentials-in-a-url).
+URL, status and size, so a blocked entry names the URL that was attempted rather than a bare host.
+A query parameter that names a credential has its value replaced, see [Credentials in a
+URL](docs/security.md#credentials-in-a-url).
 
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
 or written, since it can't show that nothing was blocked. Set `fail_on_blocked: false` to report

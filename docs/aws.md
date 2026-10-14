@@ -120,7 +120,7 @@ The ones that come up most in CI are Bedrock API keys and presigned URLs someone
 
 ## Getting started
 
-Turn the check on in `audit` mode first: nothing is refused, and the report shows what `restrict`
+Turn the check on in `audit` mode first: nothing is blocked, and the report shows what `restrict`
 would block. A step that uses only the credentials it is given needs `aws_key_check` alone:
 
 ```yaml
@@ -172,7 +172,7 @@ Then, with the report described in [Reading the report](#reading-the-report):
 
 ## Reading the report
 
-The report is the step's section in the workflow run's Job Summary. In `audit` nothing is refused.
+The report is the step's section in the workflow run's Job Summary. In `audit` nothing is blocked.
 A warning annotation counts the requests `restrict` would block, and **⚠️ Restrict Would
 Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and one row per host
 for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges every request, so
