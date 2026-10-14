@@ -25,7 +25,7 @@
 <details>
 <summary>Accessed Paths (75)</summary>
 
-<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
+<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
 | Program | Access | Path |
 | --- | --- | --- |
