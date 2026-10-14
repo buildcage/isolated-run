@@ -428,12 +428,13 @@ is gone.
 > host after the sandboxed command has exited, outside the overlay. A `$GITHUB_OUTPUT` kept this way
 > is trimmed to the entries the runner can read, and a dropped entry fails the step.
 
-Name only what a later step needs, usually the build output. Everything else the command writes is
-discarded, the rest of `$GITHUB_WORKSPACE` included: an edited `package.json` script, a new
-`.git/hooks` entry, a patched file under `node_modules`. If a later step needs `node_modules` or
-another part of the workspace, name it too. A named path is as exposed as in `persistent` mode,
-since a later step may run or ship what lands there, and an output set through `$GITHUB_OUTPUT` is
-untrusted as in [Passing values to `run`](#passing-values-to-run) above.
+Name only what a later step needs, usually the build output; the
+[filesystem audit](./docs/filesystem-audit.md#choosing-write_through) shows where the command wrote.
+Everything else the command writes is discarded, the rest of `$GITHUB_WORKSPACE` included: an
+edited `package.json` script, a new `.git/hooks` entry, a patched file under `node_modules`. If a
+later step needs `node_modules` or another part of the workspace, name it too. A named path is as
+exposed as in `persistent` mode, since a later step may run or ship what lands there, and an output
+set through `$GITHUB_OUTPUT` is untrusted as in [Passing values to `run`](#passing-values-to-run) above.
 
 If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
 directory for example, list it under `write_through:`:

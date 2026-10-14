@@ -5,57 +5,37 @@
 > in a future release without following semver. Try it in a non-critical workflow first, and pin
 > this action to a commit SHA rather than a version tag if you adopt it.
 
-`filesystem_audit: record` records every file the isolated step reads, writes, moves,
-deletes, changes the attributes of, and executes. It adds a section to the Job Summary and, with
-`upload_filesystem_audit_artifact: true`, uploads the full record as an artifact. It watches from
-the kernel, so a static binary or a tool that bypasses libc is seen like any other. It works the
-same whatever `proxy_mode` and `proxy_engine` are set to.
+`filesystem_audit: record` records every file the isolated step reads, writes, moves, deletes,
+changes the attributes of, and executes, and adds a **Process Activity Report** section to the Job
+Summary:
 
-It records and never blocks an access: what the step may write is decided by
-[`filesystem_mode` and `write_through`](../README.md#filesystem-access). Turning it on still
-changes two things, covered in [Does it fit your step?](#does-it-fit-your-step): a 32-bit system
-call kills the thread that made it, and every system call on the runner host gets slightly slower
-while the step runs.
+```yaml
+- uses: buildcage/isolated-run@<sha>
+  with:
+    filesystem_audit: record
+    run: npm ci
+```
+
+It watches from the kernel, so a static binary or a tool that bypasses libc is seen like any other,
+and it works the same whatever `proxy_mode` and `proxy_engine` are set to. It records and never
+blocks an access: what the step may write is decided by
+[`filesystem_mode` and `write_through`](../README.md#filesystem-access). It does change two things:
+a 32-bit program cannot run in the step, and system calls across the runner host get slightly
+slower; see [What changes in the step](#what-changes-in-the-step).
 
 ## What it is for
 
-- **Finding what `write_through` needs.** Under `filesystem_mode: ephemeral` every write is thrown
-  away when the step ends, except under the paths `write_through` names. The audit shows where the
-  step wrote, so you can name only what a later step needs:
+- **Finding what `write_through` needs** under `filesystem_mode: ephemeral`: the audit shows where
+  the step wrote, so you keep only what a later step reads. See
+  [Choosing `write_through`](#choosing-write_through).
+- **Checking what a dependency read**, such as a credential file under `~/.ssh` or `~/.npmrc`.
+- **Seeing what an install ran**, such as a `postinstall` script starting `curl` or a binary it just
+  downloaded.
+- **Seeing what was refused**: a write to a read-only path, or a read the file's permissions denied.
 
-  1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
-     `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
-     step sets outputs.
-  2. Look at the `W`, `D` and `A` rows under **Accessed Paths**, and at the `M` rows. `M` marks
-     only the path a file was moved away from, so a file a tool writes under a temporary name and
-     then renames into place shows under the temporary name; the artifact has where it went, as
-     `to` on its `rename` line.
-  3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
-     rest is what ephemeral discards on purpose.
+[What to look for](#what-to-look-for) shows how each of the last three appears in the summary.
 
-  A build that sets outputs and writes `./dist` ends up with:
-
-  ```yaml
-  - uses: buildcage/isolated-run@<sha>
-    with:
-      filesystem_mode: ephemeral
-      filesystem_audit: record
-      write_through: |
-        $GITHUB_OUTPUT
-        ./dist
-      run: npm ci && npm run build
-  ```
-
-- **Checking what a dependency read.** A row such as `R ~/.npmrc`, `R ~/.ssh/**` or
-  `R ~/.docker/config.json` says a command in the step opened a credential file. The details say
-  which command, and the artifact, if uploaded, says when and from which process.
-- **Seeing what an install ran.** The executed table lists every program the step started, so a
-  `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
-- **Seeing what was refused.** A flag followed by `!`, such as `w!`, is an access the sandbox, a
-  file's permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox
-  makes read-only, or a read of `/etc/shadow`.
-
-## Does it fit your step?
+## Before you turn it on
 
 ### What it needs
 
@@ -80,14 +60,14 @@ A host that falls short fails the step before the command runs, with the reason;
   kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, and a shell
   reports it as `Bad system call`, and the record names the call. Run such a program in a step
   without the audit.
-- **Cost to the whole host.** While the step runs, the tracer's hooks run on every system call and
-  every file read or write on the runner host, not only the step's, since a hook has to run to tell
-  whose call it is. That adds roughly 60 nanoseconds to each system call of every process on the
-  machine, the proxy, Docker and other jobs on a shared runner included, about 100 to each read or
-  write, and about 250 to opening and closing a file. Copying a file a byte at a time outside the
-  step took about one and a half times as long in a test, while a typical build, which spends little
-  of its time in system calls, barely changes. Inside the step, each program's first read or write
-  of a file is also recorded, which costs more.
+- **A small cost to the whole host.** A typical build, which spends little of its time in system
+  calls, barely changes. While the step runs, though, the tracer's hooks run on every system call
+  and every file read or write on the runner host, not only the step's, since a hook has to run to
+  tell whose call it is. That covers the proxy, Docker and other jobs on a shared runner too, and
+  adds roughly 60 nanoseconds to each system call, about 100 to each read or write, and about 250
+  to opening and closing a file. Copying a file a byte at a time outside the step took about one and
+  a half times as long in a test. Inside the step, each program's first read or write of a file is
+  also recorded, which costs more.
 
 ## Getting started
 
@@ -169,32 +149,34 @@ Where there is no artifact, the line under the heading says how to ask for one, 
 failed. A step that touched no file shows `No file access was recorded.` instead of the tables. One
 that only ran programs has no accessed paths table, and the flag legend opens the details instead.
 
+From the top:
+
+- The **🚫 Refused system calls** note names system calls the sandbox does not allow, such as
+  `io_uring_setup`, and the commands that made them; see
+  [Refused system calls](#refused-system-calls).
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
-- **Accessed Paths**, folded, has one row per program and path: programs in the order they first
-  ran, each one's paths in path order (the workspace, then `$HOME`, then the rest). A program is
-  named as in the executed table, a script run through its `#!` line by its own path; a script
-  starting `#!/usr/bin/env node` runs `node` in turn, and what follows shows under `node`. A process
-  that forks without running anything counts as its parent's program, and the step's own shell,
-  which runs the `run` script, shows as `bash`. Running a program is left to the executed table. A
-  `dir/**` row does not say which path under it was refused. The details fold each command's paths
-  on their own, so they often name it; the artifact always does.
+- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
+  action. Programs are in the order they first ran, and each one's paths in path order: the
+  workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
+  directory; see [Paths](#paths).
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
   that command first and last touched the path, counted from the proxy's start like the
-  communication details, or from the first access if that start is unknown. A command or path
-  holding a space is quoted there, as `"VM Thread"`, except a memfd's name, which is quoted
-  already, and a refused system call.
-- A **refused system call** is one the sandbox's seccomp profile does not allow, such as
-  `io_uring_setup` or `unshare`, which fails with `EPERM`. The note under the heading names the
-  first 10, each with the first commands that made it, and counts the rest; the details, where they
-  fit, show each once per program, as `syscall:io_uring_setup` with `!`. One already recorded as a
-  failed change to a path is not repeated, and one the profile allows only for some arguments, as
-  `clone`, is not recorded even when refused, since the kernel's own `EPERM` for it would read the
-  same. A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a
-  thread killed while others run on is not recorded. Past 200 command and system call pairs, the
-  details add a row only for each system call's first refusal that did not kill the command, and for
-  every kill; the artifact, if uploaded, has the rest.
+  communication details, or from the first access if that start is unknown.
+
+[How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
+
+### What to look for
+
+- **A credential file read.** A row such as `R ~/.npmrc`, `R ~/.ssh/**` or
+  `R ~/.docker/config.json` says a command in the step opened it. The details say which command,
+  and the artifact, if uploaded, says when and from which process.
+- **A program you did not expect.** **Executed Programs** lists every program the step started, so
+  a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
+- **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
+  permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
+  read-only, or a read of `/etc/shadow`.
 
 ### Flags
 
@@ -232,48 +214,101 @@ artifact has every access in order.
 | `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name                                                |
 | `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                                                               |
 
-Never folded into a `dir/**` row, nor counted toward its three rows:
+The workspace, `$HOME`, `/` and a few other top directories are never folded into a `dir/**` row,
+nor are a program run, a path containing `..` or a memfd, until a table grows very large. See
+[How rows are grouped](#how-rows-are-grouped).
 
-- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them, and
-  `/proc/<pid>`.
-- A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
-  file a program loaded is not counted either.
+## Choosing `write_through`
 
-That changes once a table or the details would pass 300 KB, more rows than anyone reads. Each
-of those directories then folds once five entries directly under it are not themselves among them,
-keeping those that are on rows of their own: `/` folds into `/**` but `/home/runner` still shows its
-own rows. Paths with `..` fold the same way once five share what comes before their first `..`,
-into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (five of one
-program's in the table, of one command's in the details). A program run still never folds.
+Under `filesystem_mode: ephemeral` every write is thrown away when the step ends, except under the
+paths `write_through` names. To name only what a later step needs:
 
-Which path a row is shown under:
+1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
+   `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
+   step sets outputs.
+2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
+   temporary name and then renames into place shows `M` under the temporary name; its new name is
+   the `to` on its `rename` line in the artifact.
+3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
+   rest is what ephemeral discards on purpose.
 
-- A program is shown under the file it ran, with symlinks followed, and a script under its own path
-  rather than its interpreter's.
-- A failed access is shown under the name the command passed, joined to its working directory, or
-  the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
-  alone, as `fchmod`, is shown under that file's path.
-- A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
-  shown on its own row under that file's path.
-- Reads and writes through a device such as `/dev/null` are recorded once for each time it is
-  opened, under the first program to make them. A pipe or a socket is left out of the summary.
+A build that sets outputs and writes `./dist` ends up with:
 
-### What the summary leaves out
+```yaml
+- uses: buildcage/isolated-run@<sha>
+  with:
+    filesystem_mode: ephemeral
+    filesystem_audit: record
+    write_through: |
+      $GITHUB_OUTPUT
+      ./dist
+    run: npm ci && npm run build
+```
 
-The summary leaves out what any program does just to start: the shared libraries it loads, its
-reads of them and of `/etc/ld.so.cache`, and its own reads of the program file. Another program
-reading those files is shown. A file counts as a library when the kernel loads it to start a
-program, or when it is mapped to run and its name ends in `.so`, `.so` with a version such as
-`.so.1.2.3`, or `.node`, and it is neither in memory only nor deleted. A `.so` file only read, as a
-packaging tool reads it, is shown.
+## Troubleshooting
 
-A directory's own row is left out when every flag on it shows on a row below it too and none of it
-was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows. Such a
-row does not count toward a fold either.
+The step fails before the command runs with
+`filesystem_audit could not start (<reason>); the command was not run.`
 
-A regular file or directory kept open counts only the first read and the first write through it by
-each program, so the last time in the details can be earlier than its last write. Through a device,
-only the first read and the first write after each open count, whichever program makes them.
+| Reason                               | What to do                                                                                                                                                                   |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed |
+| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are. An empty file, such as `/dev/null` mounted there, counts as none           |
+| `read kernel BTF: …`                 | See below the table                                                                                                                                                          |
+| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                   |
+| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                |
+| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
+| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
+
+`read kernel BTF: …` ending in `unknown kind …`, `header contains non-zero trailer` or
+`unsupported flags …` means the kernel's BTF is newer than the tracer can read. Please
+[open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
+Other endings, such as `no valid BTF header` or `no BTF found …`, mean
+`/sys/kernel/btf/vmlinux` is not the kernel's own or root cannot read it.
+
+The summary can also open with a warning, or be missing:
+
+- **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
+  cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
+  very large number of files at once can cause it.
+- **The same warning, with an error and a failed step, in any mode.** The record has no end line:
+  the tracer exited before the step ended, or did not finish the record when the step stopped it.
+  A reason the tracer gave is in the step log on a `filesystem-audit: fatal:` line, such as one
+  ending in `no space left on device` once the step filled the disk. A cancelled step does not add
+  this error.
+- **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
+  be missing; see [Skipped hooks](#skipped-hooks).
+- **The recording could not be read.** The summary has none of the step's accesses, a warning is
+  logged, and no artifact is uploaded.
+- **The same note, with an error and a failed step, in any mode.** The recording was removed after
+  the tracer started, by a process on the runner host outside the sandbox.
+- **No section, and a `Failed to render the filesystem audit summary` warning.** The recording was
+  read but its summary could not be written; the artifact is still uploaded if asked for. Please
+  [open an issue](https://github.com/buildcage/isolated-run/issues) with the warning.
+
+A program in the step that dies with `Bad system call` made a 32-bit system call, which the audit
+refuses; see [What changes in the step](#what-changes-in-the-step).
+
+### Skipped hooks
+
+On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
+entered again. GitHub-hosted runners boot `-azure` kernels, 7.0 on `ubuntu-26.04`, and these do not
+pause the hooks. Nor do Ubuntu 24.04's `generic` kernel or 22.04's 6.8 hardware enablement kernel in
+their default preemption mode. Ubuntu 26.04's `generic` kernel and the 7.0 hardware enablement
+kernel of 24.04 do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the
+modes with the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped when it is
+`(full)` or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing
+even so, the kernel cannot switch modes, and hooks can be skipped when `/boot/config-$(uname -r)`
+sets `CONFIG_PREEMPT_RCU=y`.
+
+`host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
+accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
+missing; a skip cannot be tied to the step, so the note cannot say they are. A skipped hook drops
+the access it was following rather than reporting it against the wrong call, save where a recorded
+path may be an earlier one's: an open may carry an earlier open's path, and a delete, move or other
+path change whose own hook was skipped too an earlier such change's. For a complete record, use a
+kernel that does not pause the hooks, such as one booted with `preempt=voluntary` where the kernel
+offers that mode.
 
 ## The artifact
 
@@ -411,70 +446,79 @@ tracer caught:
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
 
-## Troubleshooting
+## More about the summary
 
-The step fails before the command runs with
-`filesystem_audit could not start (<reason>); the command was not run.`
+### How rows are grouped
 
-| Reason                               | What to do                                                                                                                                                                   |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `the runner is not on cgroup v2`     | Boot the host with cgroup v2 (the default on Ubuntu 22.04 and later). On a cgroup v2 host, it means the runner's own cgroup lies outside its cgroup namespace or was removed |
-| `the kernel exposes no BTF`          | Use a kernel built with BTF (`/sys/kernel/btf/vmlinux`), as Ubuntu's and most distributions' are. An empty file, such as `/dev/null` mounted there, counts as none           |
-| `read kernel BTF: …`                 | See below the table                                                                                                                                                          |
-| `the kernel is older than Linux 6.1` | Move to Linux 6.1 or newer                                                                                                                                                   |
-| `attach <name>: …` on arm64          | Move to Linux 6.4 or newer, the first arm64 kernel that lets the tracer hook kernel functions                                                                                |
-| `the tracer did not attach in time`  | The host was too busy to start the tracer; run the job again                                                                                                                 |
-| Anything else                        | The tracer's own error; please [open an issue](https://github.com/buildcage/isolated-run/issues) with it                                                                     |
+**Which program.** A program is named as in the executed table, a script run through its `#!` line
+by its own path; a script starting `#!/usr/bin/env node` runs `node` in turn, and what follows shows
+under `node`. A process that forks without running anything counts as its parent's program, and the
+step's own shell, which runs the `run` script, shows as `bash`. Running a program is left to the
+executed table.
 
-`read kernel BTF: …` ending in `unknown kind …`, `header contains non-zero trailer` or
-`unsupported flags …` means the kernel's BTF is newer than the tracer can read. Please
-[open an issue](https://github.com/buildcage/isolated-run/issues) with the output of `uname -r`.
-Other endings, such as `no valid BTF header` or `no BTF found …`, mean
-`/sys/kernel/btf/vmlinux` is not the kernel's own or root cannot read it.
+**Which path.**
 
-The summary can also open with a warning, or be missing:
+- A program is shown under the file it ran, with symlinks followed.
+- A failed access is shown under the name the command passed, joined to its working directory, or
+  the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
+  alone, as `fchmod`, is shown under that file's path.
+- A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
+  shown on its own row under that file's path.
+- Reads and writes through a device such as `/dev/null` are recorded once for each time it is
+  opened, under the first program to make them. A pipe or a socket is left out of the summary.
 
-- **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
-  cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
-  very large number of files at once can cause it.
-- **The same warning, with an error and a failed step, in any mode.** The record has no end line:
-  the tracer exited before the step ended, or did not finish the record when the step stopped it.
-  A reason the tracer gave is in the step log on a `filesystem-audit: fatal:` line, such as one
-  ending in `no space left on device` once the step filled the disk. A cancelled step does not add
-  this error.
-- **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
-  be missing; see [Skipped hooks](#skipped-hooks).
-- **The recording could not be read.** The summary has none of the step's accesses, a warning is
-  logged, and no artifact is uploaded.
-- **The same note, with an error and a failed step, in any mode.** The recording was removed after
-  the tracer started, by a process on the runner host outside the sandbox.
-- **No section, and a `Failed to render the filesystem audit summary` warning.** The recording was
-  read but its summary could not be written; the artifact is still uploaded if asked for. Please
-  [open an issue](https://github.com/buildcage/isolated-run/issues) with the warning.
+**Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
+command's paths on their own, so they often name it; the artifact always does.
 
-A program in the step that dies with `Bad system call` made a 32-bit system call, which the audit
-refuses; see [What changes in the step](#what-changes-in-the-step).
+Never folded into a `dir/**` row, nor counted toward its three rows:
 
-### Skipped hooks
+- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them, and
+  `/proc/<pid>`.
+- A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
+  file a program loaded is not counted either.
 
-On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
-entered again. GitHub-hosted runners boot `-azure` kernels, 7.0 on `ubuntu-26.04`, and these do not
-pause the hooks. Nor do Ubuntu 24.04's `generic` kernel or 22.04's 6.8 hardware enablement kernel in
-their default preemption mode. Ubuntu 26.04's `generic` kernel and the 7.0 hardware enablement
-kernel of 24.04 do. On a self-hosted runner, `sudo cat /sys/kernel/debug/sched/preempt` prints the
-modes with the one in use in parentheses, such as `full (lazy)`, and hooks can be skipped when it is
-`(full)` or `(lazy)`. That file needs debugfs mounted at `/sys/kernel/debug`. Where it is missing
-even so, the kernel cannot switch modes, and hooks can be skipped when `/boot/config-$(uname -r)`
-sets `CONFIG_PREEMPT_RCU=y`.
+That changes once a table or the details would pass 300 KB, more rows than anyone reads. Each
+of those directories then folds once five entries directly under it are not themselves among them,
+keeping those that are on rows of their own: `/` folds into `/**` but `/home/runner` still shows its
+own rows. Paths with `..` fold the same way once five share what comes before their first `..`,
+into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (five of one
+program's in the table, of one command's in the details). A program run still never folds.
 
-`host_missed` counts skips anywhere on the host while the step ran, so 0 means none of the step's
-accesses was skipped. A nonzero count opens the summary with a note that some accesses may be
-missing; a skip cannot be tied to the step, so the note cannot say they are. A skipped hook drops
-the access it was following rather than reporting it against the wrong call, save where a recorded
-path may be an earlier one's: an open may carry an earlier open's path, and a delete, move or other
-path change whose own hook was skipped too an earlier such change's. For a complete record, use a
-kernel that does not pause the hooks, such as one booted with `preempt=voluntary` where the kernel
-offers that mode.
+**Quoting.** A command or path holding a space is quoted in the details, as `"VM Thread"`, except a
+memfd's name, which is quoted already, and a refused system call.
+
+### Refused system calls
+
+A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
+or `unshare`, which fails with `EPERM`. The note under the heading names the first 10, each with
+the first commands that made it, and counts the rest; the details, where they fit, show each once
+per program, as `syscall:io_uring_setup` with `!`.
+
+- One already recorded as a failed change to a path is not repeated.
+- One the profile allows only for some arguments, as `clone`, is not recorded even when refused,
+  since the kernel's own `EPERM` for it would read the same.
+- A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread
+  killed while others run on is not recorded.
+- Past 200 command and system call pairs, the details add a row only for each system call's first
+  refusal that did not kill the command, and for every kill; the artifact, if uploaded, has the
+  rest.
+
+### What the summary leaves out
+
+The summary leaves out what any program does just to start: the shared libraries it loads, its
+reads of them and of `/etc/ld.so.cache`, and its own reads of the program file. Another program
+reading those files is shown. A file counts as a library when the kernel loads it to start a
+program, or when it is mapped to run and its name ends in `.so`, `.so` with a version such as
+`.so.1.2.3`, or `.node`, and it is neither in memory only nor deleted. A `.so` file only read, as a
+packaging tool reads it, is shown.
+
+A directory's own row is left out when every flag on it shows on a row below it too and none of it
+was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows. Such a
+row does not count toward a fold either.
+
+A regular file or directory kept open counts only the first read and the first write through it by
+each program, so the last time in the details can be earlier than its last write. Through a device,
+only the first read and the first write after each open count, whichever program makes them.
 
 ## What it does not record
 
