@@ -31,7 +31,7 @@ export interface RefusedKey {
 }
 
 /**
- * Every key aws-key-not-allowed refused, or in audit would refuse, by keyRef,
+ * Every key aws-key-not-allowed refused, or in audit would block, by keyRef,
  * numbered in the order each first appeared. A role assumed in an account not
  * given has every later request signed with its key refused, so the report
  * names the account of the role whose AssumeRole answer issued the key.
@@ -64,17 +64,17 @@ export function refusedKeys(timeline: TrafficEvent[]): Map<string, RefusedKey> {
 
 function refusedKeyRef(e: TrafficEvent): string | undefined {
   const refused = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
-  return refused || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
+  return refused || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
 }
 
 /** A request audit let through that restrict would block. One refused for
  *  another reason is in Blocked Hosts already. */
-export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: string } {
-  return e.wouldRefuse !== undefined && e.action !== "block";
+export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldBlock: string } {
+  return e.wouldBlock !== undefined && e.action !== "block";
 }
 
 function auditedKey(e: TrafficEvent): boolean {
-  return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== undefined;
+  return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== undefined;
 }
 
 /** aws-key-not-allowed with the key it names, unless that says nothing more. */
@@ -87,10 +87,10 @@ export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
 }
 
 /** Names the summary blocks of Restrict Would Block, for picking their notice. */
-export const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
+export const WOULD_BLOCK_SUMMARY_BLOCK = "traffic-would-block";
 
 /** What the report says where the Job Summary's size limit cut Restrict Would Block. */
-export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
+export function wouldBlockTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run has every one"
     : "set upload_traffic_artifact: true to get every one as a downloadable artifact";
@@ -98,7 +98,7 @@ export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
 }
 
 /** The verdict line's count of the requests restrict would block, if any. */
-export function wouldRefuseVerdictItems(timeline: TrafficEvent[]): string[] {
+export function wouldBlockVerdictItems(timeline: TrafficEvent[]): string[] {
   const count = timeline.filter(letThrough).length;
   return count === 0 ? [] : [`${count} restrict would block`];
 }
@@ -108,7 +108,7 @@ export function wouldRefuseVerdictItems(timeline: TrafficEvent[]): string[] {
  * undefined when there were none. Without it a step would pass audit and fail
  * on its switch to restrict with no warning first.
  */
-export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission | undefined {
+export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | undefined {
   const count = timeline.filter(letThrough).length;
   if (count === 0) return undefined;
   return {
@@ -122,13 +122,13 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
 
 /**
  * Restrict Would Block: the requests audit let through that the AWS access
- * key check would refuse in restrict. aws-key-not-allowed gets a table of its
+ * key check would block in restrict. aws-key-not-allowed gets a table of its
  * own, one row per key whatever the host: every request a key not allowed signs
  * is refused, and a row for each host would bury the other refusals. The rest
  * are counted by host and reason, as in Blocked Hosts. The first block opens
  * with `gap`, the blank line renderReportBlocks owes a block before it.
  */
-export function wouldRefuseBlocks(
+export function wouldBlockSummaryBlocks(
   timeline: TrafficEvent[],
   keys: Map<string, RefusedKey>,
   priority: number,
@@ -151,17 +151,17 @@ export function wouldRefuseBlocks(
         return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
       }),
     );
-    blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
+    blocks.push(trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, heading, table, "\n"));
   }
   const rows = aggregate(
     timeline.flatMap((e) =>
-      !letThrough(e) || auditedKey(e) ? [] : [{ ...toHostRow(e), reason: e.wouldRefuse }],
+      !letThrough(e) || auditedKey(e) ? [] : [{ ...toHostRow(e), reason: e.wouldBlock }],
     ),
   );
   if (rows.length > 0) {
     const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    const host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
+    const host = trafficTableBlock(WOULD_BLOCK_SUMMARY_BLOCK, priority, before, table, "\n");
     // Nest the host table under the key table when both print: once a block is
     // cut, fitStepSummary skips the deeper ones of its section, so the section's
     // truncation notice appears once rather than on each table in turn. They

@@ -121,7 +121,7 @@ The ones that come up most in CI are Bedrock API keys and presigned URLs someone
 ## Getting started
 
 Turn the check on in `audit` mode first: nothing is refused, and the report shows what `restrict`
-would refuse. A step that uses only the credentials it is given needs `aws_key_check` alone:
+would block. A step that uses only the credentials it is given needs `aws_key_check` alone:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
@@ -200,7 +200,7 @@ not read; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
 ```
 
 With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
-`wouldRefuse`. If the section does not fit the Job Summary even so, it is cut and a warning
+`wouldBlock`. If the section does not fit the Job Summary even so, it is cut and a warning
 annotation says so.
 
 In `restrict` the URL rules decide first, so a request none of them allows is refused as
@@ -277,7 +277,7 @@ line in Communication details ends in:
 - `key N from a role in <account>`: an assumed role. STS issued the key, but the proxy learns it
   only for a role in an account in `allowed_aws_role_accounts`. Add the account once you have
   checked it is yours. If it is already there in `audit`, the STS call was itself one `restrict`
-  would refuse, so its answer taught no key. In the traffic artifact
+  would block, so its answer taught no key. In the traffic artifact
   (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
   `aws.keyRef` has the account in `aws.assumedAccount`.
 - `key N` alone, or nothing after the reason when it is the only key refused, from one of:
@@ -398,7 +398,7 @@ them on those, through a customized bootstrap template:
   Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned.
 - Keys are learned only from STS answers and ECR registry redirects received over HTTPS, to a
-  request the key check did not refuse, so in `audit` mode a request it would refuse teaches no key.
+  request the key check did not block, so in `audit` mode a request it would block teaches no key.
   An STS answer over plain HTTP names no account in the restrict example either. A host that names a
   resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer the proxy
   cannot read, because the client asked for JSON or it is unusually large, is not learned,
@@ -552,7 +552,7 @@ allowed_url_rules: |
 Each request to an AWS API host that the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
 where it refused nothing. A request the check refused has one only for `keyRef`, and for
-`assumedAccount` and `issuedKeyRef` on an STS call in `audit` mode. Its `reason` or `wouldRefuse`
+`assumedAccount` and `issuedKeyRef` on an STS call in `audit` mode. Its `reason` or `wouldBlock`
 says why.
 
 | Field            | When                                                                           | Notes                                                                                                                                                                        |

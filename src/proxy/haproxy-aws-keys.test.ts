@@ -107,11 +107,11 @@ describe("awsKeyExtension", () => {
 });
 
 describe("awsKeyRequestRules", () => {
-  it("refuses in restrict, and only names what restrict would refuse in audit", () => {
+  it("refuses in restrict, and only names what restrict would block in audit", () => {
     const restrict = awsKeyRequestRules(CHECK, "restrict").join("\n");
     expect(restrict.includes("http-request deny deny_status 403 if aws_refused")).toBe(true);
     const audit = awsKeyRequestRules(CHECK, "audit").join("\n");
-    expect(audit.includes("txn.would_refuse")).toBe(true);
+    expect(audit.includes("txn.would_block")).toBe(true);
     expect(audit.includes("deny")).toBe(false);
   });
 

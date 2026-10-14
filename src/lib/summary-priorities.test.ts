@@ -6,14 +6,14 @@ import { FILESYSTEM_BLOCK } from "./filesystem-audit/render.ts";
 import {
   FILESYSTEM_PRIORITIES,
   TRAFFIC_PRIORITIES,
-  WOULD_REFUSE_PRIORITY,
+  WOULD_BLOCK_PRIORITY,
 } from "./summary-priorities.ts";
 
 describe("summary priorities", () => {
   it("keeps room for the traffic tables, then the audit's tables, then the two logs", () => {
     const order = [
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.example],
-      WOULD_REFUSE_PRIORITY,
+      WOULD_BLOCK_PRIORITY,
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.blocked],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.passed],
       FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.executed],

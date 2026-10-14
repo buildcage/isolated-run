@@ -224,7 +224,7 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
           "    http-request deny deny_status 403 if aws_refused",
         ]
       : [
-          `    http-request set-var-fmt(txn.would_refuse) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
+          `    http-request set-var-fmt(txn.would_block) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_refused`,
         ]),
   ];
 }

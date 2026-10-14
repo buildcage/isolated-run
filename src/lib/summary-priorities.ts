@@ -22,7 +22,7 @@ export const TRAFFIC_PRIORITIES: TrafficPriorities = {
 };
 
 /** Restrict Would Block, the AWS access key check's own section of the traffic report. */
-export const WOULD_REFUSE_PRIORITY = 2;
+export const WOULD_BLOCK_PRIORITY = 2;
 
 export const FILESYSTEM_PRIORITIES: FilesystemPriorities = {
   [FILESYSTEM_BLOCK.executed]: 5,

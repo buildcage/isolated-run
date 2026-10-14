@@ -721,7 +721,7 @@ already uploaded. See [Known Limitations](./security.md#known-limitations).
 | `bytes`       |        | absent for a refusal and for `dns`                                                                    |
 | `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                               |
 | `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                             |
-| `wouldRefuse` |        | `audit` only: the reason `restrict` would have blocked it for, from the AWS access key check          |
+| `wouldBlock`  |        | `audit` only: the reason `restrict` would have blocked it for, from the AWS access key check          |
 | `aws`         |        | a request the AWS access key check let through; see [the AWS check](./aws.md#in-the-traffic-artifact) |
 
 A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `
