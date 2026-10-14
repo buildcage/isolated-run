@@ -54,9 +54,9 @@ A host that falls short fails the step before the command runs, with the reason;
 
 - **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
   the sandbox refuses one through a 32-bit ABI, from an i386 or ARM32 program or `int 0x80`: the
-  kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, and a shell
-  reports it as `Bad system call`, and the record names the call. Run such a program in a step
-  without the audit.
+  kernel kills the thread that made it with `SIGSYS`. A single-threaded program dies, which a shell
+  reports as `Bad system call`. The summary's note then reads
+  `Killed for a 32-bit system call: <command>`. Run such a program in a step without the audit.
 - **A small cost to the whole host.** A typical build, which spends little of its time in system
   calls, barely changes. While the step runs, though, the tracer's hooks run on every system call on
   the runner host, not only the step's, since a hook has to run to tell whose call it is. A
@@ -91,18 +91,19 @@ The `filesystem_audit_artifact_name` output names the uploaded artifact. It is e
 was uploaded, and without the `if:`, `download-artifact` would then download every artifact of the
 run.
 
-Each step with the audit on gets its own section and its own artifact,
+Each step with the audit on gets its own section and, when uploaded, its own artifact,
 `buildcage-filesystem-audit-<id>`, where `<id>` is the same random suffix as that step's traffic
-artifact, so several steps in one job never collide. Each section follows its step's traffic
-report, and both headings carry the step's `label`, so set `label` to tell the steps apart.
+artifact, so several steps in one job never collide. Each section follows its step's traffic report,
+and both headings carry the step's `label`, so set `label` to tell the steps apart.
 
 `filesystem_audit_retention_days` sets how long the artifact is kept; see
-[Reference](./reference.md#filesystem-audit). The artifact names each program the step ran but not
-its arguments, which can carry secrets. It still holds every path
-the step touched, including the names of files it only tried to open, so treat it as sensitive,
-like the traffic artifact.
+[Reference](./reference.md#action-inputs). The artifact names each program the step ran but not its
+arguments, which can carry secrets. It still holds every path the step touched, including the names
+of files it only tried to open, so treat it as sensitive, like the traffic artifact.
 
 ## Reading the summary
+
+A shortened example:
 
 ```
 ## Process Activity Report
@@ -167,9 +168,9 @@ From the top:
   separate npm itself from a script it started.
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
-  `$GITHUB_PATH` is refused (`w!`), since both stay read-only in the sandbox, but the attempt is
-  just as telling. `filesystem_mode: ephemeral` discards such writes; see the
-  [README](../README.md#filesystem-access).
+  `$GITHUB_PATH` is refused (`w!`) unless `write_through` names it, since both are read-only in the
+  sandbox otherwise, but the attempt is just as telling. `filesystem_mode: ephemeral` discards such
+  writes; see the [README](../README.md#filesystem-access).
 - **A program you did not expect.** **Executed Programs** lists every program the step started, so
   a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
@@ -339,7 +340,7 @@ jq -r 'select(.failed | not)
   filesystem-audit-*.jsonl | sort -u
 
 # Who opened a credential file, and when
-jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, kind}' filesystem-audit-*.jsonl
+jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit-*.jsonl
 
 # Every refused open
 jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
@@ -575,11 +576,11 @@ itself can do to the record, and what the record can be trusted for.
   does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
   of it fits. The note names the artifact, which still holds every access, or says how to ask for
   one, or, when the upload failed, that the record was not kept.
-- **One part too large.** The accessed-paths table or the details that alone would pass 300 KB
-  folds the directories, `..` paths and memfds it otherwise keeps on rows of their own (see
-  [Paths](#paths)). One that would pass 1 MiB even so keeps the rows that fit in it, takes no new
-  ones, and ends with a note; the Job Summary's cap then decides how much of it prints. It is left
-  out whole, under a note that says why, when not one row fits, or once its folded tree holds more
-  than 200,000 files and directories, counting every directory on the way and each program's tree
-  apart in the table, each command's in the details. When the table is left out, the details go
-  with it.
+- **One part too large.** The accessed-paths table or the details that alone would pass 300 KB folds
+  the directories, `..` paths and memfds it otherwise keeps on rows of their own (see
+  [How rows are grouped](#how-rows-are-grouped)). One that would pass 1 MiB even so keeps the rows
+  that fit in it, takes no new ones, and ends with a note; the Job Summary's cap then decides how
+  much of it prints. It is left out whole, under a note that says why, when not one row fits, or
+  once its folded tree holds more than 200,000 files and directories, counting every directory on
+  the way and each program's tree apart in the table, each command's in the details. When the table
+  is left out, the details go with it.
