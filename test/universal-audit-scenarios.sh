@@ -68,10 +68,12 @@ fi
 SLOW=$(mktemp -d)
 
 echo "=== [HTTPS - dns-failed (NXDOMAIN)] (checked at the end) ==="
-($C --max-time 5 https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
+$C https://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-https" &
 
+# The HTTP cases wait for the 503: a failed lookup takes about 4s and this
+# path makes two, so a shorter wait ends before the proxy logs its row.
 echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
-($C --max-time 5 http://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-http" &
+$C --max-time 20 http://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-http" &
 
 # [TLS ClientHello with no SNI extension at all. There is no name to judge, so
 # the connection is refused on that alone, audit mode or not; the report
@@ -111,7 +113,7 @@ check_slow() {
   fi
 }
 check_slow nxdomain.wildcard.example.com nxdomain-https
-check_slow "nxdomain.wildcard.example.com HTTP" nxdomain-http
+check_status "nxdomain.wildcard.example.com HTTP" "$(cat "$SLOW/nxdomain-http")" "503"
 rm -rf "$SLOW"
 
 scenario_results
