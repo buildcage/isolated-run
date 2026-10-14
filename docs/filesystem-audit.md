@@ -20,8 +20,8 @@ It watches from the kernel, so a static binary or a tool that bypasses libc is s
 and it works the same whatever `proxy_mode` and `proxy_engine` are set to. It records and never
 blocks an access: what the step may write is decided by
 [`filesystem_mode` and `write_through`](../README.md#filesystem-access). It does change two things:
-a 32-bit program cannot run in the step, and system calls across the runner host get slightly
-slower; see [What changes in the step](#what-changes-in-the-step).
+a 32-bit system call kills the thread in the step that made it, and system calls across the
+runner host get slightly slower; see [What changes in the step](#what-changes-in-the-step).
 
 ## What it is for
 
@@ -71,16 +71,9 @@ A host that falls short fails the step before the command runs, with the reason;
 
 ## Getting started
 
-```yaml
-- uses: buildcage/isolated-run@<sha>
-  with:
-    filesystem_audit: record
-    run: npm ci
-```
-
-The step's Job Summary gets a **Process Activity Report** section after the traffic report. The
-full record, with every access in order, is uploaded only when asked for, as the traffic artifact
-is:
+With `filesystem_audit: record` alone, as above, the step's Job Summary gets a **Process Activity
+Report** section after the traffic report. The full record, with every access in order, is uploaded
+only when asked for, as the traffic artifact is:
 
 ```yaml
 - id: build
@@ -176,7 +169,8 @@ From the top:
   a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
-  read-only, or a read of `/etc/shadow`.
+  read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
+  named in the **🚫 Refused system calls** note under the heading instead.
 
 ### Flags
 
@@ -214,23 +208,23 @@ artifact has every access in order.
 | `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name                                                |
 | `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                                                               |
 
-The workspace, `$HOME`, `/` and a few other top directories are never folded into a `dir/**` row,
-nor are a program run, a path containing `..` or a memfd, until a table grows very large. See
-[How rows are grouped](#how-rows-are-grouped).
+Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
+`$HOME` and a program run; [How rows are grouped](#how-rows-are-grouped) lists them.
 
 ## Choosing `write_through`
 
 Under `filesystem_mode: ephemeral` every write is thrown away when the step ends, except under the
 paths `write_through` names. To name only what a later step needs:
 
-1. Run the step with `filesystem_mode: ephemeral` and `filesystem_audit: record`, and in
-   `write_through` only what you already know a later step reads, such as `$GITHUB_OUTPUT` if the
-   step sets outputs.
+1. Run the step with `filesystem_mode: ephemeral`, `filesystem_audit: record` and
+   `upload_filesystem_audit_artifact: true`, and in `write_through` only what you already know a
+   later step reads, such as `$GITHUB_OUTPUT` if the step sets outputs.
 2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
    temporary name and then renames into place shows `M` under the temporary name; its new name is
    the `to` on its `rename` line in the artifact.
 3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
-   rest is what ephemeral discards on purpose.
+   rest is what ephemeral discards on purpose. Once it is settled, the artifact is no longer
+   needed.
 
 A build that sets outputs and writes `./dist` ends up with:
 
@@ -268,15 +262,15 @@ Other endings, such as `no valid BTF header` or `no BTF found …`, mean
 
 The summary can also open with a warning, or be missing:
 
-- **This record is incomplete.** `dropped` or `untracked` is nonzero, or the tracer did not stop
-  cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
+- **This record is incomplete.** `dropped` or `untracked` on the record's
+  [end line](#the-end-line) is nonzero, or the tracer did not stop cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
   very large number of files at once can cause it.
-- **The same warning, with an error and a failed step, in any mode.** The record has no end line:
+- **The same warning, with an error and a failed step, in any mode.** The record has no [end line](#the-end-line):
   the tracer exited before the step ended, or did not finish the record when the step stopped it.
   A reason the tracer gave is in the step log on a `filesystem-audit: fatal:` line, such as one
   ending in `no space left on device` once the step filled the disk. A cancelled step does not add
   this error.
-- **The kernel skipped the tracer's hooks N times.** `host_missed` is nonzero, so some accesses may
+- **The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so some accesses may
   be missing; see [Skipped hooks](#skipped-hooks).
 - **The recording could not be read.** The summary has none of the step's accesses, a warning is
   logged, and no artifact is uploaded.
