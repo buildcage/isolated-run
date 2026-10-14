@@ -267,9 +267,8 @@ describe("runSandboxStep", () => {
 
     expect(mocks.readStepFilesystemAudit.mock.calls[0][0].cancelled).toBe(false);
     const report = mocks.reportStepTraffic.mock.calls[0][0];
-    expect(report.processActivity).toBe(true);
-    report.moreBlocks(1_700_000_000);
-    expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "uploaded" });
+    report.moreBlocks(1_700_000_000, "build");
+    expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "uploaded" }, "build");
     expect(read.upload).toHaveBeenCalledTimes(1);
     expect(orderOf(read.upload)).toBeLessThan(orderOf(mocks.reportStepTraffic));
   });
@@ -978,9 +977,8 @@ describe("runSandboxStep", () => {
 
       expect(mocks.readStepFilesystemAudit.mock.calls[0][0].cancelled).toBe(true);
       const report = mocks.reportStepTraffic.mock.calls[0][0];
-      expect(report.processActivity).toBe(true);
-      report.moreBlocks(1_700_000_000);
-      expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "to-come" });
+      report.moreBlocks(1_700_000_000, "build");
+      expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "to-come" }, "build");
       expect(read.upload).toHaveBeenCalledTimes(1);
       expect(orderOf(mocks.readStepFilesystemAudit)).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(read.upload));

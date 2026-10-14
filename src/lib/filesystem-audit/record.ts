@@ -2,6 +2,7 @@ export interface AuditRecord {
   t?: string;
   kind: string;
   pid?: number;
+  ppid?: number;
   comm?: string;
   path?: string;
   to?: string;

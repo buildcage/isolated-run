@@ -273,11 +273,12 @@ Any other blocked request to that host still fails the step. See
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
-refused, and, in `audit`, the allowlist to switch to `restrict` with. A line under its title counts
-what needs a look: requests refused, requests `restrict` would refuse, connections that failed and
-requests nothing acted on. The tables follow under **🌐 Network**, refusals marked 🚫 and failed
-connections ⚠️, then under **⚙️ Process Activity** when the
-[filesystem audit](./docs/filesystem-audit.md) is on, which the title then names too.
+refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
+counts what needs a look: requests refused, requests `restrict` would refuse, connections that
+failed and requests nothing acted on. It is a CAUTION when a request was refused or the report is
+incomplete and a WARNING otherwise; with nothing to count, a plain line takes its place. The tables
+follow, refusals marked 🚫 and failed connections ⚠️. When the [filesystem
+audit](./docs/filesystem-audit.md) is on, a **Process Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, refusals included, so a blocked entry names the URL that was attempted rather
@@ -692,7 +693,7 @@ the whole summary rather than truncating it. The report comes first and takes it
 the command wrote follows it, cut at a line boundary with a note when it does not fit what is left.
 When the report, with its Process Activity section if the filesystem audit was on, would push the
 step over that limit, its parts give way in order: the process details, the timeline, the Process
-Activity tables, then the allowed table, the blocked and failed one, then the 🚨 tables of requests
+Activity tables, then the allowed table, the blocked and failed one, then the ⚠️ tables of requests
 `restrict` would refuse, and last the `restrict` example. A part that does not fit is cut at a line
 boundary with a note after what is kept, or replaced by the note when nothing of it fits; the
 example is always replaced whole rather than printed in part. Once a table is cut, the timeline is

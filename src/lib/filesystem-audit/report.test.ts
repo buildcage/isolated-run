@@ -104,7 +104,7 @@ async function uploadedBlocks(
   overrides: Partial<FilesystemAuditReportDeps>,
 ): Promise<SummaryBlock[]> {
   const read = readStepFilesystemAudit(options, overrides);
-  return read.blocks(options.startedAt, await read.upload());
+  return read.blocks(options.startedAt, await read.upload(), undefined);
 }
 
 describe("readStepFilesystemAudit", () => {
@@ -578,7 +578,11 @@ describe("readStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to read the filesystem audit recording: EIO: i/o error",
     );
-    expect(summaries).toEqual([expect.stringContaining("**The recording could not be read**")]);
+    expect(summaries).toEqual([
+      expect.stringMatching(
+        /^\n## Process Activity Report\n\n> ❗ \*\*The recording could not be read\*\*/,
+      ),
+    ]);
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
   });
@@ -893,7 +897,7 @@ describe("readStepFilesystemAudit", () => {
     const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
 
     expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
-    const text = joinSummaryBlocks(read.blocks(undefined, read.expected));
+    const text = joinSummaryBlocks(read.blocks(undefined, read.expected, "build"));
     expect(text).toContain(
       "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact",
     );
@@ -904,6 +908,17 @@ describe("readStepFilesystemAudit", () => {
     });
     expect(uploads).toHaveLength(1);
     expect(outputs).toEqual(["buildcage-filesystem-audit-deadbeef"]);
+  });
+
+  it("titles the section with the step's label, escaped", () => {
+    const { deps: d } = deps();
+    const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
+    expect(joinSummaryBlocks(read.blocks(undefined, read.expected, "a|b"))).toMatch(
+      /^\n## Process Activity Report — a\\\|b\n\n/,
+    );
+    expect(joinSummaryBlocks(read.blocks(undefined, read.expected, undefined))).toMatch(
+      /^\n## Process Activity Report\n\n/,
+    );
   });
 
   it("expects no artifact when none was asked for, or there is no copy to upload", () => {
@@ -925,7 +940,7 @@ describe("readStepFilesystemAudit", () => {
     );
 
     expect(read.expected).toBe("not-requested");
-    expect(read.blocks(undefined, read.expected)).toStrictEqual([]);
+    expect(read.blocks(undefined, read.expected, undefined)).toStrictEqual([]);
     await expect(read.upload()).resolves.toBe("not-requested");
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);

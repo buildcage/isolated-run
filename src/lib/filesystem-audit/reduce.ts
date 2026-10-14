@@ -15,6 +15,7 @@ import {
   canonical,
   components,
   DELETED,
+  DELETED_MARK,
   marked,
   MEMFD,
   MEMFD_PREFIX,
@@ -81,6 +82,12 @@ export interface Row extends Shown {
   comm: string;
 }
 
+/** An accessed path's row, with the program that made the accesses and its
+ *  place in the order programs first ran. */
+export interface PathRow extends Row {
+  program: Shown & { rank: number };
+}
+
 /**
  * A refused syscall's row: its name, whether it killed the program, and
  * whether some command refused it got no row.
@@ -99,7 +106,7 @@ export interface AuditSummary {
   /** Up to the size limit, past which fitStepSummary cuts it. */
   executed: Executed[];
   /** Each part, or undefined where it was given up (see pathsCut). */
-  paths: Row[] | undefined;
+  paths: PathRow[] | undefined;
   details: Row[] | undefined;
   /** Each refused syscall per command, as a details row. */
   refused: RefusedRow[];
@@ -185,7 +192,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     limit,
     loose,
     nodes: limits.nodes,
-    rowBytes: (p) => relLength(p) + 11,
+    rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16,
   });
   const details = new Lines({
     fanout,
@@ -198,6 +205,30 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // Each program run, with how many times it ran.
   const executed = new Map<string, number>();
   let executedBytes = 0;
+  // Each pid's program, by its rank in the order programs first ran. An exec
+  // sets it, naming a script rather than its interpreter, and a fork hands
+  // the parent's on; a process with no exec in the step's records, such as
+  // the step's shell, goes by its command name. The paths are keyed by rank, as a marked
+  // path holds the NUL a key ends at.
+  const programs = new Map<number | undefined, number>();
+  const ranks: { shown: Shown; bytes: number }[] = [];
+  const rankOf = new Map<string, number>();
+  const rank = (key: string, name: boolean): number => {
+    const id = `${name ? "n" : "p"}${key}`;
+    let r = rankOf.get(id);
+    if (r === undefined) {
+      r = ranks.length;
+      rankOf.set(id, r);
+      const s = name ? { path: escapeForDisplay(key) } : shown(key);
+      ranks.push({ shown: s, bytes: s.path.length + (s.deleted ? DELETED_MARK.length : 0) });
+    }
+    return r;
+  };
+  const programOf = (pid: number | undefined, comm: string): number => {
+    let r = programs.get(pid);
+    if (r === undefined) programs.set(pid, (r = rank(comm, true)));
+    return r;
+  };
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -211,6 +242,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!isRecord(r)) return;
     const proc = procOf(added, r);
     if (!counted) return;
+    if (r.kind === "fork") {
+      // The fork's comm is the parent's, copied to the child.
+      programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+    }
     if (r.kind === "end") {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
@@ -246,6 +281,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     if (r.kind === "exec" && r.path) {
       const p = normalize(canonical(marked(r, r.path), prefixes));
+      programs.set(r.pid, rank(p, false));
       const runs = executed.get(p);
       if (runs !== undefined) executed.set(p, runs + 1);
       else if (executedBytes <= limit) {
@@ -276,7 +312,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       details.add(x, parts);
       // The executed table lists what ran, so this one leaves it out.
-      paths.add({ ...x, comm: "", bit: x.bit & ~BIT.X }, parts);
+      const program = programOf(r.pid, x.comm);
+      paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
     }
   };
 
@@ -293,7 +330,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return { path: escapeForDisplay(p), deleted: true };
   };
 
-  const rows = (lines: { comm: string; path: string; agg: Agg }[] | undefined): Row[] | undefined =>
+  type Line = { comm: string; path: string; agg: Agg };
+  const rows = (lines: Line[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => ({
       agg,
       flags: fmtFlags(agg),
@@ -302,15 +340,21 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }));
 
   // A part cut short with no line left is given up, its note standing alone.
-  const kept = (part: Lines): Row[] | undefined => {
+  const kept = (part: Lines): Line[] | undefined => {
     const lines = part.finish();
-    return lines?.length || !part.cut ? rows(lines) : undefined;
+    return lines?.length || !part.cut ? lines : undefined;
   };
 
   const finish = (): AuditSummary => {
-    const byPath = kept(paths);
+    const byPath = kept(paths)?.map(({ comm, path, agg }) => ({
+      agg,
+      flags: fmtFlags(agg),
+      comm: "",
+      ...shown(path),
+      program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
+    }));
     // A table given up leaves no room for the details either.
-    const log = byPath && kept(details);
+    const log = byPath && rows(kept(details));
     return {
       ended,
       lost,

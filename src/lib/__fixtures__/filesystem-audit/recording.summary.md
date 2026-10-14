@@ -1,7 +1,7 @@
 
-### ⚙️ Process Activity
+## Process Activity Report
 
-#### Executed Programs
+### Executed Programs
 
 | Path | Count |
 | --- | ---: |
@@ -22,34 +22,90 @@
 | `/usr/bin/uname` | 1 |
 | `./int80` | 1 |
 
-#### Accessed Paths
+<details>
+<summary>Accessed Paths (75)</summary>
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied</sub>
 
-| Path | Access |
-| --- | --- |
-| `./A/run.sh` | WA |
-| `./execd.txt` | W |
-| `./fifo` | W |
-| `./gone-bin` | WDA |
-| `./mapped.bin` | RW |
-| `./mprotected-rwx.bin` | RW |
-| `./mprotected.bin` | RW |
-| `./probe.txt` | WM |
-| `./probe2.txt` | D |
-| `./ro-mapped.bin` | W |
-| `./root-owned.txt` | a! |
-| `./root-owned/x` | w! |
-| `./shared.txt` | W |
-| `./sub/**` | Wrd |
-| `./subshell.txt` | WA |
-| `/dev/null` | W |
-| `/dev/tty` | rw |
-| `/etc/**` | R |
-| `/proc/<pid>/stat` | R |
-| `/proc/filesystems` | R |
-| `/usr/**` | Rw! |
-| `memfd:"probe-memfd"` | W |
+| Program | Access | Path |
+| --- | --- | --- |
+| `bash` | W | `./A/run.sh` |
+| `bash` | W | `./execd.txt` |
+| `bash` | W | `./mapped.bin` |
+| `bash` | W | `./mprotected-rwx.bin` |
+| `bash` | W | `./mprotected.bin` |
+| `bash` | W | `./probe.txt` |
+| `bash` | W | `./ro-mapped.bin` |
+| `bash` | W | `./shared.txt` |
+| `bash` | W | `/dev/null` |
+| `bash` | rw | `/dev/tty` |
+| `bash` | R | `/etc/locale.alias` |
+| `bash` | R | `/usr/lib/locale/**` |
+| `bash` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/cat` | W | `./execd.txt` |
+| `/usr/bin/cat` | r | `./sub/missing.txt` |
+| `/usr/bin/cat` | W | `/dev/null` |
+| `/usr/bin/cat` | R | `/etc/hostname` |
+| `/usr/bin/cat` | R | `/etc/locale.alias` |
+| `/usr/bin/cat` | R | `/usr/lib/locale/**` |
+| `/usr/bin/cat` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/mv` | M | `./probe.txt` |
+| `/usr/bin/mv` | R | `/etc/locale.alias` |
+| `/usr/bin/mv` | R | `/proc/filesystems` |
+| `/usr/bin/mv` | R | `/usr/lib/locale/**` |
+| `/usr/bin/mv` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/rm` | D | `./probe2.txt` |
+| `/usr/bin/rm` | R | `/etc/locale.alias` |
+| `/usr/bin/rm` | R | `/usr/lib/locale/**` |
+| `/usr/bin/rm` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/touch` | WA | `./subshell.txt` |
+| `/usr/bin/touch` | R | `/etc/locale.alias` |
+| `/usr/bin/touch` | R | `/usr/lib/locale/**` |
+| `/usr/bin/touch` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/mkdir` | W | `./A` |
+| `/usr/bin/mkdir` | w! | `./root-owned/x` |
+| `/usr/bin/mkdir` | W | `./sub` |
+| `/usr/bin/mkdir` | W | `/dev/null` |
+| `/usr/bin/mkdir` | R | `/etc/locale.alias` |
+| `/usr/bin/mkdir` | R | `/proc/filesystems` |
+| `/usr/bin/mkdir` | R | `/usr/lib/locale/**` |
+| `/usr/bin/mkdir` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/mkdir` | w! | `/usr/local/buildcage-ro-probe` |
+| `/usr/bin/python3.12` | w | `./fifo` |
+| `/usr/bin/python3.12` | WDA | `./gone-bin` |
+| `/usr/bin/python3.12` | R | `./mapped.bin` |
+| `/usr/bin/python3.12` | RW | `./mprotected-rwx.bin` |
+| `/usr/bin/python3.12` | RW | `./mprotected.bin` |
+| `/usr/bin/python3.12` | d | `./sub/gone` |
+| `/usr/bin/python3.12` | R | `/etc/locale.alias` |
+| `/usr/bin/python3.12` | R | `/proc/<pid>/stat` |
+| `/usr/bin/python3.12` | R | `/usr/**` |
+| `/usr/bin/python3.12` | W | `memfd:"probe-memfd"` |
+| `/usr/bin/chmod` | A | `./A/run.sh` |
+| `/usr/bin/chmod` | a! | `./root-owned.txt` |
+| `/usr/bin/chmod` | W | `/dev/null` |
+| `/usr/bin/chmod` | R | `/etc/locale.alias` |
+| `/usr/bin/chmod` | R | `/usr/lib/locale/**` |
+| `/usr/bin/chmod` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/chown` | a! | `./root-owned.txt` |
+| `/usr/bin/chown` | W | `/dev/null` |
+| `/usr/bin/chown` | R | `/etc/**` |
+| `/usr/bin/chown` | R | `/usr/lib/locale/**` |
+| `/usr/bin/chown` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/mkfifo` | W | `./fifo` |
+| `/usr/bin/mkfifo` | R | `/etc/locale.alias` |
+| `/usr/bin/mkfifo` | R | `/proc/filesystems` |
+| `/usr/bin/mkfifo` | R | `/usr/lib/locale/**` |
+| `/usr/bin/mkfifo` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/dash` | W | `./shared.txt` |
+| `/usr/bin/true` | R | `/etc/locale.alias` |
+| `/usr/bin/true` | R | `/usr/lib/locale/**` |
+| `/usr/bin/true` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+| `/usr/bin/uname` | R | `/etc/locale.alias` |
+| `/usr/bin/uname` | R | `/usr/lib/locale/**` |
+| `/usr/bin/uname` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
+
+</details>
 
 <details>
 <summary>🔍 Process details</summary>

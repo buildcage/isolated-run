@@ -18,6 +18,7 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { failOrWarn } from "../fail-or-warn.ts";
+import { reportTitle } from "../report.ts";
 import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit-paths.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import {
@@ -39,6 +40,8 @@ import {
   unreadableSummaryBlocks,
   type RecordArtifact,
 } from "./render.ts";
+
+export const PROCESS_ACTIVITY_TITLE = "Process Activity Report";
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
@@ -171,11 +174,11 @@ function prefixes(value: string | undefined, realpath: (p: string) => string): s
 
 export interface StepFilesystemAudit {
   /**
-   * The audit's Job Summary blocks, timed from the proxy's start (undefined
-   * counts from the first access shown), each with its notice, or none when
-   * nothing was recorded or the recording could not be rendered.
+   * The audit's Job Summary blocks under `title`, timed from the proxy's start
+   * (undefined counts from the first access shown), each with its notice, or
+   * none when nothing was recorded or the recording could not be rendered.
    */
-  blocks: (startedAt: number | undefined) => SummaryBlock[];
+  blocks: (startedAt: number | undefined, title: string) => SummaryBlock[];
 }
 
 const NONE: StepFilesystemAudit = { blocks: () => [] };
@@ -188,8 +191,12 @@ export interface ReadStepFilesystemAudit {
    *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
   /** The audit's Job Summary blocks (see StepFilesystemAudit), their notes
-   *  saying `artifact` of the record. */
-  blocks: (startedAt: number | undefined, artifact: RecordArtifact) => SummaryBlock[];
+   *  saying `artifact` of the record, titled with the step's label. */
+  blocks: (
+    startedAt: number | undefined,
+    artifact: RecordArtifact,
+    stepLabel: string | undefined,
+  ) => SummaryBlock[];
 }
 
 /**
@@ -230,7 +237,8 @@ export function readStepFilesystemAudit(
       setOutput("");
       return "not-requested";
     },
-    blocks: (startedAt) => result.blocks(startedAt),
+    blocks: (startedAt, _artifact, stepLabel) =>
+      result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE)),
   });
   if (!audit) return settled(NONE);
   const options: SummaryOptions = {
@@ -247,7 +255,7 @@ export function readStepFilesystemAudit(
     reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
-    return settled({ blocks: () => unreadableSummaryBlocks() });
+    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   if (!reduced) {
     if (!attached) return settled(NONE);
@@ -255,7 +263,7 @@ export function readStepFilesystemAudit(
       "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
     );
     process.exitCode = 1;
-    return settled({ blocks: () => unreadableSummaryBlocks() });
+    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   const { summary, summaryError, ended, written } = reduced;
   // The tracer exited during the step, as a full disk makes it, or did not
@@ -286,12 +294,13 @@ export function readStepFilesystemAudit(
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
     // incomplete.
-    blocks: (startedAt, artifact) => {
+    blocks: (startedAt, artifact, stepLabel) => {
       const cutNote = (cause?: CutCause): string => filesystemTruncationNote(artifact, cause);
       let rendered: SummaryBlock[];
       try {
         if (!summary) throw summaryError;
         rendered = deps.renderBlocks(summary, {
+          title: reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE),
           startedAt,
           priorities: FILESYSTEM_PRIORITIES,
           cutNote,

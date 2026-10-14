@@ -685,7 +685,7 @@ These are refusals like `not-allowed`: they are 🚫 rows in **Blocked Hosts** a
 host or URL whatever the reason, and in `restrict` the report no longer links to
 [Troubleshooting](./aws.md#troubleshooting) once every one is expected. In `audit` mode nothing is
 refused: a warning annotation counts the requests `restrict` would have refused, and the report
-counts them under **🚨 Restrict Would Refuse** for each host and reason, or for each key under
+counts them under **⚠️ Restrict Would Refuse** for each host and reason, or for each key under
 `aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
 links for every request `restrict`'s rules would refuse, including ones a rule would then mark
 expected, which the `restrict` run itself would not fail on. **Communication details** lists each

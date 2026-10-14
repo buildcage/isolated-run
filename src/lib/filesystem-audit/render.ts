@@ -1,17 +1,18 @@
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { codeSpan } from "#core/lib/report/render/markdown-table.ts";
+import { reportHeading } from "#core/lib/report/render/render-report-markdown.ts";
 
 import { fmtSpan } from "./agg.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import type { AuditSummary, Executed, RefusedRow, Row } from "./reduce.ts";
+import type { AuditSummary, Executed, PathRow, RefusedRow, Row } from "./reduce.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied";
 // After the traffic report's closing </details>, a heading with no blank line
 // before it would read as part of that HTML block.
-const HEADING = "\n### ⚙️ Process Activity";
+const heading = (title: string): string => `\n${reportHeading(title, false).trimEnd()}`;
 const INCOMPLETE_NOTE =
   "> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
@@ -111,6 +112,8 @@ function inRecordingOrder<R extends Row>(rows: R[]): R[] {
 }
 
 export interface RenderOptions {
+  /** The section's title. May carry untrusted input: the heading escapes it. */
+  title: string;
   /** The proxy's start, in epoch seconds; undefined counts from the first access shown. */
   startedAt: number | undefined;
   priorities: FilesystemPriorities;
@@ -124,77 +127,65 @@ export interface RenderOptions {
 
 // Each part sits a level below the one before it, so once one is cut the
 // parts after it print nothing and its note stands for them all.
-function table(
-  { priorities, cutNote }: RenderOptions,
-  id: FilesystemBlockId,
-  level: number,
-  title: string,
-  md: string | undefined,
-  cause?: CutCause,
-  legend?: string,
-): SummaryBlock {
-  return md === undefined
-    ? {
-        id,
-        priority: priorities[id],
-        level,
-        section: SECTION,
-        text: `#### ${title}\n\n${cutNote(cause)}`,
-        cut: "atomic",
-      }
-    : {
-        id,
-        priority: priorities[id],
-        level,
-        section: SECTION,
-        // A table cut short says so after the rows it kept.
-        text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n${cause ? cutNote(cause) : ""}`,
-        cut: "lines",
-        head: legend ? 6 : 4,
-      };
-}
-
-function executedBlock(executed: Executed[], opts: RenderOptions): SummaryBlock {
-  return table(
-    opts,
-    FILESYSTEM_BLOCK.executed,
-    2,
-    "Executed Programs",
-    markdownRows(
-      ["Path", "Count"],
-      executed.map((e) => [pathCell(e), String(e.runs)]),
-    ),
+function executedBlock(executed: Executed[], { priorities }: RenderOptions): SummaryBlock {
+  const md = markdownRows(
+    ["Path", "Count"],
+    executed.map((e) => [pathCell(e), String(e.runs)]),
   );
+  return {
+    id: FILESYSTEM_BLOCK.executed,
+    priority: priorities[FILESYSTEM_BLOCK.executed],
+    level: 2,
+    section: SECTION,
+    text: `### Executed Programs\n\n${md}\n\n`,
+    cut: "lines",
+    head: 4,
+  };
 }
 
-// Two paths can print alike ("x" and "…/x"), so they keep their recording
-// order between them.
-function byPath(paths: Row[]): Row[] {
+// By program, in the order each first ran, and by path within each. Two
+// paths can print alike ("x" and "…/x"), so they keep their recording order
+// between them.
+function byProgramAndPath(paths: PathRow[]): PathRow[] {
   return keyed(paths)
     .sort(byRecording)
-    .sort((a, b) => a.cat - b.cat || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .sort(
+      (a, b) =>
+        a.row.program.rank - b.row.program.rank ||
+        a.cat - b.cat ||
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    )
     .map((k) => k.row);
 }
 
+// Folded, as its rows run long; a table given up leaves its note in the open.
+// The flags are explained where they first appear.
 function pathsBlock(
-  rows: Row[] | undefined,
+  rows: PathRow[] | undefined,
   cause: CutCause | undefined,
-  opts: RenderOptions,
+  { priorities, cutNote }: RenderOptions,
 ): SummaryBlock {
-  return table(
-    opts,
-    FILESYSTEM_BLOCK.paths,
-    3,
-    "Accessed Paths",
-    rows &&
-      markdownRows(
-        ["Path", "Access"],
-        rows.map((r) => [pathCell(r), r.flags]),
-      ),
-    cause,
-    // The flags are explained where they first appear.
-    LEGEND,
+  const block = {
+    id: FILESYSTEM_BLOCK.paths,
+    priority: priorities[FILESYSTEM_BLOCK.paths],
+    level: 3,
+    section: SECTION,
+  };
+  if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
+  const md = markdownRows(
+    ["Program", "Access", "Path"],
+    rows.map((r) => [pathCell(r.program), r.flags, pathCell(r)]),
   );
+  // A table cut short says so after the rows it kept.
+  return {
+    ...block,
+    cut: "lines",
+    head: 4,
+    open: `<details>\n<summary>Accessed Paths (${rows.length})</summary>\n\n`,
+    text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
+    // A blank line apart from the details that follow.
+    close: `${DETAILS_CLOSE}\n`,
+  };
 }
 
 // A memfd's name is quoted already, and a refused syscall's row names no path.
@@ -265,8 +256,8 @@ export function renderAuditSummaryBlocks(
   opts: RenderOptions,
 ): SummaryBlock[] {
   const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary;
-  const heading = [
-    HEADING,
+  const top = [
+    heading(opts.title),
     ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
     ...(hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : []),
     ...(refused.length ? [refusedNote(refused)] : []),
@@ -279,13 +270,13 @@ export function renderAuditSummaryBlocks(
     cut: "keep",
   });
   if (details?.length === 0 && !refused.length)
-    return [frame(`${heading}\n\nNo file access was recorded.\n`)];
+    return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [
-    frame(opts.legendNote ? `${heading}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${heading}\n\n`),
+    frame(opts.legendNote ? `${top}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${top}\n\n`),
   ];
   if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
-  const rows = paths && byPath(paths);
+  const rows = paths && byProgramAndPath(paths);
   // Empty when the step only ran programs, which the executed table lists.
   if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
   // The table's note stands for the details too.
@@ -296,14 +287,14 @@ export function renderAuditSummaryBlocks(
   return blocks;
 }
 
-/** The summary of a recording that could not be read. */
-export function unreadableSummaryBlocks(): SummaryBlock[] {
+/** The summary of a recording that could not be read, under `title`. */
+export function unreadableSummaryBlocks(title: string): SummaryBlock[] {
   return [
     {
       priority: 0,
       level: 1,
       section: SECTION,
-      text: `${HEADING}\n\n${UNREADABLE_NOTE}\n`,
+      text: `${heading(title)}\n\n${UNREADABLE_NOTE}\n`,
       cut: "keep",
     },
   ];

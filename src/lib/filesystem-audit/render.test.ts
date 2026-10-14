@@ -15,12 +15,19 @@ function lines(md: string): string[] {
   return m ? m[1].split("\n").map((l) => l.replace(/\s+/g, " ").trim()) : [];
 }
 
-// The rows of the "Accessed Paths" table.
-function tableRows(md: string): string[] {
+// The "Accessed Paths" table's rows, verbatim.
+function programRows(md: string): string[] {
   const m = md.match(
-    /#### Accessed Paths\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /<summary>Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
+}
+
+// The same rows as path and access alone, for a test of the paths.
+function tableRows(md: string): string[] {
+  return programRows(md).map((row) =>
+    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
+  );
 }
 
 const render = (...records: object[]): string =>
@@ -166,7 +173,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
     );
     expect(md).toContain(
-      "#### Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
+      "### Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
     );
   });
 
@@ -187,23 +194,25 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "read", comm: "a", path: "…/x" },
       { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
     );
-    expect(md).toContain("| `…/x` | R |\n| `…/x` | r |\n");
+    expect(tableRows(md)).toEqual(["| `…/x` | R |", "| `…/x` | r |"]);
   });
 
   it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
     const md = render(
-      { kind: "write", comm: "py", path: 'memfd:/usr/bin/a"b', memfd: true },
-      { kind: "exec", comm: "x", path: 'memfd:/usr/bin/a"b', memfd: true },
-      { kind: "write", comm: "py", path: "/tmp/p", deleted: true },
-      { kind: "exec", comm: "p", path: "/tmp/p", deleted: true },
-      { kind: "write", comm: "py", path: "/tmp/q (deleted)" },
+      { kind: "write", pid: 1, comm: "py", path: 'memfd:/usr/bin/a"b', memfd: true },
+      { kind: "exec", pid: 2, comm: "x", path: 'memfd:/usr/bin/a"b', memfd: true },
+      { kind: "write", pid: 1, comm: "py", path: "/tmp/p", deleted: true },
+      { kind: "exec", pid: 3, comm: "p", path: "/tmp/p", deleted: true },
+      { kind: "write", pid: 1, comm: "py", path: "/tmp/q (deleted)" },
     );
     expect(md).toContain(
       '| Path | Count |\n| --- | ---: |\n| `memfd:"/usr/bin/a\\"b"` | 1 |\n| `/tmp/p` (deleted) | 1 |\n\n',
     );
-    expect(md).toContain(
-      '| `/tmp/p` (deleted) | W |\n| `/tmp/q (deleted)` | W |\n| `memfd:"/usr/bin/a\\"b"` | W |\n',
-    );
+    expect(tableRows(md)).toEqual([
+      "| `/tmp/p` (deleted) | W |",
+      "| `/tmp/q (deleted)` | W |",
+      '| `memfd:"/usr/bin/a\\"b"` | W |',
+    ]);
     expect(lines(md)).toContain('W py memfd:"/usr/bin/a\\"b"');
     expect(lines(md)).toContain("W py /tmp/p (deleted)");
     expect(lines(md)).toContain('W py "/tmp/q (deleted)"');
@@ -211,10 +220,10 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("quotes a details name holding a space, so it cannot pass for another column", () => {
     const md = render(
-      { kind: "read", comm: "VM Thread", path: "/work/a b" },
-      { kind: "read", comm: "cat /etc/x", path: "/work/c" },
-      { kind: "read", comm: 'a"b', path: '/work/d"e' },
-      { kind: "write", comm: "py", path: "memfd:x y", memfd: true },
+      { kind: "read", pid: 1, comm: "VM Thread", path: "/work/a b" },
+      { kind: "read", pid: 2, comm: "cat /etc/x", path: "/work/c" },
+      { kind: "read", pid: 3, comm: 'a"b', path: '/work/d"e' },
+      { kind: "write", pid: 4, comm: "py", path: "memfd:x y", memfd: true },
     );
     expect(md.match(/```\n([\s\S]*?)\n```/)?.[1].split("\n")).toEqual([
       'R "VM Thread"  "./a b"',
@@ -222,7 +231,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       'R a\\"b         ./d\\"e',
       'W py           memfd:"x y"',
     ]);
-    expect(md).toContain('| `./d\\"e` | R |');
+    expect(programRows(md)).toContain('| `a\\"b` | R | `./d\\"e` |');
   });
 
   it("folds a deleted file with its siblings but keeps a memfd on its own line", () => {
@@ -257,7 +266,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("leaves the accessed-paths table out when the step only ran programs", () => {
     const md = render({ kind: "exec", comm: "sh", path: "/usr/bin/sh" });
-    expect(md).not.toContain("#### Accessed Paths");
+    expect(md).not.toContain("<summary>Accessed Paths");
     expect(lines(md)).toEqual(["X sh /usr/bin/sh"]);
   });
 
@@ -274,20 +283,70 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("leaves the executed table out when nothing was run", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
-    expect(md).not.toContain("#### Executed Programs");
+    expect(md).not.toContain("### Executed Programs");
   });
 
-  it("gives each path one row for every command's access, in path order", () => {
+  it("gives each program one row per path, folded under the flags' legend", () => {
     const md = render(
-      { kind: "read", comm: "node", path: "/etc/hosts" },
-      { kind: "read", comm: "node", path: "/work/a" },
-      { kind: "write", comm: "sh", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "node", path: "/etc/hosts" },
+      { kind: "read", pid: 1, comm: "node", path: "/work/a" },
+      { kind: "write", pid: 2, comm: "sh", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "node", path: "/work/a" },
     );
     expect(md).toContain(
-      "#### Accessed Paths\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
+      "<details>\n<summary>Accessed Paths (3)</summary>\n\n" +
+        "<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
         "lowercase = failed · ! = denied</sub>\n\n" +
-        "| Path | Access |\n| --- | --- |\n| `./a` | RW |\n| `/etc/hosts` | R |\n",
+        "| Program | Access | Path |\n| --- | --- | --- |\n" +
+        "| `node` | R | `./a` |\n| `node` | R | `/etc/hosts` |\n| `sh` | W | `./a` |\n\n</details>\n",
     );
+  });
+
+  it("names a process's program by what it ran, a script by itself, and a fork by its parent's", () => {
+    const npm = "/usr/lib/node_modules/npm/bin/npm-cli.js";
+    const md = render(
+      { kind: "read", pid: 1, comm: "bash", path: "/work/a" },
+      { kind: "fork", pid: 2, ppid: 1, comm: "bash" },
+      { kind: "exec", pid: 2, comm: "npm", path: npm },
+      { kind: "read", pid: 2, comm: "npm", path: "/work/package.json" },
+      { kind: "fork", pid: 3, ppid: 2, comm: "npm" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/node_modules/x" },
+      { kind: "fork", pid: 4, ppid: 1, comm: "bash" },
+      { kind: "write", pid: 4, comm: "bash", path: "/work/b" },
+    );
+    expect(programRows(md)).toEqual([
+      "| `bash` | R | `./a` |",
+      "| `bash` | W | `./b` |",
+      `| \`${npm}\` | W | \`./node_modules/x\` |`,
+      `| \`${npm}\` | R | \`./package.json\` |`,
+    ]);
+  });
+
+  it("keeps a process that renames itself under the name it first accessed a path by", () => {
+    const md = render(
+      { kind: "read", pid: 1, comm: "java", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "VM Thread", path: "/work/b" },
+    );
+    expect(programRows(md)).toEqual(["| `java` | R | `./a` |", "| `java` | R | `./b` |"]);
+    expect(lines(md)).toEqual(["R java ./a", 'R "VM Thread" ./b']);
+  });
+
+  it("names a fork after its parent even when the parent has accessed nothing yet", () => {
+    const md = render(
+      { kind: "fork", pid: 2, ppid: 1, comm: "bash" },
+      { kind: "read", pid: 2, comm: "renamed", path: "/work/a" },
+      { kind: "read", pid: 1, comm: "bash", path: "/work/b" },
+    );
+    expect(programRows(md)).toEqual(["| `bash` | R | `./a` |", "| `bash` | R | `./b` |"]);
+  });
+
+  it("hands the parent's program on through a fork record that names no command", () => {
+    const md = render(
+      { kind: "exec", pid: 1, comm: "make", path: "/usr/bin/make" },
+      { kind: "fork", pid: 2, ppid: 1 },
+      { kind: "write", pid: 2, comm: "make", path: "/work/out" },
+    );
+    expect(programRows(md)).toEqual(["| `/usr/bin/make` | W | `./out` |"]);
   });
 
   it("prints a path's Markdown as itself and escapes only what would break the row", () => {
@@ -296,14 +355,16 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "read", comm: "a", path: "/work/a&#47;~~b~~" },
       { kind: "read", comm: "a", path: "/work/`c``d" },
     );
-    expect(md).toContain("| `./x\\|y` | R |");
-    expect(md).toContain("| `./a&#47;~~b~~` | R |");
-    expect(md).toContain("| ```./`c``d``` | R |");
+    expect(tableRows(md)).toEqual([
+      "| ```./`c``d``` | R |",
+      "| `./a&#47;~~b~~` | R |",
+      "| `./x\\|y` | R |",
+    ]);
   });
 
   it("pads a code span whose path ends with a backtick", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x`" });
-    expect(md).toContain("| `` ./x` `` | R |");
+    expect(tableRows(md)).toEqual(["| `` ./x` `` | R |"]);
   });
 
   it("keys the workspace itself once under either spelling", () => {
@@ -314,7 +375,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       ),
       { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
     );
-    expect(md).toContain("| Path | Access |\n| --- | --- |\n| `.` | Aa! |\n\n");
+    expect(tableRows(md)).toEqual(["| `.` | Aa! |"]);
   });
 
   it("keys a path once whether it was reached through the workspace's symlink or not", () => {
@@ -327,14 +388,15 @@ describe("renderAuditSummaryBlocks: tables", () => {
       ),
       { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
     );
-    expect(md).toContain("| `./x` | R |");
-    expect(md).not.toContain("| `./x` | r |");
+    expect(tableRows(md)).toEqual(["| `./x` | R |"]);
     expect(md).toContain("| Path | Count |\n| --- | ---: |\n| `./bin` | 2 |\n\n");
   });
 
   it("folds the per-command record into a details element after the tables", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
-    expect(md.indexOf("#### Accessed Paths")).toBeLessThan(md.indexOf("<details>"));
+    expect(md.indexOf("<summary>Accessed Paths")).toBeLessThan(
+      md.indexOf("<summary>🔍 Process details"),
+    );
     expect(md).toMatch(
       /<details>\n<summary>🔍 Process details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
     );

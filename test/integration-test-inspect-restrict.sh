@@ -85,7 +85,7 @@ assert_summary_contains "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule refused this one and none can clear it, so it is tabled apart.
-assert_summary_contains "#### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
+assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the refusals"
 assert_summary_contains "| \`absent.example.com:443\` | HTTPS | ⚠️ dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"
 # The opposite case: a connection that never completed is a refusal, because
 # nothing on it was ever authenticated. It reads like an outage and is counted

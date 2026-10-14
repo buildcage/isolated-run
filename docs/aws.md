@@ -154,7 +154,7 @@ Then:
    that are yours: one you do not recognize there is what the check is meant to catch.
 2. Name those accounts. If that added any, run `audit` again before reading on: until an account is
    named, every request signed with its roles' keys shows as one `restrict` would refuse.
-3. Read **🚨 Restrict Would Refuse** in the report. [Troubleshooting](#troubleshooting) gives the
+3. Read **⚠️ Restrict Would Refuse** in the report. [Troubleshooting](#troubleshooting) gives the
    usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
    rules, `aws_key_check: true` and the accounts over.
@@ -162,7 +162,7 @@ Then:
 ### In `audit` mode
 
 A warning annotation counts the requests `restrict` would refuse. In `audit` the check judges every
-request, so one no URL rule allows can carry an `aws-` reason too. **🚨 Restrict Would Refuse**
+request, so one no URL rule allows can carry an `aws-` reason too. **⚠️ Restrict Would Refuse**
 counts them in two tables. `aws-key-not-allowed` gets a row for each key, whatever the host, naming
 up to three of the hosts its requests went to. Keys are numbered in the order they first appear
 unless the run refused only one, and a key an STS answer in the run issued names the account of its
@@ -181,7 +181,7 @@ role. Every other reason gets a row for each host, as in **🚫 Blocked Hosts**:
 refused one ends in `-> aws-key-not-allowed, key 1 from a role in 222222222222`:
 
 ```
-🚨 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)
+⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)
 ```
 
 With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
@@ -237,7 +237,7 @@ cannot be turned back into a key ID or matched across runs.
 
 ## Troubleshooting
 
-A refused request names its reason, such as `aws-key-not-allowed`, under **🚨 Restrict Would
+A refused request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would
 Refuse** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
 reason up here:
 

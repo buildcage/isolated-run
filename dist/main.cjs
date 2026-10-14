@@ -68644,6 +68644,161 @@ function failOrWarn(annotation, failClosed) {
 		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
 	};
 }
+//#endregion
+//#region src/core/lib/actions/write-step-summary.ts
+init_core();
+async function writeStepSummary(markdown, summaryFile) {
+	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
+}
+//#endregion
+//#region src/core/lib/report/outcome/annotate.ts
+function applyOutcomeAnnotations(annotation, emissions) {
+	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
+}
+//#endregion
+//#region src/core/lib/log/authority.ts
+const DEFAULT_PORT = {
+	https: "443",
+	http: "80"
+};
+function splitHostPort(authority) {
+	let colon = authority.lastIndexOf(":");
+	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
+		host: authority,
+		port: void 0
+	} : {
+		host: authority.slice(0, colon),
+		port: authority.slice(colon + 1)
+	};
+}
+function ruleHost(host) {
+	return sniHost(host).replace(/\.$/, "");
+}
+function sniHost(sni) {
+	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+//#endregion
+//#region src/core/lib/log/traffic-event.ts
+const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
+function clientEndedNoise(timeline) {
+	let completed = new Set();
+	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
+	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
+}
+function connectedHosts(timeline) {
+	let connected = {
+		any: new Set(),
+		blocked: new Set()
+	};
+	for (let event of timeline) {
+		if (event.protocol === "dns" || event.action === "incomplete") continue;
+		let host = ruleHost(event.host);
+		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
+	}
+	return connected;
+}
+function isRedundantDns(event, connected) {
+	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
+}
+//#endregion
+//#region src/core/lib/report/outcome/blocked-outcome.ts
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
+	if (!logLooksPlausible) return isAudit ? {
+		level: "notice",
+		shouldFail: !1
+	} : failOnBlocked ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+	if (!blockedCount) return {
+		level: "none",
+		shouldFail: !1
+	};
+	if (isAudit) return {
+		level: "notice",
+		shouldFail: !1
+	};
+	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
+	return failOnBlocked && hasUnexpected ? {
+		level: "error",
+		shouldFail: !0
+	} : {
+		level: "notice",
+		shouldFail: !1
+	};
+}
+const COUNT_NOUN = "connection(s) and lookup(s)";
+function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
+	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
+	if (isAudit) return base;
+	let unexpected = blockedRows.filter((row) => !row.expected).length;
+	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
+}
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
+	let outcome = determineBlockedOutcome({
+		isAudit,
+		failOnBlocked,
+		blockedCount,
+		blockedRows,
+		logLooksPlausible
+	}), base = buildBlockedMessage({
+		blockedCount,
+		blockedRows,
+		engineLabel,
+		isAudit
+	});
+	if (logLooksPlausible) return {
+		...outcome,
+		message: base
+	};
+	if (isAudit) return {
+		...outcome,
+		message: `${base}, but the logs are incomplete and this is not a full record`
+	};
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	return {
+		...outcome,
+		message
+	};
+}
+//#endregion
+//#region src/core/lib/report/outcome/report-outcomes.ts
+function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
+	let emissions = [describeBlockedOutcome({
+		isAudit: report.parameters.mode === "audit",
+		failOnBlocked,
+		blockedCount: report.blockedCount,
+		blockedRows: report.blocked,
+		logLooksPlausible: report.logLooksPlausible,
+		engineLabel
+	})], undecided = describeUndecidedRequests(report, engineLabel);
+	undecided && emissions.push(undecided);
+	let failed = describeFailedConnections(report, engineLabel);
+	return failed && emissions.push(failed), emissions;
+}
+function countUndecidedRequests(report) {
+	let isNoise = clientEndedNoise(report.timeline);
+	return report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
+}
+function describeUndecidedRequests(report, engineLabel) {
+	let count = countUndecidedRequests(report);
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+	};
+}
+function describeFailedConnections(report, engineLabel) {
+	let count = report.failed.reduce((total, row) => total + row.count, 0);
+	if (count !== 0) return {
+		level: "notice",
+		shouldFail: !1,
+		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
+	};
+}
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
@@ -68792,51 +68947,6 @@ function hostTableTruncationNote(artifactAvailable) {
 	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
 }
 //#endregion
-//#region src/core/lib/log/authority.ts
-const DEFAULT_PORT = {
-	https: "443",
-	http: "80"
-};
-function splitHostPort(authority) {
-	let colon = authority.lastIndexOf(":");
-	return colon <= 0 || authority.slice(colon + 1).includes("]") ? {
-		host: authority,
-		port: void 0
-	} : {
-		host: authority.slice(0, colon),
-		port: authority.slice(colon + 1)
-	};
-}
-function ruleHost(host) {
-	return sniHost(host).replace(/\.$/, "");
-}
-function sniHost(sni) {
-	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
-const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
-function clientEndedNoise(timeline) {
-	let completed = new Set();
-	for (let event of timeline) event.protocol !== "dns" && event.action !== "incomplete" && event.host !== "(unknown)" && completed.add(ruleHost(event.host));
-	return (event) => event.action === "incomplete" && CLIENT_ENDED_REASONS.has(event.reason) && completed.has(ruleHost(event.host));
-}
-function connectedHosts(timeline) {
-	let connected = {
-		any: new Set(),
-		blocked: new Set()
-	};
-	for (let event of timeline) {
-		if (event.protocol === "dns" || event.action === "incomplete") continue;
-		let host = ruleHost(event.host);
-		connected.any.add(host), event.action === "block" && connected.blocked.add(host);
-	}
-	return connected;
-}
-function isRedundantDns(event, connected) {
-	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
-}
-//#endregion
 //#region src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
@@ -68871,7 +68981,7 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt, refusalLabel) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "🚨" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`;
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`;
 	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
@@ -69051,118 +69161,23 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 	});
 }
 //#endregion
-//#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
-	if (!logLooksPlausible) return isAudit ? {
-		level: "notice",
-		shouldFail: !1
-	} : failOnBlocked ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-	if (!blockedCount) return {
-		level: "none",
-		shouldFail: !1
-	};
-	if (isAudit) return {
-		level: "notice",
-		shouldFail: !1
-	};
-	let hasUnexpected = blockedRows.length === 0 || blockedRows.some((row) => !row.expected);
-	return failOnBlocked && hasUnexpected ? {
-		level: "error",
-		shouldFail: !0
-	} : {
-		level: "notice",
-		shouldFail: !1
-	};
-}
-const COUNT_NOUN = "connection(s) and lookup(s)";
-function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }) {
-	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
-	if (isAudit) return base;
-	let unexpected = blockedRows.filter((row) => !row.expected).length;
-	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
-}
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
-	let outcome = determineBlockedOutcome({
-		isAudit,
-		failOnBlocked,
-		blockedCount,
-		blockedRows,
-		logLooksPlausible
-	}), base = buildBlockedMessage({
-		blockedCount,
-		blockedRows,
-		engineLabel,
-		isAudit
-	});
-	if (logLooksPlausible) return {
-		...outcome,
-		message: base
-	};
-	if (isAudit) return {
-		...outcome,
-		message: `${base}, but the logs are incomplete and this is not a full record`
-	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
-	return {
-		...outcome,
-		message
-	};
-}
-//#endregion
-//#region src/core/lib/report/outcome/report-outcomes.ts
-function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
-	let emissions = [describeBlockedOutcome({
-		isAudit: report.parameters.mode === "audit",
-		failOnBlocked,
-		blockedCount: report.blockedCount,
-		blockedRows: report.blocked,
-		logLooksPlausible: report.logLooksPlausible,
-		engineLabel
-	})], undecided = describeUndecidedRequests(report, engineLabel);
-	undecided && emissions.push(undecided);
-	let failed = describeFailedConnections(report, engineLabel);
-	return failed && emissions.push(failed), emissions;
-}
-function countUndecidedRequests(report) {
-	let isNoise = clientEndedNoise(report.timeline);
-	return report.timeline.filter((event) => event.action === "incomplete" && !isNoise(event)).length;
-}
-function describeUndecidedRequests(report, engineLabel) {
-	let count = countUndecidedRequests(report);
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
-	};
-}
-function describeFailedConnections(report, engineLabel) {
-	let count = report.failed.reduce((total, row) => total + row.count, 0);
-	if (count !== 0) return {
-		level: "notice",
-		shouldFail: !1,
-		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
-	};
-}
-//#endregion
 //#region src/core/lib/report/render/verdict.ts
 function renderVerdict(report, extraItems = []) {
 	let unexpected = 0, expected = 0;
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
 	report.blocked.length === 0 && (unexpected = report.blockedCount);
-	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), items = [
-		...report.logLooksPlausible ? [] : ["❗ report incomplete"],
-		...unexpected ? [`🚫 ${unexpected} refused`] : [],
+	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [...report.logLooksPlausible ? [] : ["report incomplete"], ...unexpected ? [`${unexpected} refused`] : []], warning = [
 		...extraItems,
-		...failed ? [`⚠️ ${failed} failed`] : [],
-		...undecided ? [`⚠️ ${undecided} not acted on`] : []
-	];
-	return expected && items.push(`${items.length ? "" : "✅ "}${expected} refused as expected`), `**${items.length ? items.join(" · ") : "✅ Nothing was refused"}**\n\n`;
+		...failed ? [`${failed} failed`] : [],
+		...undecided ? [`${undecided} not acted on`] : []
+	], asExpected = expected ? [`${expected} refused as expected`] : [];
+	if (caution.length + warning.length === 0) return `Result: ✅ ${asExpected[0] ?? "Nothing was refused"}\n\n`;
+	let items = [
+		...caution,
+		...warning,
+		...asExpected
+	].join(" · ");
+	return `> [!${caution.length ? "CAUTION" : "WARNING"}]\n> ${items}\n\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/render-report-markdown.ts
@@ -69199,11 +69214,11 @@ const trafficFrame = (text) => ({
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, section, footer = !0, extraBlocks = () => [], ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, h = section ? "####" : "###", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
-	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), section && (top += `### ${section}\n\n`), blocks.push(trafficFrame(top));
+function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", refusalLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
+	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
+	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(trafficFrame(top));
 	let wrote = !1, gap = () => wrote ? "\n" : "";
-	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${h} ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
+	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
 		let blocked = foldExpectedBlockedRows(report.blocked).map((r) => ({
 			...r,
 			outcome: "blocked"
@@ -69215,12 +69230,12 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			...failed,
 			...blocked.filter((r) => r.expected)
 		], tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule refused the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
-		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}${h} ${tableTitle}\n\n`, renderHostTable(rows, {
+		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### ${tableTitle}\n\n`, renderHostTable(rows, {
 			showReason: !0,
 			showExpected
 		}), `\n${note}`)), wrote = !0;
 	}
-	let extra = extraBlocks(gap(), h);
+	let extra = extraBlocks(gap());
 	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
@@ -69255,6 +69270,256 @@ function reportHeading(title, isAudit) {
 }
 function reportFooter(actionRepo) {
 	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
+}
+function awsFieldsOf(e) {
+	return e.extensions?.aws ?? {};
+}
+//#endregion
+//#region src/core/lib/log/aggregate.ts
+function entryKey(e) {
+	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
+}
+function compareAggregated(a, b) {
+	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
+}
+function aggregate(filtered) {
+	let map = {};
+	for (let e of filtered) {
+		let key = entryKey(e);
+		map[key] = (map[key] || 0) + 1;
+	}
+	return Object.keys(map).map((key) => {
+		let [host, portStr, ruleType, reason] = key.split("	");
+		return {
+			host,
+			port: portStr,
+			ruleType,
+			reason,
+			count: map[key]
+		};
+	}).sort(compareAggregated);
+}
+//#endregion
+//#region src/core/lib/report/build/aggregate.ts
+function targetOf(event) {
+	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
+}
+function requestPath(url) {
+	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
+	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
+}
+function matchesUrlRule({ rule, hostRe, pathRe }, event) {
+	if (event.method === void 0 || event.url === void 0) return !1;
+	let scheme = rule.schemes.find((s) => s === event.protocol);
+	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
+	let hostPort = `${event.host}:${event.port}`;
+	if (rule.isRegex) {
+		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
+		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
+	}
+	return hostRe.test(hostPort);
+}
+function buildMatchers(knownBlockedRules) {
+	return knownBlockedRules.map((line) => {
+		if (isKnownBlockedUrlRule(line)) {
+			let urlRule = convertUrlRule(line), compiled = {
+				rule: urlRule,
+				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
+				pathRe: new RegExp(urlRule.pathRegex)
+			};
+			return {
+				rule: urlRule.raw,
+				matches: (event) => matchesUrlRule(compiled, event)
+			};
+		}
+		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
+		return {
+			rule: completed,
+			matches: (event) => re.test(targetOf(event))
+		};
+	});
+}
+function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
+	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
+	for (let event of blockedEvents) {
+		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
+		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
+			entry,
+			count: 1,
+			expectedAll: index !== -1,
+			bestIndex: index === -1 ? Infinity : index,
+			bestRule: index === -1 ? void 0 : matchers[index].rule
+		});
+	}
+	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
+		...entry,
+		count,
+		expected: !0,
+		expectedBy: bestRule
+	} : {
+		...entry,
+		count,
+		expected: !1
+	}).sort(compareAggregated);
+}
+const RULE_TYPE = {
+	https: "HTTPS",
+	http: "HTTP",
+	tls: "TLS",
+	tcp: "IP",
+	dns: "DNS"
+};
+function toHostRow(event) {
+	return {
+		host: event.host,
+		port: event.port === void 0 ? "-" : String(event.port),
+		ruleType: RULE_TYPE[event.protocol],
+		reason: event.reason ?? "-"
+	};
+}
+function reduceTimeline(timeline, knownBlockedRules) {
+	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
+	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
+	return {
+		passed: aggregate(passedRows),
+		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
+		failed: aggregate(failedRows),
+		blockedCount: blockedEvents.length
+	};
+}
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	return {
+		engine,
+		parameters,
+		...reduceTimeline(timeline, parameters.knownBlockedRules),
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		startedAt,
+		timeline
+	};
+}
+//#endregion
+//#region src/proxy/aws-keys.ts
+const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
+function parseAwsAccounts(input) {
+	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !isAwsAccountId(token));
+	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
+	return [...new Set(tokens)];
+}
+function isAwsAccountId(value) {
+	return ACCOUNT_ID.test(value);
+}
+function isAwsAccessKeyId(value) {
+	return ACCESS_KEY_ID.test(value);
+}
+//#endregion
+//#region src/lib/would-refuse.ts
+const KEY_NOT_ALLOWED = "aws-key-not-allowed";
+function refusedKeys(timeline) {
+	let issuers = new Map(), seen = new Map();
+	for (let e of timeline) {
+		let { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
+		issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
+		let keyRef = refusedKeyRef(e);
+		if (!keyRef) continue;
+		let key = seen.get(keyRef) ?? {
+			hosts: new Set(),
+			count: 0
+		};
+		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
+	}
+	let numbered = seen.size > 1;
+	return new Map([...seen].map(([keyRef, key], i) => {
+		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+		return [keyRef, {
+			...key,
+			label,
+			bare: !numbered && !account
+		}];
+	}));
+}
+function refusedKeyRef(e) {
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
+}
+function letThrough(e) {
+	return e.wouldRefuse !== void 0 && e.action !== "block";
+}
+function auditedKey(e) {
+	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
+}
+function keyRefusalLabel(keys) {
+	return (e, reason) => {
+		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
+		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
+	};
+}
+const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
+function wouldRefuseTruncationNote(artifactAvailable) {
+	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+}
+function wouldRefuseVerdictItems(timeline) {
+	let count = timeline.filter(letThrough).length;
+	return count === 0 ? [] : [`${count} restrict would refuse`];
+}
+function describeWouldRefuse(timeline) {
+	let count = timeline.filter(letThrough).length;
+	if (count !== 0) return {
+		level: "warning",
+		shouldFail: !1,
+		message: `${count} request(s) restrict mode would refuse. The ⚠️ Restrict Would Refuse section counts them by key or by host and reason.`
+	};
+}
+function wouldRefuseBlocks(timeline, keys, priority, gap) {
+	let heading = `${gap}### ⚠️ Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+	if (audited.length > 0) {
+		let table = markdownTable([
+			{
+				key: "key",
+				title: `Key (${KEY_NOT_ALLOWED})`
+			},
+			{
+				key: "hosts",
+				title: "Hosts"
+			},
+			{
+				key: "count",
+				title: "Count",
+				align: "right"
+			}
+		], audited.map(({ label, hosts, count }) => {
+			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
+			return {
+				key: label,
+				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
+				count
+			};
+		}));
+		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
+	}
+	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
+		...toHostRow(e),
+		reason: e.wouldRefuse
+	}]));
+	if (rows.length > 0) {
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
+		blocks.push(blocks.length > 0 ? {
+			...host,
+			level: host.level + 1
+		} : host);
+	}
+	return blocks;
+}
+//#endregion
+//#region src/lib/aws-report.ts
+function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
+	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (!refusedByAwsCheck || at === -1) return blocks;
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
+	return [
+		...blocks.slice(0, at + 1),
+		link,
+		...blocks.slice(at + 1)
+	];
 }
 //#endregion
 //#region src/lib/filesystem-audit/record.ts
@@ -69430,7 +69695,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", HEADING = "\n### ⚙️ Process Activity";
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function refusedNote(rows) {
 	let byName = new Map(), cut = new Set(), killed = new Set(), anyKilled = !1;
 	for (let { syscall, comm } of inRecordingOrder(rows)) {
@@ -69453,7 +69718,7 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -69468,32 +69733,50 @@ const SECTION = "filesystem", FILESYSTEM_BLOCK = {
 function inRecordingOrder(rows) {
 	return keyed(rows).sort(byRecording).map((k) => k.row);
 }
-function table({ priorities, cutNote }, id, level, title, md, cause, legend) {
-	return md === void 0 ? {
-		id,
-		priority: priorities[id],
-		level,
+function executedBlock(executed, { priorities }) {
+	let md = markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]));
+	return {
+		id: FILESYSTEM_BLOCK.executed,
+		priority: priorities[FILESYSTEM_BLOCK.executed],
+		level: 2,
 		section: SECTION,
-		text: `#### ${title}\n\n${cutNote(cause)}`,
-		cut: "atomic"
-	} : {
-		id,
-		priority: priorities[id],
-		level,
-		section: SECTION,
-		text: `#### ${title}\n\n${legend ? `<sub>${legend}</sub>\n\n` : ""}${md}\n\n${cause ? cutNote(cause) : ""}`,
+		text: `### Executed Programs\n\n${md}\n\n`,
 		cut: "lines",
-		head: legend ? 6 : 4
+		head: 4
 	};
 }
-function executedBlock(executed, opts) {
-	return table(opts, FILESYSTEM_BLOCK.executed, 2, "Executed Programs", markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)])));
+function byProgramAndPath(paths) {
+	return keyed(paths).sort(byRecording).sort((a, b) => a.row.program.rank - b.row.program.rank || a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
 }
-function byPath(paths) {
-	return keyed(paths).sort(byRecording).sort((a, b) => a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
-}
-function pathsBlock(rows, cause, opts) {
-	return table(opts, FILESYSTEM_BLOCK.paths, 3, "Accessed Paths", rows && markdownRows(["Path", "Access"], rows.map((r) => [pathCell(r), r.flags])), cause, LEGEND);
+function pathsBlock(rows, cause, { priorities, cutNote }) {
+	let block = {
+		id: FILESYSTEM_BLOCK.paths,
+		priority: priorities[FILESYSTEM_BLOCK.paths],
+		level: 3,
+		section: SECTION
+	};
+	if (!rows) return {
+		...block,
+		cut: "atomic",
+		text: cutNote(cause)
+	};
+	let md = markdownRows([
+		"Program",
+		"Access",
+		"Path"
+	], rows.map((r) => [
+		pathCell(r.program),
+		r.flags,
+		pathCell(r)
+	]));
+	return {
+		...block,
+		cut: "lines",
+		head: 4,
+		open: `<details>\n<summary>Accessed Paths (${rows.length})</summary>\n\n`,
+		text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
+		close: `${DETAILS_CLOSE}\n`
+	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
 function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
@@ -69503,7 +69786,7 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		level: 4,
 		section: SECTION,
 		open: "<details>\n<summary>🔍 Process details</summary>\n\n",
-		close: "</details>\n"
+		close: DETAILS_CLOSE
 	};
 	if (!details) return {
 		...log,
@@ -69523,8 +69806,8 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 	};
 }
 function renderAuditSummaryBlocks(summary, opts) {
-	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, heading = [
-		HEADING,
+	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, top = [
+		heading(opts.title),
 		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
 		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
 		...refused.length ? [refusedNote(refused)] : []
@@ -69535,18 +69818,18 @@ function renderAuditSummaryBlocks(summary, opts) {
 		text,
 		cut: "keep"
 	});
-	if (details?.length === 0 && !refused.length) return [frame(`${heading}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(opts.legendNote ? `${heading}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${heading}\n\n`)];
+	if (details?.length === 0 && !refused.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(opts.legendNote ? `${top}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${top}\n\n`)];
 	executed.length !== 0 && blocks.push(executedBlock(executed, opts));
-	let rows = paths && byPath(paths);
+	let rows = paths && byProgramAndPath(paths);
 	return rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts)), blocks;
 }
-function unreadableSummaryBlocks() {
+function unreadableSummaryBlocks(title) {
 	return [{
 		priority: 0,
 		level: 1,
 		section: SECTION,
-		text: `${HEADING}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
+		text: `${heading(title)}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
 > artifact was uploaded.\n`,
 		cut: "keep"
 	}];
@@ -69569,7 +69852,113 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 5,
 	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 8
-}, starred = (path) => path === "/" ? "/**" : `${path}/**`, looseKids = (node) => {
+};
+//#endregion
+//#region src/lib/report.ts
+function reportTitle(label, title = "Outbound Traffic Report") {
+	return label ? `${title} — ${label}` : title;
+}
+function summaryFooter(actionRepo) {
+	return trafficFrame(reportFooter(actionRepo));
+}
+function missingReportFrame(title, isAudit) {
+	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
+}
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+	let emissions = describeReportOutcomes(report, {
+		failOnBlocked: failOnBlocked ?? !1,
+		engineLabel: "sandbox"
+	}), wouldRefuse = describeWouldRefuse(report.timeline);
+	wouldRefuse && emissions.push(wouldRefuse);
+	let keys = refusedKeys(report.timeline);
+	return {
+		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
+			title: reportTitle(stepLabel),
+			footer: !1,
+			verdictItems: wouldRefuseVerdictItems(report.timeline),
+			stepName: "Start isolated-run",
+			runCommand,
+			extraInputs,
+			actionVersion,
+			refusalLabel: keyRefusalLabel(keys),
+			extraBlocks: (gap) => wouldRefuseBlocks(report.timeline, keys, 2, gap)
+		}), report, actionRepo, actionRef),
+		emissions
+	};
+}
+const realDeps$4 = {
+	appendFile: node_fs.appendFileSync,
+	fileSize: (path) => (0, node_fs.statSync)(path).size,
+	writeSummary: writeStepSummary
+};
+function summarySize(path, fileSize) {
+	if (!path) return 0;
+	try {
+		return fileSize(path);
+	} catch {
+		return 0;
+	}
+}
+const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
+function cutCommandSummary(summary, room) {
+	if (summary.length <= room) return summary;
+	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
+	if (keep < 0) return Buffer.alloc(0);
+	let end = summary.subarray(0, keep).lastIndexOf(10);
+	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
+}
+function moveCommandSummaryLast(path, commandBytes) {
+	if (commandBytes === 0) return !1;
+	let file = (0, node_fs.readFileSync)(path), command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
+	if (ours.length === 0 && kept === command) return !1;
+	let temp = `${path}.buildcage`;
+	return (0, node_fs.writeFileSync)(temp, Buffer.concat([
+		ours,
+		kept.length > 0 ? separator : Buffer.alloc(0),
+		kept
+	])), (0, node_fs.renameSync)(temp, path), kept !== command;
+}
+function fullReportLocation(artifactAvailable) {
+	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+}
+function reportDidNotFitMessage(artifactAvailable) {
+	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
+}
+function reportDidNotFitLine(artifactAvailable) {
+	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
+}
+async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
+	let { fileSize, writeSummary } = {
+		...realDeps$4,
+		...overrides
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
+		usedBytes: used,
+		onCut: (b) => {
+			b.id !== void 0 && cutIds.add(b.id);
+		}
+	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
+	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+		cutIds,
+		wrote
+	};
+}
+async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
+	let { appendFile, fileSize, writeSummary } = {
+		...realDeps$4,
+		...overrides
+	}, outcomes = computeReportOutcomes(report, options);
+	applyOutcomeAnnotations(annotation, outcomes.emissions);
+	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+		fileSize,
+		writeSummary,
+		commandBytes,
+		fallbackLine: reportDidNotFitLine(artifactAvailable)
+	});
+	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+}
+//#endregion
+//#region src/lib/filesystem-audit/fold-tree.ts
+const starred = (path) => path === "/" ? "/**" : `${path}/**`, looseKids = (node) => {
 	let n = 0;
 	for (let kid of node.kids?.values() ?? []) kid.kept || n++;
 	return n;
@@ -69881,7 +70270,7 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p) => relLength(p) + 11
+		rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16
 	}), details = new Lines({
 		fanout,
 		keep,
@@ -69889,11 +70278,25 @@ function createAuditSummary(prefixes) {
 		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, comm) => relLength(p) + comm.length + 3
-	}), executed = new Map(), executedBytes = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Map(), add = (r, counted = !0) => {
+	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], rankOf = new Map(), rank = (key, name) => {
+		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
+		if (r === void 0) {
+			r = ranks.length, rankOf.set(id, r);
+			let s = name ? { path: escapeForDisplay(key) } : shown(key);
+			ranks.push({
+				shown: s,
+				bytes: s.path.length + (s.deleted ? 10 : 0)
+			});
+		}
+		return r;
+	}, programOf = (pid, comm) => {
+		let r = programs.get(pid);
+		return r === void 0 && programs.set(pid, r = rank(comm, !0)), r;
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
-			if (r.kind === "end") {
+			if (r.kind === "fork" && programs.set(r.pid, programOf(r.ppid, r.comm ?? "")), r.kind === "end") {
 				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
 				return;
 			}
@@ -69920,7 +70323,9 @@ function createAuditSummary(prefixes) {
 				return;
 			}
 			if (r.kind === "exec" && r.path) {
-				let p = normalize$2(canonical(marked(r, r.path), prefixes)), runs = executed.get(p);
+				let p = normalize$2(canonical(marked(r, r.path), prefixes));
+				programs.set(r.pid, rank(p, !1));
+				let runs = executed.get(p);
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
 			}
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
@@ -69935,9 +70340,11 @@ function createAuditSummary(prefixes) {
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path);
-				details.add(x, parts), paths.add({
+				details.add(x, parts);
+				let program = programOf(r.pid, x.comm);
+				paths.add({
 					...x,
-					comm: "",
+					comm: String(program),
 					bit: x.bit & ~BIT.X
 				}, parts);
 			}
@@ -69962,13 +70369,22 @@ function createAuditSummary(prefixes) {
 		...shown(path)
 	})), kept = (part) => {
 		let lines = part.finish();
-		return lines?.length || !part.cut ? rows(lines) : void 0;
+		return lines?.length || !part.cut ? lines : void 0;
 	};
 	return {
 		observe,
 		add,
 		finish: () => {
-			let byPath = kept(paths), log = byPath && kept(details);
+			let byPath = kept(paths)?.map(({ comm, path, agg }) => ({
+				agg,
+				flags: fmtFlags(agg),
+				comm: "",
+				...shown(path),
+				program: {
+					...ranks[Number(comm)].shown,
+					rank: Number(comm)
+				}
+			})), log = byPath && rows(kept(details));
 			return {
 				ended,
 				lost,
@@ -70022,7 +70438,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 }
 //#endregion
 //#region src/lib/filesystem-audit/report.ts
-const CHUNK_BYTES = 1 << 20;
+const PROCESS_ACTIVITY_TITLE = "Process Activity Report", CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
 	try {
@@ -70056,7 +70472,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 		}
 	};
 }
-const realDeps$4 = {
+const realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
@@ -70079,7 +70495,7 @@ function prefixes(value, realpath) {
 const NONE = { blocks: () => [] };
 function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
-		...realDeps$4,
+		...realDeps$3,
 		...overrides
 	}, setOutput = (artifactName) => {
 		try {
@@ -70090,7 +70506,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	}, settled = (result) => ({
 		expected: "not-requested",
 		upload: async () => (setOutput(""), "not-requested"),
-		blocks: (startedAt) => result.blocks(startedAt)
+		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE))
 	});
 	if (!audit) return settled(NONE);
 	let options = {
@@ -70100,9 +70516,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: () => unreadableSummaryBlocks() });
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
 	}
-	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: () => unreadableSummaryBlocks() })) : settled(NONE);
+	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
 	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
 	let artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
@@ -70117,11 +70533,12 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 			}
 			return setOutput(artifactName), artifactOf(artifactName);
 		},
-		blocks: (startedAt, artifact) => {
+		blocks: (startedAt, artifact, stepLabel) => {
 			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
 			try {
 				if (!summary) throw summaryError;
 				rendered = deps.renderBlocks(summary, {
+					title: reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE),
 					startedAt,
 					priorities: FILESYSTEM_PRIORITIES,
 					cutNote,
@@ -70179,23 +70596,6 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		...reduced,
 		written
 	};
-}
-//#endregion
-//#region src/proxy/aws-keys.ts
-const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
-function parseAwsAccounts(input) {
-	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !isAwsAccountId(token));
-	if (invalid.length > 0) throw Error(`invalid AWS account ID: ${invalid.map((t) => JSON.stringify(t)).join(", ")}`);
-	return [...new Set(tokens)];
-}
-function isAwsAccountId(value) {
-	return ACCOUNT_ID.test(value);
-}
-function isAwsAccessKeyId(value) {
-	return ACCESS_KEY_ID.test(value);
-}
-function awsFieldsOf(e) {
-	return e.extensions?.aws ?? {};
 }
 //#endregion
 //#region src/lib/filesystem-audit/mode.ts
@@ -73043,7 +73443,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 //#endregion
 //#region src/lib/sandbox/sandboxed-command.ts
 init_core();
-const realDeps$3 = {
+const realDeps$2 = {
 	withScratchDir,
 	extractRuncBootstrap,
 	extractCaCert,
@@ -73262,7 +73662,7 @@ async function startAudit(dir, config, options, deps) {
 }
 async function runSandboxedCommand(options, overrides = {}) {
 	let { containerName, proxyNetns, env, filesystemMode, overlayRoots, warn, cancel } = options, deps = {
-		...realDeps$3,
+		...realDeps$2,
 		...overrides
 	}, { withScratchDir, writeOciConfig, resolveSandboxEnv, buildEnvBlob, runIsolated } = deps;
 	return withScratchDir(async (dir) => {
@@ -73657,130 +74057,6 @@ async function scanInspectDnsLog(lines, isAudit = !1) {
 	};
 }
 //#endregion
-//#region src/core/lib/log/aggregate.ts
-function entryKey(e) {
-	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
-}
-function compareAggregated(a, b) {
-	return b.count - a.count || (a.host < b.host ? -1 : +(a.host > b.host)) || Number(a.port) - Number(b.port);
-}
-function aggregate(filtered) {
-	let map = {};
-	for (let e of filtered) {
-		let key = entryKey(e);
-		map[key] = (map[key] || 0) + 1;
-	}
-	return Object.keys(map).map((key) => {
-		let [host, portStr, ruleType, reason] = key.split("	");
-		return {
-			host,
-			port: portStr,
-			ruleType,
-			reason,
-			count: map[key]
-		};
-	}).sort(compareAggregated);
-}
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
-function targetOf(event) {
-	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
-}
-function requestPath(url) {
-	let pathAndQuery = url.slice(url.indexOf("/", url.indexOf("://") + 3)), query = pathAndQuery.indexOf("?");
-	return query === -1 ? pathAndQuery : pathAndQuery.slice(0, query);
-}
-function matchesUrlRule({ rule, hostRe, pathRe }, event) {
-	if (event.method === void 0 || event.url === void 0) return !1;
-	let scheme = rule.schemes.find((s) => s === event.protocol);
-	if (scheme === void 0 || rule.methods !== null && !rule.methods.includes(event.method.toUpperCase()) || !pathRe.test(requestPath(event.url))) return !1;
-	let hostPort = `${event.host}:${event.port}`;
-	if (rule.isRegex) {
-		let defaultPort = Number(DEFAULT_PORT$1[scheme]);
-		return event.port === defaultPort && hostRe.test(event.host) || hostRe.test(hostPort);
-	}
-	return hostRe.test(hostPort);
-}
-function buildMatchers(knownBlockedRules) {
-	return knownBlockedRules.map((line) => {
-		if (isKnownBlockedUrlRule(line)) {
-			let urlRule = convertUrlRule(line), compiled = {
-				rule: urlRule,
-				hostRe: new RegExp(urlRule.isRegex ? urlRule.hostRegex : urlRule.authorityRegex, "i"),
-				pathRe: new RegExp(urlRule.pathRegex)
-			};
-			return {
-				rule: urlRule.raw,
-				matches: (event) => matchesUrlRule(compiled, event)
-			};
-		}
-		let completed = completeRulePort(line), re = new RegExp(convertRule(completed), "i");
-		return {
-			rule: completed,
-			matches: (event) => re.test(targetOf(event))
-		};
-	});
-}
-function annotateKnownBlocked(blockedEvents, knownBlockedRules) {
-	let matchers = buildMatchers(knownBlockedRules), accumulators = new Map();
-	for (let event of blockedEvents) {
-		let entry = toHostRow(event), index = matchers.findIndex((matcher) => matcher.matches(event)), key = entryKey(entry), accumulator = accumulators.get(key);
-		accumulator ? (accumulator.count++, index === -1 ? accumulator.expectedAll = !1 : index < accumulator.bestIndex && (accumulator.bestIndex = index, accumulator.bestRule = matchers[index].rule)) : accumulators.set(key, {
-			entry,
-			count: 1,
-			expectedAll: index !== -1,
-			bestIndex: index === -1 ? Infinity : index,
-			bestRule: index === -1 ? void 0 : matchers[index].rule
-		});
-	}
-	return [...accumulators.values()].map(({ entry, count, expectedAll, bestRule }) => expectedAll ? {
-		...entry,
-		count,
-		expected: !0,
-		expectedBy: bestRule
-	} : {
-		...entry,
-		count,
-		expected: !1
-	}).sort(compareAggregated);
-}
-const RULE_TYPE = {
-	https: "HTTPS",
-	http: "HTTP",
-	tls: "TLS",
-	tcp: "IP",
-	dns: "DNS"
-};
-function toHostRow(event) {
-	return {
-		host: event.host,
-		port: event.port === void 0 ? "-" : String(event.port),
-		ruleType: RULE_TYPE[event.protocol],
-		reason: event.reason ?? "-"
-	};
-}
-function reduceTimeline(timeline, knownBlockedRules) {
-	let passedRows = [], blockedEvents = [], failedRows = [], connected = connectedHosts(timeline);
-	for (let event of timeline) event.action !== "discovery" && event.action !== "incomplete" && (isRedundantDns(event, connected) || (event.action === "failed" ? failedRows.push(toHostRow(event)) : event.action === "block" ? blockedEvents.push(event) : passedRows.push(toHostRow(event))));
-	return {
-		passed: aggregate(passedRows),
-		blocked: annotateKnownBlocked(blockedEvents, knownBlockedRules),
-		failed: aggregate(failedRows),
-		blockedCount: blockedEvents.length
-	};
-}
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
-	return {
-		engine,
-		parameters,
-		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
-		startedAt,
-		timeline
-	};
-}
-//#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
 	let { resolverHosts } = compileRuleSet({
@@ -73884,231 +74160,6 @@ function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
 //#endregion
-//#region src/core/lib/actions/write-step-summary.ts
-init_core();
-async function writeStepSummary(markdown, summaryFile) {
-	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
-}
-//#endregion
-//#region src/core/lib/report/outcome/annotate.ts
-function applyOutcomeAnnotations(annotation, emissions) {
-	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
-}
-//#endregion
-//#region src/lib/would-refuse.ts
-const KEY_NOT_ALLOWED = "aws-key-not-allowed";
-function refusedKeys(timeline) {
-	let issuers = new Map(), seen = new Map();
-	for (let e of timeline) {
-		let { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
-		issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && issuers.set(issuedKeyRef, assumedAccount);
-		let keyRef = refusedKeyRef(e);
-		if (!keyRef) continue;
-		let key = seen.get(keyRef) ?? {
-			hosts: new Set(),
-			count: 0
-		};
-		seen.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
-	}
-	let numbered = seen.size > 1;
-	return new Map([...seen].map(([keyRef, key], i) => {
-		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
-		return [keyRef, {
-			...key,
-			label,
-			bare: !numbered && !account
-		}];
-	}));
-}
-function refusedKeyRef(e) {
-	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
-}
-function letThrough(e) {
-	return e.wouldRefuse !== void 0 && e.action !== "block";
-}
-function auditedKey(e) {
-	return letThrough(e) && e.wouldRefuse === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
-}
-function keyRefusalLabel(keys) {
-	return (e, reason) => {
-		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
-		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
-	};
-}
-const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
-function wouldRefuseTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
-}
-function wouldRefuseVerdictItems(timeline) {
-	let count = timeline.filter(letThrough).length;
-	return count === 0 ? [] : [`🚨 ${count} restrict would refuse`];
-}
-function describeWouldRefuse(timeline) {
-	let count = timeline.filter(letThrough).length;
-	if (count !== 0) return {
-		level: "warning",
-		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The 🚨 Restrict Would Refuse section counts them by key or by host and reason.`
-	};
-}
-function wouldRefuseBlocks(timeline, keys, priority, gap, level) {
-	let heading = `${gap}${level} 🚨 Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
-	if (audited.length > 0) {
-		let table = markdownTable([
-			{
-				key: "key",
-				title: `Key (${KEY_NOT_ALLOWED})`
-			},
-			{
-				key: "hosts",
-				title: "Hosts"
-			},
-			{
-				key: "count",
-				title: "Count",
-				align: "right"
-			}
-		], audited.map(({ label, hosts, count }) => {
-			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
-			return {
-				key: label,
-				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,
-				count
-			};
-		}));
-		blocks.push(trafficTableBlock(WOULD_REFUSE_BLOCK, priority, heading, table, "\n"));
-	}
-	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
-		...toHostRow(e),
-		reason: e.wouldRefuse
-	}]));
-	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_REFUSE_BLOCK, priority, before, table, "\n");
-		blocks.push(blocks.length > 0 ? {
-			...host,
-			level: host.level + 1
-		} : host);
-	}
-	return blocks;
-}
-//#endregion
-//#region src/lib/aws-report.ts
-function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let refusedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldRefuse.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_REFUSE_BLOCK]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!refusedByAwsCheck || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
-	return [
-		...blocks.slice(0, at + 1),
-		link,
-		...blocks.slice(at + 1)
-	];
-}
-//#endregion
-//#region src/lib/report.ts
-function reportTitle(label, processActivity) {
-	let title = processActivity ? "Traffic & Process Activity Report" : "Outbound Traffic Report";
-	return label ? `${title} — ${label}` : title;
-}
-function summaryFooter(actionRepo) {
-	return trafficFrame(reportFooter(actionRepo));
-}
-function missingReportFrame(title, isAudit) {
-	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
-}
-function computeReportOutcomes(report, { stepLabel, processActivity = !1, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
-	let emissions = describeReportOutcomes(report, {
-		failOnBlocked: failOnBlocked ?? !1,
-		engineLabel: "sandbox"
-	}), wouldRefuse = describeWouldRefuse(report.timeline);
-	wouldRefuse && emissions.push(wouldRefuse);
-	let keys = refusedKeys(report.timeline);
-	return {
-		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-			title: reportTitle(stepLabel, processActivity),
-			section: "🌐 Network",
-			footer: !1,
-			verdictItems: wouldRefuseVerdictItems(report.timeline),
-			stepName: "Start isolated-run",
-			runCommand,
-			extraInputs,
-			actionVersion,
-			refusalLabel: keyRefusalLabel(keys),
-			extraBlocks: (gap, level) => wouldRefuseBlocks(report.timeline, keys, 2, gap, level)
-		}), report, actionRepo, actionRef),
-		emissions
-	};
-}
-const realDeps$2 = {
-	appendFile: node_fs.appendFileSync,
-	fileSize: (path) => (0, node_fs.statSync)(path).size,
-	writeSummary: writeStepSummary
-};
-function summarySize(path, fileSize) {
-	if (!path) return 0;
-	try {
-		return fileSize(path);
-	} catch {
-		return 0;
-	}
-}
-const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
-function cutCommandSummary(summary, room) {
-	if (summary.length <= room) return summary;
-	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
-	if (keep < 0) return Buffer.alloc(0);
-	let end = summary.subarray(0, keep).lastIndexOf(10);
-	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
-}
-function moveCommandSummaryLast(path, commandBytes) {
-	if (commandBytes === 0) return !1;
-	let file = (0, node_fs.readFileSync)(path), command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
-	if (ours.length === 0 && kept === command) return !1;
-	let temp = `${path}.buildcage`;
-	return (0, node_fs.writeFileSync)(temp, Buffer.concat([
-		ours,
-		kept.length > 0 ? separator : Buffer.alloc(0),
-		kept
-	])), (0, node_fs.renameSync)(temp, path), kept !== command;
-}
-function fullReportLocation(artifactAvailable) {
-	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
-}
-function reportDidNotFitMessage(artifactAvailable) {
-	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
-}
-function reportDidNotFitLine(artifactAvailable) {
-	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
-}
-async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
-	let { fileSize, writeSummary } = {
-		...realDeps$2,
-		...overrides
-	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
-		usedBytes: used,
-		onCut: (b) => {
-			b.id !== void 0 && cutIds.add(b.id);
-		}
-	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
-	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
-		cutIds,
-		wrote
-	};
-}
-async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
-	let { appendFile, fileSize, writeSummary } = {
-		...realDeps$2,
-		...overrides
-	}, outcomes = computeReportOutcomes(report, options);
-	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-refuse" ? wouldRefuseTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
-		fileSize,
-		writeSummary,
-		commandBytes,
-		fallbackLine: reportDidNotFitLine(artifactAvailable)
-	});
-	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The 🚨 Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
-}
-//#endregion
 //#region src/core/lib/report/outcome/traffic-output.ts
 const RECORD_FIELDS = new Set([
 	"time",
@@ -74178,7 +74229,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], processActivity, commandSummaryBytes = 0 }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], commandSummaryBytes = 0 }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -74188,8 +74239,8 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	} catch (e) {
 		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
 	}
-	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt), footer = [summaryFooter(actionRepo)], named = processActivity && rest.length > 0, writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
-		missingReportFrame(reportTitle(stepLabel, named), parameters.mode === "audit"),
+	let stepLabel = readStepLabel(), rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
+		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
 		...rest,
 		...footer
 	], env, annotation, { commandBytes: commandSummaryBytes }, { writeSummaryBlocks }), artifactName = "";
@@ -74202,7 +74253,6 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			extraInputs: extraInputs?.(report),
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel,
-			processActivity: named,
 			failOnBlocked,
 			extraBlocks: [...rest, ...footer],
 			commandBytes: commandSummaryBytes
@@ -74440,7 +74490,7 @@ async function finalizeStep(run, deps) {
 		actionRepo,
 		actionRef: reportActionRef,
 		failClosed: proxyMode !== "audit" && failOnBlocked
-	}), artifact = cancelled ? readAudit.expected : await readAudit.upload(), processActivity = audit !== void 0;
+	}), artifact = cancelled ? readAudit.expected : await readAudit.upload();
 	return await deps.reportStepTraffic({
 		containerName,
 		proxyEngine: inputs.proxyEngine,
@@ -74461,8 +74511,7 @@ async function finalizeStep(run, deps) {
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
-		moreBlocks: (startedAt) => readAudit.blocks(startedAt, artifact),
-		processActivity,
+		moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
 		commandSummaryBytes
 	}), cancelled && await readAudit.upload(), runnerFileFailed;
 }
