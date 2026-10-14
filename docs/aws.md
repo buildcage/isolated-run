@@ -6,7 +6,7 @@
 > nothing on this page applies and the action behaves as before. Try them in a non-critical workflow
 > first, and pin this action to a commit SHA rather than a version tag if you adopt it.
 
-`aws_key_check: true` refuses a request to an AWS API unless it is signed with the key the step
+`aws_key_check: true` blocks a request to an AWS API unless it is signed with the key the step
 was given. `allowed_aws_role_accounts` names the accounts whose roles the step may assume, so the
 keys those roles get pass too. [Getting started](#getting-started) walks through adopting it.
 
@@ -41,7 +41,7 @@ path, before the request leaves the runner.
 
 With the check on, a request signed for an AWS API passes only when the proxy knows its key: mainly
 the key the step started with, and the keys STS issues for roles in the accounts you named. A key
-carried in from anywhere else is refused, and so are most unsigned requests to a host that serves
+carried in from anywhere else is blocked, and so are most unsigned requests to a host that serves
 every account. [How the check decides](#how-the-check-decides) has the exact rules.
 
 It does not stop a request signed with your own key from reaching another account's resource, such
@@ -188,7 +188,7 @@ one no URL rule allows can carry an `aws-` reason too.
 | `sts.us-east-1.amazonaws.com:443` | HTTPS | aws-no-credential |     1 |
 
 A key's row names up to three of the hosts its requests went to. Keys are numbered `key 1`, `key 2`
-and so on, in the order they first appear; when only one key was refused, it has no number. A key
+and so on, in the order they first appear; when only one key was blocked, it has no number. A key
 STS issued during the run shows the account of the role it was issued for. A `key N` with no
 `from a role in` came from somewhere else, such as a profile, or from an STS answer the proxy could
 not read; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
@@ -203,16 +203,16 @@ With `upload_traffic_artifact: true`, the traffic artifact has every one, with t
 `wouldBlock`. If the section does not fit the Job Summary even so, it is cut and a warning
 annotation says so.
 
-In `restrict` the URL rules decide first, so a request none of them allows is refused as
-`not-allowed` rather than with an `aws-` reason. The ones they allow and the check refuses are
-listed under **🚫 Blocked Hosts**. In Communication details a refused one ends in
+In `restrict` the URL rules decide first, so a request none of them allows is blocked as
+`not-allowed` rather than with an `aws-` reason. The ones they allow and the check blocks are
+listed under **🚫 Blocked Hosts**. In Communication details a blocked one ends in
 `-> aws-key-not-allowed, key 1 from a role in 222222222222`, and the traffic artifact gives its
 reason in `reason`.
 
 The report's **Switch to restrict mode** example includes `aws_key_check: true` and
 `allowed_aws_role_accounts`. The accounts it lists are the ones you gave, plus each account the run
 assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
-refuse, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
+block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
 step can assume a role, in an account of its own too, so each added account is marked:
 
 ```yaml
@@ -223,22 +223,22 @@ allowed_aws_role_accounts: |
 ```
 
 The example brings the URL rules and the accounts over, not the credentials. A `key N` row with no
-`from a role in`, and an `aws-no-credential` row, are not fixed by a rule, so both still refuse
-after the switch. [Troubleshooting](#troubleshooting) says what each needs.
+`from a role in`, and an `aws-no-credential` row, are not fixed by a rule, so both are still
+blocked after the switch. [Troubleshooting](#troubleshooting) says what each needs.
 
 ## Common setups
 
 ### Bedrock
 
 The Bearer token in `AWS_BEARER_TOKEN_BEDROCK`, a Bedrock API key, names no account the proxy can
-see, so it is refused as `aws-unsupported-credential`. Call Bedrock with the role keys
+see, so it is blocked as `aws-unsupported-credential`. Call Bedrock with the role keys
 `configure-aws-credentials` gets through OIDC instead: they are signed with SigV4 and pass with
 `aws_key_check: true` alone, given a role allowed `bedrock:InvokeModel`.
 
 ### Downloading a presigned URL
 
 A presigned URL carries the key of whoever signed it, such as Lambda `GetFunction`'s
-`Code.Location` or a vendor's download link, and is refused as `aws-key-not-allowed`. Download it
+`Code.Location` or a vendor's download link, and is blocked as `aws-key-not-allowed`. Download it
 in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key
 ID from the URL's `X-Amz-Credential`, names the account it belongs to.
 
@@ -250,17 +250,17 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 
 ## Troubleshooting
 
-A refused request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would
+A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would
 Block** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
 reason up below.
 
-To accept a refusal you expect, list its host or URL in `known_blocked_rules` as for any other: it
+To accept a block you expect, list its host or URL in `known_blocked_rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
 [Reference](./reference.md#aws-access-key-check).
 
 ### `aws-key-not-allowed`
 
-The request was signed with a key the proxy does not know. Look first at which requests are refused.
+The request was signed with a key the proxy does not know. Look first at which requests are blocked.
 
 **Requests of one kind**, while others signed in the step pass:
 
@@ -280,7 +280,7 @@ line in Communication details ends in:
   would block, so its answer taught no key. In the traffic artifact
   (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
   `aws.keyRef` has the account in `aws.assumedAccount`.
-- `key N` alone, or nothing after the reason when it is the only key refused, from one of:
+- `key N` alone, or nothing after the reason when it is the only key blocked, from one of:
   - A profile, `~/.aws/credentials` or `credential_process`; see [What it needs](#what-it-needs).
   - `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn. Get the
     credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
@@ -392,9 +392,9 @@ them on those, through a customized bootstrap template:
 
 - `AssumeRoleWithWebIdentity` takes no signature, so the proxy judges one sent as a form, as the
   SDKs send it, by the account of the role it names; one with its `Action` in the query instead is
-  `aws-no-credential`. A role in an account not listed in `allowed_aws_role_accounts` is refused as
+  `aws-no-credential`. A role in an account not listed in `allowed_aws_role_accounts` is blocked as
   `aws-role-not-allowed`, and with none listed the call stays `aws-no-credential`.
-  `AssumeRoleWithSAML` is refused as `aws-no-credential`, and keys from `GetSessionToken`, IAM
+  `AssumeRoleWithSAML` is blocked as `aws-no-credential`, and keys from `GetSessionToken`, IAM
   Identity Center's `GetRoleCredentials` or Cognito's `GetCredentialsForIdentity` are never
   learned.
 - Keys are learned only from STS answers and ECR registry redirects received over HTTPS, to a
@@ -402,7 +402,7 @@ them on those, through a customized bootstrap template:
   An STS answer over plain HTTP names no account in the restrict example either. A host that names a
   resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS answer the proxy
   cannot read, because the client asked for JSON or it is unusually large, is not learned,
-  and requests signed with it are refused. Such an answer names no account in the restrict example
+  and requests signed with it are blocked. Such an answer names no account in the restrict example
   either.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
@@ -412,7 +412,7 @@ them on those, through a customized bootstrap template:
 
 ### How the check decides
 
-In `restrict` the URL rules decide first: a request they refuse stays `not-allowed`, and the key
+In `restrict` the URL rules decide first: a request they block stays `not-allowed`, and the key
 check judges only the requests they allow. In `audit` the check judges every request.
 
 #### Host and credential
@@ -446,7 +446,7 @@ than one credential is `aws-ambiguous-credential`. Where more than one reason ap
 
 #### Which keys pass
 
-The proxy knows only these three kinds of key, and refuses any other:
+The proxy knows only these three kinds of key, and blocks any other:
 
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
   is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
@@ -457,7 +457,7 @@ The proxy knows only these three kinds of key, and refuses any other:
   keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
   `assume_role`, or the AWS CLI run with a `--profile` that sets `role_arn` and
   `web_identity_token_file`. A role in any other account issues a key the proxy never learns, so
-  requests signed with it are refused. With no account named, no STS key is learned, but the proxy
+  requests signed with it are blocked. With no account named, no STS key is learned, but the proxy
   still reads each answer for the account of its role, so a run shows which accounts to name.
 - **Keys ECR signs a layer's presigned URL with.** An ECR registry,
   `<account>.dkr.ecr.<region>.amazonaws.com` or its dual-stack `<account>.dkr-ecr.<region>.on.aws`,
@@ -476,17 +476,17 @@ knows, compared as a whole string. The proxy never decodes a key ID or verifies 
 request that copies one of your key IDs without the secret is refused by AWS and logged in your own
 account.
 
-Any other AWS credential is refused as `aws-unsupported-credential` without its key being read: the
+Any other AWS credential is blocked as `aws-unsupported-credential` without its key being read: the
 older Signature Version 2 and 3, a token in place of a signature on a host that serves every
 account, a credential in a form body on a host where the proxy reads one (below), and an S3
-POST-policy upload, the HTML form browsers upload to S3 with. A POST to EC2 is refused unless its
+POST-policy upload, the HTML form browsers upload to S3 with. A POST to EC2 is blocked unless its
 `Content-Type` is a form: EC2 alone reads the body as a form whatever the type says, so a credential
 there would otherwise go unread.
 
 Some AWS APIs, such as STS, IAM, CloudFormation, SNS and EC2, take their parameters as a form: the
 body of a `POST` whose Content-Type is `application/x-www-form-urlencoded`. A credential could hide
 in it, so the proxy reads such a body whole, up to about 4 MiB, before deciding, unless the host
-names a resource ([below](#which-hosts)). A form body it cannot read through is refused as
+names a resource ([below](#which-hosts)). A form body it cannot read through is blocked as
 `aws-unreadable`: one that is larger, compressed, or sent without a `Content-Length`.
 
 A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper sends
@@ -531,9 +531,9 @@ the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
 Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com`,
 `sqs.us-east-1.amazonaws.com` or `s3-control.us-east-1.amazonaws.com`. The account a request to one
 of those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
-request there is refused, `GET` included, `AssumeRoleWithWebIdentity` excepted (see
+request there is blocked, `GET` included, `AssumeRoleWithWebIdentity` excepted (see
 [Host and credential](#host-and-credential)). A host missing from the lists above is treated the
-same way; if a legitimate request is refused for that reason, as `aws-no-credential` or, carrying a
+same way; if a legitimate request is blocked for that reason, as `aws-no-credential` or, carrying a
 token, `aws-unsupported-credential`, report it.
 
 These hosts are only as narrow as the URL rules that allow them. A rule such as
@@ -551,7 +551,7 @@ allowed_url_rules: |
 
 Each request to an AWS API host that the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it refused nothing. A request the check refused has one only for `keyRef`, and for
+where it blocked nothing. A request the check blocked has one only for `keyRef`, and for
 `assumedAccount` and `issuedKeyRef` on an STS call in `audit` mode. Its `reason` or `wouldBlock`
 says why.
 

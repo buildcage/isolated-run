@@ -68788,7 +68788,7 @@ function describeUndecidedRequests(report, engineLabel) {
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: that is a refusal, and it is in Blocked Hosts.`
+		message: `${count} request(s) buildcage ${engineLabel} could not act on, shown with ⚠️ in Communication details. Each ended before a whole request had arrived, so no rule decided it and none reached an origin: the client closed or failed the TLS handshake, its own timeout expired, or this proxy ran into an error while still reading. None of them fails the step. Bytes this proxy would not read as a request are not among them: those are blocked, and they are in Blocked Hosts.`
 	};
 }
 function describeFailedConnections(report, engineLabel) {
@@ -68796,7 +68796,7 @@ function describeFailedConnections(report, engineLabel) {
 	if (count !== 0) return {
 		level: "notice",
 		shouldFail: !1,
-		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule refused them and none can change the outcome, so none of them fails the step.`
+		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule blocked them and none can change the outcome, so none of them fails the step.`
 	};
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
@@ -69229,7 +69229,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 			...blocked.filter((r) => !r.expected),
 			...failed,
 			...blocked.filter((r) => r.expected)
-		], tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule refused the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
+		], tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
 		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### ${tableTitle}\n\n`, renderHostTable(rows, {
 			showReason: !0,
 			showExpected
