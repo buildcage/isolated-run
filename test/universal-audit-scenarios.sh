@@ -68,10 +68,10 @@ fi
 SLOW=$(mktemp -d)
 
 echo "=== [HTTPS - dns-failed (NXDOMAIN)] (checked at the end) ==="
-($C https://nxdomain.wildcard.example.com/ 2>/dev/null || echo "000") > "$SLOW/nxdomain-https" &
+$C https://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-https" &
 
-# Plain HTTP sits out inspect-delay (5s) before its two lookups; waiting for
-# the 503 keeps the proxy's row ahead of the report.
+# The HTTP cases wait for the 503: a failed lookup takes about 4s and this
+# path makes two, so a shorter wait ends before the proxy logs its row.
 echo "=== [HTTP - dns-failed (NXDOMAIN)] (checked at the end) ==="
 $C --max-time 20 http://nxdomain.wildcard.example.com/ > "$SLOW/nxdomain-http" &
 
