@@ -164,8 +164,8 @@ Then, with the report described in [Reading the report](#reading-the-report):
    `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
    recognize there is what the check is meant to catch.
 2. Name those accounts. If that added any, run `audit` again before reading on: until an account is
-   named, every request signed with its roles' keys shows as one `restrict` would refuse.
-3. Read **⚠️ Restrict Would Refuse** in the report. [Troubleshooting](#troubleshooting) gives the
+   named, every request signed with its roles' keys shows as one `restrict` would block.
+3. Read **⚠️ Restrict Would Block** in the report. [Troubleshooting](#troubleshooting) gives the
    usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
    rules, `aws_key_check: true` and the accounts over.
@@ -173,8 +173,8 @@ Then, with the report described in [Reading the report](#reading-the-report):
 ## Reading the report
 
 The report is the step's section in the workflow run's Job Summary. In `audit` nothing is refused.
-A warning annotation counts the requests `restrict` would refuse, and **⚠️ Restrict Would
-Refuse** lists them in two tables: one row per key for `aws-key-not-allowed`, and one row per host
+A warning annotation counts the requests `restrict` would block, and **⚠️ Restrict Would
+Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and one row per host
 for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges every request, so
 one no URL rule allows can carry an `aws-` reason too.
 
@@ -196,7 +196,7 @@ not read; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
 **Communication details** names the key on each of those requests:
 
 ```
-⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would refuse: aws-key-not-allowed, key 1 from a role in 222222222222)
+⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)
 ```
 
 With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
@@ -251,7 +251,7 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 ## Troubleshooting
 
 A refused request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would
-Refuse** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
+Block** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
 reason up below.
 
 To accept a refusal you expect, list its host or URL in `known_blocked_rules` as for any other: it

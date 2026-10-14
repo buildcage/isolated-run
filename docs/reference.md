@@ -684,12 +684,12 @@ These are refusals like `not-allowed`: they are 🚫 rows in **Blocked Hosts** a
 `fail_on_blocked: true`. `known_blocked_rules` marks them as expected the same way, matching the
 host or URL whatever the reason, and in `restrict` the report links to
 [Troubleshooting](./aws.md#troubleshooting) only while one is not expected. In `audit` mode nothing
-is refused: a warning annotation counts the requests `restrict` would have refused, and the report
-counts them under **⚠️ Restrict Would Refuse** for each host and reason, or for each key under
+is refused: a warning annotation counts the requests `restrict` would have blocked, and the report
+counts them under **⚠️ Restrict Would Block** for each host and reason, or for each key under
 `aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
-links for every request `restrict`'s rules would refuse, including ones a rule would then mark
+links for every request `restrict`'s rules would block, including ones a rule would then mark
 expected, which the `restrict` run itself would not fail on. **Communication details** lists each
-among the other requests, ending in `(restrict would refuse: <reason>)`, and the traffic artifact
+among the other requests, ending in `(restrict would block: <reason>)`, and the traffic artifact
 has them too.
 
 ## Traffic artifact
@@ -721,7 +721,7 @@ already uploaded. See [Known Limitations](./security.md#known-limitations).
 | `bytes`       |        | absent for a refusal and for `dns`                                                                    |
 | `reason`      |        | only when `action` is `block`, `incomplete` or `failed`                                               |
 | `destination` |        | the address it actually resolved to; `inspect` only, and absent for `dns`                             |
-| `wouldRefuse` |        | `audit` only: the reason `restrict` would have refused it for, from the AWS access key check          |
+| `wouldRefuse` |        | `audit` only: the reason `restrict` would have blocked it for, from the AWS access key check          |
 | `aws`         |        | a request the AWS access key check let through; see [the AWS check](./aws.md#in-the-traffic-artifact) |
 
 A `dns` row's `host` is the name as the resolver logged it: lowercased, with escapes such as `\ `

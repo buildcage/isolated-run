@@ -313,7 +313,7 @@ export async function writeReportSummary(
   } else if (cutIds.has(WOULD_REFUSE_BLOCK)) {
     // The section's own notice is easy to miss below the fold.
     annotation.warning(
-      "The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " +
+      "The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
           ? "The buildcage-traffic artifact uploaded for this run has every request."
           : "Set upload_traffic_artifact: true to get every request as an artifact."),

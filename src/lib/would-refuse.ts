@@ -25,7 +25,7 @@ export interface RefusedKey {
   bare: boolean;
   /** The hosts of the requests audit let through, in the order each first
    *  appeared, and how many there were: a key with none has no row in
-   *  Restrict Would Refuse. */
+   *  Restrict Would Block. */
   hosts: Set<string>;
   count: number;
 }
@@ -67,7 +67,7 @@ function refusedKeyRef(e: TrafficEvent): string | undefined {
   return refused || e.wouldRefuse === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
 }
 
-/** A request audit let through that restrict would refuse. One refused for
+/** A request audit let through that restrict would block. One refused for
  *  another reason is in Blocked Hosts already. */
 export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldRefuse: string } {
   return e.wouldRefuse !== undefined && e.action !== "block";
@@ -86,25 +86,25 @@ export function keyRefusalLabel(keys: Map<string, RefusedKey>): RefusalLabel {
   };
 }
 
-/** Names the Restrict Would Refuse blocks, for picking their notice. */
+/** Names the summary blocks of Restrict Would Block, for picking their notice. */
 export const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
 
-/** What the report says where the Job Summary's size limit cut Restrict Would Refuse. */
+/** What the report says where the Job Summary's size limit cut Restrict Would Block. */
 export function wouldRefuseTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run has every one"
     : "set upload_traffic_artifact: true to get every one as a downloadable artifact";
-  return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
+  return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
 }
 
-/** The verdict line's count of the requests restrict would refuse, if any. */
+/** The verdict line's count of the requests restrict would block, if any. */
 export function wouldRefuseVerdictItems(timeline: TrafficEvent[]): string[] {
   const count = timeline.filter(letThrough).length;
-  return count === 0 ? [] : [`${count} restrict would refuse`];
+  return count === 0 ? [] : [`${count} restrict would block`];
 }
 
 /**
- * The warning for requests audit let through that restrict would refuse, or
+ * The warning for requests audit let through that restrict would block, or
  * undefined when there were none. Without it a step would pass audit and fail
  * on its switch to restrict with no warning first.
  */
@@ -115,13 +115,13 @@ export function describeWouldRefuse(timeline: TrafficEvent[]): OutcomeEmission |
     level: "warning",
     shouldFail: false,
     message:
-      `${count} request(s) restrict mode would refuse. ` +
-      "The ⚠️ Restrict Would Refuse section counts them by key or by host and reason.",
+      `${count} request(s) restrict mode would block. ` +
+      "The ⚠️ Restrict Would Block section counts them by key or by host and reason.",
   };
 }
 
 /**
- * Restrict Would Refuse: the requests audit let through that the AWS access
+ * Restrict Would Block: the requests audit let through that the AWS access
  * key check would refuse in restrict. aws-key-not-allowed gets a table of its
  * own, one row per key whatever the host: every request a key not allowed signs
  * is refused, and a row for each host would bury the other refusals. The rest
@@ -134,7 +134,7 @@ export function wouldRefuseBlocks(
   priority: number,
   gap: string,
 ): SummaryBlock[] {
-  const heading = `${gap}### ⚠️ Restrict Would Refuse\n\n`;
+  const heading = `${gap}### ⚠️ Restrict Would Block\n\n`;
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {

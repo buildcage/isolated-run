@@ -20,8 +20,8 @@ case "$MODE" in
     ;;
   audit)
     : "${SWITCHED_ACCOUNT:?SWITCHED_ACCOUNT must be set}"
-    assert_summary_contains "(restrict would refuse: aws-key-not-allowed" \
-      "the call signed with the switched role's key is one restrict would refuse"
+    assert_summary_contains "(restrict would block: aws-key-not-allowed" \
+      "the call signed with the switched role's key is one restrict would block"
     # A single account is quoted on one line.
     if grep -A1 -F "aws_key_check: true" <<< "$SUMMARY" |
       grep -qF "allowed_aws_role_accounts: \"$SWITCHED_ACCOUNT\" # assumed in this run, check it is yours"; then

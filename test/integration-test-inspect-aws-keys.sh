@@ -79,11 +79,11 @@ else
   cat "$TMPDIR/audit.log"
 fi
 SUMMARY=$(cat "$TMPDIR/audit.md")
-assert_summary_contains "(restrict would refuse: aws-key-not-allowed, key 1)" \
+assert_summary_contains "(restrict would block: aws-key-not-allowed, key 1)" \
   "the timeline says restrict would have refused the request"
-assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would refuse: aws-key-not-allowed, key 2 from a role in 111111111111\)" \
-  "an AssumeRole answer to a key restrict would refuse taught no key" \
-  "an AssumeRole answer to a key restrict would refuse taught its key"
+assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would block: aws-key-not-allowed, key 2 from a role in 111111111111\)" \
+  "an AssumeRole answer to a key restrict would block taught no key" \
+  "an AssumeRole answer to a key restrict would block taught its key"
 assert_summary_contains "| key 3 from a role in 999999999999 | ssm.us-east-1.amazonaws.com, sqs.us-east-1.amazonaws.com | 2 |" \
   "the requests signed with a key an AssumeRole answer issued are one row, naming the role's account"
 assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
@@ -92,10 +92,10 @@ assert_summary_matches "^ +111111111111$" \
   "the restrict example does not name the account given on a line of its own"
 assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
   "the restrict example marks the account a role was assumed in"
-if grep -qF "restrict mode would refuse" "$TMPDIR/audit.log"; then
-  pass "a warning counts the requests restrict would refuse"
+if grep -qF "restrict mode would block" "$TMPDIR/audit.log"; then
+  pass "a warning counts the requests restrict would block"
 else
-  fail "no warning counted the requests restrict would refuse"
+  fail "no warning counted the requests restrict would block"
 fi
 
 echo ""

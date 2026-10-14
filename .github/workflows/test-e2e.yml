@@ -976,7 +976,7 @@ jobs:
           SWITCHED_ACCOUNT: ${{ steps.accounts.outputs.switched }}
         run: node test/assert-aws-traffic-artifact.mjs "$RUNNER_TEMP/aws-traffic/traffic.json"
 
-      # No account named: the switched role's key is one restrict would refuse,
+      # No account named: the switched role's key is one restrict would block,
       # and the report names its account for the workflow to check.
       - name: Call STS with the AWS access key check in audit mode
         id: audit

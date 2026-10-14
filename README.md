@@ -271,9 +271,9 @@ Any other blocked request to that host still fails the step. See
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
-refused, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
-counts what needs a look: requests refused, requests `restrict` would refuse, connections that
-failed and requests nothing acted on. It is a CAUTION when a request was refused unexpectedly or the
+blocked from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
+counts what needs a look: requests blocked, requests `restrict` would block, connections that
+failed and requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the
 report is incomplete, and a WARNING otherwise; with nothing to count, a plain line replaces it. In
 the tables that follow, refusals are marked 🚫 and failed connections ⚠️. With the [filesystem
 audit](./docs/filesystem-audit.md) on, a **Process Activity Report** section follows the report.
@@ -314,7 +314,7 @@ name:
     aws-region: us-east-1
 - uses: buildcage/isolated-run@086f49946425ef5e6ccf0bd251e79671009d1392 # v2.1.0
   with:
-    proxy_mode: audit # shows what restrict would refuse
+    proxy_mode: audit # shows what restrict would block
     aws_key_check: true
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
@@ -723,7 +723,7 @@ follows it, cut at a line boundary with a note and a warning when it does not fi
 When the report itself, with its Process Activity section if the filesystem audit was on, would
 pass the limit, its parts give way in this order: the process details, the timeline, the Process
 Activity tables, the allowed table, the blocked and failed table, the ⚠️ tables of requests
-`restrict` would refuse, and last the `restrict` example. A part that does not fit is cut at a line
+`restrict` would block, and last the `restrict` example. A part that does not fit is cut at a line
 boundary with a note after what is kept, or replaced by the note when nothing of it fits; the
 example is only ever replaced whole. Once a table is cut, the timeline is left out under the same
 note. The Process Activity parts (Executed Programs, Accessed Paths, then the details) follow the

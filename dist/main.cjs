@@ -68981,7 +68981,7 @@ const MARK = {
 	failed: "⚠️"
 };
 function renderEvent(event, startedAt, refusalLabel) {
-	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would refuse: ${label(event.wouldRefuse)})`;
+	let mark = event.action === "audit" && event.wouldRefuse !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => refusalLabel(event, reason) ?? reason, note = event.wouldRefuse === void 0 ? "" : ` (restrict would block: ${label(event.wouldRefuse)})`;
 	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
@@ -69166,12 +69166,12 @@ function renderVerdict(report, extraItems = []) {
 	let unexpected = 0, expected = 0;
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
 	report.blocked.length === 0 && (unexpected = report.blockedCount);
-	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [...report.logLooksPlausible ? [] : ["report incomplete"], ...unexpected ? [`${unexpected} refused`] : []], warning = [
+	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [...report.logLooksPlausible ? [] : ["report incomplete"], ...unexpected ? [`${unexpected} blocked`] : []], warning = [
 		...extraItems,
 		...failed ? [`${failed} failed`] : [],
 		...undecided ? [`${undecided} not acted on`] : []
-	], asExpected = expected ? [`${expected} refused as expected`] : [];
-	if (caution.length + warning.length === 0) return `Result: ✅ ${asExpected[0] ?? "Nothing was refused"}\n\n`;
+	], asExpected = expected ? [`${expected} blocked as expected`] : [];
+	if (caution.length + warning.length === 0) return `Result: ✅ ${asExpected[0] ?? "Nothing was blocked"}\n\n`;
 	let items = [
 		...caution,
 		...warning,
@@ -69455,22 +69455,22 @@ function keyRefusalLabel(keys) {
 }
 const WOULD_REFUSE_BLOCK = "traffic-would-refuse";
 function wouldRefuseTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would refuse exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
 }
 function wouldRefuseVerdictItems(timeline) {
 	let count = timeline.filter(letThrough).length;
-	return count === 0 ? [] : [`${count} restrict would refuse`];
+	return count === 0 ? [] : [`${count} restrict would block`];
 }
 function describeWouldRefuse(timeline) {
 	let count = timeline.filter(letThrough).length;
 	if (count !== 0) return {
 		level: "warning",
 		shouldFail: !1,
-		message: `${count} request(s) restrict mode would refuse. The ⚠️ Restrict Would Refuse section counts them by key or by host and reason.`
+		message: `${count} request(s) restrict mode would block. The ⚠️ Restrict Would Block section counts them by key or by host and reason.`
 	};
 }
 function wouldRefuseBlocks(timeline, keys, priority, gap) {
-	let heading = `${gap}### ⚠️ Restrict Would Refuse\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+	let heading = `${gap}### ⚠️ Restrict Would Block\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
 			{
@@ -69954,7 +69954,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 		commandBytes,
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
-	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The ⚠️ Restrict Would Refuse section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+	wrote === "blocks" ? cutIds.has("traffic-would-refuse") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
 //#region src/lib/filesystem-audit/fold-tree.ts
