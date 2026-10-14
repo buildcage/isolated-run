@@ -791,8 +791,10 @@ short form.
   and, folded below them, one row per command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact
   named `buildcage-filesystem-audit-<id>`, whose name the `filesystem_audit_artifact_name` output
-  carries; `filesystem_audit_retention_days` sets how long it is kept. It leaves out each program's
-  arguments but holds every path the step touched; treat it as sensitive.
+  carries; `filesystem_audit_retention_days` sets how long it is kept. Empty uses the repository's
+  default, a value above the repository's maximum is lowered to it with a warning, and a value that
+  is not a whole number above zero fails the step even when nothing is uploaded. It leaves out each
+  program's arguments but holds every path the step touched; treat it as sensitive.
 
 ## CA trust variables
 

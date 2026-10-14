@@ -296,7 +296,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
     expect(md).toContain(
       "<details>\n<summary>Accessed Paths (3)</summary>\n\n" +
         "<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
-        "lowercase = failed · ! = denied</sub>\n\n" +
+        "lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Access | Path |\n| --- | --- | --- |\n" +
         "| `node` | R | `./a` |\n| `node` | R | `/etc/hosts` |\n| `sh` | W | `./a` |\n\n</details>\n",
     );

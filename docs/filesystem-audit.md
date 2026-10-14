@@ -19,17 +19,18 @@ Summary:
 It watches from the kernel, so a static binary or a tool that bypasses libc is seen like any other,
 and it works the same whatever `proxy_mode` and `proxy_engine` are set to. It records and never
 blocks an access: what the step may write is decided by
-[`filesystem_mode` and `write_through`](../README.md#filesystem-access). It does change two things:
-a 32-bit system call kills the thread in the step that made it, and system calls across the
-runner host get slightly slower; see [What changes in the step](#what-changes-in-the-step).
+[`filesystem_mode` and `write_through`](../README.md#filesystem-access).
 
 ## What it is for
 
 - **Finding what `write_through` needs** under `filesystem_mode: ephemeral`: the audit shows where
   the step wrote, so you keep only what a later step reads. See
   [Choosing `write_through`](#choosing-write_through).
-- **Checking what a dependency read, ran, or was refused.** See
+- **Checking what a dependency read, wrote, ran, or was refused.** See
   [What to look for](#what-to-look-for).
+
+It suits a step's first runs, a dependency update, or an investigation. It can also stay on, since a
+typical build barely slows down, and then each run leaves a record to compare against.
 
 ## Before you turn it on
 
@@ -57,19 +58,20 @@ A host that falls short fails the step before the command runs, with the reason;
   reports it as `Bad system call`, and the record names the call. Run such a program in a step
   without the audit.
 - **A small cost to the whole host.** A typical build, which spends little of its time in system
-  calls, barely changes. While the step runs, though, the tracer's hooks run on every system call
-  and every file read or write on the runner host, not only the step's, since a hook has to run to
-  tell whose call it is. That covers the proxy, Docker and other jobs on a shared runner too, and
-  adds roughly 60 nanoseconds to each system call, about 100 to each read or write, and about 250
-  to opening and closing a file. Copying a file a byte at a time outside the step took about one and
-  a half times as long in a test. Inside the step, each program's first read or write of a file is
-  also recorded, which costs more.
+  calls, barely changes. While the step runs, though, the tracer's hooks run on every system call on
+  the runner host, not only the step's, since a hook has to run to tell whose call it is. A
+  GitHub-hosted runner runs one job, so only that job pays. On a self-hosted runner shared by
+  several jobs, they all do. Each hook adds roughly 60 nanoseconds to each system call, about 100 to
+  each read or write, and about 250 to opening and closing a file. Copying a file a byte at a time
+  outside the step took about one and a half times as long in a test. Inside the step, each
+  program's first read or write of a file is also recorded, which costs more.
 
 ## Getting started
 
 With `filesystem_audit: record` alone, as above, the step's Job Summary gets a **Process Activity
 Report** section after the traffic report. The full record, with every access in order, is uploaded
-only when asked for, as the traffic artifact is:
+only when asked for, as the traffic artifact is. It can be downloaded from the run's page, or by a
+later step to query with `jq`, as in [The artifact](#the-artifact):
 
 ```yaml
 - id: build
@@ -94,10 +96,9 @@ Each step with the audit on gets its own section and its own artifact,
 artifact, so several steps in one job never collide. Each section follows its step's traffic
 report, and both headings carry the step's `label`, so set `label` to tell the steps apart.
 
-`filesystem_audit_retention_days` sets how long the artifact is kept; empty uses the repository's
-default, and a value above the repository's maximum is lowered to it, with a warning. A value that
-is not a whole number above zero fails the step even when nothing is uploaded. The artifact names
-each program the step ran but not its arguments, which can carry secrets. It still holds every path
+`filesystem_audit_retention_days` sets how long the artifact is kept; see
+[Reference](./reference.md#filesystem-audit). The artifact names each program the step ran but not
+its arguments, which can carry secrets. It still holds every path
 the step touched, including the names of files it only tried to open, so treat it as sensitive,
 like the traffic artifact.
 
@@ -116,7 +117,7 @@ buildcage-filesystem-audit-<id> artifact · how to read this
 | `/usr/bin/dash`       |    12 |
 
 ▶ Accessed Paths (4)
-R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = denied
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path                  |
 | --------------------- | ------ | --------------------- |
 | `/usr/local/bin/node` | RWD    | `./node_modules/**`   |
@@ -151,16 +152,24 @@ From the top:
   directory; see [Paths](#paths).
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
-  that command first and last touched the path, counted from the proxy's start like the
-  communication details, or from the first access if that start is unknown.
+  that command first and last touched the path. It counts from the start of the step's proxy, about
+  when the step starts, on the same clock as the traffic report's Communication details, so a file
+  access can be matched to a request. Where that start is unknown, it counts from the first access.
 
 [How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
 
 ### What to look for
 
-- **A credential file read.** A row such as `R ~/.npmrc`, `R ~/.ssh/**` or
-  `R ~/.docker/config.json` says a command in the step opened it. The details say which command,
-  and the artifact, if uploaded, says when and from which process.
+- **A credential file read by something other than its tool.** A row such as `R ~/.npmrc`,
+  `R ~/.ssh/**` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
+  every run, and npm and a package's install script both show as `node`, so the program alone does
+  not tell them apart. The artifact, if uploaded, gives each read's process and its parent, which
+  separate npm itself from a script it started.
+- **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
+  `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
+  `$GITHUB_PATH` is refused (`w!`), since both stay read-only in the sandbox, but the attempt is
+  just as telling. `filesystem_mode: ephemeral` discards such writes; see the
+  [README](../README.md#filesystem-access).
 - **A program you did not expect.** **Executed Programs** lists every program the step started, so
   a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
@@ -182,52 +191,56 @@ From the top:
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
 | `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path |
 
-A refusal shows even where the same action also succeeded, after the uppercase letters: `RWr!` on
-`/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused. A failed
-open shows what it asked for: `w` to write, create or truncate, `r` to read, and both for one opened
-to read and write, as bash does `/dev/tty`. A swap of two paths (`renameat2` with
-`RENAME_EXCHANGE`) shows `M` on both. A row's flags do not say which action came first; the
-artifact has every access in order.
+- A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
+  `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused.
+- A failed open shows what it asked for: `w` to write, create or truncate, `r` to read, and both
+  for one opened to read and write, as bash does `/dev/tty`.
+- A swap of two paths (`renameat2` with `RENAME_EXCHANGE`) shows `M` on both.
+- A row's flags do not say which action came first; the artifact has every access in order.
 
 ### Paths
 
-| Shown as                     | Means                                                                                                                                                            |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./…`                        | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
-| `~/…`                        | Under `$HOME`                                                                                                                                                    |
-| `dir/**`                     | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
-| `/proc/<pid>/…`              | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
-| `…/name`                     | A relative name whose directory was closed before it could be read, or a path too deep to record in full                                                         |
-| `path…`                      | A failed open's name too long to record in full, cut at its end                                                                                                  |
-| `memfd:"name"`               | A file that exists only in memory and has no path; the name is whatever its creator chose                                                                        |
-| `path (deleted)`             | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row                                                 |
-| `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name                                                |
-| `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                                                               |
+| Shown as        | Means                                                                                                                                                            |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./…`           | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
+| `~/…`           | Under `$HOME`                                                                                                                                                    |
+| `dir/**`        | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
+| `/proc/<pid>/…` | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
 
 Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
-`$HOME` and a program run; [How rows are grouped](#how-rows-are-grouped) lists them.
+`$HOME` and a program run; [How rows are grouped](#how-rows-are-grouped) lists them, and
+[Other notations](#other-notations) covers cut, in-memory, deleted and escaped names.
 
 ## Choosing `write_through`
 
 Under `filesystem_mode: ephemeral` every write is thrown away when the step ends, except under the
-paths `write_through` names. To name only what a later step needs:
+paths `write_through` names. Two kinds of path are easy to miss:
+
+- **The runner's files.** `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` are written like any other
+  file, so the step's outputs and its own summary are lost unless named. `$GITHUB_ENV` and
+  `$GITHUB_PATH` are read-only in either mode, and need naming to be written at all.
+- **Caches.** `actions/cache`, and setup actions with `cache:`, save a directory such as `~/.npm`
+  after the job. Unless it is named, the save finds nothing the step added to it.
+
+To name only what a later step needs:
 
 1. Run the step with `filesystem_mode: ephemeral`, `filesystem_audit: record` and
    `upload_filesystem_audit_artifact: true`, and in `write_through` only what you already know a
-   later step reads, such as `$GITHUB_OUTPUT` if the step sets outputs.
+   later step reads.
 2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
    temporary name and then renames into place shows `M` under the temporary name; its new name is
    the `to` on its `rename` line in the artifact.
-3. Add what a later step reads, usually the build output, to `write_through`, and run again. The
-   rest is what ephemeral discards on purpose.
+3. Of those, add to `write_through` what a later step or the end of the job uses: build output,
+   test reports, coverage, a cache directory. Run again. The rest is what ephemeral discards on
+   purpose.
 
-A build that sets outputs and writes `./dist` ends up with this, the artifact no longer needed:
+A build that sets outputs and writes `./dist` ends up with this; the audit can be left on or taken
+off:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
   with:
     filesystem_mode: ephemeral
-    filesystem_audit: record
     write_through: |
       $GITHUB_OUTPUT
       ./dist
@@ -257,20 +270,23 @@ Other endings, such as `no valid BTF header` or `no BTF found …`, mean
 
 The summary can also open with a warning, or be missing:
 
-- **This record is incomplete.** `dropped` or `untracked` on the record's
-  [end line](#the-end-line) is nonzero, or the tracer did not stop cleanly. Some accesses are missing from both the summary and the artifact. A step that touches a
-  very large number of files at once can cause it.
-- **The same warning, with an error and a failed step, in any mode.** The record has no [end line](#the-end-line):
-  the tracer exited before the step ended, or did not finish the record when the step stopped it.
-  A reason the tracer gave is in the step log on a `filesystem-audit: fatal:` line, such as one
-  ending in `no space left on device` once the step filled the disk. A cancelled step does not add
-  this error.
-- **The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so some accesses may
-  be missing; see [Skipped hooks](#skipped-hooks).
-- **The recording could not be read.** The summary has none of the step's accesses, a warning is
-  logged, and no artifact is uploaded.
-- **The same note, with an error and a failed step, in any mode.** The recording was removed after
-  the tracer started, by a process on the runner host outside the sandbox.
+- **❗ This record is incomplete.** `dropped` or `untracked` on the record's
+  [end line](#the-end-line) is nonzero, or the tracer did not stop cleanly. Some accesses are
+  missing from both the summary and the artifact. A step that touches a very large number of files
+  at once can cause it.
+- **❗ This record is incomplete, with the error
+  `The filesystem audit tracer stopped before it finished its record`.** The step fails, in `audit`
+  too. The record has no [end line](#the-end-line): the tracer exited before the step ended, or did
+  not finish the record when the step stopped it. A reason the tracer gave is in the step log on a
+  `filesystem-audit: fatal:` line, such as one ending in `no space left on device` once the step
+  filled the disk. A cancelled step does not add this error.
+- **❗ The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so
+  some accesses may be missing; see [Skipped hooks](#skipped-hooks).
+- **❗ The recording could not be read**, with a `Failed to read the filesystem audit recording`
+  warning. The summary has none of the step's accesses, and no artifact is uploaded.
+- **❗ The recording could not be read, with the error `The filesystem audit recording is gone`.**
+  The step fails, in `audit` too. The recording was removed after the tracer started, by a process
+  on the runner host outside the sandbox.
 - **No section, and a `Failed to render the filesystem audit summary` warning.** The recording was
   read but its summary could not be written; the artifact is still uploaded if asked for. Please
   [open an issue](https://github.com/buildcage/isolated-run/issues) with the warning.
@@ -279,6 +295,9 @@ A program in the step that dies with `Bad system call` made a 32-bit system call
 refuses; see [What changes in the step](#what-changes-in-the-step).
 
 ### Skipped hooks
+
+On a GitHub-hosted runner there is nothing to do here. Read on only if a self-hosted runner shows a
+nonzero `host_missed`, or the note above.
 
 On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
 entered again. GitHub-hosted runners boot `-azure` kernels, 7.0 on `ubuntu-26.04`, and these do not
@@ -466,15 +485,30 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
   file a program loaded is not counted either.
 
-That changes once a table or the details would pass 300 KB, more rows than anyone reads. Each
-of those directories then folds once five entries directly under it are not themselves among them,
-keeping those that are on rows of their own: `/` folds into `/**` but `/home/runner` still shows its
-own rows. Paths with `..` fold the same way once five share what comes before their first `..`,
-into a row such as `./a/../**`, and memfds once there are five, into `memfd:**` (five of one
-program's in the table, of one command's in the details). A program run still never folds.
+That changes once a table or the details would pass 300 KB, more rows than anyone reads:
+
+- Each of those directories folds once five entries directly under it are not themselves among
+  them. Those that are keep rows of their own: `/` folds into `/**`, but `/home/runner` still shows
+  its own rows.
+- Paths with `..` fold once five share what comes before their first `..`, into a row such as
+  `./a/../**`.
+- Memfds fold once there are five, into `memfd:**`: five of one program's in the table, of one
+  command's in the details.
+- A program run still never folds.
 
 **Quoting.** A command or path holding a space is quoted in the details, as `"VM Thread"`, except a
 memfd's name, which is quoted already, and a refused system call.
+
+### Other notations
+
+| Shown as                     | Means                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `…/name`                     | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
+| `path…`                      | A failed open's name too long to record in full, cut at its end                                                   |
+| `memfd:"name"`               | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
+| `path (deleted)`             | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
+| `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
+| `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                |
 
 ### Refused system calls
 
