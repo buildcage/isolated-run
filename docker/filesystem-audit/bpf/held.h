@@ -451,11 +451,10 @@ static __always_inline void report_held(u32 slot, struct held_key *k, struct eve
  * path syscall's is.
  *
  * The hold is the failed open the call would be (K_OPEN_FAILED), as a refused
- * or missing file never reaches security_file_open. One that does reach it is
- * recorded there and lets go of the hold (see open_reached()), as an open can
- * wait in the kernel after that hook for as long as the caller likes, a FIFO's
- * for its other end. bases says whether the open reached its create step (see
- * open_creating()).
+ * or missing file never reaches security_file_open. It ends at that hook (see
+ * open_reached()), since an open can then wait in the kernel indefinitely, as
+ * a FIFO's does for its other end. bases says whether the open reached its
+ * create step (see open_creating()).
  *
  * No hold outlives its syscall (see on_sys_exit), so one already there is this
  * open's, and its name is read. A name that needs tails when none are free is

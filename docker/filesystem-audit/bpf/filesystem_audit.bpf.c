@@ -491,12 +491,10 @@ int BPF_PROG(on_file_free, struct file *file)
 /**
  * Ends an open(2) family call's hold as the call returns, recording a failed
  * open with the descriptor and flags from its arguments. A call with no hold
- * either reached its file, recorded there, or names nothing the kernel looked
- * up, as one a seccomp filter or a tracer stopped, or one with no free
- * descriptor; its return goes out as a K_OPEN_RESULT, which the reader drops
- * when no open waits for it. The exception is a name getname refused as too
- * long, read from the caller as a failed path syscall's is, so a filter or
- * tracer returning ENAMETOOLONG records one too.
+ * sends its return as a K_OPEN_RESULT, for the open recorded at its file if
+ * there is one. A name getname refused as too long is read from the caller as
+ * a failed path syscall's is, so a filter or tracer returning ENAMETOOLONG
+ * records one too.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id, long nr,
 					  long ret)

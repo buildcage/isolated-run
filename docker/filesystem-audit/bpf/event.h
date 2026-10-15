@@ -66,9 +66,8 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 */
 	K_SYSCALL = 31,
 	/**
-	 * An open(2) call's return, for the open recorded at its file with tid
-	 * set: path_len holds the return value; no data. The reader settles that
-	 * open with it and writes no line of its own.
+	 * An open(2) call's return value, in path_len, for the open recorded at
+	 * its file under the same tid; no data, and no line of its own.
 	 */
 	K_OPEN_RESULT = 32
 };

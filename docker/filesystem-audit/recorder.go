@@ -72,10 +72,9 @@ func (r *recorder) add(raw []byte) error {
 		r.started = true
 	}
 	if rec.tid != 0 {
-		// Another open from the thread means the result of the one before was
-		// lost, as when the ring buffer was full, so it is written as done.
-		// Losing a result can also hand the thread's next result, from a call
-		// that never reached a file, to the open still waiting.
+		// A second open from the thread means the first one's result was lost,
+		// so it is written as done. A lost result can also hand the next one,
+		// from a call that never reached a file, to the open still waiting.
 		old, lost := r.opens[rec.tid]
 		r.opens[rec.tid] = rec
 		if lost {
