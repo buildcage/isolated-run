@@ -26,7 +26,7 @@ import {
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 import { isAwsAccessKeyId, isAwsAccountId, parseAwsAccounts } from "../proxy/aws-keys.ts";
-import { awsFieldsOf } from "../proxy/aws-log.ts";
+import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
@@ -274,6 +274,8 @@ export function readAwsKeyInputs(
 
 /** Ends the restrict example's line for an account the run assumed a role in but was not given. */
 const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
+const NO_CREDENTIAL = "aws-no-credential" satisfies AwsBlockedReason;
+const ROLE_NOT_ALLOWED = "aws-role-not-allowed" satisfies AwsBlockedReason;
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
@@ -297,10 +299,20 @@ export function awsExampleInputs(
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
   const keys = [...blockedKeys(timeline).values()];
+  // An unsigned AssumeRoleWithWebIdentity is judged by its role's account, so
+  // naming that account lets the call itself through too.
+  const webIdentity = new Set(
+    timeline.flatMap((e) => {
+      const { keyRef, assumedAccount } = awsFieldsOf(e);
+      const byAccount = e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED;
+      return byAccount && !keyRef && assumedAccount ? [assumedAccount] : [];
+    }),
+  );
   const mark = (a: string) => {
     const names = keys
       .filter((k) => k.account === a)
       .map((k) => (k.name === "key" ? "the key" : k.name));
+    if (webIdentity.has(a)) names.push("its AssumeRoleWithWebIdentity call");
     const last = names.pop();
     const list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
     return ` # ${list ? `lets ${list} through; ` : ""}${ASSUMED_ACCOUNT_MARK}`;

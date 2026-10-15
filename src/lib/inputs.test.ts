@@ -492,4 +492,40 @@ describe("awsExampleInputs", () => {
       "  # 333333333333 # assumed in this run, check it is yours",
     ]);
   });
+
+  it("names an AssumeRoleWithWebIdentity call its account would let through", () => {
+    const webIdentity = (wouldBlock: string, assumedAccount: string): TrafficEvent => ({
+      time: 0,
+      action: "audit",
+      protocol: "https",
+      host: "sts.amazonaws.com",
+      port: 443,
+      wouldBlock,
+      extensions: { aws: { assumedAccount, issuedKeyRef: `${assumedAccount}-key` } },
+    });
+    const timeline = [
+      webIdentity("aws-no-credential", "222222222222"),
+      webIdentity("aws-role-not-allowed", "333333333333"),
+      // Signed, so its key decides, not the account of its role.
+      {
+        ...webIdentity("aws-no-credential", "444444444444"),
+        extensions: { aws: { keyRef: "aaaa1111", assumedAccount: "444444444444" } },
+      },
+      {
+        time: 1,
+        action: "audit",
+        protocol: "https",
+        host: "s3.amazonaws.com",
+        port: 443,
+        wouldBlock: "aws-key-not-allowed",
+        extensions: { aws: { keyRef: "222222222222-key" } },
+      } satisfies TrafficEvent,
+    ];
+    expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline).slice(1)).toStrictEqual([
+      "allowed_aws_role_accounts: |",
+      "  # 222222222222 # lets the key and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
+      "  # 333333333333 # lets its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
+      "  # 444444444444 # assumed in this run, check it is yours",
+    ]);
+  });
 });

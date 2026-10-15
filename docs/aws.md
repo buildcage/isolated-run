@@ -215,7 +215,8 @@ The report's **Switch to restrict mode** example includes `aws_key_check: true` 
 assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
 block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
 step can assume a role, in an account of its own too, so each added account is left commented out,
-with the keys in **⚠️ Restrict Would Block** that naming it lets through:
+with the keys in **⚠️ Restrict Would Block** that naming it lets through, and an
+`AssumeRoleWithWebIdentity` call for a role in it, which is judged by that account:
 
 ```yaml
 aws_key_check: true
@@ -226,8 +227,9 @@ allowed_aws_role_accounts: |
 
 A key from a role assumed with another role's key passes only once that other role's account is
 named too. The example brings the URL rules and the accounts you named over, not the credentials. A
-`key N` row with no `from a role in`, and an `aws-no-credential` row, are not fixed by a rule, so
-both are still blocked after the switch. [Troubleshooting](#troubleshooting) says what each needs.
+`key N` row with no `from a role in`, and an `aws-no-credential` row its comments do not name, are
+not fixed by a rule, so both are still blocked after the switch. [Troubleshooting](#troubleshooting)
+says what each needs.
 
 ## Common setups
 

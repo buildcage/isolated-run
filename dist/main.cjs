@@ -70722,8 +70722,13 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 }
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), keys = [...blockedKeys(timeline).values()], mark = (a) => {
-		let names = keys.filter((k) => k.account === a).map((k) => k.name === "key" ? "the key" : k.name), last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), keys = [...blockedKeys(timeline).values()], webIdentity = new Set(timeline.flatMap((e) => {
+		let { keyRef, assumedAccount } = awsFieldsOf(e);
+		return (e.wouldBlock === "aws-no-credential" || e.wouldBlock === "aws-role-not-allowed") && !keyRef && assumedAccount ? [assumedAccount] : [];
+	})), mark = (a) => {
+		let names = keys.filter((k) => k.account === a).map((k) => k.name === "key" ? "the key" : k.name);
+		webIdentity.has(a) && names.push("its AssumeRoleWithWebIdentity call");
+		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
 	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
