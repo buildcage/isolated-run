@@ -632,7 +632,8 @@ best-effort: they are read from the command's memory when the call returns, so a
 rewrite one first, or change directory so that a relative one is joined to another, and a process
 tracing the command can change the call's arguments. A failed open's flags are read the same way,
 but its name is the kernel's copy, unless the kernel refused the name as too long, when it is read
-like the others. A change through a descriptor alone that fails before the kernel reaches its file,
+like the others; rewriting the command's own copy can only leave a relative name without its
+directory. A change through a descriptor alone that fails before the kernel reaches its file,
 as `fchmod` on a read-only mount, and an `fsetxattr`, are recorded under the file the descriptor
 held when the call returned. Another thread can swap the descriptor first for another file, or close
 it or swap it for a pipe, which leaves no record. A path too deep to record in full is shown cut,
