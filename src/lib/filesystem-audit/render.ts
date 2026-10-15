@@ -281,7 +281,7 @@ export function renderAuditSummaryBlocks(
   // programs has no accessed paths table, so the details are the first to
   // show flags.
   if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
-  // The blank line ends the </details> above, which would otherwise swallow it.
+  // The blank line ends a </details> above, which would otherwise swallow it.
   if (opts.legendNote) blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`));
   return blocks;
 }

@@ -137,9 +137,9 @@ first-last access since the proxy started · flags · command · path
 buildcage-filesystem-audit-<id> artifact · how to read this
 ```
 
-Where there is no artifact, the last line says how to ask for one, or that the upload failed. A step
-that touched no file shows `No file access was recorded.` instead of the tables. One that only ran
-programs has no accessed paths table, and the flag legend opens the details instead.
+Where there is no artifact, the line closing the section says how to ask for one, or that the upload
+failed. A step that touched no file shows `No file access was recorded.` instead of the tables. One
+that only ran programs has no accessed paths table, and the flag legend opens the details instead.
 
 From the top:
 
@@ -157,6 +157,8 @@ From the top:
   that command first and last touched the path. It counts from the start of the step's proxy, about
   when the step starts, on the same clock as the traffic report's Communication details, so a file
   access can be matched to a request. Where that start is unknown, it counts from the first access.
+- The closing line explains the `./`, `~/` and `dir/**` notations, names the artifact that holds the
+  full record and links to this section.
 
 [How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
 
