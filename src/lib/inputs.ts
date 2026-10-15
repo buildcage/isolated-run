@@ -30,6 +30,7 @@ import { awsFieldsOf } from "../proxy/aws-log.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
+import { blockedKeys } from "./would-block.ts";
 
 const LIST_INPUTS = [
   "allowed_https_rules",
@@ -272,15 +273,16 @@ export function readAwsKeyInputs(
 }
 
 /** Ends the restrict example's line for an account the run assumed a role in but was not given. */
-const ASSUMED_ACCOUNT_MARK = " # assumed in this run, check it is yours";
+const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
  * for this run: the accounts given, and every account the run assumed a role
  * in. A build's own AssumeRole names an account too, so each one not given is
- * marked for a look. One account is quoted, since YAML reads an ID that begins
- * with 0 as a number; more are a block, one to a line, which needs no quotes
- * and lets each carry its own comment.
+ * left commented out for a look, with the blocked keys naming it would let
+ * through. One account is quoted, since YAML reads an ID that begins with 0 as
+ * a number; more are a block, one to a line, which needs no quotes and lets
+ * each carry its own comment.
  */
 export function awsExampleInputs(
   { key, roleAccounts }: AwsKeyInputs,
@@ -294,11 +296,20 @@ export function awsExampleInputs(
     .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  const mark = (a: string) => (added.has(a) ? ASSUMED_ACCOUNT_MARK : "");
+  const keys = [...blockedKeys(timeline).values()];
+  const mark = (a: string) => {
+    const names = keys
+      .filter((k) => k.account === a)
+      .map((k) => (k.name === "key" ? "the key" : k.name));
+    const last = names.pop();
+    const list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
+    return ` # ${list ? `lets ${list} through; ` : ""}${ASSUMED_ACCOUNT_MARK}`;
+  };
+  const line = (a: string, text: string) => (added.has(a) ? `# ${text}${mark(a)}` : text);
   if (accounts.length === 1) {
-    lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`);
+    lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`));
   } else if (accounts.length > 1) {
-    lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`));
+    lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`));
   }
   return lines;
 }

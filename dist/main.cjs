@@ -69430,9 +69430,11 @@ function blockedKeys(timeline) {
 	}
 	let numbered = seen.size > 1;
 	return new Map([...seen].map(([keyRef, key], i) => {
-		let account = issuers.get(keyRef), label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
+		let account = issuers.get(keyRef), name = numbered ? `key ${i + 1}` : "key", label = account ? `${name} from a role in ${account}` : name;
 		return [keyRef, {
 			...key,
+			name,
+			account,
 			label,
 			bare: !numbered && !account
 		}];
@@ -70654,60 +70656,60 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$9 = getInput) {
-	let runInput = getInput$9("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$5 = getInput) {
+	let runInput = getInput$5("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$8 = getInput) {
+function readProxyInputs(getInput$4 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$4("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$4("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$3 = getInput) {
+function readFilesystemInputs(notice, getInput$8 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$3("write_through"),
-			writable: getInput$3("writable"),
-			allowWrite: getInput$3("allow_write")
+			writeThrough: getInput$8("write_through"),
+			writable: getInput$8("writable"),
+			allowWrite: getInput$8("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$2 = getInput) {
-	return resolveFilesystemAudit(getInput$2("filesystem_audit"));
+function readFilesystemAuditInput(getInput$6 = getInput) {
+	return resolveFilesystemAudit(getInput$6("filesystem_audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$5 = getInput) {
-	let days = getInput$5("filesystem_audit_retention_days");
+function readFilesystemAuditArtifactInputs(getInput$1 = getInput) {
+	let days = getInput$1("filesystem_audit_retention_days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$5),
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$1),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$6 = getInput) {
-	return getInput$6("label") || void 0;
+function readStepLabel(getInput$2 = getInput) {
+	return getInput$2("label") || void 0;
 }
-function readFailOnCaResidue(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$1);
+function readFailOnCaResidue(getInput$7 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
 }
-function readFailOnBlocked(getInput$4 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$4);
+function readFailOnBlocked(getInput$9 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$9);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$7("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$7);
+	let check = readBooleanInput("aws_key_check", !1, getInput$3);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -70720,8 +70722,11 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
 }
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), mark = (a) => added.has(a) ? " # assumed in this run, check it is yours" : "";
-	return accounts.length === 1 ? lines.push(`allowed_aws_role_accounts: "${accounts[0]}"${mark(accounts[0])}`) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${a}${mark(a)}`)), lines;
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), keys = [...blockedKeys(timeline).values()], mark = (a) => {
+		let names = keys.filter((k) => k.account === a).map((k) => k.name === "key" ? "the key" : k.name), last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
+		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
+	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
+	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
