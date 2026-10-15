@@ -98,6 +98,7 @@ static __always_inline struct event *start(u32 slot, u32 kind)
 	e->trunc2 = 0;
 	e->marks = 0;
 	e->gid = 0;
+	e->tid = 0;
 	// The process's name, as ps shows it, not the thread's: a JVM or tokio
 	// worker thread names itself after its pool.
 	BPF_CORE_READ_STR_INTO(&e->comm, t, group_leader, comm);

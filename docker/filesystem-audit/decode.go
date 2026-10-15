@@ -46,6 +46,7 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK_FAILED:     "link",
 	filesystemAuditKindK_TRUNCATE_FAILED: "truncate",
 	filesystemAuditKindK_SYSCALL:         "syscall",
+	filesystemAuditKindK_OPEN_RESULT:     "open-result",
 }
 
 func kindName(kind filesystemAuditKind) string {
@@ -74,6 +75,7 @@ const (
 	offErr       = int(unsafe.Offsetof(filesystemAuditEvent{}.Err))
 	offMarks     = int(unsafe.Offsetof(filesystemAuditEvent{}.Marks))
 	offGid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Gid))
+	offTid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Tid))
 	offTs        = int(unsafe.Offsetof(filesystemAuditEvent{}.Ts))
 	hdrLen       = int(unsafe.Offsetof(filesystemAuditEvent{}.Data))
 )
@@ -238,22 +240,23 @@ func decode(raw []byte) (record, error) {
 		Comm: cstr(raw[offComm : offComm+commLen]),
 		boot: le.Uint64(raw[offTs:]),
 	}
-	// A held path change or open its syscall refused carries the errno; its
-	// path and kind are as for one that succeeded.
+	// A held path change its syscall refused carries the errno; its path and
+	// kind are as for one that succeeded.
 	if heldErr := le.Uint32(raw[offErr:]); heldErr != 0 {
 		r.Err = int32(heldErr)
 		r.Failed = true
 	}
 	switch kind {
 	case filesystemAuditKindK_OPEN:
-		var pathErr int32
-		r.Path, pathErr = filePath(data, pathRet, n1, truncated)
-		if !r.Failed {
-			r.Err = pathErr
-		}
+		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
+		r.tid = le.Uint32(raw[offTid:])
+		r.created = bases&1 != 0
+	case filesystemAuditKindK_OPEN_RESULT:
+		r.tid = le.Uint32(raw[offTid:])
+		r.ret = pathRet
 	case filesystemAuditKindK_OPEN_FAILED:
 		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
 		// n2 marks a name the BPF side had to cut, which lost its end.

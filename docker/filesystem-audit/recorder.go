@@ -20,6 +20,9 @@ type recorder struct {
 	// offset is bootOffset, read once per line written.
 	offset func() (int64, error)
 	files  execFiles
+	// opens holds each thread's open, recorded at its file, until the
+	// open-result of its call arrives.
+	opens map[uint32]record
 	// line is reused for each line written.
 	line    []byte
 	counts  map[tally]int
@@ -40,6 +43,7 @@ func newRecorder(w *bufio.Writer, log io.Writer, offset func() (int64, error)) *
 		log:    log,
 		offset: offset,
 		files:  execFiles{},
+		opens:  map[uint32]record{},
 		counts: map[tally]int{},
 	}
 }
@@ -55,6 +59,9 @@ func (r *recorder) add(raw []byte) error {
 	if r.files.attach(&rec) {
 		return nil
 	}
+	if rec.Kind == "open-result" {
+		return r.settle(rec)
+	}
 	if !r.started {
 		if rec.Kind != "exec" {
 			r.preExec++
@@ -62,6 +69,42 @@ func (r *recorder) add(raw []byte) error {
 		}
 		r.started = true
 	}
+	if rec.tid != 0 {
+		// Another open from the thread means the result of the one before was
+		// lost, which the drop or skip counts already say.
+		old, lost := r.opens[rec.tid]
+		r.opens[rec.tid] = rec
+		if lost {
+			return r.write(old)
+		}
+		return nil
+	}
+	return r.write(rec)
+}
+
+// settle records the open the open-result res is for, as done or as refused
+// with its errno; one that created its file before being refused is both. A
+// restarted call drops it, as the call's next run records it again.
+func (r *recorder) settle(res record) error {
+	rec, ok := r.opens[res.tid]
+	if !ok {
+		return nil
+	}
+	delete(r.opens, res.tid)
+	if res.ret <= -512 && res.ret >= -516 { // ERESTARTSYS to ERESTART_RESTARTBLOCK
+		return nil
+	}
+	if res.ret >= 0 || rec.created {
+		if err := r.write(rec); err != nil || res.ret >= 0 {
+			return err
+		}
+	}
+	rec.Err, rec.Failed = -res.ret, true
+	return r.write(rec)
+}
+
+// write writes rec as the recording's next line.
+func (r *recorder) write(rec record) error {
 	// Read per event, so a wall-clock step mid-run shifts later times as it
 	// shifts the proxy's.
 	offset, err := r.offset()
@@ -89,6 +132,19 @@ type loss struct {
 // flushes the recording.
 func (r *recorder) finish(l loss) error {
 	untracked := l.untracked
+	// An open whose call never returned while the tracer ran reached its
+	// file, but whether it succeeded is unknown.
+	waiting := make([]record, 0, len(r.opens))
+	for _, rec := range r.opens {
+		waiting = append(waiting, rec)
+	}
+	sort.Slice(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })
+	for _, rec := range waiting {
+		if err := r.write(rec); err != nil {
+			return err
+		}
+	}
+	untracked += uint64(len(waiting))
 	if l.errNamed == nil && l.errUnheld == nil && l.named == 0 && l.unheld > 0 {
 		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += l.unheld

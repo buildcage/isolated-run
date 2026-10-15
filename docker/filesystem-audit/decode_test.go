@@ -15,7 +15,7 @@ type event struct {
 	pathRet                   int32
 	err                       uint32
 	marks                     uint32
-	gid                       uint32
+	gid, tid                  uint32
 	bases                     uint32
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
@@ -39,6 +39,7 @@ func (e event) bytes() []byte {
 	le.PutUint32(b[offErr:], e.err)
 	le.PutUint32(b[offMarks:], e.marks)
 	le.PutUint32(b[offGid:], e.gid)
+	le.PutUint32(b[offTid:], e.tid)
 	le.PutUint64(b[offTs:], e.boot)
 	return append(b, e.data...)
 }
@@ -70,13 +71,20 @@ func TestDecodeHeldRefusal(t *testing.T) {
 	}
 }
 
-func TestDecodeHeldOpenRefusal(t *testing.T) {
-	r, err := decode(event{kind: filesystemAuditKindK_OPEN, flags: unix.O_WRONLY | unix.O_NONBLOCK, err: uint32(unix.ENXIO), data: []byte("/tmp/fifo\x00")}.bytes())
+func TestDecodeOpenAndItsResult(t *testing.T) {
+	r, err := decode(event{kind: filesystemAuditKindK_OPEN, flags: unix.O_WRONLY | unix.O_CREAT, tid: 12, bases: 1, data: []byte("/tmp/f\x00")}.bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "open" || r.Path != "/tmp/fifo" || r.Access != "w" || !r.Failed || r.Err != int32(unix.ENXIO) {
-		t.Errorf("held open refusal decode: %+v", r)
+	if r.Kind != "open" || r.Path != "/tmp/f" || r.tid != 12 || !r.created || r.Failed {
+		t.Errorf("open decode: %+v", r)
+	}
+	r, err = decode(event{kind: filesystemAuditKindK_OPEN_RESULT, tid: 12, pathRet: -int32(unix.ENXIO)}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "open-result" || r.tid != 12 || r.ret != -int32(unix.ENXIO) {
+		t.Errorf("open result decode: %+v", r)
 	}
 }
 

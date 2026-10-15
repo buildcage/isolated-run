@@ -317,12 +317,8 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	int r = hold_open(e);
-	if (r) {
-		submit(e);
-		if (r > 0)
-			open_recorded(e);
-	}
+	open_reached(e);
+	submit(e);
 	return 0;
 }
 
@@ -493,12 +489,14 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
- * Ends an open(2) family call's hold as the call returns, recording the open,
- * with the descriptor and flags from its arguments for a failed one. A call
- * with no hold names nothing the kernel looked up, as one a seccomp filter or
- * a tracer stopped, or one with no free descriptor. The exception is a name
- * getname refused as too long, read from the caller as a failed path
- * syscall's is, so a filter or tracer returning ENAMETOOLONG records one too.
+ * Ends an open(2) family call's hold as the call returns, recording a failed
+ * open with the descriptor and flags from its arguments. A call with no hold
+ * either reached its file, recorded there, or names nothing the kernel looked
+ * up, as one a seccomp filter or a tracer stopped, or one with no free
+ * descriptor; its return goes out as a K_OPEN_RESULT, which the reader drops
+ * when no open waits for it. The exception is a name getname refused as too
+ * long, read from the caller as a failed path syscall's is, so a filter or
+ * tracer returning ENAMETOOLONG records one too.
  */
 static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id, long nr,
 					  long ret)
@@ -509,8 +507,16 @@ static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id
 		open_name(slot, (const char *)sys_arg(regs, at), 1);
 	int had_head;
 	struct event *e = open_return(slot, id, ret, &had_head);
-	if (ret < 0 && !is_restart(ret) && !had_head)
-		bump(&open_unheld);
+	if (!had_head) {
+		if (ret < 0 && !is_restart(ret))
+			bump(&open_unheld);
+		struct event *r = start(slot, K_OPEN_RESULT);
+		if (r) {
+			r->tid = (u32)id;
+			r->path_len = ret;
+			submit(r);
+		}
+	}
 	if (!e)
 		return;
 	u32 flags;
@@ -556,7 +562,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	} else if (head) {
 		u32 t = tails_for(head->data_len);
 		if (!is_restart(ret) && (ret >= 0 || !watched || fd_held))
-			report_held(slot, &k, head, ret < 0 ? -ret : 0, 0);
+			report_held(slot, &k, head, ret < 0 ? -ret : 0);
 		release(&k, t);
 	}
 	if (watched && !fd_held)

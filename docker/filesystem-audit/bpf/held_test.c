@@ -279,7 +279,7 @@ static void test_short_hold(void)
 	CHECK(hold_new(make(K_UNLINK, HEAD_DATA, 1), HELD_OP) == 0);
 	CHECK(heads.count == 1 && tails.count == 0 && use()->taken == 0);
 	struct held_key k = held_key(HELD_OP);
-	report_held(0, &k, head_of(1, HELD_OP), 0, 0);
+	report_held(0, &k, head_of(1, HELD_OP), 0);
 	CHECK(nsent == 1 && sent[0].size == HEAD && data_matches(&sent[0].e, HEAD_DATA, 1));
 	release(&k, 0);
 	CHECK(heads.count == 0);
@@ -298,7 +298,7 @@ static void test_long_hold_round_trip(void)
 	struct event *e = assemble(0, &k, head_of(1, HELD_OP));
 	CHECK(e && e->kind == K_RENAME && e->data_len == len && data_matches(e, len, 9));
 	CHECK(!e->truncated && untracked_count() == 0);
-	report_held(0, &k, head_of(1, HELD_OP), 2, 0);
+	report_held(0, &k, head_of(1, HELD_OP), 2);
 	CHECK(nsent == 1 && sent[0].e.err == 2 && data_matches(&sent[0].e, len, 9));
 	release(&k, MAX_TAILS);
 	CHECK(heads.count == 0 && use()->taken == 0);
@@ -468,7 +468,7 @@ static void test_missing_tail_drops(void)
 	bpf_map_delete_elem(&tails, &k);
 	k.n = 0;
 	CHECK(assemble(0, &k, head_of(1, HELD_OP)) == NULL && untracked_count() == 1);
-	report_held(0, &k, head_of(1, HELD_OP), 0, 0);
+	report_held(0, &k, head_of(1, HELD_OP), 0);
 	CHECK(nsent == 0 && untracked_count() == 2);
 }
 
@@ -501,8 +501,7 @@ static void test_refused_deletes(void)
 
 /**
  * reclaim_held drops a hold a thread left behind, gives back its tails, and
- * counts it in untracked, bar a K_OPEN_RECORDED marker, which stands for an
- * open already recorded.
+ * counts it in untracked.
  */
 static void test_reclaim_held(void)
 {
@@ -519,12 +518,6 @@ static void test_reclaim_held(void)
 	CHECK(heads.count == 0 && tails.count == 0 && use()->taken == 0);
 	CHECK(untracked_count() == 1);
 	CHECK_ACCOUNTS();
-
-	reset();
-	struct held_key open = held_key(HELD_OPEN);
-	CHECK(hold_new(make(K_OPEN_RECORDED, 0, 0), HELD_OPEN) == 0);
-	reclaim_held(&open);
-	CHECK(heads.count == 0 && untracked_count() == 0);
 
 	reset();
 	reclaim_held(&op);
@@ -646,95 +639,55 @@ static void test_open_no_head(void)
 	CHECK(open_return(0, bpf_get_current_pid_tgid(), -2, &had_head) == NULL && !had_head);
 }
 
-static void test_open_held_and_reported(void)
+/**
+ * An open that reaches its file lets go of its name's hold, tails and all,
+ * taking its thread and create step with it, and its call then finds no hold.
+ */
+static void test_open_reached(void)
 {
 	reset();
-	open_name(0, "/tmp/f", 0);
-	struct event *e = make(K_OPEN, 30, 5);
-	CHECK(hold_open(e) == 0); // in place, no tails
-	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN && tails.count == 0);
-	int had_head = 0;
-	CHECK(open_return(0, bpf_get_current_pid_tgid(), 0, &had_head) == NULL && had_head);
-	CHECK(nsent == 1 && sent[0].e.err == 0);
-	CHECK(sent[0].size == __builtin_offsetof(struct event, data) + 30);
-	CHECK(heads.count == 0);
-
-	reset();
-	open_name(0, "/tmp/f", 0);
+	name_of(long_name, sizeof(long_name) - 1, 'n');
+	open_name(0, long_name, 0);
 	CHECK(open_creating());
-	e = make(K_OPEN, HEAD_DATA + 2 * CHUNK, 6);
-	CHECK(hold_open(e) == 0 && use()->taken == 2);
-	CHECK(open_ret(-13) == NULL && nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
-	CHECK(data_matches(&sent[1].e, HEAD_DATA + 2 * CHUNK, 6));
+	CHECK(use()->taken == tails_for(sizeof(long_name)));
+	struct event *e = make(K_OPEN, 30, 5);
+	open_reached(e);
+	CHECK(e->tid == 1 && e->bases == 1 && data_matches(e, 30, 5));
 	CHECK(heads.count == 0 && use()->taken == 0);
 	CHECK_ACCOUNTS();
-}
-
-static void test_open_not_held(void)
-{
-	reset();
-	CHECK(hold_open(make(K_OPEN, 30, 1)) < 0); // outside open(2)
-	CHECK(!open_creating());
-	CHECK(open_ret(-2) == NULL);
-	open_name(0, "/f", 0);
-	CHECK(hold_open(make(K_OPEN, 30, 1)) == 0);
-	CHECK(hold_open(make(K_OPEN, 30, 2)) < 0); // nested in the one held
-	CHECK(head_of(1, HELD_OPEN)->data[0] == (char)1);
+	int had_head = 1;
+	CHECK(open_return(0, bpf_get_current_pid_tgid(), -13, &had_head) == NULL && !had_head);
+	CHECK(nsent == 0);
 }
 
 /**
- * An open that finds no tails for its path is recorded at once and counted,
- * and marked so its call records nothing more, whether the failed hold left
- * its head or took it.
+ * An open with no hold, from outside open(2) or nested in an open that
+ * already reached its file, is left as it is.
  */
-static void test_open_no_tails(void)
+static void test_open_not_held(void)
 {
 	reset();
-	open_name(0, "/tmp/f", 0);
-	use()->taken = N_TAILS;
-	struct event *e = make(K_OPEN, HEAD_DATA + CHUNK, 1);
-	CHECK(hold_open(e) > 0 && untracked_count() == 1);
-	open_recorded(e);
-	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_ret(-6) == NULL && nsent == 0 && heads.count == 0);
-
-	reset();
-	open_name(0, "/tmp/f", 0);
-	tails.busy_after = 0; // the hold fails after replacing the head, which goes too
-	e = make(K_OPEN, HEAD_DATA + CHUNK, 1);
-	CHECK(hold_open(e) > 0 && heads.count == 0);
-	tails.busy_after = -1;
-	open_recorded(e);
-	CHECK(head_of(1, HELD_OPEN)->kind == K_OPEN_RECORDED);
-	CHECK(open_ret(-6) == NULL && nsent == 0);
+	struct event *e = make(K_OPEN, 30, 1);
+	open_reached(e); // outside open(2)
+	CHECK(e->tid == 0 && e->bases == 0);
+	CHECK(!open_creating());
+	CHECK(open_ret(-2) == NULL);
+	open_name(0, "/f", 0);
+	open_reached(make(K_OPEN, 30, 1));
+	e = make(K_OPEN, 30, 2);
+	open_reached(e); // nested in the one that reached its file
+	CHECK(e->tid == 0 && heads.count == 0);
 }
 
 static void test_open_restarted(void)
 {
 	reset();
-	open_name(0, "/f", 0);
-	hold_open(make(K_OPEN, HEAD_DATA + CHUNK, 1));
+	name_of(long_name, sizeof(long_name) - 1, 'n');
+	open_name(0, long_name, 0);
 	CHECK(open_ret(-512) == NULL && nsent == 0);
 	CHECK(heads.count == 0 && use()->taken == 0);
 	open_name(0, "/x", 0);
 	CHECK(open_ret(0) == NULL && nsent == 0 && heads.count == 0);
-}
-
-static void test_report_outcomes(void)
-{
-	reset();
-	struct event *e = make(K_OPEN, 10, 1);
-	report_at(e, HEAD, 0, 0);
-	CHECK(nsent == 1 && sent[0].e.err == 0);
-	nsent = 0;
-	report_at(e, HEAD, 6, 0);
-	CHECK(nsent == 1 && sent[0].e.err == 6);
-	nsent = 0;
-	report_at(e, HEAD, 13, 1); // created, then refused
-	CHECK(nsent == 2 && sent[0].e.err == 0 && sent[1].e.err == 13);
-	nsent = 0;
-	report_at(e, HEAD, 0, 1);
-	CHECK(nsent == 1 && sent[0].e.err == 0);
 }
 
 int main(void)
@@ -761,11 +714,9 @@ int main(void)
 	test_open_long_name();
 	test_open_long_name_no_tails();
 	test_open_no_head();
-	test_open_held_and_reported();
+	test_open_reached();
 	test_open_not_held();
-	test_open_no_tails();
 	test_open_restarted();
-	test_report_outcomes();
 	if (failures) {
 		fprintf(stderr, "held_test: %d failed\n", failures);
 		return 1;
