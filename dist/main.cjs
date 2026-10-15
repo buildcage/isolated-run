@@ -69481,7 +69481,8 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 			},
 			{
 				key: "hosts",
-				title: "Hosts"
+				title: "Hosts",
+				cell: String
 			},
 			{
 				key: "count",
@@ -69489,7 +69490,7 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 				align: "right"
 			}
 		], audited.map(({ label, hosts, count }) => {
-			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).join(", ");
+			let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).map(codeCell).join(", ");
 			return {
 				key: label,
 				hosts: rest > 0 ? `${shown} and ${rest} more` : shown,

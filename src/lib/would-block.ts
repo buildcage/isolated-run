@@ -5,7 +5,7 @@ import type { OutcomeEmission } from "#core/lib/report/outcome/annotate.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
 import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
-import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
+import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
@@ -148,12 +148,13 @@ export function wouldBlockTables(
       [
         // Every row's reason, which the troubleshooting link below is looked up by.
         { key: "key", title: `Key (${KEY_NOT_ALLOWED})` },
-        { key: "hosts", title: "Hosts" },
+        // Each host is a code span of its own, made below: a request chooses its Host header.
+        { key: "hosts", title: "Hosts", cell: String },
         { key: "count", title: "Count", align: "right" },
       ],
       audited.map(({ label, hosts, count }) => {
         const rest = hosts.size - KEY_HOSTS_SHOWN;
-        const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).join(", ");
+        const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).map(codeCell).join(", ");
         return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
       }),
     );

@@ -348,9 +348,9 @@ describe("computeReportOutcomes", () => {
       expect(markdown).toMatch(/^> 7 restrict would block$/m);
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
-          "| key 2 | ssm.amazonaws.com | 1 |",
-          "| key 3 | cloudformation.amazonaws.com | 1 |",
+          "| key 1 from a role in 222222222222 | `s3.amazonaws.com`, `ssm.amazonaws.com` | 3 |",
+          "| key 2 | `ssm.amazonaws.com` | 1 |",
+          "| key 3 | `cloudformation.amazonaws.com` | 1 |",
         ],
         [
           "| `s3.amazonaws.com:443` | HTTPS | aws-no-credential | 1 |",
@@ -384,7 +384,18 @@ describe("computeReportOutcomes", () => {
         options(),
       );
       expect(tables(markdown)[0][0]).toBe(
-        "| key 1 | a.amazonaws.com, b.amazonaws.com, c.amazonaws.com and 2 more | 5 |",
+        "| key 1 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more | 5 |",
+      );
+    });
+
+    it("puts each host of a key in a code span of its own", () => {
+      const hosts = ["a&ZeroWidthSpace;.amazonaws.com", "~~b~~.amazonaws.com", "c|d.amazonaws.com"];
+      const markdown = markdownOf(
+        audit(hosts.map((host, i) => signed(i, host, "aaaa1111"))),
+        options(),
+      );
+      expect(tables(markdown)[0][0]).toBe(
+        "| key | `a&ZeroWidthSpace;.amazonaws.com`, `~~b~~.amazonaws.com`, `c\\|d.amazonaws.com` | 3 |",
       );
     });
 
@@ -394,13 +405,13 @@ describe("computeReportOutcomes", () => {
         options(),
       );
       expect(tables(one)).toStrictEqual([
-        ["| key from a role in 222222222222 | s3.amazonaws.com | 1 |"],
+        ["| key from a role in 222222222222 | `s3.amazonaws.com` | 1 |"],
       ]);
       expect(details(one).at(-1)).toContain(
         "(restrict would block: aws-key-not-allowed, key from a role in 222222222222)",
       );
       const bare = markdownOf(audit([signed(1, "s3.amazonaws.com", "aaaa1111")]), options());
-      expect(tables(bare)).toStrictEqual([["| key | s3.amazonaws.com | 1 |"]]);
+      expect(tables(bare)).toStrictEqual([["| key | `s3.amazonaws.com` | 1 |"]]);
       expect(details(bare).at(-1)).toMatch(/\(restrict would block: aws-key-not-allowed\)$/);
     });
   });
