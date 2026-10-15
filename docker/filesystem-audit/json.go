@@ -48,12 +48,18 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
 	// "t" is its wall-clock time.
 	boot uint64
-	// tid is the thread of an open whose open-result follows, and of that
-	// result; created marks such an open that made its file, and ret is the
-	// result's return value.
+	// tid is the thread of an event whose syscall's result follows, and of
+	// that result, nr the syscall. ret is a result's return value, bits its
+	// RESULT_* and hasBase whether Path holds a failed open's base directory.
+	// caller marks an open-name read from the caller, and cut one that read
+	// cut short.
 	tid     uint32
-	created bool
+	nr      int32
 	ret     int32
+	bits    uint8
+	hasBase bool
+	caller  bool
+	cut     bool
 }
 
 const timeLayout = "2006-01-02T15:04:05.000Z07:00"

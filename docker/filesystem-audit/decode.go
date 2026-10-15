@@ -12,8 +12,7 @@ import (
 )
 
 // kindNames names each kind of struct event. A failed operation decodes to
-// the name of the one that succeeded, with Failed set: the *_FAILED kinds, and
-// any path change the kernel refused after its hook saw it.
+// the name of the one that succeeded, with Failed set.
 var kindNames = [...]string{
 	filesystemAuditKindK_OPEN:            "open",
 	filesystemAuditKindK_EXEC:            "exec",
@@ -26,7 +25,7 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK:            "link",
 	filesystemAuditKindK_TRUNCATE:        "truncate",
 	filesystemAuditKindK_CHOWN:           "chown",
-	filesystemAuditKindK_OPEN_FAILED:     "open",
+	filesystemAuditKindK_OPEN_NAME:       "open-name",
 	filesystemAuditKindK_READ:            "read",
 	filesystemAuditKindK_WRITE:           "write",
 	filesystemAuditKindK_MMAP:            "mmap",
@@ -46,7 +45,9 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK_FAILED:     "link",
 	filesystemAuditKindK_TRUNCATE_FAILED: "truncate",
 	filesystemAuditKindK_SYSCALL:         "syscall",
-	filesystemAuditKindK_OPEN_RESULT:     "open-result",
+	filesystemAuditKindK_RESULT:          "result",
+	filesystemAuditKindK_OPEN_CREATE:     "open-create",
+	filesystemAuditKindK_EXIT:            "exit",
 }
 
 func kindName(kind filesystemAuditKind) string {
@@ -72,7 +73,7 @@ const (
 	offTrunc2    = int(unsafe.Offsetof(filesystemAuditEvent{}.Trunc2))
 	offComm      = int(unsafe.Offsetof(filesystemAuditEvent{}.Comm))
 	commLen      = len(filesystemAuditEvent{}.Comm)
-	offErr       = int(unsafe.Offsetof(filesystemAuditEvent{}.Err))
+	offNr        = int(unsafe.Offsetof(filesystemAuditEvent{}.Nr))
 	offMarks     = int(unsafe.Offsetof(filesystemAuditEvent{}.Marks))
 	offGid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Gid))
 	offTid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Tid))
@@ -196,6 +197,38 @@ func passed(data []byte, has bool, n int, truncated bool) (string, string) {
 	return p, passedName(name, p)
 }
 
+// RESULT_* in bpf/event.h.
+const (
+	resultOpen    = 1
+	resultWatched = 2
+	resultFD      = 4
+)
+
+// failedOpen is the record of an open(2) that failed before reaching a file,
+// from the name it passed (an open-name) and its call's result, which carries
+// the errno, the flags and the base directory a relative name is joined to.
+func failedOpen(name, res record) record {
+	p := name.Path
+	if res.hasBase && p != "" && p[0] != '/' {
+		p = strings.TrimSuffix(res.Path, "/") + "/" + p
+	}
+	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
+	r.Path = tidy(p)
+	r.Name = passedName(name.Path, r.Path)
+	// A cut name has lost its end, the part that names the file.
+	if name.cut {
+		r.Path += "…"
+		if r.Name != "" {
+			r.Name += "…"
+		}
+	}
+	r.Err = -res.ret
+	r.Flags = res.Flags
+	r.Access = openAccess(res.Flags, 0)
+	r.Failed = true
+	return r
+}
+
 // applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
 // " (deleted)" d_path appended (dpath), so Path holds the name alone. Another
 // kernel-internal file, such as a pipe or an io_uring ring, is left relative,
@@ -239,12 +272,8 @@ func decode(raw []byte) (record, error) {
 		PPID: le.Uint32(raw[offPpid:]),
 		Comm: cstr(raw[offComm : offComm+commLen]),
 		boot: le.Uint64(raw[offTs:]),
-	}
-	// A held path change its syscall refused carries the errno; its path and
-	// kind are as for one that succeeded.
-	if heldErr := le.Uint32(raw[offErr:]); heldErr != 0 {
-		r.Err = int32(heldErr)
-		r.Failed = true
+		tid:  le.Uint32(raw[offTid:]),
+		nr:   int32(le.Uint32(raw[offNr:])),
 	}
 	switch kind {
 	case filesystemAuditKindK_OPEN:
@@ -252,24 +281,18 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
-		r.tid = le.Uint32(raw[offTid:])
-		r.created = bases&1 != 0
-	case filesystemAuditKindK_OPEN_RESULT:
-		r.tid = le.Uint32(raw[offTid:])
+	case filesystemAuditKindK_OPEN_NAME:
+		r.Path = cstr(data)
+		r.caller, r.cut = n1 != 0, n2 != 0
+	case filesystemAuditKindK_RESULT:
 		r.ret = pathRet
-	case filesystemAuditKindK_OPEN_FAILED:
-		r.Path, r.Name = passed(data, bases&1 != 0, int(mode), truncated)
-		// n2 marks a name the BPF side had to cut, which lost its end.
-		if n2 != 0 {
-			r.Path += "…"
-			if r.Name != "" {
-				r.Name += "…"
-			}
-		}
-		r.Err = pathRet // the positive errno the BPF side stored as -ret
+		r.bits = uint8(n1)
 		r.Flags = flags
-		r.Access = openAccess(flags, 0)
-		r.Failed = true
+		// A failed open's base directory, which only a relative name uses.
+		if bases&1 != 0 {
+			r.Path, _ = components(data, int(mode), truncated)
+			r.hasBase = true
+		}
 	case filesystemAuditKindK_READ, filesystemAuditKindK_WRITE:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)

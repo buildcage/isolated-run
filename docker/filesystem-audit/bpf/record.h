@@ -64,7 +64,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, N_SLOTS);
 	__type(key, u32);
-	__type(value, struct scratch_buf);
+	__type(value, struct event);
 } scratch SEC(".maps");
 
 /** The scratch event of the program whose BPF_PROG @p slot is. */
@@ -102,7 +102,7 @@ static __always_inline struct event *start(u32 slot, u32 kind)
 	// The process's name, as ps shows it, not the thread's: a JVM or tokio
 	// worker thread names itself after its pool.
 	BPF_CORE_READ_STR_INTO(&e->comm, t, group_leader, comm);
-	e->err = 0;
+	e->nr = 0;
 	e->ts = bpf_ktime_get_boot_ns();
 	return e;
 }
