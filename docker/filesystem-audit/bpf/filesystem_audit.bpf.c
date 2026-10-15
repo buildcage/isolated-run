@@ -76,9 +76,8 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 
 /**
  * A thread's exit, so the reader drops what the thread sent for a syscall
- * whose exit never ran (a skipped hook, or the kernel writing a core dump
- * through the path hooks with no syscall to return from), rather than give
- * it to a reused thread id.
+ * whose exit never ran (a skipped hook, or a core dump written through the
+ * path hooks) rather than give it to a reused thread id.
  */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
@@ -350,11 +349,10 @@ static __always_inline int open_creating(u32 slot)
 DIR_ENTRY_HOOK(on_mknod, security_path_mknod, K_MKNOD, open_creating(slot))
 
 /**
- * Sends the name of the open(2) the thread is in, for the reader to record
- * the open under if it fails before reaching a file: as getname copied it,
- * not the user pointer, which the caller could rewrite before the syscall
- * returns; or, with @p user, the caller's own, for a name getname refused as
- * too long, best-effort as a failed path syscall's is.
+ * Sends the name of the open(2) the thread is in, to record the open under if
+ * it fails before reaching a file: getname's copy, which the caller cannot
+ * rewrite, or with @p user the caller's own, for a name getname refused as
+ * too long.
  */
 static __always_inline void open_name(u32 slot, const char *name, int user)
 {
@@ -498,11 +496,9 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
- * Sends the return of syscall @p nr, with @p bits (RESULT_*), for the events
- * the thread sent while in it. A failed open(2) adds its flags, from its
- * arguments, and the base directory of its descriptor or working directory,
- * which the reader joins to a relative name: only the name the reader holds
- * says whether it is one.
+ * Sends the return of syscall @p nr, with @p bits (RESULT_*). A failed
+ * open(2) adds its flags and the base directory of its descriptor or working
+ * directory, which the reader joins to the name only if that is relative.
  */
 static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr, long ret, u8 bits)
 {
