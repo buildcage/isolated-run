@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,15 +37,24 @@ type recorder struct {
 	started        bool
 }
 
-// call is what one thread sent while in a syscall.
+// call is what one thread sent while in a syscall. It stays with its thread,
+// for the next call, until the thread exits.
 type call struct {
 	// op is a path change its hook sent, whose result says whether it
 	// happened, and failure the call's failure recorded from its exit.
-	op, failure *record
-	// name is an open's name, open the file it reached, and created says it
-	// reached its create step.
-	name, open *record
-	created    bool
+	op, failure       record
+	hasOp, hasFailure bool
+	// open is the file an open reached, and name the name it passed, cut
+	// short when cut; created says it reached its create step.
+	open             record
+	name             []byte
+	hasOpen, hasName bool
+	cut, created     bool
+}
+
+// pending says whether c holds anything of a call.
+func (c *call) pending() bool {
+	return c.hasOp || c.hasName || c.hasOpen
 }
 
 // tally is what the step log counts lines by.
@@ -68,6 +78,26 @@ func newRecorder(w *bufio.Writer, log io.Writer, offset func() (int64, error)) *
 // before the sandboxed command's first exec belong to runc's own setup and are
 // dropped; the cgroup holds nothing else before then.
 func (r *recorder) add(raw []byte) error {
+	// The events that only settle others are read from their header alone.
+	if len(raw) >= hdrLen {
+		h := header(raw)
+		switch h.kind {
+		case filesystemAuditKindK_RESULT:
+			return r.settle(h, raw)
+		case filesystemAuditKindK_EXIT:
+			return r.exited(h.tid)
+		case filesystemAuditKindK_OPEN_NAME:
+			if r.started {
+				return r.openName(h, raw)
+			}
+			return nil
+		case filesystemAuditKindK_OPEN_CREATE:
+			if r.started {
+				r.call(h.tid).created = true
+			}
+			return nil
+		}
+	}
 	rec, err := decode(raw)
 	if err != nil {
 		return err
@@ -75,17 +105,9 @@ func (r *recorder) add(raw []byte) error {
 	if r.files.attach(&rec) {
 		return nil
 	}
-	switch rec.Kind {
-	case "result":
-		return r.settle(rec)
-	case "exit":
-		return r.exited(rec.tid)
-	}
 	if !r.started {
 		if rec.Kind != "exec" {
-			if rec.Kind != "open-name" && rec.Kind != "open-create" {
-				r.preExec++
-			}
+			r.preExec++
 			return nil
 		}
 		r.started = true
@@ -96,34 +118,29 @@ func (r *recorder) add(raw []byte) error {
 	if rec.Failed {
 		// Recorded from its call's exit, just before the call's result,
 		// which can keep the path change its hook sent instead.
-		if c := r.calls[rec.tid]; c != nil && c.op != nil {
-			c.failure = &rec
+		if c := r.calls[rec.tid]; c != nil && c.hasOp {
+			c.failure, c.hasFailure = rec, true
 			return nil
 		}
 		return r.write(rec)
 	}
 	c := r.call(rec.tid)
-	switch {
-	case rec.Kind == "open-name":
-		return r.openName(c, rec)
-	case rec.Kind == "open-create":
-		c.created = true
-	case rec.Kind == "open":
+	if rec.Kind == "open" {
 		// The call's own file is the first it reaches; a later one, as a
 		// FUSE passthrough's backing file, is written as done.
-		if c.open != nil {
+		if c.hasOpen {
 			return r.write(rec)
 		}
-		c.open = &rec
-	default:
-		// A path change from another call means that call's result never
-		// came; one from the same call is its hook run again, as after
-		// breaking a delegation.
-		if c.op != nil && c.op.nr != rec.nr {
-			r.unsettled++
-		}
-		c.op = &rec
+		c.open, c.hasOpen = rec, true
+		return nil
 	}
+	// A path change from another call means that call's result never came;
+	// one from the same call is its hook run again, as after breaking a
+	// delegation.
+	if c.hasOp && c.op.nr != rec.nr {
+		r.unsettled++
+	}
+	c.op, c.hasOp = rec, true
 	return nil
 }
 
@@ -140,109 +157,118 @@ func (r *recorder) call(tid uint32) *call {
 // openName takes the name of the open(2) a thread starts. A name read from
 // the caller comes at the call's return, when getname refused it, and gives
 // way to the kernel's copy if the call had one.
-func (r *recorder) openName(c *call, name record) error {
-	if name.caller && c.name != nil {
+func (r *recorder) openName(h hdr, raw []byte) error {
+	c := r.call(h.tid)
+	if h.n1 != 0 && c.hasName {
 		return nil
 	}
-	if !name.caller {
+	if h.n1 == 0 {
 		r.named++
 	}
 	// An open still waiting is the last call's, whose result never came.
 	if err := r.lose(c); err != nil {
 		return err
 	}
-	c.name = &name
+	name := raw[hdrLen:]
+	if i := bytes.IndexByte(name, 0); i >= 0 {
+		name = name[:i]
+	}
+	c.name, c.hasName, c.cut = append(c.name[:0], name...), true, h.n2 != 0
 	return nil
 }
 
 // lose writes what c holds as if its call's result never came: an open as
 // done and a failure as recorded, counting the call once.
 func (r *recorder) lose(c *call) error {
-	open, failure := c.open, c.failure
-	if c.op == nil && c.name == nil && open == nil {
+	if !c.pending() {
 		return nil
 	}
-	*c = call{}
+	open, failure, hasOpen, hasFailure := c.open, c.failure, c.hasOpen, c.hasFailure
+	c.clear()
 	r.unsettled++
-	if failure != nil {
-		if err := r.write(*failure); err != nil {
+	if hasFailure {
+		if err := r.write(failure); err != nil {
 			return err
 		}
 	}
-	if open == nil {
+	if !hasOpen {
 		return nil
 	}
-	return r.write(*open)
+	return r.write(open)
 }
 
-// settle writes what the thread sent during the call res ends. A path change
-// is done, or refused unless the exit's record stands for the failure. An
-// open is done, refused, or both if it created its file first; one that
-// failed before reaching a file is written under its name. A restarted call
-// drops them, as its rerun sends them again.
-func (r *recorder) settle(res record) error {
-	c := r.calls[res.tid]
-	if c == nil {
+// clear empties c, keeping its name's buffer.
+func (c *call) clear() {
+	*c = call{name: c.name[:0]}
+}
+
+// settle writes what the thread sent during the call the result h ends. A
+// path change is done, or refused unless the exit's record stands for the
+// failure. An open is done, refused, or both if it created its file first;
+// one that failed before reaching a file is written under its name. A
+// restarted call drops them, as its rerun sends them again.
+func (r *recorder) settle(h hdr, raw []byte) error {
+	c := r.calls[h.tid]
+	if c == nil || !c.pending() {
 		// runc's own opens before the first exec send no name the reader keeps.
-		if r.started && res.bits&resultOpen != 0 && res.ret < 0 && !isRestart(res.ret) {
+		if r.started && h.n1&resultOpen != 0 && h.ret < 0 && !isRestart(h.ret) {
 			r.unnamed++
 		}
 		return nil
 	}
-	if err := r.settleOp(c, res); err != nil {
+	if err := r.settleOp(c, h); err != nil {
 		return err
 	}
-	if res.bits&resultOpen != 0 {
-		if err := r.settleOpen(c, res); err != nil {
-			return err
-		}
+	if h.n1&resultOpen == 0 {
+		return nil
 	}
-	if c.op == nil && c.name == nil && c.open == nil {
-		delete(r.calls, res.tid)
-	}
-	return nil
+	return r.settleOpen(c, h, raw)
 }
 
-func (r *recorder) settleOp(c *call, res record) error {
-	op, failure := c.op, c.failure
-	c.op, c.failure = nil, nil
+func (r *recorder) settleOp(c *call, h hdr) error {
+	op, failure, hasOp, hasFailure := &c.op, c.failure, c.hasOp, c.hasFailure
+	c.hasOp, c.hasFailure = false, false
 	switch {
-	case op == nil:
+	case !hasOp:
 		return nil
-	case op.nr != res.nr:
+	case op.nr != h.nr:
 		// Sent from a call whose own result never came.
 		r.unsettled++
-	case isRestart(res.ret):
-	case res.ret >= 0:
+	case isRestart(h.ret):
+	case h.ret >= 0:
 		return r.write(*op)
-	case res.bits&resultWatched == 0 || res.bits&resultFD != 0:
-		op.Err, op.Failed = -res.ret, true
+	case h.n1&resultWatched == 0 || h.n1&resultFD != 0:
+		op.Err, op.Failed = -h.ret, true
 		return r.write(*op)
 	}
-	if failure == nil {
+	if !hasFailure {
 		return nil
 	}
-	return r.write(*failure)
+	return r.write(failure)
 }
 
-func (r *recorder) settleOpen(c *call, res record) error {
-	open, name, created := c.open, c.name, c.created
-	c.open, c.name, c.created = nil, nil, false
+func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
+	open, hasOpen, hasName, created := &c.open, c.hasOpen, c.hasName, c.created
+	c.hasOpen, c.hasName, c.created = false, false, false
 	switch {
-	case isRestart(res.ret):
+	case isRestart(h.ret):
 		return nil
-	case open != nil:
-		if res.ret >= 0 || created {
-			if err := r.write(*open); err != nil || res.ret >= 0 {
+	case hasOpen:
+		if h.ret >= 0 || created {
+			if err := r.write(*open); err != nil || h.ret >= 0 {
 				return err
 			}
 		}
-		open.Err, open.Failed = -res.ret, true
+		open.Err, open.Failed = -h.ret, true
 		return r.write(*open)
-	case res.ret >= 0:
+	case h.ret >= 0:
 		return nil
-	case name != nil:
-		return r.write(failedOpen(*name, res))
+	case hasName:
+		rec, err := failedOpen(string(c.name), c.cut, raw)
+		if err != nil {
+			return err
+		}
+		return r.write(rec)
 	}
 	r.unnamed++
 	return nil
@@ -296,13 +322,14 @@ func (r *recorder) finish(l loss) error {
 	// file, but whether it succeeded is unknown.
 	waiting := make([]record, 0, len(r.calls))
 	for _, c := range r.calls {
-		if c.op != nil || c.name != nil || c.open != nil {
+		if c.pending() {
 			r.unsettled++
 		}
-		for _, rec := range []*record{c.open, c.failure} {
-			if rec != nil {
-				waiting = append(waiting, *rec)
-			}
+		if c.hasOpen {
+			waiting = append(waiting, c.open)
+		}
+		if c.hasFailure {
+			waiting = append(waiting, c.failure)
 		}
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })

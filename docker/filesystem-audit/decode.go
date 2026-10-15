@@ -157,6 +157,9 @@ func under(base, name string) string {
 // stays, since it makes the kernel follow a final symlink, and ".." stays,
 // since through a symlink it leads somewhere a lexical clean would not.
 func tidy(p string) string {
+	if !strings.Contains(p, "//") && !strings.Contains(p, "/./") {
+		return p
+	}
 	parts := strings.Split(p, "/")
 	kept := make([]string, 0, len(parts))
 	for i, part := range parts {
@@ -208,18 +211,25 @@ const (
 	resultFD      = 4
 )
 
-// failedOpen is the record of an open(2) that failed before reaching a file:
-// its name, joined to the result's base directory when relative.
-func failedOpen(name, res record) record {
-	p := name.Path
-	if res.hasBase && p != "" && p[0] != '/' {
-		p = under(res.Path, p)
+// failedOpen is the record of an open(2) that failed before reaching a file,
+// from its result raw: its name, cut short when cut, joined to the base
+// directory the result carries when relative.
+func failedOpen(name string, cut bool, raw []byte) (record, error) {
+	res, err := decode(raw)
+	if err != nil {
+		return record{}, err
+	}
+	p := name
+	if raw[offBases]&1 != 0 && p != "" && p[0] != '/' {
+		le := binary.LittleEndian
+		base, _ := components(raw[hdrLen:], int(le.Uint32(raw[offMode:])), raw[offTruncated] != 0)
+		p = under(base, p)
 	}
 	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
 	r.Path = tidy(p)
-	r.Name = passedName(name.Path, r.Path)
+	r.Name = passedName(name, r.Path)
 	// A cut name has lost its end, the part that names the file.
-	if name.cut {
+	if cut {
 		r.Path += "…"
 		if r.Name != "" {
 			r.Name += "…"
@@ -229,7 +239,7 @@ func failedOpen(name, res record) record {
 	r.Flags = res.Flags
 	r.Access = openAccess(res.Flags, 0)
 	r.Failed = true
-	return r
+	return r, nil
 }
 
 // applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
@@ -250,6 +260,28 @@ func applyMarks(r *record, marks uint32, dpath bool) {
 			r.Path = strings.TrimSuffix(r.Path, " (deleted)")
 		}
 		r.Deleted = true
+	}
+}
+
+// hdr is what the reader needs of an event that settles others.
+type hdr struct {
+	kind   filesystemAuditKind
+	tid    uint32
+	nr     int32
+	ret    int32
+	n1, n2 uint8
+}
+
+// header reads hdr from a sample at least hdrLen long.
+func header(raw []byte) hdr {
+	le := binary.LittleEndian
+	return hdr{
+		kind: filesystemAuditKind(le.Uint32(raw[offKind:])),
+		tid:  le.Uint32(raw[offTid:]),
+		nr:   int32(le.Uint32(raw[offNr:])),
+		ret:  int32(le.Uint32(raw[offPathLen:])),
+		n1:   raw[offN1],
+		n2:   raw[offN2],
 	}
 }
 
@@ -284,18 +316,9 @@ func decode(raw []byte) (record, error) {
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
-	case filesystemAuditKindK_OPEN_NAME:
-		r.Path = cstr(data)
-		r.caller, r.cut = n1 != 0, n2 != 0
 	case filesystemAuditKindK_RESULT:
 		r.ret = pathRet
-		r.bits = uint8(n1)
 		r.Flags = flags
-		// A failed open's base directory, which only a relative name uses.
-		if bases&1 != 0 {
-			r.Path, _ = components(data, int(mode), truncated)
-			r.hasBase = true
-		}
 	case filesystemAuditKindK_READ, filesystemAuditKindK_WRITE:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)

@@ -48,17 +48,11 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
 	// "t" is its wall-clock time.
 	boot uint64
-	// tid and nr are the thread and syscall an event was sent from. A
-	// result has its return value in ret, RESULT_* in bits, and a failed
-	// open's base directory in Path when hasBase. caller and cut mark an
-	// open-name read from the caller, and cut short.
-	tid     uint32
-	nr      int32
-	ret     int32
-	bits    uint8
-	hasBase bool
-	caller  bool
-	cut     bool
+	// tid and nr are the thread and syscall an event was sent from, and ret
+	// a result's return value.
+	tid uint32
+	nr  int32
+	ret int32
 }
 
 const timeLayout = "2006-01-02T15:04:05.000Z07:00"

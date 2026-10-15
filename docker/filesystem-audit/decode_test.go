@@ -73,7 +73,7 @@ func TestDecodeOpenAndItsResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "result" || r.tid != 12 || r.nr != 257 || r.bits != resultOpen || r.ret != -int32(unix.ENXIO) || r.hasBase {
+	if r.Kind != "result" || r.tid != 12 || r.nr != 257 || r.ret != -int32(unix.ENXIO) {
 		t.Errorf("result decode: %+v", r)
 	}
 }
@@ -145,15 +145,11 @@ func TestFailedOpen(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			name, err := decode(c.openName.bytes())
+			got, err := failedOpen(cstr(c.openName.data), c.openName.n2 != 0, c.res.bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, err := decode(c.res.bytes())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := failedOpen(name, res); got != c.want {
+			if got != c.want {
 				t.Errorf("failedOpen mismatch\n got: %+v\nwant: %+v", got, c.want)
 			}
 		})
