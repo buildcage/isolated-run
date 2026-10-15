@@ -23,8 +23,9 @@ type recorder struct {
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
-	// keepOp marks a thread whose next failure recorded from its call's exit
-	// is left out, as the path change its hook sent stands for it.
+	// keepOp marks a thread whose next failure recorded from its call's exit,
+	// a failed path syscall or a refused one, is left out, as the path change
+	// its hook sent stands for it.
 	keepOp map[uint32]bool
 	// line is reused for each line written.
 	line    []byte
@@ -183,7 +184,8 @@ func (r *recorder) settle(res record) error {
 	delete(r.keepOp, res.tid)
 	c := r.calls[res.tid]
 	if c == nil {
-		if res.bits&resultOpen != 0 && res.ret < 0 && !isRestart(res.ret) {
+		// runc's own opens before the first exec send no name the reader keeps.
+		if r.started && res.bits&resultOpen != 0 && res.ret < 0 && !isRestart(res.ret) {
 			r.unnamed++
 		}
 		return nil
@@ -216,9 +218,8 @@ func (r *recorder) settleOp(c *call, res record) error {
 	case res.ret >= 0:
 		return r.write(*op)
 	case res.bits&resultWatched == 0 || res.bits&resultFD != 0:
-		if res.bits&resultWatched != 0 {
-			r.keepOp[res.tid] = true
-		}
+		// It stands for any record of the failure that follows.
+		r.keepOp[res.tid] = true
 		op.Err, op.Failed = -res.ret, true
 		return r.write(*op)
 	}

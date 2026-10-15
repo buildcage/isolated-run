@@ -531,12 +531,12 @@ static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr,
 
 /**
  * Sends the return of each call a hook may have sent an event from: the
- * open(2) family, a path syscall, and bind(2), whose socket file passes the
- * mknod hook. A path syscall that failed is then recorded from its exit
- * (see classify()), and the reader drops the path change its hook sent, as
- * the exit's record stands for the failure. A call through a descriptor
- * alone is the exception: the path change has the file the hook saw, which a
- * thread swapping the descriptor before the exit cannot change.
+ * open(2) family, a path syscall, and the calls other_hooked() names. A path
+ * syscall that failed is then recorded from its exit (see classify()), and
+ * the reader drops the path change its hook sent, as the exit's record
+ * stands for the failure. A call through a descriptor alone is the
+ * exception: the path change has the file the hook saw, which a thread
+ * swapping the descriptor before the exit cannot change.
  */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
@@ -552,14 +552,14 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		if (ret == -ENAMETOOLONG)
 			open_name(slot, (const char *)sys_arg(regs, nr == nr_openat || nr == nr_openat2), 1);
 		send_result(slot, regs, nr, ret, RESULT_OPEN);
-	} else if ((watched && call.kind != K_ATTR_FAILED) || (nr >= 0 && nr == nr_bind)) {
+	} else if ((watched && call.kind != K_ATTR_FAILED) || other_hooked(nr)) {
 		u8 bits = watched ? RESULT_WATCHED : 0;
 		if (watched && ret < 0 && names_fd(&call))
 			bits |= RESULT_FD;
 		send_result(slot, regs, nr, ret, bits);
-	} else if (ret == -EPERM && !watched && is_refusable(nr)) {
-		syscall_refused(slot, nr, 0);
 	}
+	if (ret == -EPERM && !watched && !is_open_nr(nr) && is_refusable(nr))
+		syscall_refused(slot, nr, 0);
 	if (watched)
 		op_exit(slot, &call, ret);
 	return 0;

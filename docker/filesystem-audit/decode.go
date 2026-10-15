@@ -145,7 +145,12 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 	if name == "" { // futimens, fchmod: the descriptor's own path
 		return base, rest
 	}
-	return strings.TrimSuffix(base, "/") + "/" + name, rest
+	return under(base, name), rest
+}
+
+// under is name in directory base.
+func under(base, name string) string {
+	return strings.TrimSuffix(base, "/") + "/" + name
 }
 
 // tidy drops the spellings that never change where a path leads: a "."
@@ -210,7 +215,7 @@ const (
 func failedOpen(name, res record) record {
 	p := name.Path
 	if res.hasBase && p != "" && p[0] != '/' {
-		p = strings.TrimSuffix(res.Path, "/") + "/" + p
+		p = under(res.Path, p)
 	}
 	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
 	r.Path = tidy(p)

@@ -75,7 +75,16 @@ const volatile long nr_setxattr = -1, nr_lsetxattr = -1, nr_fsetxattr = -1;
 const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = -1;
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
 const volatile long nr_truncate = -1, nr_ftruncate = -1;
-const volatile long nr_bind = -1;
+/**
+ * Other syscalls whose path hooks can run: bind(2) to a path,
+ * open_by_handle_at(2) with O_TRUNC, and bpf(2) pinning an object.
+ */
+const volatile long nr_bind = -1, nr_open_by_handle_at = -1, nr_bpf = -1;
+
+static __always_inline int other_hooked(long nr)
+{
+	return nr >= 0 && (nr == nr_bind || nr == nr_open_by_handle_at || nr == nr_bpf);
+}
 
 /**
  * A syscall's argument @p i (0 to 4), from the register it was passed in.
@@ -365,7 +374,8 @@ struct {
 /**
  * Records the step's syscall @p nr as refused, once per program: with
  * @p killed, a 32-bit one seccomp killed the program for, else one that
- * failed with EPERM.
+ * failed with EPERM, sent right after its K_RESULT for the reader to drop if
+ * a path change its hook sent stands for it.
  */
 static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 {
@@ -380,6 +390,8 @@ static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 	struct event *e = start(slot, K_SYSCALL);
 	if (!e)
 		return;
+	if (!killed)
+		e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = nr;
 	e->mode = killed;
 	e->path_len = killed ? 0 : EPERM;
