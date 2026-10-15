@@ -25,6 +25,7 @@ import {
 } from "#core/lib/actions/inputs.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
+import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccessKeyId, isAwsAccountId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
 import { SandboxError } from "./errors.ts";
@@ -274,7 +275,14 @@ export function readAwsKeyInputs(
 
 /** Closes the comment on an account the run assumed a role in but was not given. */
 const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
+const NO_CREDENTIAL = "aws-no-credential" satisfies AwsBlockedReason;
 const ROLE_NOT_ALLOWED = "aws-role-not-allowed" satisfies AwsBlockedReason;
+const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
+const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
+
+function isEcrRegistry(host: string): boolean {
+  return ECR_REGISTRY.test(host);
+}
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
@@ -297,31 +305,46 @@ export function awsExampleInputs(
     .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  // A role's AssumeRole answer teaches its key only when restrict lets the call
-  // through. Naming the role's account alone does that for a call nothing would
-  // block, and for an AssumeRoleWithWebIdentity refused for that account. A
-  // call signed with another unnamed role's key needs that account too, so its
-  // key is left out.
-  const passesOnceNamed = (e: TrafficEvent, account: string) => {
-    const { keyRef, assumedAccount } = awsFieldsOf(e);
-    if (e.wouldBlock === undefined) return true;
-    return e.wouldBlock === ROLE_NOT_ALLOWED && !keyRef && assumedAccount === account;
-  };
   const issuers = new Map<string, TrafficEvent>();
   for (const e of timeline) {
     const { issuedKeyRef } = awsFieldsOf(e);
     if (issuedKeyRef) issuers.set(issuedKeyRef, e);
   }
-  const keys = [...blockedKeys(timeline)].flatMap(([keyRef, k]) => {
+  // Whether naming `account` alone lets a request through. An answer teaches
+  // its key only when restrict lets the call through: an AssumeRole's for a
+  // role in the account, an ECR registry's whatever the account. A call signed
+  // with another unnamed role's key needs that account too, so it does not
+  // pass here. `seen` stops a key that would lead back to itself.
+  const passes = (e: TrafficEvent, account: string, seen: Set<string>): boolean => {
+    const { keyRef, roleAccount } = awsFieldsOf(e);
+    switch (e.wouldBlock) {
+      case undefined:
+        return true;
+      case NO_CREDENTIAL:
+      case ROLE_NOT_ALLOWED:
+        return roleAccount === account;
+      case KEY_NOT_ALLOWED:
+        return keyRef !== undefined && learned(keyRef, account, seen);
+      default:
+        return false;
+    }
+  };
+  const learned = (keyRef: string, account: string, seen: Set<string>): boolean => {
     const issuer = issuers.get(keyRef);
-    return k.account && issuer && passesOnceNamed(issuer, k.account) ? [k] : [];
-  });
+    if (!issuer || seen.has(keyRef)) return false;
+    const { assumedAccount } = awsFieldsOf(issuer);
+    const teaches = assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host);
+    return teaches && passes(issuer, account, new Set(seen).add(keyRef));
+  };
+  const keys = [...blockedKeys(timeline)];
   const mark = (a: string) => {
     const names = keys
-      .filter((k) => k.account === a)
-      .map((k) => (k.name === "key" ? "the key" : k.name));
+      .filter(([keyRef]) => learned(keyRef, a, new Set()))
+      .map(([, k]) => (k.name === "key" ? "the key" : k.name));
     const webIdentity = timeline.some(
-      (e) => e.wouldBlock === ROLE_NOT_ALLOWED && passesOnceNamed(e, a),
+      (e) =>
+        (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) &&
+        passes(e, a, new Set()),
     );
     if (webIdentity) names.push("its AssumeRoleWithWebIdentity call");
     const last = names.pop();

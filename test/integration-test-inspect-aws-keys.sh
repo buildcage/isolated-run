@@ -139,6 +139,29 @@ else
 fi
 
 echo ""
+echo "--- aws_key_check alone, audited: what naming an account would let through ---"
+# OIDC into 111111111111, its key pulls a layer from ECR, and the layer's
+# presigned URL is fetched with the key ECR signed it with. None is learned
+# with no account named, and naming 111111111111 would let all three through.
+aws_step keyonlychain \
+  AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
+  INPUT_PROXY_MODE="audit" \
+  INPUT_ALLOWED_AWS_ROLE_ACCOUNTS="" \
+  INPUT_RUN="curl -sS --max-time 10 -o /dev/null -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data 'Action=AssumeRoleWithWebIdentity&RoleArn=arn%3Aaws%3Aiam%3A%3A111111111111%3Arole%2Fdeploy&RoleSessionName=gh&WebIdentityToken=eyJ' https://sts.us-east-1.amazonaws.com/sts/web-identity &&
+    curl -sS --max-time 10 -o /dev/null -H 'Authorization: AWS4-HMAC-SHA256 Credential=${ASIA}TESTWEBIDKEY0001/x' https://111111111111.dkr.ecr.us-east-1.amazonaws.com/v2/app/blobs/sha256:abc &&
+    curl -sS --max-time 10 -o /dev/null 'https://prod-us-east-1-starport-layer-bucket.s3.amazonaws.com/layer?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=${ASIA}TESTISSUEDKEY01%2F20261010%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=ab'"
+RUN_EXIT=$?
+if [ "$RUN_EXIT" != "0" ]; then
+  fail "the key-only chain audit step failed (exit $RUN_EXIT)"
+  cat "$TMPDIR/keyonlychain.log"
+fi
+SUMMARY=$(cat "$TMPDIR/keyonlychain.md")
+assert_summary_contains "| key 2 | prod-us-east-1-starport-layer-bucket.s3.amazonaws.com | 1 |" \
+  "the key ECR issued for a registry request restrict would block is one restrict would block too"
+assert_summary_contains '# allowed_aws_role_accounts: "111111111111" # lets key 1, key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours' \
+  "the restrict example names the web identity call, its key and the key ECR issued to it under the account"
+
+echo ""
 echo "--- no key to start from ---"
 aws_step nokey \
   INPUT_PROXY_MODE="audit" \

@@ -80,6 +80,7 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
         assumedAccount: "txn.aws_log_assumed",
         keyRef: "txn.aws_log_key_ref",
         issuedKeyRef: "txn.aws_log_issued_ref",
+        roleAccount: "txn.aws_log_role",
       } satisfies Record<keyof AwsTrafficFields["aws"], string>,
     },
   };
@@ -95,6 +96,7 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     ...credentialFacts(),
     ...keyExtraction(check.keyMapFile, check.refSecret),
     ...unsignedAndSts(),
+    ...webIdentityFacts(),
     ...(roles?.facts ?? []),
     ...verdicts(mode, roles),
     ...trafficRecord(roles),
@@ -243,17 +245,22 @@ function trafficRecord(roles?: RoleRules): string[] {
     "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",
     "    http-request set-var(txn.aws_log_account) var(txn.aws_key_owner) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     ...(roles?.logAccount ?? []),
+    "    # And, whatever the verdict, the role account an AssumeRoleWithWebIdentity",
+    "    # call would be judged by.",
+    "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_role_body_many !aws_fed_in_query",
   ];
 }
 
 /** Which answers the response rules read, and which of them may teach a key. */
 function learnFlags(): string[] {
   return [
-    "    # Only a redirect answering a registry request the check did not block",
-    "    # can teach a key, and only over TLS, where the registry's certificate",
-    "    # was verified. Each regex runs only on a host it could match.",
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
-    `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+    "    # A redirect answering a registry request is read only over TLS, where",
+    "    # the registry's certificate was verified, and teaches a key only when",
+    "    # the check did not block the request. Each regex runs only on a host it",
+    "    # could match.",
+    `    http-request set-var(txn.aws_ecr_read) bool(true) if { ssl_fc } aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+    `    http-request set-var(txn.aws_ecr_read) bool(true) if { ssl_fc } { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+    "    http-request set-var(txn.aws_ecr_learn) bool(true) if { var(txn.aws_ecr_read) -m bool } !aws_blocked",
     "    # Any answer over TLS names the account of its role, but only one to a",
     "    # request the check let through can teach a key. A plaintext answer",
     "    # could have been rewritten on the way.",
@@ -264,25 +271,34 @@ function learnFlags(): string[] {
 }
 
 /**
- * What is judged by a role account: AssumeRoleWithWebIdentity, which takes no
- * signature, by the account of the role in RoleArn, and a static CodeCommit
- * Git credential by the account it names. Only a form body naming Action and
- * RoleArn once each, with neither in the query, is judged. Names are counted
- * in any spelling: STS decodes a name, and takes the query's value over the
+ * AssumeRoleWithWebIdentity, which takes no signature, and the account of the
+ * role in its RoleArn. Only a form body naming Action and RoleArn once each,
+ * with neither in the query, is judged by that account. Names are counted in
+ * any spelling: STS decodes a name, and takes the query's value over the
  * body's even for a POST. Only & splits a parameter: STS refuses a ; in a
- * query or a body.
+ * query or a body. Read with no account named too, for the traffic record.
+ */
+function webIdentityFacts(): string[] {
+  return [
+    `    acl aws_fed_action req.body -m reg -i (^|&)${FORM_ACTION}=AssumeRoleWithWebIdentity(&|$)`,
+    `    acl aws_fed_action_many req.body -m reg -i (?s)(^|&)${FORM_ACTION}=.*&${FORM_ACTION}=`,
+    `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
+    `    acl aws_fed_in_query query -m reg -i (^|&)(${FORM_ACTION}|${FORM_ROLE_ARN})=`,
+    "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form !aws_sigv4 !aws_query !aws_unsupported aws_fed_action !aws_fed_action_many",
+    "    acl aws_fed var(txn.aws_fed) -m bool",
+    `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
+    "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
+  ];
+}
+
+/**
+ * What is judged by a role account: AssumeRoleWithWebIdentity by the account
+ * of its role (see webIdentityFacts), and a static CodeCommit Git credential
+ * by the account it names.
  */
 function roleRules(accountFile: string) {
   return {
     facts: [
-      `    acl aws_fed_action req.body -m reg -i (^|&)${FORM_ACTION}=AssumeRoleWithWebIdentity(&|$)`,
-      `    acl aws_fed_action_many req.body -m reg -i (?s)(^|&)${FORM_ACTION}=.*&${FORM_ACTION}=`,
-      `    acl aws_role_body_many req.body -m reg -i (?s)(^|&)${FORM_ROLE_ARN}=.*&${FORM_ROLE_ARN}=`,
-      `    acl aws_fed_in_query query -m reg -i (^|&)(${FORM_ACTION}|${FORM_ROLE_ARN})=`,
-      "    http-request set-var(txn.aws_fed) bool(true) if aws_sts_host aws_form !aws_sigv4 !aws_query !aws_unsupported aws_fed_action !aws_fed_action_many",
-      "    acl aws_fed var(txn.aws_fed) -m bool",
-      `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
-      "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
       `    http-request set-var(txn.aws_git_account_id) 'var(txn.aws_git_user),regsub("^.*-at-([0-9]{12})$","\\1")' if aws_git { var(txn.aws_git_user) -m reg ^((?!-at-).)+-at-[0-9]{12}\\z }`,
       `    http-request set-var(txn.aws_git_account) bool(true) if { var(txn.aws_git_account_id) -m str -f ${accountFile} }`,
       "    acl aws_git_account var(txn.aws_git_account) -m bool",
@@ -307,7 +323,7 @@ type RoleRules = ReturnType<typeof roleRules>;
  * redirects a layer download to, and, when role accounts are named, the key
  * an AssumeRole or AssumeRoleWithWebIdentity answer issues for a role in one
  * of them. Only an answer over TLS to a request the check did not block
- * teaches one. The account of the role, and a reference to the key, are
+ * teaches one. A reference to the key, and an STS answer's role account, are
  * recorded from any answer over TLS, named or not and allowed or not, so one
  * run shows every account to name, a chain of roles included.
  *
@@ -318,12 +334,13 @@ type RoleRules = ReturnType<typeof roleRules>;
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   return [
+    "    acl aws_ecr_read var(txn.aws_ecr_read) -m bool",
     "    acl aws_ecr_learn var(txn.aws_ecr_learn) -m bool",
     "    acl aws_location_many res.fhdr(location) -m reg -i x-amz-credential=.*x-amz-credential=",
-    `    http-response set-var(txn.aws_issued_key) 'res.fhdr(location),regsub("${LOCATION_CREDENTIAL}","\\2",i)' if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many`,
+    `    http-response set-var(txn.aws_issued_key) 'res.fhdr(location),regsub("${LOCATION_CREDENTIAL}","\\2",i)' if aws_ecr_read { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many`,
     "    acl aws_issued_key var(txn.aws_issued_key) -m reg ^ASIA[A-Z0-9]+$",
     "    # A key the proxy already knows keeps what it was learned as.",
-    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
+    `    http-response set-map(${check.keyMapFile}) %[var(txn.aws_issued_key)] issued if aws_ecr_learn aws_issued_key !{ var(txn.aws_issued_key),map(${check.keyMapFile}) -m found }`,
     `    http-response set-var(txn.aws_log_issued_ref) ${keyRef("txn.aws_issued_key", check.refSecret)} if aws_issued_key`,
     "    acl aws_sts_read var(txn.aws_sts_read) -m bool",
     "    acl aws_learn var(txn.aws_learn) -m bool",

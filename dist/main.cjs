@@ -69414,7 +69414,7 @@ function isAwsAccessKeyId(value) {
 }
 //#endregion
 //#region src/lib/would-block.ts
-const KEY_NOT_ALLOWED = "aws-key-not-allowed";
+const KEY_NOT_ALLOWED$1 = "aws-key-not-allowed";
 function blockedKeys(timeline) {
 	let issuers = new Map(), seen = new Map();
 	for (let e of timeline) {
@@ -69441,18 +69441,18 @@ function blockedKeys(timeline) {
 	}));
 }
 function blockedKeyRef(e) {
-	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
+	return e.action === "block" && e.reason === KEY_NOT_ALLOWED$1 || e.wouldBlock === KEY_NOT_ALLOWED$1 ? awsFieldsOf(e).keyRef : void 0;
 }
 function letThrough(e) {
 	return e.wouldBlock !== void 0 && e.action !== "block";
 }
 function auditedKey(e) {
-	return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== void 0;
+	return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED$1 && awsFieldsOf(e).keyRef !== void 0;
 }
 function keyBlockLabel(keys) {
 	return (e, reason) => {
-		let keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
-		return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : void 0;
+		let keyRef = reason === KEY_NOT_ALLOWED$1 ? awsFieldsOf(e).keyRef : void 0, key = keyRef ? keys.get(keyRef) : void 0;
+		return key && !key.bare ? `${KEY_NOT_ALLOWED$1}, ${key.label}` : void 0;
 	};
 }
 const WOULD_BLOCK_ID = "traffic-would-block";
@@ -69477,7 +69477,7 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 		let table = markdownTable([
 			{
 				key: "key",
-				title: `Key (${KEY_NOT_ALLOWED})`
+				title: `Key (${KEY_NOT_ALLOWED$1})`
 			},
 			{
 				key: "hosts",
@@ -70606,6 +70606,24 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 	};
 }
 //#endregion
+//#region src/proxy/aws-hosts.ts
+const AMAZONAWS_TLDS = [
+	"com",
+	"com\\.cn",
+	"eu"
+], DUALSTACK_NAMES = [
+	"api\\.aws",
+	"api\\.amazonwebservices\\.com\\.cn",
+	"api\\.amazonwebservices\\.eu"
+], AMAZONAWS_DOMAINS = `amazonaws\\.(${AMAZONAWS_TLDS.join("|")})`, DUALSTACK_DOMAINS = `(${DUALSTACK_NAMES.join("|")})`, AWS_DOMAINS = `(${AMAZONAWS_DOMAINS}|${DUALSTACK_DOMAINS})`;
+[...AMAZONAWS_TLDS.map((tld) => `amazonaws\\.${tld}`), ...DUALSTACK_NAMES].map((domain) => `.${domain.replaceAll("\\.", ".")}`);
+const vpceHost = (service) => `^([a-z0-9-]+\\.)*vpce-[a-z0-9-]+\\.${service}\\.[a-z0-9-]+\\.vpce\\.amazonaws\\.com$`, apiHost = (service, vpceService = service) => `^${service}(-fips)?(\\.[a-z0-9-]+)?\\.${AWS_DOMAINS}$|${vpceHost(vpceService)}`;
+apiHost("sts"), `${apiHost("ec2", "ec2(-fips)?")}`, `${AMAZONAWS_DOMAINS}`, `${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}${DUALSTACK_DOMAINS}${AMAZONAWS_DOMAINS}${DUALSTACK_DOMAINS}${AMAZONAWS_DOMAINS}${AMAZONAWS_DOMAINS}`;
+const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$`;
+`^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` + vpceHost("git-codecommit(-fips)?");
+const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
+formName("awsaccesskeyid"), formName("x-amz-credential");
+//#endregion
 //#region src/lib/filesystem-audit/mode.ts
 const FILESYSTEM_AUDIT = ["off", "record"];
 function resolveFilesystemAudit(input) {
@@ -70662,60 +70680,60 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$5 = getInput) {
-	let runInput = getInput$5("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$6 = getInput) {
+	let runInput = getInput$6("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$4 = getInput) {
+function readProxyInputs(getInput$5 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$4("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$4("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$9 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$9("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$9("write_through"),
+			writable: getInput$9("writable"),
+			allowWrite: getInput$9("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$6 = getInput) {
-	return resolveFilesystemAudit(getInput$6("filesystem_audit"));
+function readFilesystemAuditInput(getInput$8 = getInput) {
+	return resolveFilesystemAudit(getInput$8("filesystem_audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$1 = getInput) {
-	let days = getInput$1("filesystem_audit_retention_days");
+function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
+	let days = getInput$2("filesystem_audit_retention_days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$1),
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$2),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$2 = getInput) {
-	return getInput$2("label") || void 0;
+function readStepLabel(getInput$3 = getInput) {
+	return getInput$3("label") || void 0;
 }
 function readFailOnCaResidue(getInput$7 = getInput) {
 	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
 }
-function readFailOnBlocked(getInput$9 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$9);
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$1);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$4 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$3);
+	let check = readBooleanInput("aws_key_check", !1, getInput$4);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -70726,23 +70744,34 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 		roleAccounts
 	};
 }
-const ROLE_NOT_ALLOWED = "aws-role-not-allowed";
+const NO_CREDENTIAL = "aws-no-credential", ROLE_NOT_ALLOWED = "aws-role-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
+function isEcrRegistry(host) {
+	return ECR_REGISTRY.test(host);
+}
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), passesOnceNamed = (e, account) => {
-		let { keyRef, assumedAccount } = awsFieldsOf(e);
-		return e.wouldBlock === void 0 || e.wouldBlock === ROLE_NOT_ALLOWED && !keyRef && assumedAccount === account;
-	}, issuers = new Map();
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), issuers = new Map();
 	for (let e of timeline) {
 		let { issuedKeyRef } = awsFieldsOf(e);
 		issuedKeyRef && issuers.set(issuedKeyRef, e);
 	}
-	let keys = [...blockedKeys(timeline)].flatMap(([keyRef, k]) => {
+	let passes = (e, account, seen) => {
+		let { keyRef, roleAccount } = awsFieldsOf(e);
+		switch (e.wouldBlock) {
+			case void 0: return !0;
+			case NO_CREDENTIAL:
+			case ROLE_NOT_ALLOWED: return roleAccount === account;
+			case "aws-key-not-allowed": return keyRef !== void 0 && learned(keyRef, account, seen);
+			default: return !1;
+		}
+	}, learned = (keyRef, account, seen) => {
 		let issuer = issuers.get(keyRef);
-		return k.account && issuer && passesOnceNamed(issuer, k.account) ? [k] : [];
-	}), mark = (a) => {
-		let names = keys.filter((k) => k.account === a).map((k) => k.name === "key" ? "the key" : k.name);
-		timeline.some((e) => e.wouldBlock === ROLE_NOT_ALLOWED && passesOnceNamed(e, a)) && names.push("its AssumeRoleWithWebIdentity call");
+		if (!issuer || seen.has(keyRef)) return !1;
+		let { assumedAccount } = awsFieldsOf(issuer);
+		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host)) && passes(issuer, account, new Set(seen).add(keyRef));
+	}, keys = [...blockedKeys(timeline)], mark = (a) => {
+		let names = keys.filter(([keyRef]) => learned(keyRef, a, new Set())).map(([, k]) => k.name === "key" ? "the key" : k.name);
+		timeline.some((e) => (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) && passes(e, a, new Set())) && names.push("its AssumeRoleWithWebIdentity call");
 		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
