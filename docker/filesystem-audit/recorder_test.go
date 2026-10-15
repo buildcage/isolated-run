@@ -292,6 +292,7 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			[]event{unlink(11, nrFchmod, "a"), exitFailure, {kind: filesystemAuditKindK_EXIT, tid: 11}},
 			"/exit:1", 1,
 		},
+		{"refused, its result not yet come at the end", []event{unlink(11, nrFchmod, "a"), exitFailure}, "/exit:1", 1},
 		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
 		{
 			"hook run again in its call",
@@ -390,7 +391,7 @@ func TestRecorderCountsUnnamedFailedOpensUntrackedWhenNoOpenWasNamed(t *testing.
 		events    []event
 		untracked float64
 	}{
-		{"none named", []event{failed, waitingOpen(11, "/a"), failed, {kind: filesystemAuditKindK_OPEN_CREATE, tid: 11}, failed}, 3},
+		{"none named", []event{failed, waitingOpen(11, "/a"), failed, {kind: filesystemAuditKindK_OPEN_CREATE, tid: 11}, failed, unlink(11, nrOpenat, "t"), failed}, 4},
 		{"some named", []event{failed, openName(11, "/b"), failed, failed}, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -405,7 +406,7 @@ func TestRecorderCountsUnnamedFailedOpensUntrackedWhenNoOpenWasNamed(t *testing.
 				t.Fatalf("recording = %v, want untracked %v", got, c.untracked)
 			}
 			warned := strings.Contains(log.String(), "no open passed do_filp_open")
-			if warned != (c.untracked == 3) {
+			if warned != (c.untracked == 4) {
 				t.Fatalf("log = %q", log)
 			}
 		})

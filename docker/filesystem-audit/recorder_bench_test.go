@@ -27,3 +27,42 @@ func BenchmarkRecorderAdd(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkRecorderOpen settles an open(2) that reached its file: its name,
+// the file and the call's result.
+func BenchmarkRecorderOpen(b *testing.B) {
+	benchCall(b,
+		event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, ppid: 1, comm: "node", tid: 9, data: []byte("/home/runner/work/app/node_modules/x/index.js\x00")},
+		event{kind: filesystemAuditKindK_OPEN, pid: 9, ppid: 1, comm: "node", tid: 9, flags: unix.O_RDONLY, data: []byte("/home/runner/work/app/node_modules/x/index.js\x00")},
+		event{kind: filesystemAuditKindK_RESULT, pid: 9, ppid: 1, comm: "node", tid: 9, nr: 257, n1: resultOpen, pathRet: 3},
+	)
+}
+
+// BenchmarkRecorderFailedOpen settles an open(2) of a missing file by an
+// absolute name, its result carrying the working directory.
+func BenchmarkRecorderFailedOpen(b *testing.B) {
+	benchCall(b,
+		event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, ppid: 1, comm: "node", tid: 9, data: []byte("/usr/lib/x86_64-linux-gnu/libmissing.so\x00")},
+		event{kind: filesystemAuditKindK_RESULT, pid: 9, ppid: 1, comm: "node", tid: 9, nr: 257, n1: resultOpen, pathRet: -2,
+			bases: 1, mode: 5, data: comps("x", "node_modules", "app", "work", "runner")},
+	)
+}
+
+func benchCall(b *testing.B, events ...event) {
+	samples := make([][]byte, len(events))
+	for i, e := range events {
+		samples[i] = e.bytes()
+	}
+	r := newRecorder(bufio.NewWriter(io.Discard), io.Discard, func() (int64, error) { return 0, nil })
+	if err := r.add(event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "node", data: []byte("/usr/bin/node\x00")}.bytes()); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, s := range samples {
+			if err := r.add(s); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
