@@ -137,12 +137,12 @@ describe("readBackingFile", () => {
     dir = mkdtempSync(join(tmpdir(), "backing-"));
     const path = join(dir, "output");
     writeFileSync(path, "a=1\n");
-    expect(readBackingFile(path)).toStrictEqual({ bytes: Buffer.from("a=1\n") });
+    expect(readBackingFile(path, 1024)).toStrictEqual({ bytes: Buffer.from("a=1\n") });
   });
 
   it("takes a removed backing file as empty", () => {
     dir = mkdtempSync(join(tmpdir(), "backing-"));
-    expect(readBackingFile(join(dir, "gone"))).toStrictEqual({ empty: true });
+    expect(readBackingFile(join(dir, "gone"), 1024)).toStrictEqual({ empty: true });
   });
 
   it("refuses a symlink without following it", () => {
@@ -151,7 +151,7 @@ describe("readBackingFile", () => {
     const path = join(dir, "output");
     writeFileSync(secret, "secret=1\n");
     symlinkSync(secret, path);
-    expect(readBackingFile(path)).toStrictEqual({ reason: "it was not a regular file" });
+    expect(readBackingFile(path, 1024)).toStrictEqual({ reason: "it was not a regular file" });
   });
 
   // lstat, not open: opening a FIFO would block.
@@ -159,30 +159,38 @@ describe("readBackingFile", () => {
     dir = mkdtempSync(join(tmpdir(), "backing-"));
     const path = join(dir, "output");
     execFileSync("mkfifo", [path]);
-    expect(readBackingFile(path)).toStrictEqual({ reason: "it was not a regular file" });
+    expect(readBackingFile(path, 1024)).toStrictEqual({ reason: "it was not a regular file" });
   });
 
   it("refuses a directory", () => {
     dir = mkdtempSync(join(tmpdir(), "backing-"));
     const path = join(dir, "output");
     mkdirSync(path);
-    expect(readBackingFile(path)).toStrictEqual({ reason: "it was not a regular file" });
+    expect(readBackingFile(path, 1024)).toStrictEqual({ reason: "it was not a regular file" });
   });
 
-  it("refuses a file over 64 MiB without reading it", () => {
-    const read = readBackingFile("/backing/output", {
-      lstat: () => ({ isFile: () => true, size: 64 * 1024 * 1024 + 1 }),
+  it("measures a file over the limit without reading it", () => {
+    const read = readBackingFile("/backing/output", 1024, {
+      lstat: () => ({ isFile: () => true, size: 1025 }),
       readFile: () => {
         throw new Error("should not read");
       },
     });
-    expect(read).toStrictEqual({ reason: "it was over 64 MiB" });
+    expect(read).toStrictEqual({ oversize: 1025 });
+  });
+
+  it("reads a file exactly at the limit", () => {
+    const read = readBackingFile("/backing/output", 1024, {
+      lstat: () => ({ isFile: () => true, size: 1024 }),
+      readFile: () => Buffer.from("x"),
+    });
+    expect(read).toStrictEqual({ bytes: Buffer.from("x") });
   });
 
   // The command can take the directory's permissions away. Only the code goes
   // into the annotation: the message names the host-side path.
   it("refuses a file it cannot lstat, without throwing or naming the path", () => {
-    const read = readBackingFile("/backing/output", {
+    const read = readBackingFile("/backing/output", 1024, {
       lstat: () => {
         throw Object.assign(new Error("EACCES: permission denied, lstat '/backing/output'"), {
           code: "EACCES",
@@ -195,7 +203,7 @@ describe("readBackingFile", () => {
 
   // Or the file's own.
   it("refuses a regular file it cannot read, without throwing", () => {
-    const read = readBackingFile("/backing/output", {
+    const read = readBackingFile("/backing/output", 1024, {
       lstat: () => ({ isFile: () => true, size: 1 }),
       readFile: () => {
         throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
@@ -206,7 +214,7 @@ describe("readBackingFile", () => {
 
   // Only lstat's ENOENT means the command removed the file.
   it("refuses a regular file that is gone by the read", () => {
-    const read = readBackingFile("/backing/output", {
+    const read = readBackingFile("/backing/output", 1024, {
       lstat: () => ({ isFile: () => true, size: 1 }),
       readFile: () => {
         throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
@@ -216,7 +224,7 @@ describe("readBackingFile", () => {
   });
 
   it("falls back to the message for an error with no code", () => {
-    const read = readBackingFile("/backing/output", {
+    const read = readBackingFile("/backing/output", 1024, {
       lstat: () => {
         throw new Error("odd");
       },

@@ -146,6 +146,20 @@ export const COMMAND_SUMMARY_CUT_MESSAGE =
 
 const COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
 
+/** Said when the command's summary of `size` bytes was over GitHub's limit,
+ *  in KiB as the runner's own message for it counts. */
+export function commandSummaryDroppedMessage(size: number): string {
+  return (
+    `This step's own Job Summary was dropped: at ${Math.floor(size / 1024)} KiB it was over ` +
+    "GitHub's 1 MiB limit, past which GitHub drops a summary whole."
+  );
+}
+
+/** The same, as the one line written in place of the command's summary. */
+export function commandSummaryDroppedNote(size: number): Buffer {
+  return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");
+}
+
 /** The command's summary cut at a line boundary to `room` bytes, its note
  *  included, or nothing when not even the note fits. */
 function cutCommandSummary(summary: Buffer, room: number): Buffer {

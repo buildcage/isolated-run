@@ -506,7 +506,7 @@ before it ends, and the key with it.
 | Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                                                                                                                                                                                                                                 |
 | Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)                                                                                                                                                                                                                 |
 | Replaces its `$GITHUB_STEP_SUMMARY` with a symlink, FIFO or directory, or removes it, to stop the report           | The command writes a backing copy (an overlay copy under `ephemeral` when `write_through` does not cover the file), never the real file, and the host writes the real file itself, so the report still lands. A removed copy is read back as empty; one that is not a regular file is too, rather than followed or blocked on, and fails the step                            |
-| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut to what is left, with a note and a warning annotation; the verdict is applied before the summary is written, so enforcement is unaffected                                                                                                                                                                   |
+| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut to what is left, with a note and a warning annotation, or replaced by the note when it is over the limit on its own; the verdict is applied before the summary is written, so enforcement is unaffected                                                                                                     |
 | Writes its own `traffic_artifact_name`/`filesystem_audit_artifact_name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The command writes a backing copy (an overlay copy, discarded, under `ephemeral` when `write_through` does not cover the file); the host writes the real file from the backing copy, trimmed to the entries the runner can read, then sets the names itself (last-write-wins). A copy that is not a regular file, or holds an entry the runner would stop at, fails the step |
 
 ## What the engines cannot see
@@ -800,10 +800,12 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   reaches it only through the bind and cannot move it aside. Filling the backing copy to GitHub's
   1 MiB limit, past which GitHub drops the whole summary, cannot push the report out: the report
   takes its room first, and the command's summary is cut to what is left, with a note and a warning
-  annotation. The step's verdict is applied as annotations before any summary is written, so what
-  reaches the summary never changes what the step enforces. Where the report is meant to be an
-  audit trail, take it from `upload_traffic_artifact: true` instead: the JSON is uploaded when the
-  step ends, and is not a file a later step can append a line to.
+  annotation. A copy over the limit on its own is not read at all: the note stands in for it, as
+  GitHub would drop it whole, and the step does not fail over it. The step's verdict is applied as
+  annotations before any summary is written, so what reaches the summary never changes what the step
+  enforces. Where the report is meant to be an audit trail, take it from
+  `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is not a
+  file a later step can append a line to.
 - **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,
   which reads workflow commands from it as from any step. `::add-mask::` registers a string as a
   secret, so the runner replaces it with `***` wherever it appears for the rest of the job, this
