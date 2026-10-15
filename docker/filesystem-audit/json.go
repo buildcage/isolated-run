@@ -48,11 +48,10 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
 	// "t" is its wall-clock time.
 	boot uint64
-	// tid is the thread of an event whose syscall's result follows, and of
-	// that result, nr the syscall. ret is a result's return value, bits its
-	// RESULT_* and hasBase whether Path holds a failed open's base directory.
-	// caller marks an open-name read from the caller, and cut one that read
-	// cut short.
+	// tid and nr are the thread and syscall an event was sent from. A
+	// result has its return value in ret, RESULT_* in bits, and a failed
+	// open's base directory in Path when hasBase. caller and cut mark an
+	// open-name read from the caller, and cut short.
 	tid     uint32
 	nr      int32
 	ret     int32

@@ -23,9 +23,8 @@ type recorder struct {
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
-	// keepOp marks a thread whose next failure recorded from its call's exit,
-	// a failed path syscall or a refused one, is left out, as the path change
-	// its hook sent stands for it.
+	// keepOp marks a thread whose next failure from its call's exit is left
+	// out, as the path change its hook sent stands for it.
 	keepOp map[uint32]bool
 	// line is reused for each line written.
 	line    []byte
@@ -131,7 +130,7 @@ func (r *recorder) add(raw []byte) error {
 	return nil
 }
 
-// call is thread tid's call, made empty when it has none.
+// call is thread tid's call, created if absent.
 func (r *recorder) call(tid uint32) *call {
 	c := r.calls[tid]
 	if c == nil {
@@ -174,13 +173,11 @@ func (r *recorder) lose(c *call) error {
 	return r.write(*open)
 }
 
-// settle writes what the thread sent while in the call res is the result of.
-// A path change is written as done, or as refused with its errno when no
-// record from the call's exit stands for the failure. An open is written as
-// done or refused, one that created its file before being refused as both;
-// one that failed before reaching a file is written under the name it
-// passed. A restarted call drops them, as the call's next run sends them
-// again.
+// settle writes what the thread sent during the call res ends. A path change
+// is done, or refused unless the exit's record stands for the failure. An
+// open is done, refused, or both if it created its file first; one that
+// failed before reaching a file is written under its name. A restarted call
+// drops them, as its rerun sends them again.
 func (r *recorder) settle(res record) error {
 	delete(r.keepOp, res.tid)
 	c := r.calls[res.tid]

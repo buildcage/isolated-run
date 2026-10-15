@@ -252,8 +252,7 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 		return;
 	if (ret < 0)
 		e->path_len = -ret;
-	// Right after the call's K_RESULT, which can tell the reader to keep the
-	// path change its hook sent instead (RESULT_FD).
+	// So the reader can drop it for the path change its hook sent (RESULT_FD).
 	if (call->kind != K_ATTR_FAILED)
 		e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = call->val1;
@@ -374,8 +373,8 @@ struct {
 /**
  * Records the step's syscall @p nr as refused, once per program: with
  * @p killed, a 32-bit one seccomp killed the program for, else one that
- * failed with EPERM, sent with the thread for the reader to drop when a path
- * change its hook sent stands for it (see on_sys_exit).
+ * failed with EPERM, with the thread so the reader can drop it for a path
+ * change its hook sent.
  */
 static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 {

@@ -43,10 +43,9 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "syscalls.h"
 
 /**
- * Sends the path change @p e with the thread and the syscall it was made from.
- * Its security_path_* hook runs before the kernel's own permission checks
- * (may_delete, may_create, notify_change), so whether it happened is known
- * only from the call's K_RESULT, which the reader waits for (see on_sys_exit).
+ * Sends the path change @p e. Its hook runs before the kernel's own permission
+ * checks (may_delete, may_create, notify_change), so whether it happened is
+ * known only from the call's K_RESULT.
  */
 static __always_inline void send_op(struct event *e)
 {
@@ -75,9 +74,8 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 }
 
 /**
- * A thread's exit, so the reader drops what the thread sent for a syscall
- * whose exit never ran (a skipped hook, or a core dump written through the
- * path hooks) rather than give it to a reused thread id.
+ * Lets the reader drop what a thread sent for a syscall whose exit never ran,
+ * as for a core dump, rather than give it to a reused thread id.
  */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
@@ -316,8 +314,7 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	// The reader takes the first file its call reaches as the open's (see
-	// recorder.go); exec opening the program is no open(2).
+	// The first file an open(2) reaches is its own (see recorder.go).
 	if (in_open_call())
 		e->tid = (u32)bpf_get_current_pid_tgid();
 	submit(e);
@@ -325,8 +322,8 @@ int BPF_PROG(on_open, struct file *file)
 }
 
 /**
- * Marks the open(2) the thread is in, if any, as having reached its create
- * step, for the reader to record one refused after creating its file as both.
+ * Marks the open(2) the thread is in, if any, as reaching its create step, so
+ * one refused afterwards is recorded as both.
  *
  * @return Whether the thread is in one.
  */
@@ -526,13 +523,10 @@ static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr,
 }
 
 /**
- * Sends the return of each call a hook may have sent an event from: the
- * open(2) family, a path syscall, and the calls other_hooked() names. A path
- * syscall that failed is then recorded from its exit (see classify()), and
- * the reader drops the path change its hook sent, as the exit's record
- * stands for the failure. A call through a descriptor alone is the
- * exception: the path change has the file the hook saw, which a thread
- * swapping the descriptor before the exit cannot change.
+ * Sends the return of each call a hook may have sent from. A failed path
+ * syscall's record from its exit (see classify()) stands for the failure,
+ * except for a call through a descriptor alone: its hook saw the file, which
+ * a thread could swap before the exit.
  */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
