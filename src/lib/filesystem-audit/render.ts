@@ -119,7 +119,7 @@ export interface RenderOptions {
   priorities: FilesystemPriorities;
   /** What a part says where it left rows out: in place of them all, or after those it kept. */
   cutNote: (cause?: CutCause) => string;
-  /** The line under the heading. */
+  /** The line closing the summary. */
   legendNote?: string;
   /** Where the skipped-hooks note links to. */
   skippedHooksUrl?: string;
@@ -246,10 +246,10 @@ function detailsBlock(
 }
 
 /**
- * The summary as blocks for fitStepSummary, in print order: a frame (heading,
- * notes and the legend note) kept whole, the executed table, the accessed-paths
- * table under the flag legend, and the full per-command record folded into a
- * details element.
+ * The summary as blocks for fitStepSummary, in print order: a frame (heading
+ * and notes) kept whole, the executed table, the accessed-paths table under
+ * the flag legend, the full per-command record folded into a details element,
+ * and the legend note, also kept whole.
  */
 export function renderAuditSummaryBlocks(
   summary: AuditSummary,
@@ -272,18 +272,17 @@ export function renderAuditSummaryBlocks(
   if (details?.length === 0 && !refused.length)
     return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
-  const blocks: SummaryBlock[] = [
-    frame(opts.legendNote ? `${top}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${top}\n\n`),
-  ];
+  const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
   if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
   const rows = paths && byProgramAndPath(paths);
   // Empty when the step only ran programs, which the executed table lists.
   if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
-  // The table's note stands for the details too.
-  if (!rows) return blocks;
-  // A step that only ran programs has no accessed paths table, so the
-  // details are the first to show flags.
-  blocks.push(detailsBlock(summary, rows.length === 0, opts));
+  // The table's note stands for the details too. A step that only ran
+  // programs has no accessed paths table, so the details are the first to
+  // show flags.
+  if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
+  // The blank line ends a </details> above, which would otherwise swallow it.
+  if (opts.legendNote) blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`));
   return blocks;
 }
 

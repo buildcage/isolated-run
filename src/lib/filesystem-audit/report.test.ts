@@ -147,8 +147,9 @@ describe("readStepFilesystemAudit", () => {
 
     expect(summaries[0]).toContain("Process Activity");
     expect(summaries[0]).toContain("W node ./a.txt");
+    // Below the details, not under the heading.
     expect(summaries[0]).toContain(
-      "<sub>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
+      "```\n\n</details>\n\n<sub>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
         "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
         "[how to read this](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#reading-the-summary)</sub>",
     );

@@ -108,8 +108,6 @@ A shortened example:
 ```
 ## Process Activity Report
 > 🚫 Refused system calls: io_uring_setup (node).
-./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
-buildcage-filesystem-audit-<id> artifact · how to read this
 
 ### Executed Programs
 | Path                  | Count |
@@ -134,9 +132,12 @@ first-last access since the proxy started · flags · command · path
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.530-00:41.207: RWD node ./node_modules/**
 00:00.531-00:40.982: X   sh   /usr/bin/dash
+
+./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
+buildcage-filesystem-audit-<id> artifact · how to read this
 ```
 
-Where there is no artifact, the line under the heading says how to ask for one, or that the upload
+Where there is no artifact, the line closing the section says how to ask for one, or that the upload
 failed. A step that touched no file shows `No file access was recorded.` instead of the tables. One
 that only ran programs has no accessed paths table, and the flag legend opens the details instead.
 
@@ -156,6 +157,8 @@ From the top:
   that command first and last touched the path. It counts from the start of the step's proxy, about
   when the step starts, on the same clock as the traffic report's Communication details, so a file
   access can be matched to a request. Where that start is unknown, it counts from the first access.
+- The closing line explains the `./`, `~/` and `dir/**` notations, names the artifact that holds the
+  full record and links to this section.
 
 [How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
 

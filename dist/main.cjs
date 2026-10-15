@@ -69819,10 +69819,10 @@ function renderAuditSummaryBlocks(summary, opts) {
 		cut: "keep"
 	});
 	if (details?.length === 0 && !refused.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(opts.legendNote ? `${top}\n\n<sub>${opts.legendNote}</sub>\n\n` : `${top}\n\n`)];
+	let blocks = [frame(`${top}\n\n`)];
 	executed.length !== 0 && blocks.push(executedBlock(executed, opts));
 	let rows = paths && byProgramAndPath(paths);
-	return rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts)), blocks;
+	return rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
 }
 function unreadableSummaryBlocks(title) {
 	return [{
