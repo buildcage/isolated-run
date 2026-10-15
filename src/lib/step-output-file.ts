@@ -28,8 +28,9 @@ export interface OutputSink {
 const LF = 0x0a;
 const EQUALS = 0x3d;
 const LESS_THAN = 0x3c;
-const HEREDOC = Buffer.from("<<");
-const NEWLINE = Buffer.from("\n");
+// Marked pure so a bundle that does not read $GITHUB_OUTPUT leaves them out.
+const HEREDOC = /* @__PURE__ */ Buffer.from("<<");
+const NEWLINE = /* @__PURE__ */ Buffer.from("\n");
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
 // UTF-8 only.
@@ -98,7 +99,7 @@ const MAX_QUOTED = 64;
 // delimiter cut to them still shows as cut.
 const QUOTED_BYTES = (MAX_QUOTED + 1) * 4;
 
-const NO_TAIL = Buffer.alloc(0);
+const NO_TAIL = /* @__PURE__ */ Buffer.alloc(0);
 
 /**
  * Part of a line, kept as its first QUOTED_BYTES, for a message, and a SHA-256

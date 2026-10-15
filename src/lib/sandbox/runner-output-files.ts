@@ -161,29 +161,20 @@ export function readBackingFile(
   maxBytes: number,
   deps: ReadBackingDeps = realReadBackingDeps,
 ): BackingRead {
-  const checked = checkBackingFile(path, deps.lstat);
-  if (!("size" in checked)) return checked;
-  if (checked.size > maxBytes) return { oversize: checked.size };
-  try {
-    return { bytes: deps.readFile(path) };
-  } catch (e) {
-    return unreadable(e);
-  }
-}
-
-function checkBackingFile(
-  path: string,
-  lstat: ReadBackingDeps["lstat"],
-): { size: number } | { empty: true } | { reason: string } {
   let stats: { isFile: () => boolean; size: number };
   try {
-    stats = lstat(path);
+    stats = deps.lstat(path);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { empty: true };
     return unreadable(e);
   }
   if (!stats.isFile()) return { reason: "it was not a regular file" };
-  return { size: stats.size };
+  if (stats.size > maxBytes) return { oversize: stats.size };
+  try {
+    return { bytes: deps.readFile(path) };
+  } catch (e) {
+    return unreadable(e);
+  }
 }
 
 // The code alone: the message names the host-side path.
@@ -199,24 +190,26 @@ export type OutputWriteBack = { reason: string } | { error?: string };
 
 const CHUNK_BYTES = 64 * 1024;
 
+export interface WriteBackOutputDeps {
+  read: typeof readSync;
+  write: typeof writeSync;
+}
+
 /**
  * Writes $GITHUB_OUTPUT's real path from its backing file through
  * copyOutputEntries, a chunk at a time. A backing file readBackingFile would
- * refuse leaves the real file empty, and the real path is checked as
- * writeRunnerFile checks it, throwing.
+ * refuse, or one that fails to read, leaves the real file empty. The real path
+ * is checked as writeRunnerFile checks it, throwing, and a failed write empties
+ * it and throws.
  */
-export function writeBackOutputFile(backingPath: string, realPath: string): OutputWriteBack {
-  const checked = checkBackingFile(backingPath, lstatSync);
-  let backing: number | undefined;
-  let result: OutputWriteBack = {};
-  if ("reason" in checked) result = checked;
-  else if ("size" in checked) {
-    try {
-      backing = openSync(backingPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    } catch (e) {
-      result = unreadable(e);
-    }
-  }
+export function writeBackOutputFile(
+  backingPath: string,
+  realPath: string,
+  { read, write }: WriteBackOutputDeps = { read: readSync, write: writeSync },
+): OutputWriteBack {
+  const opened = openBackingFile(backingPath);
+  const backing = "fd" in opened ? opened.fd : undefined;
+  let result: OutputWriteBack = "reason" in opened ? opened : {};
   try {
     withRunnerFile(realPath, (fd) => {
       ftruncateSync(fd);
@@ -226,22 +219,31 @@ export function writeBackOutputFile(backingPath: string, realPath: string): Outp
       let pending: Buffer[] = [];
       let pendingBytes = 0;
       const flush = () => {
-        writeAt(fd, Buffer.concat(pending), written);
+        writeAt(fd, Buffer.concat(pending), written, write);
         written += pendingBytes;
         pending = [];
         pendingBytes = 0;
       };
-      const error = copyOutputEntries(readChunks(backing), {
-        write: (bytes) => {
-          pending.push(bytes);
-          pendingBytes += bytes.length;
-          if (pendingBytes >= CHUNK_BYTES) flush();
-        },
-        commit: () => (committed = written + pendingBytes),
-      });
-      flush();
-      ftruncateSync(fd, committed);
-      result = { error };
+      try {
+        result = {
+          error: copyOutputEntries(readChunks(backing, read), {
+            write: (bytes) => {
+              pending.push(bytes);
+              pendingBytes += bytes.length;
+              if (pendingBytes >= CHUNK_BYTES) flush();
+            },
+            commit: () => (committed = written + pendingBytes),
+          }),
+        };
+        flush();
+        ftruncateSync(fd, committed);
+      } catch (e) {
+        // Nothing is kept: a read cut short looks like the end of the file,
+        // and a failed write can stop inside an entry.
+        ftruncateSync(fd);
+        if (!(e instanceof BackingReadError)) throw e;
+        result = unreadable(e.cause);
+      }
     });
   } finally {
     if (backing !== undefined) closeSync(backing);
@@ -249,12 +251,36 @@ export function writeBackOutputFile(backingPath: string, realPath: string): Outp
   return result;
 }
 
-function* readChunks(fd: number): Generator<Buffer> {
+/** The backing file opened as readBackingFile would read it, by the
+ *  descriptor alone, so nothing can swap it between a check and the open. */
+function openBackingFile(path: string): { fd: number } | { empty: true } | { reason: string } {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { empty: true };
+    if (code === "ELOOP" || code === "EMLINK") return { reason: "it was not a regular file" };
+    return unreadable(e);
+  }
+  if (fstatSync(fd).isFile()) return { fd };
+  closeSync(fd);
+  return { reason: "it was not a regular file" };
+}
+
+class BackingReadError extends Error {}
+
+function* readChunks(fd: number, read: typeof readSync): Generator<Buffer> {
   for (;;) {
     const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
-    const read = readSync(fd, buffer);
-    if (read === 0) return;
-    yield buffer.subarray(0, read);
+    let bytes: number;
+    try {
+      bytes = read(fd, buffer);
+    } catch (e) {
+      throw new BackingReadError("read", { cause: e });
+    }
+    if (bytes === 0) return;
+    yield buffer.subarray(0, bytes);
   }
 }
 
@@ -298,9 +324,9 @@ function withRunnerFile(path: string, use: (fd: number) => void): void {
 }
 
 // At explicit offsets: a read leaves the position at the old end.
-function writeAt(fd: number, bytes: Buffer, position: number): void {
+function writeAt(fd: number, bytes: Buffer, position: number, write = writeSync): void {
   for (let done = 0; done < bytes.length;) {
-    done += writeSync(fd, bytes, done, bytes.length - done, position + done);
+    done += write(fd, bytes, done, bytes.length - done, position + done);
   }
 }
 

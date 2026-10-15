@@ -69859,59 +69859,73 @@ const realReadBackingDeps = {
 	readFile: (path) => (0, node_fs.readFileSync)(path)
 };
 function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
-	let checked = checkBackingFile(path, deps.lstat);
-	if (!("size" in checked)) return checked;
-	if (checked.size > maxBytes) return { oversize: checked.size };
+	let stats;
+	try {
+		stats = deps.lstat(path);
+	} catch (e) {
+		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
+	}
+	if (!stats.isFile()) return { reason: "it was not a regular file" };
+	if (stats.size > maxBytes) return { oversize: stats.size };
 	try {
 		return { bytes: deps.readFile(path) };
 	} catch (e) {
 		return unreadable(e);
 	}
 }
-function checkBackingFile(path, lstat) {
-	let stats;
-	try {
-		stats = lstat(path);
-	} catch (e) {
-		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
-	}
-	return stats.isFile() ? { size: stats.size } : { reason: "it was not a regular file" };
-}
 function unreadable(e) {
 	return { reason: `it could not be read (${e.code ?? errorMessage(e)})` };
 }
 const CHUNK_BYTES$1 = 65536;
-function writeBackOutputFile(backingPath, realPath) {
-	let checked = checkBackingFile(backingPath, node_fs.lstatSync), backing, result = {};
-	if ("reason" in checked) result = checked;
-	else if ("size" in checked) try {
-		backing = (0, node_fs.openSync)(backingPath, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW);
-	} catch (e) {
-		result = unreadable(e);
-	}
+function writeBackOutputFile(backingPath, realPath, { read, write } = {
+	read: node_fs.readSync,
+	write: node_fs.writeSync
+}) {
+	let opened = openBackingFile(backingPath), backing = "fd" in opened ? opened.fd : void 0, result = "reason" in opened ? opened : {};
 	try {
 		withRunnerFile(realPath, (fd) => {
 			if ((0, node_fs.ftruncateSync)(fd), backing === void 0) return;
 			let written = 0, committed = 0, pending = [], pendingBytes = 0, flush = () => {
-				writeAt(fd, Buffer.concat(pending), written), written += pendingBytes, pending = [], pendingBytes = 0;
-			}, error = copyOutputEntries(readChunks(backing), {
-				write: (bytes) => {
-					pending.push(bytes), pendingBytes += bytes.length, pendingBytes >= CHUNK_BYTES$1 && flush();
-				},
-				commit: () => committed = written + pendingBytes
-			});
-			flush(), (0, node_fs.ftruncateSync)(fd, committed), result = { error };
+				writeAt(fd, Buffer.concat(pending), written, write), written += pendingBytes, pending = [], pendingBytes = 0;
+			};
+			try {
+				result = { error: copyOutputEntries(readChunks(backing, read), {
+					write: (bytes) => {
+						pending.push(bytes), pendingBytes += bytes.length, pendingBytes >= CHUNK_BYTES$1 && flush();
+					},
+					commit: () => committed = written + pendingBytes
+				}) }, flush(), (0, node_fs.ftruncateSync)(fd, committed);
+			} catch (e) {
+				if ((0, node_fs.ftruncateSync)(fd), !(e instanceof BackingReadError)) throw e;
+				result = unreadable(e.cause);
+			}
 		});
 	} finally {
 		backing !== void 0 && (0, node_fs.closeSync)(backing);
 	}
 	return result;
 }
-function* readChunks(fd) {
+function openBackingFile(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		let code = e.code;
+		return code === "ENOENT" ? { empty: !0 } : code === "ELOOP" || code === "EMLINK" ? { reason: "it was not a regular file" } : unreadable(e);
+	}
+	return (0, node_fs.fstatSync)(fd).isFile() ? { fd } : ((0, node_fs.closeSync)(fd), { reason: "it was not a regular file" });
+}
+var BackingReadError = class extends Error {};
+function* readChunks(fd, read) {
 	for (;;) {
-		let buffer = Buffer.allocUnsafe(CHUNK_BYTES$1), read = (0, node_fs.readSync)(fd, buffer);
-		if (read === 0) return;
-		yield buffer.subarray(0, read);
+		let buffer = Buffer.allocUnsafe(CHUNK_BYTES$1), bytes;
+		try {
+			bytes = read(fd, buffer);
+		} catch (e) {
+			throw new BackingReadError("read", { cause: e });
+		}
+		if (bytes === 0) return;
+		yield buffer.subarray(0, bytes);
 	}
 }
 function writeRunnerFile(path, content) {
@@ -69934,8 +69948,8 @@ function withRunnerFile(path, use) {
 		(0, node_fs.closeSync)(fd);
 	}
 }
-function writeAt(fd, bytes, position) {
-	for (let done = 0; done < bytes.length;) done += (0, node_fs.writeSync)(fd, bytes, done, bytes.length - done, position + done);
+function writeAt(fd, bytes, position, write = node_fs.writeSync) {
+	for (let done = 0; done < bytes.length;) done += write(fd, bytes, done, bytes.length - done, position + done);
 }
 function removeBackingDir(path) {
 	let pending = [path];

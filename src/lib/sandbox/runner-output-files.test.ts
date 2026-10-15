@@ -7,9 +7,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readSync,
   rmSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -389,11 +391,46 @@ describe("writeBackOutputFile", () => {
     expect(readFileSync(real, "utf8")).toBe("");
   });
 
+  it.each([
+    ["a FIFO, without blocking on it", (path: string) => execFileSync("mkfifo", [path])],
+    ["a directory", (path: string) => mkdirSync(path)],
+  ])("refuses a backing file that is %s", (_, make) => {
+    make(backing);
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({
+      reason: "it was not a regular file",
+    });
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
   it("refuses a backing file the command made unreadable", () => {
     writeFileSync(backing, "a=1\n", { mode: 0o000 });
     expect(writeBackOutputFile(backing, real)).toStrictEqual({
       reason: "it could not be read (EACCES)",
     });
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
+  it("keeps nothing of a backing file that fails partway through", () => {
+    writeFileSync(backing, "a=1\nb=2");
+    let reads = 0;
+    const read = ((fd: number, buffer: Buffer) => {
+      if (reads++ === 0) return readSync(fd, buffer, 0, 6, null);
+      throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+    }) as typeof readSync;
+    expect(writeBackOutputFile(backing, real, { read, write: writeSync })).toStrictEqual({
+      reason: "it could not be read (EIO)",
+    });
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
+  it("empties the real file and throws when writing it fails partway through", () => {
+    writeFileSync(backing, "a=1\n".repeat(40_000));
+    let writes = 0;
+    const write = ((...args: Parameters<typeof writeSync>) => {
+      if (writes++ === 0) return writeSync(...args);
+      throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    }) as typeof writeSync;
+    expect(() => writeBackOutputFile(backing, real, { read: readSync, write })).toThrow("ENOSPC");
     expect(readFileSync(real, "utf8")).toBe("");
   });
 
