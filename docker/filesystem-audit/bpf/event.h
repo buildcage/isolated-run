@@ -21,10 +21,8 @@ typedef __u64 u64;
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
 	/**
-	 * An open(2)'s name, as getname copied it, from the thread in tid; n1 is
-	 * 1 when it was read from the caller instead (see on_sys_exit), and
-	 * n2 when that read stopped at PATH_LEN. The reader holds it until the
-	 * call's K_RESULT, and records a failed open from the two.
+	 * An open(2)'s name as getname copied it; n1 is 1 when it was read from
+	 * the caller instead, n2 when that read stopped at PATH_LEN.
 	 */
 	K_OPEN_NAME = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
 	/**
@@ -72,16 +70,14 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 */
 	K_SYSCALL = 31,
 	/**
-	 * A syscall's return, in path_len, for the events its thread (tid) sent
-	 * while in it: nr is the syscall, n1 holds RESULT_* bits. A failed
-	 * open(2) also has its flags in flags and the base directory its name
-	 * would resolve against in data, as add_base appends it, whether or not
-	 * the name is relative. No line of its own.
+	 * A syscall's return in path_len, with RESULT_* in n1. A failed open(2)
+	 * also has its flags, and its descriptor's or working directory's path in
+	 * data (see add_base).
 	 */
 	K_RESULT = 32,
-	/** The open(2) in tid reached its create step; no data, no line of its own. */
+	/** The open(2) in tid reached its create step. */
 	K_OPEN_CREATE = 33,
-	/** Thread tid exited; no data, no line of its own. */
+	/** Thread tid exited. */
 	K_EXIT = 34
 };
 

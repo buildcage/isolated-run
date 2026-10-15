@@ -208,9 +208,8 @@ const (
 	resultFD      = 4
 )
 
-// failedOpen is the record of an open(2) that failed before reaching a file,
-// from the name it passed (an open-name) and its call's result, which carries
-// the errno, the flags and the base directory a relative name is joined to.
+// failedOpen is the record of an open(2) that failed before reaching a file:
+// its name, joined to the result's base directory when relative.
 func failedOpen(name, res record) record {
 	p := name.Path
 	if res.hasBase && p != "" && p[0] != '/' {
