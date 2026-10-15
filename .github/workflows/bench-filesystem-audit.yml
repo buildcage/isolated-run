@@ -1,0 +1,27 @@
+name: Bench / Filesystem audit tracer
+
+on:
+  push:
+    branches: [test/measure-tracer-overhead]
+
+permissions: {}
+
+jobs:
+  bench:
+    name: bench (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build main's tracer and this branch's
+        run: bench/build.sh
+      - name: Run the workloads
+        run: bench/run.sh
