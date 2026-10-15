@@ -14,12 +14,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   mediateRunnerOutputFiles,
   readBackingFile,
   removeBackingDir,
+  rewriteRunnerFile,
   RUNNER_FILES_DIR,
   runnerFilesDirFor,
   writeRunnerFile,
@@ -288,6 +289,46 @@ describe("writeRunnerFile", () => {
     writeFileSync(target, "kept\n");
     linkSync(target, path);
     expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(
+      "a hard link to another file",
+    );
+    expect(readFileSync(target, "utf8")).toBe("kept\n");
+  });
+});
+
+describe("rewriteRunnerFile", () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    path = join(dir, "step_summary_abc");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("rewrites the file from its start with what it is given of the content", () => {
+    writeFileSync(path, "command\nreport\n");
+    rewriteRunnerFile(path, (content) => Buffer.from(content.toString("utf8").slice(8)));
+    expect(readFileSync(path, "utf8")).toBe("report\n");
+  });
+
+  it("leaves the file alone when given nothing", () => {
+    writeFileSync(path, "kept\n");
+    rewriteRunnerFile(path, () => undefined);
+    expect(readFileSync(path, "utf8")).toBe("kept\n");
+  });
+
+  it("does not follow a symlink", () => {
+    const target = join(dir, "add_path_abc");
+    writeFileSync(target, "kept\n");
+    symlinkSync(target, path);
+    expect(() => rewriteRunnerFile(path, () => Buffer.from("x\n"))).toThrow(/ELOOP|EMLINK/);
+    expect(readFileSync(target, "utf8")).toBe("kept\n");
+  });
+
+  it("does not write through a hard link", () => {
+    const target = join(dir, "add_path_abc");
+    writeFileSync(target, "kept\n");
+    linkSync(target, path);
+    expect(() => rewriteRunnerFile(path, () => Buffer.from("x\n"))).toThrow(
       "a hard link to another file",
     );
     expect(readFileSync(target, "utf8")).toBe("kept\n");

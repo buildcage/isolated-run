@@ -69524,6 +69524,261 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	];
 }
 //#endregion
+//#region src/lib/retry-briefly.ts
+function retryBriefly(fn, options = {}) {
+	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
+	for (let attempt = 1;; attempt++) try {
+		return fn();
+	} catch (e) {
+		if (attempt >= attempts || !retryOn(e)) throw e;
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+	}
+}
+//#endregion
+//#region src/lib/sandbox/mountinfo.ts
+function parseMountinfo(mountinfoContent) {
+	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
+		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
+		return {
+			mountPoint: unescapeField(fields[4]),
+			fsType: unescapeField(fields[dashIndex + 1]),
+			superOptions: superOptions ? superOptions.split(",") : [],
+			device: unescapeField(fields[2]),
+			root: unescapeField(fields[3])
+		};
+	});
+}
+function unescapeField(field) {
+	return (field ?? "").replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
+}
+function listHostMounts() {
+	return parseMountinfo((0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8"));
+}
+//#endregion
+//#region src/lib/sandbox/run-host-command.ts
+function runPinnedHostCommand(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+//#endregion
+//#region src/lib/sandbox/scratch-dir.ts
+const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
+function checkScratchBaseParent(realpath = node_fs.realpathSync) {
+	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
+	try {
+		real = realpath(parent);
+	} catch {
+		return;
+	}
+	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up under a path that goes through one. Replace that symlink, at ${parent} or on the way to it, with a real directory.`, "SCRATCH_BASE_SYMLINKED");
+}
+function parseMountsUnder(mountinfoContent, dir) {
+	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
+	return parseMountinfo(mountinfoContent).map(({ mountPoint }) => mountPoint).filter((mountPoint) => mountPoint === dir || mountPoint.startsWith(prefix)).sort((a, b) => b.length - a.length);
+}
+function defaultReadMountinfo() {
+	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
+}
+function defaultRemove$1(path) {
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function defaultMkdir$2(path, mode) {
+	(0, node_fs.mkdirSync)(path, { mode });
+}
+function unmountAllUnder(dir, deps, warn) {
+	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
+	try {
+		mountPoints = parseMountsUnder(readMountinfo(), dir);
+	} catch {
+		return;
+	}
+	for (let mountPoint of mountPoints) try {
+		exec("sudo", [
+			"umount",
+			"-R",
+			"-l",
+			mountPoint
+		]);
+	} catch (e) {
+		warn?.(`Failed to unmount ${mountPoint} before cleanup: ${errorMessage(e)}`);
+	}
+}
+function removeScratchDir(dir, deps) {
+	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove$1 } = deps;
+	retryBriefly(() => {
+		try {
+			remove(dir);
+		} catch (e) {
+			if (e.code !== "EACCES") throw e;
+			let st = lstat(dir);
+			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
+			exec("sudo", [
+				"-n",
+				"rm",
+				"-rf",
+				dir
+			]);
+		}
+	}, { retryOn: (e) => e.code === "EBUSY" });
+}
+function cleanupScratchDir(dir, { ephemeralRoots, warn } = {}, deps = {}) {
+	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir, deps, warn), removeScratchDir(dir, deps);
+}
+function assertUnderScratchBase(dir) {
+	let abs = (0, node_path.resolve)(dir);
+	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
+}
+function scratchDirFor(containerName) {
+	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
+}
+function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$2, lstat = node_fs.lstatSync } = {}) {
+	try {
+		mkdir(base, 448);
+		return;
+	} catch (e) {
+		if (e.code !== "EEXIST") throw e;
+	}
+	let st = lstat(base), uid = process.getuid();
+	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
+}
+async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
+	let dir;
+	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir, { warn }), (0, node_fs.mkdirSync)(dir, {
+		recursive: !0,
+		mode: 448
+	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
+	try {
+		return await fn(dir);
+	} finally {
+		cleanupScratchDir(dir, {
+			ephemeralRoots,
+			warn
+		});
+	}
+}
+//#endregion
+//#region src/lib/sandbox/runner-output-files.ts
+const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
+	GITHUB_OUTPUT: "output",
+	GITHUB_STEP_SUMMARY: "step-summary"
+}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
+	mkdir: (path) => {
+		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
+	},
+	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
+		mode: 420,
+		flag: "wx"
+	})
+};
+function mediateRunnerOutputFiles(env, variables, backingDir, deps = realMediateDeps) {
+	if (variables.length === 0) return;
+	deps.mkdir(backingDir);
+	let files = [], envOverrides = {};
+	for (let variable of variables) {
+		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
+		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
+			variable,
+			realPath: env[variable],
+			backingPath
+		});
+	}
+	return {
+		envOverrides,
+		mounts: [{
+			destination: RUNNER_FILES_DIR,
+			type: "none",
+			source: backingDir,
+			options: ["rbind", "rw"]
+		}],
+		maskedPaths: files.map((f) => f.realPath),
+		files
+	};
+}
+const realReadBackingDeps = {
+	lstat: (path) => (0, node_fs.lstatSync)(path),
+	readFile: (path) => (0, node_fs.readFileSync)(path)
+};
+function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
+	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
+	try {
+		stats = deps.lstat(path);
+	} catch (e) {
+		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
+	}
+	if (!stats.isFile()) return { reason: "it was not a regular file" };
+	if (stats.size > maxBytes) return { oversize: stats.size };
+	try {
+		return { bytes: deps.readFile(path) };
+	} catch (e) {
+		return unreadable(e);
+	}
+}
+function writeRunnerFile(path, content) {
+	let fd = openRunnerFile(path, node_fs.constants.O_WRONLY);
+	try {
+		(0, node_fs.ftruncateSync)(fd), (0, node_fs.writeFileSync)(fd, content);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function rewriteRunnerFile(path, rewrite) {
+	let fd = openRunnerFile(path, node_fs.constants.O_RDWR);
+	try {
+		let content = rewrite((0, node_fs.readFileSync)(fd));
+		if (content === void 0) return;
+		(0, node_fs.ftruncateSync)(fd);
+		for (let done = 0; done < content.length;) done += (0, node_fs.writeSync)(fd, content, done, content.length - done, done);
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openRunnerFile(path, flags) {
+	let fd = (0, node_fs.openSync)(path, flags | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	try {
+		let stats = (0, node_fs.fstatSync)(fd);
+		if (!stats.isFile()) throw Error("not a regular file");
+		if (stats.nlink !== 1) throw Error("a hard link to another file");
+		return fd;
+	} catch (e) {
+		throw (0, node_fs.closeSync)(fd), e;
+	}
+}
+function removeBackingDir(path) {
+	let pending = [path];
+	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
+		let stats;
+		try {
+			stats = (0, node_fs.lstatSync)(dir);
+		} catch (e) {
+			if (e.code === "ENOENT") continue;
+			throw e;
+		}
+		if (stats.isDirectory()) {
+			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
+			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
+		}
+	}
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function runnerFilesDirFor(containerName) {
+	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
+	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
+}
+//#endregion
 //#region src/lib/filesystem-audit/record.ts
 const LETTER = {
 	read: "R",
@@ -69917,14 +70172,15 @@ function cutCommandSummary(summary, room) {
 }
 function moveCommandSummaryLast(path, commandBytes) {
 	if (commandBytes === 0) return !1;
-	let file = (0, node_fs.readFileSync)(path), command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
-	if (ours.length === 0 && kept === command) return !1;
-	let temp = `${path}.buildcage`;
-	return (0, node_fs.writeFileSync)(temp, Buffer.concat([
-		ours,
-		kept.length > 0 ? separator : Buffer.alloc(0),
-		kept
-	])), (0, node_fs.renameSync)(temp, path), kept !== command;
+	let cut = !1;
+	return rewriteRunnerFile(path, (file) => {
+		let command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
+		if (ours.length !== 0 || kept !== command) return cut = kept !== command, Buffer.concat([
+			ours,
+			kept.length > 0 ? separator : Buffer.alloc(0),
+			kept
+		]);
+	}), cut;
 }
 function fullReportLocation(artifactAvailable) {
 	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
@@ -70747,150 +71003,6 @@ function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
 	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed_aws_role_accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
-}
-//#endregion
-//#region src/lib/retry-briefly.ts
-function retryBriefly(fn, options = {}) {
-	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
-	for (let attempt = 1;; attempt++) try {
-		return fn();
-	} catch (e) {
-		if (attempt >= attempts || !retryOn(e)) throw e;
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-	}
-}
-//#endregion
-//#region src/lib/sandbox/mountinfo.ts
-function parseMountinfo(mountinfoContent) {
-	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
-		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
-		return {
-			mountPoint: unescapeField(fields[4]),
-			fsType: unescapeField(fields[dashIndex + 1]),
-			superOptions: superOptions ? superOptions.split(",") : [],
-			device: unescapeField(fields[2]),
-			root: unescapeField(fields[3])
-		};
-	});
-}
-function unescapeField(field) {
-	return (field ?? "").replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
-}
-function listHostMounts() {
-	return parseMountinfo((0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8"));
-}
-//#endregion
-//#region src/lib/sandbox/run-host-command.ts
-function runPinnedHostCommand(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-//#endregion
-//#region src/lib/sandbox/scratch-dir.ts
-const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
-function checkScratchBaseParent(realpath = node_fs.realpathSync) {
-	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
-	try {
-		real = realpath(parent);
-	} catch {
-		return;
-	}
-	if (real !== parent) throw new SandboxError(`${parent} resolves to ${real} through a symlink, and the sandbox cannot be set up under a path that goes through one. Replace that symlink, at ${parent} or on the way to it, with a real directory.`, "SCRATCH_BASE_SYMLINKED");
-}
-function parseMountsUnder(mountinfoContent, dir) {
-	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
-	return parseMountinfo(mountinfoContent).map(({ mountPoint }) => mountPoint).filter((mountPoint) => mountPoint === dir || mountPoint.startsWith(prefix)).sort((a, b) => b.length - a.length);
-}
-function defaultReadMountinfo() {
-	return (0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8");
-}
-function defaultRemove$1(path) {
-	(0, node_fs.rmSync)(path, {
-		recursive: !0,
-		force: !0
-	});
-}
-function defaultMkdir$2(path, mode) {
-	(0, node_fs.mkdirSync)(path, { mode });
-}
-function unmountAllUnder(dir, deps, warn) {
-	let { readMountinfo = defaultReadMountinfo, exec = runPinnedHostCommand } = deps, mountPoints;
-	try {
-		mountPoints = parseMountsUnder(readMountinfo(), dir);
-	} catch {
-		return;
-	}
-	for (let mountPoint of mountPoints) try {
-		exec("sudo", [
-			"umount",
-			"-R",
-			"-l",
-			mountPoint
-		]);
-	} catch (e) {
-		warn?.(`Failed to unmount ${mountPoint} before cleanup: ${errorMessage(e)}`);
-	}
-}
-function removeScratchDir(dir, deps) {
-	let { exec = runPinnedHostCommand, lstat = node_fs.lstatSync, remove = defaultRemove$1 } = deps;
-	retryBriefly(() => {
-		try {
-			remove(dir);
-		} catch (e) {
-			if (e.code !== "EACCES") throw e;
-			let st = lstat(dir);
-			if (!st.isDirectory() || st.uid !== process.getuid()) throw new SandboxError(`Refusing to sudo rm -rf ${dir}: not a directory owned by uid ${process.getuid()}.`, "SCRATCH_DIR_UNSAFE");
-			exec("sudo", [
-				"-n",
-				"rm",
-				"-rf",
-				dir
-			]);
-		}
-	}, { retryOn: (e) => e.code === "EBUSY" });
-}
-function cleanupScratchDir(dir, { ephemeralRoots, warn } = {}, deps = {}) {
-	assertUnderScratchBase(dir), ephemeralRoots && ephemeralRoots.length > 0 && console.log(`Discarded ephemeral writes under ${ephemeralRoots.join(", ")}`), unmountAllUnder(dir, deps, warn), removeScratchDir(dir, deps);
-}
-function assertUnderScratchBase(dir) {
-	let abs = (0, node_path.resolve)(dir);
-	if ((0, node_path.dirname)(abs) !== SANDBOX_SCRATCH_BASE || !/^sandbox-[A-Za-z0-9]+$/.test((0, node_path.basename)(abs))) throw new SandboxError(`Refusing to clean up ${JSON.stringify(dir)}: not a scratch dir under ${SANDBOX_SCRATCH_BASE}.`, "SCRATCH_DIR_OUT_OF_BASE");
-}
-function scratchDirFor(containerName) {
-	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
-	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
-}
-function ensureOwnScratchBase(base = SANDBOX_SCRATCH_BASE, { mkdir = defaultMkdir$2, lstat = node_fs.lstatSync } = {}) {
-	try {
-		mkdir(base, 448);
-		return;
-	} catch (e) {
-		if (e.code !== "EEXIST") throw e;
-	}
-	let st = lstat(base), uid = process.getuid();
-	if (!st.isDirectory() || st.uid !== uid || st.mode & 63) throw new SandboxError(`${base} exists but is not a private directory owned by uid ${uid} (mode ${(st.mode & 4095).toString(8)}, uid ${st.uid}). Another user may have created it. Remove it and re-run.`, "SCRATCH_BASE_UNSAFE");
-}
-async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) {
-	let dir;
-	ensureOwnScratchBase(), containerName ? (dir = scratchDirFor(containerName), cleanupScratchDir(dir, { warn }), (0, node_fs.mkdirSync)(dir, {
-		recursive: !0,
-		mode: 448
-	})) : dir = (0, node_fs.mkdtempSync)((0, node_path.join)(SANDBOX_SCRATCH_BASE, "sandbox-"));
-	try {
-		return await fn(dir);
-	} finally {
-		cleanupScratchDir(dir, {
-			ephemeralRoots,
-			warn
-		});
-	}
 }
 //#endregion
 //#region src/lib/overlayfs-preflight.ts
@@ -72583,98 +72695,6 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
-}
-//#endregion
-//#region src/lib/sandbox/runner-output-files.ts
-const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
-	GITHUB_OUTPUT: "output",
-	GITHUB_STEP_SUMMARY: "step-summary"
-}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
-	mkdir: (path) => {
-		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
-	},
-	writeFile: (path, data) => (0, node_fs.writeFileSync)(path, data, {
-		mode: 420,
-		flag: "wx"
-	})
-};
-function mediateRunnerOutputFiles(env, variables, backingDir, deps = realMediateDeps) {
-	if (variables.length === 0) return;
-	deps.mkdir(backingDir);
-	let files = [], envOverrides = {};
-	for (let variable of variables) {
-		let leaf = LEAF[variable], backingPath = (0, node_path.join)(backingDir, leaf);
-		deps.writeFile(backingPath, ""), envOverrides[variable] = `${RUNNER_FILES_DIR}/${leaf}`, files.push({
-			variable,
-			realPath: env[variable],
-			backingPath
-		});
-	}
-	return {
-		envOverrides,
-		mounts: [{
-			destination: RUNNER_FILES_DIR,
-			type: "none",
-			source: backingDir,
-			options: ["rbind", "rw"]
-		}],
-		maskedPaths: files.map((f) => f.realPath),
-		files
-	};
-}
-const realReadBackingDeps = {
-	lstat: (path) => (0, node_fs.lstatSync)(path),
-	readFile: (path) => (0, node_fs.readFileSync)(path)
-};
-function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
-	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
-	try {
-		stats = deps.lstat(path);
-	} catch (e) {
-		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
-	}
-	if (!stats.isFile()) return { reason: "it was not a regular file" };
-	if (stats.size > maxBytes) return { oversize: stats.size };
-	try {
-		return { bytes: deps.readFile(path) };
-	} catch (e) {
-		return unreadable(e);
-	}
-}
-function writeRunnerFile(path, content) {
-	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_WRONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	try {
-		let stats = (0, node_fs.fstatSync)(fd);
-		if (!stats.isFile()) throw Error("not a regular file");
-		if (stats.nlink !== 1) throw Error("a hard link to another file");
-		(0, node_fs.ftruncateSync)(fd), (0, node_fs.writeFileSync)(fd, content);
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function removeBackingDir(path) {
-	let pending = [path];
-	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
-		let stats;
-		try {
-			stats = (0, node_fs.lstatSync)(dir);
-		} catch (e) {
-			if (e.code === "ENOENT") continue;
-			throw e;
-		}
-		if (stats.isDirectory()) {
-			(stats.mode & 448) != 448 && (0, node_fs.chmodSync)(dir, stats.mode | 448);
-			for (let entry of (0, node_fs.readdirSync)(dir)) pending.push((0, node_path.join)(dir, entry));
-		}
-	}
-	(0, node_fs.rmSync)(path, {
-		recursive: !0,
-		force: !0
-	});
-}
-function runnerFilesDirFor(containerName) {
-	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
-	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
