@@ -389,13 +389,18 @@ describe("computeReportOutcomes", () => {
     });
 
     it("puts each host of a key in a code span of its own", () => {
-      const hosts = ["a&ZeroWidthSpace;.amazonaws.com", "~~b~~.amazonaws.com", "c|d.amazonaws.com"];
+      const hosts = [
+        "www.a.amazonaws.com",
+        "b&ZeroWidthSpace;.amazonaws.com",
+        "~~c|d~~.amazonaws.com",
+        "e.amazonaws.com",
+      ];
       const markdown = markdownOf(
         audit(hosts.map((host, i) => signed(i, host, "aaaa1111"))),
         options(),
       );
       expect(tables(markdown)[0][0]).toBe(
-        "| key | `a&ZeroWidthSpace;.amazonaws.com`, `~~b~~.amazonaws.com`, `c\\|d.amazonaws.com` | 3 |",
+        "| key | `www.a.amazonaws.com`, `b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com` and 1 more | 4 |",
       );
     });
 
