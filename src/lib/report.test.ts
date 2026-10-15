@@ -328,7 +328,7 @@ describe("computeReportOutcomes", () => {
         options({
           extraInputs: [
             "aws_key_check: true",
-            'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+            '# allowed_aws_role_accounts: "222222222222" # lets key 1 through; assumed in this run, check it is yours',
           ],
         }),
       );
@@ -359,6 +359,10 @@ describe("computeReportOutcomes", () => {
       );
       const section = markdown.slice(markdown.indexOf("### ⚠️ Restrict"), markdown.indexOf("🛡️"));
       expect(section).not.toContain("assumed in this run");
+      // The account is commented out inside the example's step, at its inputs' indent.
+      expect(markdown).toMatch(
+        /^ {10}aws_key_check: true\n {10}# allowed_aws_role_accounts: "222222222222" # lets key 1 through; /m,
+      );
     });
 
     it("names three hosts of a key and counts the rest", () => {

@@ -419,7 +419,7 @@ describe("awsExampleInputs", () => {
     expect(lines.join("\n").includes(KEY)).toBe(false);
   });
 
-  it("adds each account the run assumed a role in, and asks for a look at them", () => {
+  it("adds each account the run assumed a role in, commented out for a look", () => {
     const event = (assumedAccount: string) => ({
       time: 0,
       action: "allow",
@@ -435,23 +435,115 @@ describe("awsExampleInputs", () => {
       event('1" injected'),
       { time: 0, action: "allow", protocol: "https", host: "example.com" },
     ] as TrafficEvent[];
-    expect(awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline)).toStrictEqual([
+    const block = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline);
+    expect(block).toStrictEqual([
       "aws_key_check: true",
       "allowed_aws_role_accounts: |",
-      "  012345678901 # assumed in this run, check it is yours",
+      "  # 012345678901 # assumed in this run, check it is yours",
       "  111111111111",
-      "  222222222222 # assumed in this run, check it is yours",
+      "  # 222222222222 # assumed in this run, check it is yours",
     ]);
-    // The block reads back as the accounts alone.
-    const block = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline).slice(2);
-    expect(parseAwsAccounts(block.join("\n"))).toStrictEqual([
-      "012345678901",
-      "111111111111",
-      "222222222222",
-    ]);
+    // The block reads back as the accounts given alone.
+    expect(parseAwsAccounts(block.slice(2).join("\n"))).toStrictEqual(["111111111111"]);
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline.slice(0, 1))).toStrictEqual([
       "aws_key_check: true",
-      'allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+      '# allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+    ]);
+  });
+
+  it("names the blocked keys that naming the account alone lets through", () => {
+    const sts = (aws: Record<string, string>, wouldBlock?: string): TrafficEvent => ({
+      time: 0,
+      action: wouldBlock ? "audit" : "allow",
+      protocol: "https",
+      host: "sts.amazonaws.com",
+      port: 443,
+      ...(wouldBlock ? { wouldBlock } : {}),
+      extensions: { aws },
+    });
+    const signed = (keyRef: string): TrafficEvent => ({
+      time: 1,
+      action: "audit",
+      protocol: "https",
+      host: "s3.amazonaws.com",
+      port: 443,
+      wouldBlock: "aws-key-not-allowed",
+      extensions: { aws: { keyRef } },
+    });
+    const issued = (assumedAccount: string, issuedKeyRef: string) =>
+      sts({ key: "env", assumedAccount, issuedKeyRef });
+    const timeline = [
+      issued("222222222222", "aaaa1111"),
+      issued("333333333333", "cccc3333"),
+      signed("aaaa1111"),
+      signed("bbbb2222"),
+      issued("222222222222", "dddd4444"),
+      signed("dddd4444"),
+      // A chain: the call that issued it is signed with key 1, whose account
+      // is not named either, so 444444444444 alone would not let it through.
+      sts(
+        { keyRef: "aaaa1111", assumedAccount: "444444444444", issuedKeyRef: "eeee5555" },
+        "aws-key-not-allowed",
+      ),
+      signed("eeee5555"),
+    ];
+    expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline).slice(1)).toStrictEqual([
+      "# allowed_aws_role_accounts: |",
+      "#   222222222222 # lets key 1 and key 3 through; assumed in this run, check it is yours",
+      "#   333333333333 # assumed in this run, check it is yours",
+      "#   444444444444 # assumed in this run, check it is yours",
+    ]);
+    // With an account given, the input stays on and only the added lines are commented out.
+    expect(
+      awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline.slice(0, 3)).slice(1),
+    ).toStrictEqual([
+      "allowed_aws_role_accounts: |",
+      "  111111111111",
+      "  # 222222222222 # lets the key through; assumed in this run, check it is yours",
+      "  # 333333333333 # assumed in this run, check it is yours",
+    ]);
+  });
+
+  it("names an AssumeRoleWithWebIdentity call refused for its account", () => {
+    const webIdentity = (wouldBlock: string, assumedAccount: string): TrafficEvent => ({
+      time: 0,
+      action: "audit",
+      protocol: "https",
+      host: "sts.amazonaws.com",
+      port: 443,
+      wouldBlock,
+      extensions: { aws: { assumedAccount, issuedKeyRef: `${assumedAccount}-key` } },
+    });
+    const signed = (keyRef: string): TrafficEvent => ({
+      time: 1,
+      action: "audit",
+      protocol: "https",
+      host: "s3.amazonaws.com",
+      port: 443,
+      wouldBlock: "aws-key-not-allowed",
+      extensions: { aws: { keyRef } },
+    });
+    const timeline = [
+      webIdentity("aws-role-not-allowed", "222222222222"),
+      // With no account named the proxy does not judge it by account, so it
+      // may stay blocked once one is.
+      webIdentity("aws-no-credential", "333333333333"),
+      // Signed, so its key decides, not the account of its role.
+      {
+        ...webIdentity("aws-role-not-allowed", "444444444444"),
+        extensions: { aws: { keyRef: "ffff6666", assumedAccount: "444444444444" } },
+      },
+      signed("222222222222-key"),
+      signed("333333333333-key"),
+    ];
+    expect(
+      awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline).slice(1),
+    ).toStrictEqual([
+      "allowed_aws_role_accounts: |",
+      "  111111111111",
+      "  # 222222222222 # lets key 1 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
+      "  # 333333333333 # assumed in this run, check it is yours",
+      "  # 444444444444 # assumed in this run, check it is yours",
     ]);
   });
 });

@@ -90,8 +90,8 @@ assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lis
 assert_summary_matches "^ +111111111111$" \
   "the restrict example names the account given, unmarked" \
   "the restrict example does not name the account given on a line of its own"
-assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
-  "the restrict example marks the account a role was assumed in"
+assert_summary_contains "# 999999999999 # lets key 3 through; assumed in this run, check it is yours" \
+  "the restrict example comments out the account a role was assumed in, naming its key"
 if grep -qF "restrict mode would block" "$TMPDIR/audit.log"; then
   pass "a warning counts the requests restrict would block"
 else
@@ -128,9 +128,9 @@ if [ "$RUN_EXIT" != "0" ]; then
   cat "$TMPDIR/keyonlyaudit.log"
 fi
 SUMMARY=$(cat "$TMPDIR/keyonlyaudit.md")
-assert_summary_contains "111111111111 # assumed in this run, check it is yours" \
+assert_summary_contains "#   111111111111 # lets the key through; assumed in this run, check it is yours" \
   "with no account named, the restrict example names the first role of a chain"
-assert_summary_contains "999999999999 # assumed in this run, check it is yours" \
+assert_summary_contains "#   999999999999 # assumed in this run, check it is yours" \
   "with no account named, the restrict example names the second role of a chain"
 if grep -qF "333333333333" <<< "$SUMMARY"; then
   fail "the restrict example names the account of an AssumeRole answer over plaintext"

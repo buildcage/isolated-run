@@ -21,6 +21,10 @@ export interface BlockedKey {
    *  run blocked one key alone, and the account when no STS answer in the
    *  run issued the key. */
   label: string;
+  /** The label without the account: "key 2", or "key" when it is the only one. */
+  name: string;
+  /** The account of the role whose AssumeRole answer in the run issued the key. */
+  account?: string;
   /** Whether the label is "key" alone, which names nothing a log line could use. */
   bare: boolean;
   /** The hosts of the requests audit let through, in the order each first
@@ -56,8 +60,9 @@ export function blockedKeys(timeline: TrafficEvent[]): Map<string, BlockedKey> {
   return new Map(
     [...seen].map(([keyRef, key], i) => {
       const account = issuers.get(keyRef);
-      const label = `key${numbered ? ` ${i + 1}` : ""}${account ? ` from a role in ${account}` : ""}`;
-      return [keyRef, { ...key, label, bare: !numbered && !account }];
+      const name = numbered ? `key ${i + 1}` : "key";
+      const label = account ? `${name} from a role in ${account}` : name;
+      return [keyRef, { ...key, name, account, label, bare: !numbered && !account }];
     }),
   );
 }

@@ -160,15 +160,16 @@ with the account of the role the step is given:
 Then, with the report described in [Reading the report](#reading-the-report):
 
 1. Check the accounts of the other roles the step assumed, which the report's **Switch to restrict
-   mode** example marks. A CDK app deploying to several accounts assumes a
+   mode** example lists commented out. A CDK app deploying to several accounts assumes a
    `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
    recognize there is what the check is meant to catch.
-2. Name those accounts. If that added any, run `audit` again before reading on: until an account is
-   named, every request signed with its roles' keys shows as one `restrict` would block.
+2. Name those accounts, or uncomment them in the example. If that added any, run `audit` again
+   before reading on: until an account is named, every request signed with its roles' keys shows as
+   one `restrict` would block.
 3. Read **⚠️ Restrict Would Block** in the report. [Troubleshooting](#troubleshooting) gives the
    usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
-   rules, `aws_key_check: true` and the accounts over.
+   rules, `aws_key_check: true` and the accounts you named over.
 
 ## Reading the report
 
@@ -213,18 +214,24 @@ The report's **Switch to restrict mode** example includes `aws_key_check: true` 
 `allowed_aws_role_accounts`. The accounts it lists are the ones you gave, plus each account the run
 assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
 block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
-step can assume a role, in an account of its own too, so each added account is marked:
+step can assume a role, in an account of its own too, so each added account is left commented out,
+and so is the input itself when you gave none. Its comment says what naming that account alone lets
+through: the keys from its roles in **⚠️ Restrict Would Block**, and an `AssumeRoleWithWebIdentity`
+call refused for it:
 
 ```yaml
 aws_key_check: true
 allowed_aws_role_accounts: |
   111111111111
-  222222222222 # assumed in this run, check it is yours
+  # 222222222222 # lets key 1 through; assumed in this run, check it is yours
 ```
 
-The example brings the URL rules and the accounts over, not the credentials. A `key N` row with no
-`from a role in`, and an `aws-no-credential` row, are not fixed by a rule, so both are still
-blocked after the switch. [Troubleshooting](#troubleshooting) says what each needs.
+A key from a role assumed with the key of another unnamed role is left out of the comment: it
+passes only once that other role's account is named too. The example brings the URL rules and the
+accounts you named over, not the credentials. A `key N` row with no `from a role in`, and an
+`aws-no-credential` row for anything but an `AssumeRoleWithWebIdentity` call, are not fixed by a
+rule, so both are still blocked after the switch. [Troubleshooting](#troubleshooting) says what
+each needs.
 
 ## Common setups
 
