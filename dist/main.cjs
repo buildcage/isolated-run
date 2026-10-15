@@ -69170,12 +69170,12 @@ function renderVerdict(report, extraItems = []) {
 		...extraItems,
 		...failed ? [`${failed} failed`] : [],
 		...undecided ? [`${undecided} not acted on`] : []
-	], asExpected = expected ? [`${expected} blocked as expected`] : [];
-	if (caution.length + warning.length === 0) return `Result: ✅ ${asExpected[0] ?? "Nothing was blocked"}\n\n`;
+	];
+	if (caution.length + warning.length === 0) return "";
 	let items = [
 		...caution,
 		...warning,
-		...asExpected
+		...expected ? [`${expected} blocked as expected`] : []
 	].join(" · ");
 	return `> [!${caution.length ? "CAUTION" : "WARNING"}]\n> ${items}\n\n`;
 }
