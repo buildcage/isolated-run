@@ -177,9 +177,10 @@ func (r *recorder) lose(c *call) error {
 // settle writes what the thread sent while in the call res is the result of.
 // A path change is written as done, or as refused with its errno when no
 // record from the call's exit stands for the failure. An open is written as
-// done or refused, one that created its file before being refused as both,
-// and a call that failed before reaching a file under the name it passed. A
-// restarted call drops them, as the call's next run sends them again.
+// done or refused, one that created its file before being refused as both;
+// one that failed before reaching a file is written under the name it
+// passed. A restarted call drops them, as the call's next run sends them
+// again.
 func (r *recorder) settle(res record) error {
 	delete(r.keepOp, res.tid)
 	c := r.calls[res.tid]
@@ -349,8 +350,8 @@ func (r *recorder) finish(l loss) error {
 
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked calls found a tracking map full or never returned
-// while the tracer ran. HostMissed runs the kernel skipped between attaching
+// buffer full, and Untracked calls found a tracking map full or had a return
+// the tracer never saw. HostMissed runs the kernel skipped between attaching
 // and the stop signal; the summary does not count them as lost, since any of
 // them may have been another process's.
 type end struct {

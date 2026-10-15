@@ -374,8 +374,8 @@ struct {
 /**
  * Records the step's syscall @p nr as refused, once per program: with
  * @p killed, a 32-bit one seccomp killed the program for, else one that
- * failed with EPERM, sent right after its K_RESULT for the reader to drop if
- * a path change its hook sent stands for it.
+ * failed with EPERM, sent with the thread for the reader to drop when a path
+ * change its hook sent stands for it (see on_sys_exit).
  */
 static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 {

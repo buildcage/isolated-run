@@ -31,7 +31,7 @@ import (
 
 //go:generate go run ./cmd/gensyscallnames
 
-// -mcpu=v3: every kernel the tracer runs on has it.
+// -mcpu=v3 for its 32-bit jumps; every kernel the tracer runs on has them.
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event -type kind filesystemAudit bpf/filesystem_audit.bpf.c
 
 func main() {
