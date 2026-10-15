@@ -81,14 +81,12 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_EXIT = 34
 };
 
-/**
- * @name K_RESULT bits
- * @{
- */
-#define RESULT_OPEN 1    ///< An open(2) family call.
-#define RESULT_WATCHED 2 ///< A failure is recorded from the call's arguments (see op_exit()).
-#define RESULT_FD 4      ///< The call names its file by descriptor (see names_fd()).
-/** @} */
+/** K_RESULT bits, in n1. */
+enum result_bit {
+	RESULT_OPEN = 1,    ///< An open(2) family call.
+	RESULT_WATCHED = 2, ///< A failure is recorded from the call's arguments (see op_exit()).
+	RESULT_FD = 4,      ///< The call names its file by descriptor (see names_fd()).
+};
 
 /**
  * Fixed header (decode.go reads it through the type bpf2go generates), then
