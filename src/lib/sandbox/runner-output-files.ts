@@ -33,6 +33,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   rmSync,
   writeFileSync,
   writeSync,
@@ -41,6 +42,7 @@ import { basename, dirname, join } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
+import { copyOutputEntries } from "../step-output-file.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase, scratchDirFor } from "./scratch-dir.ts";
 import type { MountEntry } from "./types.ts";
 
@@ -159,23 +161,100 @@ export function readBackingFile(
   maxBytes: number,
   deps: ReadBackingDeps = realReadBackingDeps,
 ): BackingRead {
-  // The code alone: the message names the host-side path.
-  const unreadable = (e: unknown) => ({
-    reason: `it could not be read (${(e as NodeJS.ErrnoException).code ?? errorMessage(e)})`,
-  });
+  const checked = checkBackingFile(path, deps.lstat);
+  if (!("size" in checked)) return checked;
+  if (checked.size > maxBytes) return { oversize: checked.size };
+  try {
+    return { bytes: deps.readFile(path) };
+  } catch (e) {
+    return unreadable(e);
+  }
+}
+
+function checkBackingFile(
+  path: string,
+  lstat: ReadBackingDeps["lstat"],
+): { size: number } | { empty: true } | { reason: string } {
   let stats: { isFile: () => boolean; size: number };
   try {
-    stats = deps.lstat(path);
+    stats = lstat(path);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { empty: true };
     return unreadable(e);
   }
   if (!stats.isFile()) return { reason: "it was not a regular file" };
-  if (stats.size > maxBytes) return { oversize: stats.size };
+  return { size: stats.size };
+}
+
+// The code alone: the message names the host-side path.
+function unreadable(e: unknown): { reason: string } {
+  return {
+    reason: `it could not be read (${(e as NodeJS.ErrnoException).code ?? errorMessage(e)})`,
+  };
+}
+
+/** How writing $GITHUB_OUTPUT back went: why its backing file could not be
+ *  read, or why the runner would stop reading what it held. */
+export type OutputWriteBack = { reason: string } | { error?: string };
+
+const CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Writes $GITHUB_OUTPUT's real path from its backing file through
+ * copyOutputEntries, a chunk at a time. A backing file readBackingFile would
+ * refuse leaves the real file empty, and the real path is checked as
+ * writeRunnerFile checks it, throwing.
+ */
+export function writeBackOutputFile(backingPath: string, realPath: string): OutputWriteBack {
+  const checked = checkBackingFile(backingPath, lstatSync);
+  let backing: number | undefined;
+  let result: OutputWriteBack = {};
+  if ("reason" in checked) result = checked;
+  else if ("size" in checked) {
+    try {
+      backing = openSync(backingPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (e) {
+      result = unreadable(e);
+    }
+  }
   try {
-    return { bytes: deps.readFile(path) };
-  } catch (e) {
-    return unreadable(e);
+    withRunnerFile(realPath, (fd) => {
+      ftruncateSync(fd);
+      if (backing === undefined) return;
+      let written = 0;
+      let committed = 0;
+      let pending: Buffer[] = [];
+      let pendingBytes = 0;
+      const flush = () => {
+        writeAt(fd, Buffer.concat(pending), written);
+        written += pendingBytes;
+        pending = [];
+        pendingBytes = 0;
+      };
+      const error = copyOutputEntries(readChunks(backing), {
+        write: (bytes) => {
+          pending.push(bytes);
+          pendingBytes += bytes.length;
+          if (pendingBytes >= CHUNK_BYTES) flush();
+        },
+        commit: () => (committed = written + pendingBytes),
+      });
+      flush();
+      ftruncateSync(fd, committed);
+      result = { error };
+    });
+  } finally {
+    if (backing !== undefined) closeSync(backing);
+  }
+  return result;
+}
+
+function* readChunks(fd: number): Generator<Buffer> {
+  for (;;) {
+    const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+    const read = readSync(fd, buffer);
+    if (read === 0) return;
+    yield buffer.subarray(0, read);
   }
 }
 
@@ -198,20 +277,30 @@ export function rewriteRunnerFile(
   path: string,
   rewrite: (content: Buffer) => Buffer | undefined,
 ): void {
+  withRunnerFile(path, (fd) => {
+    const content = rewrite(readFileSync(fd));
+    if (content === undefined) return;
+    ftruncateSync(fd);
+    writeAt(fd, content, 0);
+  });
+}
+
+function withRunnerFile(path: string, use: (fd: number) => void): void {
   const fd = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stats = fstatSync(fd);
     if (!stats.isFile()) throw new Error("not a regular file");
     if (stats.nlink !== 1) throw new Error("a hard link to another file");
-    const content = rewrite(readFileSync(fd));
-    if (content === undefined) return;
-    ftruncateSync(fd);
-    // At explicit offsets: the read left the position at the old end.
-    for (let done = 0; done < content.length;) {
-      done += writeSync(fd, content, done, content.length - done, done);
-    }
+    use(fd);
   } finally {
     closeSync(fd);
+  }
+}
+
+// At explicit offsets: a read leaves the position at the old end.
+function writeAt(fd: number, bytes: Buffer, position: number): void {
+  for (let done = 0; done < bytes.length;) {
+    done += writeSync(fd, bytes, done, bytes.length - done, position + done);
   }
 }
 

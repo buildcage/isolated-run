@@ -23,6 +23,7 @@ import {
   rewriteRunnerFile,
   RUNNER_FILES_DIR,
   runnerFilesDirFor,
+  writeBackOutputFile,
   writeRunnerFile,
 } from "./runner-output-files.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -331,6 +332,78 @@ describe("rewriteRunnerFile", () => {
     expect(() => rewriteRunnerFile(path, () => Buffer.from("x\n"))).toThrow(
       "a hard link to another file",
     );
+    expect(readFileSync(target, "utf8")).toBe("kept\n");
+  });
+});
+
+describe("writeBackOutputFile", () => {
+  let dir: string;
+  let backing: string;
+  let real: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "runner-"));
+    backing = join(dir, "output");
+    real = join(dir, "set_output_abc");
+    writeFileSync(real, "left=over\n");
+  });
+  afterEach(() => {
+    chmodSync(dir, 0o700);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("writes the entries the runner reads over what the real file held", () => {
+    writeFileSync(backing, "a=1\n\nb<<EOF\nv\nEOF\n");
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({ error: undefined });
+    expect(readFileSync(real, "utf8")).toBe("a=1\nb<<EOF\nv\nEOF\n");
+  });
+
+  // Larger than a chunk, so a value runs across reads and writes.
+  it("copies entries and lines larger than a chunk whole", () => {
+    const long = "v".repeat(200 * 1024);
+    const text = `${"a=1\n".repeat(30_000)}b<<EOF\n${long}\nEOF\nc=${long}\n`;
+    writeFileSync(backing, text);
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({ error: undefined });
+    expect(readFileSync(real, "utf8")).toBe(text);
+  });
+
+  it("drops what follows the entry the runner would stop at, and says why", () => {
+    writeFileSync(backing, `a=1\nx<<NEVER\n${"b=2\n".repeat(30_000)}`);
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({
+      error: 'line 2, output "x", never reaches its delimiter "NEVER"',
+    });
+    expect(readFileSync(real, "utf8")).toBe("a=1\n");
+  });
+
+  it("leaves the real file empty when the command removed its backing file", () => {
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({});
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
+  it("refuses a backing symlink without following it, leaving the real file empty", () => {
+    const secret = join(dir, "secret");
+    writeFileSync(secret, "secret=1\n");
+    symlinkSync(secret, backing);
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({
+      reason: "it was not a regular file",
+    });
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
+  it("refuses a backing file the command made unreadable", () => {
+    writeFileSync(backing, "a=1\n", { mode: 0o000 });
+    expect(writeBackOutputFile(backing, real)).toStrictEqual({
+      reason: "it could not be read (EACCES)",
+    });
+    expect(readFileSync(real, "utf8")).toBe("");
+  });
+
+  it("throws on a real path that is not a regular file of its own", () => {
+    const target = join(dir, "add_path_abc");
+    writeFileSync(target, "kept\n");
+    rmSync(real);
+    symlinkSync(target, real);
+    writeFileSync(backing, "a=1\n");
+    expect(() => writeBackOutputFile(backing, real)).toThrow(/ELOOP|EMLINK/);
     expect(readFileSync(target, "utf8")).toBe("kept\n");
   });
 });

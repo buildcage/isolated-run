@@ -691,6 +691,7 @@ function releaseNssDb(name, deps = {}) {
 		warn?.(`buildcage: could not update ${path} (${errorMessage(e)}), so the directories made for Chromium's NSS database are left in place for a later step to remove`);
 	}
 }
+Buffer.from("<<"), Buffer.from("\n"), Buffer.alloc(0);
 function removeBackingDir(path) {
 	let pending = [path];
 	for (let dir = pending.pop(); dir !== void 0; dir = pending.pop()) {
