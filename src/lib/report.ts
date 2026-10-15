@@ -31,6 +31,7 @@ import {
   blockedKeys,
   describeWouldBlock,
   keyBlockLabel,
+  withoutKeysTheExampleAllows,
   WOULD_BLOCK_ID,
   wouldBlockTables,
   wouldBlockTruncationNote,
@@ -88,6 +89,7 @@ export function computeReportOutcomes(
     actionVersion,
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
+  report = { ...report, timeline: withoutKeysTheExampleAllows(report.timeline) };
   const emissions = describeReportOutcomes(report, {
     failOnBlocked: failOnBlocked ?? false,
     engineLabel: "sandbox",

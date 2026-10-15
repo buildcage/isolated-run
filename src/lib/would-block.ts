@@ -62,6 +62,31 @@ export function blockedKeys(timeline: TrafficEvent[]): Map<string, BlockedKey> {
   );
 }
 
+/**
+ * The timeline as the Job Summary reads it, where Restrict Would Block holds
+ * what restrict would still block once the Switch to restrict mode example is
+ * applied. That example names the account of every role the run assumed, so a
+ * key STS issued for one is learned whenever restrict lets the AssumeRole
+ * through, and its requests lose their wouldBlock. Each AssumeRole comes
+ * before the requests signed with the key it issued, so one pass follows a
+ * chain of roles. The traffic artifact keeps every wouldBlock.
+ */
+export function withoutKeysTheExampleAllows(timeline: TrafficEvent[]): TrafficEvent[] {
+  const allowed = new Set<string>();
+  return timeline.map((e) => {
+    const { keyRef, issuedKeyRef, assumedAccount } = awsFieldsOf(e);
+    const keyFixed =
+      e.wouldBlock === KEY_NOT_ALLOWED && keyRef !== undefined && allowed.has(keyRef);
+    const passes = e.action !== "block" && (e.wouldBlock === undefined || keyFixed);
+    if (passes && issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount)) {
+      allowed.add(issuedKeyRef);
+    }
+    if (!keyFixed) return e;
+    const { wouldBlock: _, ...rest } = e;
+    return rest;
+  });
+}
+
 function blockedKeyRef(e: TrafficEvent): string | undefined {
   const blocked = e.action === "block" && e.reason === KEY_NOT_ALLOWED;
   return blocked || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;

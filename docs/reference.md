@@ -684,13 +684,13 @@ Like `not-allowed`, these are 🚫 rows in **Blocked Hosts** and fail the step u
 `fail_on_blocked: true`. `known_blocked_rules` marks them as expected the same way, matching the
 host or URL whatever the reason, and in `restrict` the report links to
 [Troubleshooting](./aws.md#troubleshooting) only while one is not expected. In `audit` mode nothing
-is blocked: a warning annotation counts the requests `restrict` would have blocked, and the report
-counts them under **⚠️ Restrict Would Block** for each host and reason, or for each key under
-`aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
-links for every request `restrict`'s rules would block, including ones a rule would then mark
-expected, which the `restrict` run itself would not fail on. **Communication details** lists each
-among the other requests, ending in `(restrict would block: <reason>)`, and the traffic artifact
-has them too.
+is blocked: a warning annotation counts the requests `restrict` would have blocked with the
+report's **Switch to restrict mode** example applied, and the report counts them under **⚠️
+Restrict Would Block** for each host and reason, or for each key under `aws-key-not-allowed`. This
+preview does not apply `known_blocked_rules`: it counts, warns about and links for every request
+`restrict`'s rules would block, including ones a rule would then mark expected, which the
+`restrict` run itself would not fail on. **Communication details** lists each among the other
+requests, ending in `(restrict would block: <reason>)`, and the traffic artifact has them too.
 
 ## Traffic artifact
 

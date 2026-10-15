@@ -297,7 +297,14 @@ describe("computeReportOutcomes", () => {
     it("puts aws-key-not-allowed in a table of keys, whatever the host, naming the account a role was assumed in", () => {
       const markdown = markdownOf(
         audit([
-          assumed("222222222222", "aaaa1111"),
+          // Signed with a key nothing issued, so restrict blocks it and learns
+          // no key from its answer, whatever account the example names.
+          {
+            ...signed(0, "sts.amazonaws.com", "bbbb2222"),
+            extensions: {
+              aws: { keyRef: "bbbb2222", assumedAccount: "222222222222", issuedKeyRef: "aaaa1111" },
+            },
+          },
           // An ECR redirect names no account.
           {
             time: 0,
@@ -336,11 +343,11 @@ describe("computeReportOutcomes", () => {
         "### ⚠️ Restrict Would Block\n\n| Key (aws-key-not-allowed) | Hosts | Count |\n",
       );
       // Every request audit let through that restrict would block, by key or by host.
-      expect(markdown).toMatch(/^> 7 restrict would block$/m);
+      expect(markdown).toMatch(/^> 8 restrict would block$/m);
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
-          "| key 2 | ssm.amazonaws.com | 1 |",
+          "| key 1 | sts.amazonaws.com, ssm.amazonaws.com | 2 |",
+          "| key 2 from a role in 222222222222 | s3.amazonaws.com, ssm.amazonaws.com | 3 |",
           "| key 3 | cloudformation.amazonaws.com | 1 |",
         ],
         [
@@ -349,16 +356,40 @@ describe("computeReportOutcomes", () => {
         ],
       ]);
       expect(details(markdown)).toContain(
-        "⚠️ 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)",
+        "⚠️ 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would block: aws-key-not-allowed, key 2 from a role in 222222222222)",
       );
       expect(details(markdown)).toContain(
-        "⚠️ 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would block: aws-key-not-allowed, key 2)",
+        "⚠️ 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would block: aws-key-not-allowed, key 1)",
       );
       expect(details(markdown)).toContain(
-        "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)",
+        "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would block: aws-key-not-allowed, key 2 from a role in 222222222222)",
       );
       const section = markdown.slice(markdown.indexOf("### ⚠️ Restrict"), markdown.indexOf("🛡️"));
       expect(section).not.toContain("assumed in this run");
+    });
+
+    it("leaves out a key the restrict example lets through, down a chain of roles", () => {
+      const r = audit([
+        assumed("222222222222", "aaaa1111"),
+        {
+          ...signed(1, "sts.amazonaws.com", "aaaa1111"),
+          extensions: {
+            aws: { keyRef: "aaaa1111", assumedAccount: "333333333333", issuedKeyRef: "dddd4444" },
+          },
+        },
+        signed(2, "s3.amazonaws.com", "dddd4444"),
+        signed(3, "s3.amazonaws.com", "eeee5555"),
+      ]);
+      const markdown = markdownOf(r, options());
+      expect(markdown).toMatch(/^> 1 restrict would block$/m);
+      expect(tables(markdown)).toStrictEqual([["| key | s3.amazonaws.com | 1 |"]]);
+      expect(details(markdown).slice(1)).toStrictEqual([
+        "✅ 00:01.000: GET https://sts.amazonaws.com/1 -> 200",
+        "✅ 00:02.000: GET https://s3.amazonaws.com/2 -> 200",
+        "⚠️ 00:03.000: GET https://s3.amazonaws.com/3 -> 200 (restrict would block: aws-key-not-allowed)",
+      ]);
+      const warning = computeReportOutcomes(r, options()).emissions.at(-1);
+      expect(warning?.message.startsWith("1 request(s) restrict mode would block")).toBe(true);
     });
 
     it("names three hosts of a key and counts the rest", () => {
@@ -377,11 +408,18 @@ describe("computeReportOutcomes", () => {
 
     it("numbers no key when the run blocked one alone, and leaves a bare key out of the log", () => {
       const one = markdownOf(
-        audit([assumed("222222222222", "aaaa1111"), signed(1, "s3.amazonaws.com", "aaaa1111")]),
+        audit([
+          // Restrict blocks this AssumeRole, so it learns no key from the answer.
+          {
+            ...wouldBlock(0, "sts.amazonaws.com", "aws-ambiguous-credential"),
+            extensions: { aws: { assumedAccount: "222222222222", issuedKeyRef: "aaaa1111" } },
+          },
+          signed(1, "s3.amazonaws.com", "aaaa1111"),
+        ]),
         options(),
       );
-      expect(tables(one)).toStrictEqual([
-        ["| key from a role in 222222222222 | s3.amazonaws.com | 1 |"],
+      expect(tables(one)[0]).toStrictEqual([
+        "| key from a role in 222222222222 | s3.amazonaws.com | 1 |",
       ]);
       expect(details(one).at(-1)).toContain(
         "(restrict would block: aws-key-not-allowed, key from a role in 222222222222)",

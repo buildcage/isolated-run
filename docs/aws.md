@@ -163,8 +163,7 @@ Then, with the report described in [Reading the report](#reading-the-report):
    mode** example marks. A CDK app deploying to several accounts assumes a
    `cdk-hnb659fds-deploy-role-*` role in each. Keep only accounts that are yours: one you do not
    recognize there is what the check is meant to catch.
-2. Name those accounts. If that added any, run `audit` again before reading on: until an account is
-   named, every request signed with its roles' keys shows as one `restrict` would block.
+2. Name those accounts.
 3. Read **⚠️ Restrict Would Block** in the report. [Troubleshooting](#troubleshooting) gives the
    usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
@@ -173,10 +172,11 @@ Then, with the report described in [Reading the report](#reading-the-report):
 ## Reading the report
 
 The report is the step's section in the workflow run's Job Summary. In `audit` nothing is blocked.
-A warning annotation counts the requests `restrict` would block, and **⚠️ Restrict Would
-Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and one row per host
-for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges every request, so
-one no URL rule allows can carry an `aws-` reason too.
+A warning annotation counts the requests `restrict` would block once the report's **Switch to
+restrict mode** example is applied, and **⚠️ Restrict Would Block** lists them in two tables: one
+row per key for `aws-key-not-allowed`, and one row per host for every other reason, as in **🚫
+Blocked Hosts**. In `audit` the check judges every request, so one no URL rule allows can carry an
+`aws-` reason too.
 
 | Key (aws-key-not-allowed)         | Hosts                                                              | Count |
 | --------------------------------- | ------------------------------------------------------------------ | ----: |
@@ -189,9 +189,11 @@ one no URL rule allows can carry an `aws-` reason too.
 
 A key's row names up to three of the hosts its requests went to. Keys are numbered `key 1`, `key 2`
 and so on, in the order they first appear; when only one key was blocked, it has no number. A key
-STS issued during the run shows the account of the role it was issued for. A `key N` with no
-`from a role in` came from somewhere else, such as a profile, or from an STS answer the proxy could
-not read; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
+STS issued during the run shows the account of the role it was issued for. The example names that
+account, so the key is listed only when the STS call that issued it was itself one `restrict`
+would block, which teaches no key. A `key N` with no `from a role in` came from somewhere else,
+such as a profile, or from an STS answer the proxy could not read;
+[`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
 
 **Communication details** names the key on each of those requests:
 
@@ -222,9 +224,9 @@ allowed_aws_role_accounts: |
   222222222222 # assumed in this run, check it is yours
 ```
 
-The example brings the URL rules and the accounts over, not the credentials. A `key N` row with no
-`from a role in`, and an `aws-no-credential` row, are not fixed by a rule, so both are still
-blocked after the switch. [Troubleshooting](#troubleshooting) says what each needs.
+The example brings the URL rules and the accounts over, not the credentials, so every row of
+**⚠️ Restrict Would Block** is still blocked after the switch. [Troubleshooting](#troubleshooting)
+says what each needs.
 
 ## Common setups
 
@@ -276,9 +278,9 @@ line in Communication details ends in:
 
 - `key N from a role in <account>`: an assumed role. STS issued the key, but the proxy learns it
   only for a role in an account in `allowed_aws_role_accounts`. Add the account once you have
-  checked it is yours. If it is already there in `audit`, the STS call was itself one `restrict`
-  would block, so its answer taught no key. In the traffic artifact
-  (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
+  checked it is yours. If it is already there, or the key is in **⚠️ Restrict Would Block**, the
+  STS call was itself one `restrict` would block, so its answer taught no key. In the traffic
+  artifact (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
   `aws.keyRef` has the account in `aws.assumedAccount`.
 - `key N` alone, or nothing after the reason when it is the only key blocked, from one of:
   - A profile, `~/.aws/credentials` or `credential_process`; see [What it needs](#what-it-needs).
@@ -553,7 +555,9 @@ Each request to an AWS API host that the check let through has an `aws` object i
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
 where it blocked nothing. A request the check blocked has one only for `keyRef`, and for
 `assumedAccount` and `issuedKeyRef` on an STS call in `audit` mode. Its `reason` or `wouldBlock`
-says why.
+says why. `wouldBlock` is judged with the inputs the run was given, so a request signed with the
+key of a role in an account the **Switch to restrict mode** example adds has one, though **⚠️
+Restrict Would Block** leaves it out.
 
 | Field            | When                                                                           | Notes                                                                                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -69438,6 +69438,15 @@ function blockedKeys(timeline) {
 		}];
 	}));
 }
+function withoutKeysTheExampleAllows(timeline) {
+	let allowed = new Set();
+	return timeline.map((e) => {
+		let { keyRef, issuedKeyRef, assumedAccount } = awsFieldsOf(e), keyFixed = e.wouldBlock === KEY_NOT_ALLOWED && keyRef !== void 0 && allowed.has(keyRef);
+		if (e.action !== "block" && (e.wouldBlock === void 0 || keyFixed) && issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount) && allowed.add(issuedKeyRef), !keyFixed) return e;
+		let { wouldBlock: _, ...rest } = e;
+		return rest;
+	});
+}
 function blockedKeyRef(e) {
 	return e.action === "block" && e.reason === KEY_NOT_ALLOWED || e.wouldBlock === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : void 0;
 }
@@ -69865,6 +69874,10 @@ function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
 function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+	report = {
+		...report,
+		timeline: withoutKeysTheExampleAllows(report.timeline)
+	};
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
