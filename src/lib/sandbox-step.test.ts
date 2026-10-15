@@ -852,8 +852,7 @@ describe("runSandboxStep", () => {
 
       // Rounded up: a byte over the limit does not read as 1024 KiB.
       const message =
-        "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit, " +
-        "past which GitHub drops a summary whole.";
+        "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit.";
       const note = Buffer.from(`> ⚠️ ${message}\n`);
       expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, note);
       expect(annotation.warning).toHaveBeenCalledWith(message);

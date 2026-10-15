@@ -800,8 +800,8 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   reaches it only through the bind and cannot move it aside. Filling the backing copy to GitHub's
   1 MiB limit, past which GitHub drops the whole summary, cannot push the report out: the report
   takes its room first, and the command's summary is cut to what is left, with a note and a warning
-  annotation. A copy over the limit on its own is not read at all: the note stands in for it, as
-  GitHub would drop it whole, and the step does not fail over it. The step's verdict is applied as
+  annotation. A copy over the limit on its own is not read: a note stands in for it, and the step
+  does not fail. The step's verdict is applied as
   annotations before any summary is written, so what reaches the summary never changes what the step
   enforces. Where the report is meant to be an audit trail, take it from
   `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is not a

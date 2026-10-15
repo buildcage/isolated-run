@@ -720,8 +720,8 @@ reported as blocked; see
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
 the whole summary rather than truncating it. The report is written first; what the command wrote
 follows it, cut at a line boundary with a note and a warning when it does not fit in what is left.
-What the command wrote is dropped whole when it is over 1 MiB on its own, as GitHub would drop it,
-and a note and a warning stand in for it; the step does not fail over it. When the report itself,
+A note and a warning replace what the command wrote when it is over 1 MiB on its own, as GitHub
+would drop it whole; the step does not fail. When the report itself,
 with its Process Activity section if the filesystem audit was on, would pass the limit, its parts
 give way in this order: the process details, the timeline, the Process Activity tables, the allowed
 table, the blocked and failed table, the ⚠️ tables of requests `restrict` would block, and last the

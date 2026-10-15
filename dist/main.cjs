@@ -69901,7 +69901,7 @@ function summarySize(path, fileSize) {
 }
 const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
 function commandSummaryDroppedMessage(size) {
-	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit, past which GitHub drops a summary whole.`;
+	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit.`;
 }
 function commandSummaryDroppedNote(size) {
 	return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");

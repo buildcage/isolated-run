@@ -151,7 +151,7 @@ const COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_M
 export function commandSummaryDroppedMessage(size: number): string {
   return (
     `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over ` +
-    "GitHub's 1 MiB limit, past which GitHub drops a summary whole."
+    "GitHub's 1 MiB limit."
   );
 }
 
