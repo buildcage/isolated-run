@@ -845,13 +845,14 @@ describe("runSandboxStep", () => {
     // GitHub drops a summary over its limit whole without failing the step.
     it("writes a note in place of a $GITHUB_STEP_SUMMARY over the limit, without failing", async () => {
       mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY") ? { oversize: 2 * 1024 * 1024 } : { empty: true },
+        path.endsWith("GITHUB_STEP_SUMMARY") ? { oversize: 1024 * 1024 + 1 } : { empty: true },
       );
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
 
+      // Rounded up: a byte over the limit does not read as 1024 KiB.
       const message =
-        "This step's own Job Summary was dropped: at 2048 KiB it was over GitHub's 1 MiB limit, " +
+        "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit, " +
         "past which GitHub drops a summary whole.";
       const note = Buffer.from(`> ⚠️ ${message}\n`);
       expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, note);

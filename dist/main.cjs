@@ -69901,7 +69901,7 @@ function summarySize(path, fileSize) {
 }
 const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
 function commandSummaryDroppedMessage(size) {
-	return `This step's own Job Summary was dropped: at ${Math.floor(size / 1024)} KiB it was over GitHub's 1 MiB limit, past which GitHub drops a summary whole.`;
+	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit, past which GitHub drops a summary whole.`;
 }
 function commandSummaryDroppedNote(size) {
 	return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");
@@ -74391,7 +74391,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 	if ("reason" in read) failure = read.reason;
 	else if ("oversize" in read) output ? failure = `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` : (content = commandSummaryDroppedNote(read.oversize), annotation.warning(commandSummaryDroppedMessage(read.oversize)));
 	else if ("bytes" in read) {
-		if (file.variable === "GITHUB_OUTPUT") {
+		if (output) {
 			let { text, error } = validatedOutputText(read.bytes);
 			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
 		} else content = read.bytes;

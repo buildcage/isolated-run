@@ -243,7 +243,7 @@ function writeBackMediatedFile(
       annotation.warning(commandSummaryDroppedMessage(read.oversize));
     }
   } else if ("bytes" in read) {
-    if (file.variable === "GITHUB_OUTPUT") {
+    if (output) {
       const { text, error } = validatedOutputText(read.bytes);
       content = Buffer.from(text, "utf8");
       if (error) failure = `was written without what the runner could not read: ${error}`;
