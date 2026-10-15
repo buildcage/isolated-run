@@ -251,7 +251,7 @@ describe("the traffic record", () => {
       for (const mode of ["restrict", "audit"] as const) {
         expect(
           awsKeyRequestRules(check, mode).includes(
-            "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_role_body_many !aws_fed_in_query",
+            "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_fed_ambiguous",
           ),
         ).toBe(true);
       }

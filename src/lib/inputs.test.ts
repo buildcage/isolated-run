@@ -544,11 +544,18 @@ describe("awsExampleInputs", () => {
           signed("222222222222-key"),
           signed("333333333333-key"),
           signed("444444444444-key"),
+          // Signed, so its key decides, not the account of its role.
+          event(
+            "sts.amazonaws.com",
+            { keyRef: "ffff6666", assumedAccount: "555555555555", roleAccount: "555555555555" },
+            "aws-role-not-allowed",
+          ),
         ]),
       ).toStrictEqual([
         "  # 222222222222 # lets key 1 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
         "  # 333333333333 # lets key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
         "  # 444444444444 # assumed in this run, check it is yours",
+        "  # 555555555555 # assumed in this run, check it is yours",
       ]);
     });
 
@@ -563,6 +570,12 @@ describe("awsExampleInputs", () => {
           }),
           event(registry, { keyRef: "aaaa1111", issuedKeyRef: "bbbb2222" }, "aws-key-not-allowed"),
           signed("bbbb2222"),
+          // ECR hands the same key out again, to a request no account lets through.
+          event(registry, { keyRef: "zzzz9999", issuedKeyRef: "bbbb2222" }, "aws-key-not-allowed"),
+          // One audit let through taught its key already, so a request that key
+          // still fails is one it was not good for, whatever account is named.
+          event(registry, { key: "env", issuedKeyRef: "gggg7777" }),
+          signed("gggg7777", "sqs.amazonaws.com"),
           // An STS answer that named no account teaches nothing, whatever signed it.
           event("sts.amazonaws.com", { key: "env", issuedKeyRef: "cccc3333" }),
           signed("cccc3333"),

@@ -247,7 +247,7 @@ function trafficRecord(roles?: RoleRules): string[] {
     ...(roles?.logAccount ?? []),
     "    # And, whatever the verdict, the role account an AssumeRoleWithWebIdentity",
     "    # call would be judged by.",
-    "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_role_body_many !aws_fed_in_query",
+    "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_fed_ambiguous",
   ];
 }
 
@@ -288,6 +288,8 @@ function webIdentityFacts(): string[] {
     "    acl aws_fed var(txn.aws_fed) -m bool",
     `    http-request set-var(txn.aws_role_account) 'req.body_param(RoleArn),url_dec,regsub("${ROLE_ARN}","\\1")' if aws_fed`,
     "    acl aws_role_account var(txn.aws_role_account) -m reg ^[0-9]{12}$",
+    "    http-request set-var(txn.aws_fed_ambiguous) bool(true) if aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
+    "    acl aws_fed_ambiguous var(txn.aws_fed_ambiguous) -m bool",
   ];
 }
 
@@ -308,7 +310,7 @@ function roleRules(accountFile: string) {
     ],
     gitAccountExempt: " !aws_git_account",
     roleAccountExempt: " !aws_role_account",
-    ambiguous: " or aws_fed aws_role_body_many or aws_fed aws_fed_in_query",
+    ambiguous: " or aws_fed_ambiguous",
     logAccount: [
       "    http-request set-var(txn.aws_log_account) var(txn.aws_git_account_id) if aws_allowed aws_git_account",
       "    http-request set-var(txn.aws_log_account) var(txn.aws_role_account) if aws_allowed aws_role_account",

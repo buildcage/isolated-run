@@ -305,16 +305,18 @@ export function awsExampleInputs(
     .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  const issuers = new Map<string, TrafficEvent>();
+  // ECR hands one key out on many redirects, so a key can have several issuers.
+  const issuers = new Map<string, TrafficEvent[]>();
   for (const e of timeline) {
     const { issuedKeyRef } = awsFieldsOf(e);
-    if (issuedKeyRef) issuers.set(issuedKeyRef, e);
+    if (issuedKeyRef) issuers.set(issuedKeyRef, [...(issuers.get(issuedKeyRef) ?? []), e]);
   }
   // Whether naming `account` alone lets a request through. An answer teaches
   // its key only when restrict lets the call through: an AssumeRole's for a
-  // role in the account, an ECR registry's whatever the account. A call signed
-  // with another unnamed role's key needs that account too, so it does not
-  // pass here. `seen` stops a key that would lead back to itself.
+  // role in the account, and an ECR registry's for a request audit would block,
+  // since one it let through taught its key already. A call signed with another
+  // unnamed role's key needs that account too, so it does not pass here.
+  // `seen` stops a key that would lead back to itself.
   const passes = (e: TrafficEvent, account: string, seen: Set<string>): boolean => {
     const { keyRef, roleAccount } = awsFieldsOf(e);
     switch (e.wouldBlock) {
@@ -322,19 +324,25 @@ export function awsExampleInputs(
         return true;
       case NO_CREDENTIAL:
       case ROLE_NOT_ALLOWED:
-        return roleAccount === account;
+        // A signed call is judged by its key, whatever its role.
+        return !keyRef && roleAccount === account;
       case KEY_NOT_ALLOWED:
         return keyRef !== undefined && learned(keyRef, account, seen);
       default:
         return false;
     }
   };
-  const learned = (keyRef: string, account: string, seen: Set<string>): boolean => {
-    const issuer = issuers.get(keyRef);
-    if (!issuer || seen.has(keyRef)) return false;
+  const teaches = (issuer: TrafficEvent, account: string, seen: Set<string>): boolean => {
     const { assumedAccount } = awsFieldsOf(issuer);
-    const teaches = assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host);
-    return teaches && passes(issuer, account, new Set(seen).add(keyRef));
+    const learnable = assumedAccount
+      ? assumedAccount === account
+      : isEcrRegistry(issuer.host) && issuer.wouldBlock !== undefined;
+    return learnable && passes(issuer, account, seen);
+  };
+  const learned = (keyRef: string, account: string, seen: Set<string>): boolean => {
+    if (seen.has(keyRef)) return false;
+    const next = new Set(seen).add(keyRef);
+    return (issuers.get(keyRef) ?? []).some((issuer) => teaches(issuer, account, next));
   };
   const keys = [...blockedKeys(timeline)];
   const mark = (a: string) => {

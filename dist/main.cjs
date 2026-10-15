@@ -70753,22 +70753,24 @@ function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), issuers = new Map();
 	for (let e of timeline) {
 		let { issuedKeyRef } = awsFieldsOf(e);
-		issuedKeyRef && issuers.set(issuedKeyRef, e);
+		issuedKeyRef && issuers.set(issuedKeyRef, [...issuers.get(issuedKeyRef) ?? [], e]);
 	}
 	let passes = (e, account, seen) => {
 		let { keyRef, roleAccount } = awsFieldsOf(e);
 		switch (e.wouldBlock) {
 			case void 0: return !0;
 			case NO_CREDENTIAL:
-			case ROLE_NOT_ALLOWED: return roleAccount === account;
+			case ROLE_NOT_ALLOWED: return !keyRef && roleAccount === account;
 			case "aws-key-not-allowed": return keyRef !== void 0 && learned(keyRef, account, seen);
 			default: return !1;
 		}
-	}, learned = (keyRef, account, seen) => {
-		let issuer = issuers.get(keyRef);
-		if (!issuer || seen.has(keyRef)) return !1;
+	}, teaches = (issuer, account, seen) => {
 		let { assumedAccount } = awsFieldsOf(issuer);
-		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host)) && passes(issuer, account, new Set(seen).add(keyRef));
+		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host) && issuer.wouldBlock !== void 0) && passes(issuer, account, seen);
+	}, learned = (keyRef, account, seen) => {
+		if (seen.has(keyRef)) return !1;
+		let next = new Set(seen).add(keyRef);
+		return (issuers.get(keyRef) ?? []).some((issuer) => teaches(issuer, account, next));
 	}, keys = [...blockedKeys(timeline)], mark = (a) => {
 		let names = keys.filter(([keyRef]) => learned(keyRef, a, new Set())).map(([, k]) => k.name === "key" ? "the key" : k.name);
 		timeline.some((e) => (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) && passes(e, a, new Set())) && names.push("its AssumeRoleWithWebIdentity call");
