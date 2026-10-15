@@ -84,7 +84,7 @@ assert_summary_contains "(restrict would block: aws-key-not-allowed, key 1)" \
 assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would block: aws-key-not-allowed, key 2 from a role in 111111111111\)" \
   "an AssumeRole answer to a key restrict would block taught no key" \
   "an AssumeRole answer to a key restrict would block taught its key"
-assert_summary_contains "| key 3 from a role in 999999999999 | ssm.us-east-1.amazonaws.com, sqs.us-east-1.amazonaws.com | 2 |" \
+assert_summary_contains "| key 3 from a role in 999999999999 | \`ssm.us-east-1.amazonaws.com\`, \`sqs.us-east-1.amazonaws.com\` | 2 |" \
   "the requests signed with a key an AssumeRole answer issued are one row, naming the role's account"
 assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
 assert_summary_matches "^ +111111111111$" \
@@ -156,7 +156,7 @@ if [ "$RUN_EXIT" != "0" ]; then
   cat "$TMPDIR/keyonlychain.log"
 fi
 SUMMARY=$(cat "$TMPDIR/keyonlychain.md")
-assert_summary_contains "| key 2 | prod-us-east-1-starport-layer-bucket.s3.amazonaws.com | 1 |" \
+assert_summary_contains "| key 2 | \`prod-us-east-1-starport-layer-bucket.s3.amazonaws.com\` | 1 |" \
   "the key ECR issued for a registry request restrict would block is one restrict would block too"
 assert_summary_contains '# allowed_aws_role_accounts: "111111111111" # lets key 1, key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours' \
   "the restrict example names the web identity call, its key and the key ECR issued to it under the account"

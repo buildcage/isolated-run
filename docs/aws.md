@@ -179,10 +179,10 @@ Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and
 for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges every request, so
 one no URL rule allows can carry an `aws-` reason too.
 
-| Key (aws-key-not-allowed)         | Hosts                                                              | Count |
-| --------------------------------- | ------------------------------------------------------------------ | ----: |
-| key 1 from a role in 222222222222 | cloudformation.us-east-1.amazonaws.com, s3.us-east-1.amazonaws.com |    66 |
-| key 2                             | ssm.us-east-1.amazonaws.com                                        |     3 |
+| Key (aws-key-not-allowed)         | Hosts                                                                  | Count |
+| --------------------------------- | ---------------------------------------------------------------------- | ----: |
+| key 1 from a role in 222222222222 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |    66 |
+| key 2                             | `ssm.us-east-1.amazonaws.com`                                          |     3 |
 
 | Host                              | Rule  | Reason            | Count |
 | --------------------------------- | ----- | ----------------- | ----: |
