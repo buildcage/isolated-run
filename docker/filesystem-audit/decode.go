@@ -268,7 +268,7 @@ func decode(raw []byte) (record, error) {
 	truncated, truncated2 := raw[offTruncated] != 0, raw[offTrunc2] != 0
 	data := raw[hdrLen:]
 	marks := le.Uint32(raw[offMarks:])
-	gid := le.Uint32(raw[offGid:]) // a failed chown's; a held one's is in mode
+	gid := le.Uint32(raw[offGid:]) // a failed chown's; a hooked one's is in mode
 	r := record{
 		Kind: kindName(kind),
 		PID:  le.Uint32(raw[offPid:]),

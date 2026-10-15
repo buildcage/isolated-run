@@ -23,9 +23,6 @@ type recorder struct {
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
-	// keepOp marks a thread whose next failure from its call's exit is left
-	// out, as the path change its hook sent stands for it.
-	keepOp map[uint32]bool
 	// line is reused for each line written.
 	line    []byte
 	counts  map[tally]int
@@ -42,8 +39,8 @@ type recorder struct {
 // call is what one thread sent while in a syscall.
 type call struct {
 	// op is a path change its hook sent, whose result says whether it
-	// happened.
-	op *record
+	// happened, and failure the call's failure recorded from its exit.
+	op, failure *record
 	// name is an open's name, open the file it reached, and created says it
 	// reached its create step.
 	name, open *record
@@ -63,7 +60,6 @@ func newRecorder(w *bufio.Writer, log io.Writer, offset func() (int64, error)) *
 		offset: offset,
 		files:  execFiles{},
 		calls:  map[uint32]*call{},
-		keepOp: map[uint32]bool{},
 		counts: map[tally]int{},
 	}
 }
@@ -98,9 +94,10 @@ func (r *recorder) add(raw []byte) error {
 		return r.write(rec)
 	}
 	if rec.Failed {
-		// Recorded from its call's exit, right after the call's result.
-		if r.keepOp[rec.tid] {
-			delete(r.keepOp, rec.tid)
+		// Recorded from its call's exit, just before the call's result,
+		// which can keep the path change its hook sent instead.
+		if c := r.calls[rec.tid]; c != nil && c.op != nil {
+			c.failure = &rec
 			return nil
 		}
 		return r.write(rec)
@@ -158,15 +155,20 @@ func (r *recorder) openName(c *call, name record) error {
 	return nil
 }
 
-// lose writes the open c still waits on as done, the call's result having
-// never come, and counts the call.
+// lose writes what c holds as if its call's result never came: an open as
+// done and a failure as recorded, counting the call once.
 func (r *recorder) lose(c *call) error {
-	open, name := c.open, c.name
-	c.open, c.name, c.created = nil, nil, false
-	if open == nil && name == nil {
+	open, failure := c.open, c.failure
+	if c.op == nil && c.name == nil && open == nil {
 		return nil
 	}
+	*c = call{}
 	r.unsettled++
+	if failure != nil {
+		if err := r.write(*failure); err != nil {
+			return err
+		}
+	}
 	if open == nil {
 		return nil
 	}
@@ -179,7 +181,6 @@ func (r *recorder) lose(c *call) error {
 // failed before reaching a file is written under its name. A restarted call
 // drops them, as its rerun sends them again.
 func (r *recorder) settle(res record) error {
-	delete(r.keepOp, res.tid)
 	c := r.calls[res.tid]
 	if c == nil {
 		// runc's own opens before the first exec send no name the reader keeps.
@@ -203,12 +204,11 @@ func (r *recorder) settle(res record) error {
 }
 
 func (r *recorder) settleOp(c *call, res record) error {
-	op := c.op
-	if op == nil {
-		return nil
-	}
-	c.op = nil
+	op, failure := c.op, c.failure
+	c.op, c.failure = nil, nil
 	switch {
+	case op == nil:
+		return nil
 	case op.nr != res.nr:
 		// Sent from a call whose own result never came.
 		r.unsettled++
@@ -216,12 +216,13 @@ func (r *recorder) settleOp(c *call, res record) error {
 	case res.ret >= 0:
 		return r.write(*op)
 	case res.bits&resultWatched == 0 || res.bits&resultFD != 0:
-		// It stands for any record of the failure that follows.
-		r.keepOp[res.tid] = true
 		op.Err, op.Failed = -res.ret, true
 		return r.write(*op)
 	}
-	return nil
+	if failure == nil {
+		return nil
+	}
+	return r.write(*failure)
 }
 
 func (r *recorder) settleOpen(c *call, res record) error {
@@ -252,12 +253,8 @@ func (r *recorder) settleOpen(c *call, res record) error {
 func (r *recorder) exited(tid uint32) error {
 	c := r.calls[tid]
 	delete(r.calls, tid)
-	delete(r.keepOp, tid)
 	if c == nil {
 		return nil
-	}
-	if c.op != nil {
-		r.unsettled++
 	}
 	return r.lose(c)
 }
@@ -299,13 +296,13 @@ func (r *recorder) finish(l loss) error {
 	// file, but whether it succeeded is unknown.
 	waiting := make([]record, 0, len(r.calls))
 	for _, c := range r.calls {
-		if c.op != nil {
+		if c.op != nil || c.name != nil || c.open != nil {
 			r.unsettled++
 		}
-		if c.open != nil {
-			waiting = append(waiting, *c.open)
-		} else if c.name != nil {
-			r.unsettled++
+		for _, rec := range []*record{c.open, c.failure} {
+			if rec != nil {
+				waiting = append(waiting, *rec)
+			}
 		}
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })
@@ -314,7 +311,7 @@ func (r *recorder) finish(l loss) error {
 			return err
 		}
 	}
-	untracked := l.untracked + uint64(len(waiting)+r.unsettled)
+	untracked := l.untracked + uint64(r.unsettled)
 	if r.named == 0 && r.unnamed > 0 {
 		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += uint64(r.unnamed)
