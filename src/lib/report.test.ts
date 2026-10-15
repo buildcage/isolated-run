@@ -467,9 +467,7 @@ describe("computeReportOutcomes", () => {
       }),
       options({ stepLabel: "build" }),
     );
-    expect(markdown).toMatch(
-      /^## Outbound Traffic Report — build\n\nResult: ✅ Nothing was blocked\n\n### ✅ Allowed Hosts\n/,
-    );
+    expect(markdown).toMatch(/^## Outbound Traffic Report — build\n\n### ✅ Allowed Hosts\n/);
     // The step closes the summary after the process activity.
     expect(markdown).not.toMatch(/Reported by/);
   });

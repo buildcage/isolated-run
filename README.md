@@ -270,13 +270,14 @@ Any other blocked request to that host still fails the step. See
 
 ## The report
 
-Every step appends its own section to the Job Summary: the hosts it reached, the ones it was
-blocked from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title
-counts what needs a look: requests blocked, requests `restrict` would block, connections that
-failed and requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the
-report is incomplete, and a WARNING otherwise; with nothing to count, a plain line replaces it. In
-the tables that follow, blocked requests are marked 🚫 and failed connections ⚠️. With the [filesystem
-audit](./docs/filesystem-audit.md) on, a **Process Activity Report** section follows the report.
+Every step appends its own section to the Job Summary: the hosts it reached, the ones it was blocked
+from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title counts
+what needs a look: requests blocked, requests `restrict` would block, connections that failed and
+requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the report is
+incomplete, and a WARNING otherwise. With nothing to count, or only requests blocked as expected,
+there is no alert. In the tables that follow, blocked requests are marked 🚫 and failed connections
+⚠️. With the [filesystem audit](./docs/filesystem-audit.md) on, a **Process Activity Report**
+section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, so a blocked entry names the URL that was attempted rather than a bare host.
