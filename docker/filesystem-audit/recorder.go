@@ -27,8 +27,10 @@ type recorder struct {
 	line    []byte
 	counts  map[tally]int
 	preExec int
-	total   int
-	started bool
+	// unsettled counts opens written with no result of their own.
+	unsettled int
+	total     int
+	started   bool
 }
 
 // tally is what the step log counts lines by.
@@ -71,10 +73,13 @@ func (r *recorder) add(raw []byte) error {
 	}
 	if rec.tid != 0 {
 		// Another open from the thread means the result of the one before was
-		// lost, which the drop or skip counts already say.
+		// lost, as when the ring buffer was full, so it is written as done.
+		// Losing a result can also hand the thread's next result, from a call
+		// that never reached a file, to the open still waiting.
 		old, lost := r.opens[rec.tid]
 		r.opens[rec.tid] = rec
 		if lost {
+			r.unsettled++
 			return r.write(old)
 		}
 		return nil
@@ -91,7 +96,7 @@ func (r *recorder) settle(res record) error {
 		return nil
 	}
 	delete(r.opens, res.tid)
-	if res.ret <= -512 && res.ret >= -516 { // ERESTARTSYS to ERESTART_RESTARTBLOCK
+	if isRestart(res.ret) {
 		return nil
 	}
 	if res.ret >= 0 || rec.created {
@@ -101,6 +106,12 @@ func (r *recorder) settle(res record) error {
 	}
 	rec.Err, rec.Failed = -res.ret, true
 	return r.write(rec)
+}
+
+// isRestart is is_restart() in held.h: whether ret is one of ERESTARTSYS to
+// ERESTART_RESTARTBLOCK, which the kernel runs the call again for.
+func isRestart(ret int32) bool {
+	return ret <= -512 && ret >= -516
 }
 
 // write writes rec as the recording's next line.
@@ -144,7 +155,7 @@ func (r *recorder) finish(l loss) error {
 			return err
 		}
 	}
-	untracked += uint64(len(waiting))
+	untracked += uint64(len(waiting) + r.unsettled)
 	if l.errNamed == nil && l.errUnheld == nil && l.named == 0 && l.unheld > 0 {
 		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += l.unheld

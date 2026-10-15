@@ -514,12 +514,12 @@ static __always_inline int open_creating(void)
 }
 
 /**
- * Ends the open(2) hold of the thread, from security_file_open, as its call
- * has reached the file @p e opens, which is recorded now with tid set and
- * bases taken from the hold. Its call's return follows as a K_OPEN_RESULT
- * (see on_sys_exit), from which the reader records it as done or refused.
+ * Ends the thread's open(2) hold at security_file_open, where its call reached
+ * the file @p e opens: @p e takes the thread in tid and the create step in
+ * bases, and the reader records it as done or refused once the call's
+ * K_OPEN_RESULT arrives (see on_sys_exit).
  *
- * An open with no hold is recorded as done, and nothing follows for it: one
+ * An open with no hold keeps tid 0, so the reader records it as done: one
  * from outside open(2), such as exec opening the program, one nested in an
  * open already here, such as a FUSE passthrough's backing file, and one whose
  * name found no room to be held.

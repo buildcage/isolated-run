@@ -162,6 +162,9 @@ func TestRecorderWritesAnOpenWhoseResultWasLost(t *testing.T) {
 	if got, want := paths(t, out), fmt.Sprintf("/bin/sh:0 /a:0 /b:%d :0", unix.ENOENT); got != want {
 		t.Fatalf("recording = %s, want %s", got, want)
 	}
+	if got := lines(t, out); got[3]["untracked"] != float64(1) {
+		t.Fatalf("end line = %v, want /a untracked", got[3])
+	}
 }
 
 func TestRecorderWritesOpensStillWaitingAtTheEnd(t *testing.T) {

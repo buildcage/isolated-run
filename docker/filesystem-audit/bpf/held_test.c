@@ -640,8 +640,8 @@ static void test_open_no_head(void)
 }
 
 /**
- * An open that reaches its file lets go of its name's hold, tails and all,
- * taking its thread and create step with it, and its call then finds no hold.
+ * An open that reaches its file ends its name's hold, tails included, and
+ * takes the thread and create step from it; its call then finds no hold.
  */
 static void test_open_reached(void)
 {
