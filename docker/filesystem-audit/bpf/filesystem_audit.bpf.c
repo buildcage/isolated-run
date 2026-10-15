@@ -536,6 +536,11 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct path_call call = {}; // so no field reaches the stack unset
 	long nr = sys_nr(regs);
 	int watched = classify(nr, regs, &call);
+	// Before the call's K_RESULT, which decides whether they stand.
+	if (watched)
+		op_exit(slot, &call, ret);
+	if (ret == -EPERM && !watched && !is_open_nr(nr) && is_refusable(nr))
+		syscall_refused(slot, nr, 0);
 	if (is_open_nr(nr)) {
 		// A name refused as too long reached no hook to send it, so a filter
 		// or tracer returning ENAMETOOLONG records one too.
@@ -548,10 +553,6 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 			bits |= RESULT_FD;
 		send_result(slot, regs, nr, ret, bits);
 	}
-	if (ret == -EPERM && !watched && !is_open_nr(nr) && is_refusable(nr))
-		syscall_refused(slot, nr, 0);
-	if (watched)
-		op_exit(slot, &call, ret);
 	return 0;
 }
 

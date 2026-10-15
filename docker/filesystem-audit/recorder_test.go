@@ -262,26 +262,36 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 		{"done", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, 0)}, "/a:0", 0},
 		{
 			"refused, recorded from the exit",
-			[]event{unlink(11, nrFchmod, "a"), result(11, nrFchmod, resultWatched, eperm), exitFailure},
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, result(11, nrFchmod, resultWatched, eperm)},
 			"/exit:1", 0,
 		},
 		{
 			"refused through a descriptor",
-			[]event{unlink(11, nrFchmod, "a"), result(11, nrFchmod, resultWatched|resultFD, eperm), exitFailure},
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, result(11, nrFchmod, resultWatched|resultFD, eperm)},
 			"/a:1", 0,
 		},
 		{
 			"refused, recorded from the exit through a descriptor",
-			[]event{result(11, nrFchmod, resultWatched|resultFD, eperm), exitFailure},
+			[]event{exitFailure, result(11, nrFchmod, resultWatched|resultFD, eperm)},
 			"/exit:1", 0,
 		},
 		{"refused in a call recorded from no exit", []event{unlink(11, nrBind, "s"), result(11, nrBind, 0, eperm)}, "/s:1", 0},
 		{
 			"refused, with the call refused too",
-			[]event{unlink(11, nrBind, "s"), result(11, nrBind, 0, eperm), refused},
+			[]event{unlink(11, nrBind, "s"), refused, result(11, nrBind, 0, eperm)},
 			"/s:1", 0,
 		},
-		{"refused by seccomp", []event{result(11, nrBind, 0, eperm), refused}, ":1", 0},
+		{"refused by seccomp", []event{refused, result(11, nrBind, 0, eperm)}, ":1", 0},
+		{
+			"refused by seccomp after a refused path change",
+			[]event{unlink(11, nrBind, "s"), result(11, nrBind, 0, -int32(unix.EACCES)), refused, result(11, nrBind, 0, eperm)},
+			fmt.Sprintf("/s:%d :1", unix.EACCES), 0,
+		},
+		{
+			"refused, its result lost",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, {kind: filesystemAuditKindK_EXIT, tid: 11}},
+			"/exit:1", 1,
+		},
 		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
 		{
 			"hook run again in its call",
@@ -300,9 +310,6 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 		},
 		{"at its thread's exit", []event{unlink(11, nrUnlink, "a"), {kind: filesystemAuditKindK_EXIT, tid: 11}}, "", 1},
 		{"at the end", []event{unlink(11, nrUnlink, "a")}, "", 1},
-		// A failure after its call's result passes, unless the result kept
-		// the path change for it.
-		{"refused with nothing sent", []event{result(11, nrFchmod, resultWatched, eperm), exitFailure}, "/exit:1", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, untracked := recordEvents(t, c.events...)
@@ -312,6 +319,22 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			}
 			if got != want || untracked != c.untracked {
 				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
+	}
+}
+
+// A truncating open whose result never came is one call, counted once.
+func TestRecorderCountsALostCallOnce(t *testing.T) {
+	call := []event{openName(11, "/f"), unlink(11, nrOpenat, "f"), waitingOpen(11, "/f")}
+	for name, events := range map[string][]event{
+		"at its thread's exit": append(call, event{kind: filesystemAuditKindK_EXIT, tid: 11}),
+		"at the end":           call,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, untracked := recordEvents(t, events...)
+			if got != "/bin/sh:0 /f:0 :0" || untracked != float64(1) {
+				t.Fatalf("recording = %s, untracked %v, want /f as done and one untracked", got, untracked)
 			}
 		})
 	}
