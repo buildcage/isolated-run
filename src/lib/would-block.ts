@@ -148,7 +148,7 @@ export function wouldBlockTables(
       [
         // Every row's reason, which the troubleshooting link below is looked up by.
         { key: "key", title: `Key (${KEY_NOT_ALLOWED})` },
-        // Each host is a code span of its own, made below: a request chooses its Host header.
+        // Already a code span per host, as a request chooses its Host header.
         { key: "hosts", title: "Hosts", cell: String },
         { key: "count", title: "Count", align: "right" },
       ],
