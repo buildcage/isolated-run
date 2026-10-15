@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -14,8 +13,8 @@ import (
 
 // optionalProgs are programs whose attach target some supported kernels do
 // not expose; each is dropped before load when its function is absent from
-// kernel BTF. do_filp_open, renamed in 7.0, starts an open's hold with the
-// name getname copied.
+// kernel BTF. do_filp_open, renamed in 7.0, sends an open's name as getname
+// copied it.
 var optionalProgs = map[string]string{
 	"on_filp_open":     "do_filp_open",
 	"on_do_file_open":  "do_file_open",
@@ -23,7 +22,7 @@ var optionalProgs = map[string]string{
 	"on_file_truncate": "security_file_truncate",
 }
 
-// openNameProgs is the subset of optionalProgs that starts an open's hold; at
+// openNameProgs is the subset of optionalProgs that sends an open's name; at
 // least one must attach.
 var openNameProgs = map[string]bool{"on_filp_open": true, "on_do_file_open": true}
 
@@ -93,7 +92,7 @@ func markRefusable(m *ebpf.Map, allowed string) error {
 // attachAll attaches every loaded program, and any that fails is fatal; those
 // the kernel does not offer were dropped before load. The exception is one of
 // the two spellings of do_filp_open, of which at least one must attach or no
-// open would be held.
+// failed open would have a name.
 func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
 	var links []link.Link
 	openNames := 0
@@ -143,21 +142,8 @@ func readLoss(coll *ebpf.Collection, missed count) loss {
 	l.dropped, l.errDropped = sumPerCPU(coll.Maps["drops"])
 	l.untracked, l.errUntracked = sumPerCPU(coll.Maps["untracked"])
 	l.internal, _ = sumPerCPU(coll.Maps["skipped_internal"])
-	l.named, l.errNamed = sumPerCPU(coll.Maps["open_named"])
-	l.unheld, l.errUnheld = sumPerCPU(coll.Maps["open_unheld"])
 	l.missed = missed
-	l.tailsPeak, l.tailsMax = tailsPeak(coll), coll.Maps["tails"].MaxEntries()
 	return l
-}
-
-// tailsPeak is the most tails held at once, for the step log; "?" when it
-// cannot be read.
-func tailsPeak(coll *ebpf.Collection) string {
-	var use struct{ Taken, Peak uint64 }
-	if err := coll.Maps["tail_use"].Lookup(uint32(0), &use); err != nil {
-		return "?"
-	}
-	return strconv.FormatUint(use.Peak, 10)
 }
 
 func sumPerCPU(m *ebpf.Map) (uint64, error) {

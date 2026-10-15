@@ -38,22 +38,21 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "event.h"
 #include "kernel.h"
 #include "record.h"
-#include "held.h"
 #include "path.h"
 #include "access.h"
 #include "syscalls.h"
 
 /**
- * Holds the path change @p e, tagged in err with the syscall it was made from,
- * so on_sys_exit reports it only against that call's own return. If that exit is
- * skipped, the hold is left for the next syscall's exit, which the tag tells
- * apart and drops rather than reports (see on_sys_exit). err is overwritten
- * before the event is recorded.
+ * Sends the path change @p e with the thread and the syscall it was made from.
+ * Its security_path_* hook runs before the kernel's own permission checks
+ * (may_delete, may_create, notify_change), so whether it happened is known
+ * only from the call's K_RESULT, which the reader waits for (see on_sys_exit).
  */
-static __always_inline void hold_op(struct event *e)
+static __always_inline void send_op(struct event *e)
 {
-	e->err = current_sys_nr();
-	hold(e);
+	e->tid = (u32)bpf_get_current_pid_tgid();
+	e->nr = current_sys_nr();
+	submit(e);
 }
 
 /**
@@ -76,20 +75,21 @@ int BPF_PROG(on_exec_file, struct linux_binprm *bprm)
 }
 
 /**
- * Drops any hold a thread still has as it exits, so one whose syscall exit
- * never ran (a skipped hook, or the kernel writing a core dump through the path
- * hooks with no syscall to return from) neither leaks nor is taken up by a
- * reused thread id.
+ * A thread's exit, so the reader drops what the thread sent for a syscall
+ * whose exit never ran (a skipped hook, or the kernel writing a core dump
+ * through the path hooks with no syscall to return from), rather than give
+ * it to a reused thread id.
  */
 SEC("tp_btf/sched_process_exit")
 int BPF_PROG(on_task_exit, struct task_struct *p)
 {
 	if (!in_target())
 		return 0;
-	struct held_key op = held_key(HELD_OP);
-	reclaim_held(&op);
-	struct held_key open = held_key(HELD_OPEN);
-	reclaim_held(&open);
+	struct event *e = start(slot, K_EXIT);
+	if (!e)
+		return 0;
+	e->tid = (u32)bpf_get_current_pid_tgid();
+	submit(e);
 	return 0;
 }
 
@@ -179,7 +179,7 @@ int BPF_PROG(name, const struct path *dir, struct dentry *dentry)		\
 		return 0;							\
 	u32 off = leaf(e, 0, dentry, &e->n1);					\
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated); \
-	hold_op(e);								\
+	send_op(e);								\
 	return 0;								\
 }
 
@@ -201,7 +201,7 @@ int BPF_PROG(on_symlink, const struct path *dir, struct dentry *dentry, const ch
 	e->path_len = off;
 	off = leaf(e, off, dentry, &e->n1);
 	e->data_len = walk(e, off, BPF_CORE_READ(dir, dentry), BPF_CORE_READ(dir, mnt), &e->n1, &e->truncated);
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -220,7 +220,7 @@ int BPF_PROG(on_rename, const struct path *old_dir, struct dentry *old_dentry,
 			&e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), BPF_CORE_READ(new_dir, mnt), &e->n2, &e->trunc2);
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -234,7 +234,7 @@ int BPF_PROG(on_chmod, const struct path *path, unsigned short mode)
 		return 0;
 	e->mode = mode;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -256,7 +256,7 @@ int BPF_PROG(on_link, struct dentry *old_dentry, const struct path *new_dir,
 	u32 off = walk_path(e, 0, 1, old_dentry, mnt, &e->n1, &e->truncated);
 	off = leaf(e, off, new_dentry, &e->n2);
 	e->data_len = walk(e, off, BPF_CORE_READ(new_dir, dentry), mnt, &e->n2, &e->trunc2);
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -270,7 +270,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 	if (!e)
 		return 0;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -287,7 +287,7 @@ int BPF_PROG(on_file_truncate, struct file *file)
 	if (!e)
 		return 0;
 	e->data_len = file_walk(e, file);
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -302,7 +302,7 @@ int BPF_PROG(on_chown, const struct path *path, unsigned int uid, unsigned int g
 	e->flags = uid;
 	e->mode = gid;
 	e->data_len = path_walk(e, BPF_CORE_READ(path, dentry), BPF_CORE_READ(path, mnt));
-	hold_op(e);
+	send_op(e);
 	return 0;
 }
 
@@ -317,67 +317,76 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	open_reached(e);
+	// The reader takes the first file its call reaches as the open's (see
+	// recorder.go); exec opening the program is no open(2).
+	if (in_open_call())
+		e->tid = (u32)bpf_get_current_pid_tgid();
 	submit(e);
 	return 0;
+}
+
+/**
+ * Marks the open(2) the thread is in, if any, as having reached its create
+ * step, for the reader to record one refused after creating its file as both.
+ *
+ * @return Whether the thread is in one.
+ */
+static __always_inline int open_creating(u32 slot)
+{
+	if (!in_open_call())
+		return 0;
+	struct event *e = start(slot, K_OPEN_CREATE);
+	if (e) {
+		e->tid = (u32)bpf_get_current_pid_tgid();
+		submit(e);
+	}
+	return 1;
 }
 
 /**
  * mknod(2) and bind(2) to a path. A creating open also passes here, from
  * may_o_create, and is skipped: the open records it.
  */
-DIR_ENTRY_HOOK(on_mknod, security_path_mknod, K_MKNOD, open_creating())
+DIR_ENTRY_HOOK(on_mknod, security_path_mknod, K_MKNOD, open_creating(slot))
 
 /**
- * Records the failed open assembled in @p e, its name in place, called with
- * @p dfd and @p flags.
+ * Sends the name of the open(2) the thread is in, for the reader to record
+ * the open under if it fails before reaching a file: as getname copied it,
+ * not the user pointer, which the caller could rewrite before the syscall
+ * returns; or, with @p user, the caller's own, for a name getname refused as
+ * too long, best-effort as a failed path syscall's is.
  */
-static __always_inline void open_failed(u32 slot, struct event *e, long ret, int dfd, u32 flags)
+static __always_inline void open_name(u32 slot, const char *name, int user)
 {
-	// A cut name, marked in n2 for the reader, has lost its end, the part that
-	// names the file; one cut for want of tails is also counted.
-	u8 cut = e->n2;
-	u32 off = e->data_len;
-	if (cut == NAME_CUT_HELD)
-		bump(&untracked);
-	// start resets the header of the scratch e is in.
-	if (start(slot, K_OPEN_FAILED) != e)
+	struct event *e = start(slot, K_OPEN_NAME);
+	if (!e)
 		return;
-	e->path_len = -ret;
-	e->flags = flags;
-	e->n2 = cut;
-	if (off > PATH_LEN) // never, but the verifier needs the bound
+	long r = user ? bpf_probe_read_user_str(e->data, PATH_LEN, name) :
+			bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
+	if (r <= 0) {
+		// Only the kernel's copy failing to read loses a record.
+		if (!user)
+			bump(&untracked);
 		return;
-	if (off > 1 && e->data[0] != '/')
-		off = add_base(e, off, dfd, 1, 0);
-	e->data_len = off;
+	}
+	e->tid = (u32)bpf_get_current_pid_tgid();
+	e->data_len = r;
+	e->n1 = user;
+	e->n2 = user && r == PATH_LEN;
 	submit(e);
 }
 
 /**
- * The step's open(2) calls that reached do_filp_open, and its failed ones that
- * returned with no hold, all of them lost if do_filp_open's program attached
- * but never ran, as where the kernel inlined it into its callers.
+ * Sends the name of the open(2) the thread is in, if any, from the struct
+ * filename in @p ctx's second argument.
  */
-struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, u32);
-	__type(value, u64);
-} open_named SEC(".maps"), open_unheld SEC(".maps");
-
-/**
- * Starts holding the open(2) the thread is in, if any, from its name, the
- * struct filename in @p ctx's second argument.
- */
-static __always_inline void hold_name(u32 slot, u64 *ctx)
+static __always_inline void send_name(u32 slot, u64 *ctx)
 {
 	if (!in_target() || !in_open_call())
 		return;
-	bump(&open_named);
 	u64 name = 0;
 	bpf_get_func_arg(ctx, 1, &name); // a number, which unlike a pointer can be range-checked
-	// 7.0 passes on getname's error, which open_returned() handles.
+	// 7.0 passes on getname's error, which on_sys_exit handles.
 	if ((long)name < 0 && (long)name >= -4095)
 		return;
 	open_name(slot, BPF_CORE_READ((struct filename *)name, name), 0);
@@ -390,14 +399,14 @@ static __always_inline void hold_name(u32 slot, u64 *ctx)
 SEC("fentry/do_filp_open")
 int BPF_PROG(on_filp_open, int dfd, struct filename *name)
 {
-	hold_name(slot, ctx);
+	send_name(slot, ctx);
 	return 0;
 }
 
 SEC("fentry/do_file_open")
 int BPF_PROG(on_do_file_open, int dfd, struct filename *name)
 {
-	hold_name(slot, ctx);
+	send_name(slot, ctx);
 	return 0;
 }
 
@@ -489,54 +498,45 @@ int BPF_PROG(on_file_free, struct file *file)
 }
 
 /**
- * Ends an open(2) family call's hold as the call returns, recording a failed
- * open with the descriptor and flags from its arguments. A call with no hold
- * sends its return as a K_OPEN_RESULT, for the open recorded at its file if
- * there is one. A name getname refused as too long is read from the caller as
- * a failed path syscall's is, so a filter or tracer returning ENAMETOOLONG
- * records one too.
+ * Sends the return of syscall @p nr, with @p bits (RESULT_*), for the events
+ * the thread sent while in it. A failed open(2) adds its flags, from its
+ * arguments, and the base directory of its descriptor or working directory,
+ * which the reader joins to a relative name: only the name the reader holds
+ * says whether it is one.
  */
-static __always_inline void open_returned(u32 slot, struct pt_regs *regs, u64 id, long nr,
-					  long ret)
+static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr, long ret, u8 bits)
 {
-	int at = nr == nr_openat || nr == nr_openat2;
-	// First: a name refused as too long has no hold until open_name makes one.
-	if (ret == -ENAMETOOLONG)
-		open_name(slot, (const char *)sys_arg(regs, at), 1);
-	int had_head;
-	struct event *e = open_return(slot, id, ret, &had_head);
-	if (!had_head) {
-		if (ret < 0 && !is_restart(ret))
-			bump(&open_unheld);
-		struct event *r = start(slot, K_OPEN_RESULT);
-		if (r) {
-			r->tid = (u32)id;
-			r->path_len = ret;
-			submit(r);
-		}
-	}
+	struct event *e = start(slot, K_RESULT);
 	if (!e)
 		return;
-	u32 flags;
-	if (nr == nr_creat) {
-		flags = O_CREAT | O_WRONLY | O_TRUNC;
-	} else if (nr == nr_openat2) {
-		u64 f = 0; // open_how's first field
-		bpf_probe_read_user(&f, sizeof(f), (void *)sys_arg(regs, 2));
-		flags = f;
-	} else {
-		flags = sys_arg(regs, at + 1);
+	e->tid = (u32)bpf_get_current_pid_tgid();
+	e->nr = nr;
+	e->path_len = ret;
+	e->n1 = bits;
+	if ((bits & RESULT_OPEN) && ret < 0 && !is_restart(ret)) {
+		int at = nr == nr_openat || nr == nr_openat2;
+		if (nr == nr_creat) {
+			e->flags = O_CREAT | O_WRONLY | O_TRUNC;
+		} else if (nr == nr_openat2) {
+			u64 f = 0; // open_how's first field
+			bpf_probe_read_user(&f, sizeof(f), (void *)sys_arg(regs, 2));
+			e->flags = f;
+		} else {
+			e->flags = sys_arg(regs, at + 1);
+		}
+		e->data_len = add_base(e, 0, at ? (int)sys_arg(regs, 0) : AT_FDCWD, 1, 0);
 	}
-	open_failed(slot, e, ret, at ? (int)sys_arg(regs, 0) : AT_FDCWD, flags);
+	submit(e);
 }
 
 /**
- * Reports a held path change when its syscall returns: as done if it
- * succeeded (a truncating open returns a descriptor), else as failed with the
- * errno, unless the call is one recorded from its exit (see classify()),
- * whose record then stands for the failure. A call through a descriptor alone
- * is the exception: its hold has the file the hook saw, which a thread
- * swapping the descriptor before the exit cannot change.
+ * Sends the return of each call a hook may have sent an event from: the
+ * open(2) family, a path syscall, and bind(2), whose socket file passes the
+ * mknod hook. A path syscall that failed is then recorded from its exit
+ * (see classify()), and the reader drops the path change its hook sent, as
+ * the exit's record stands for the failure. A call through a descriptor
+ * alone is the exception: the path change has the file the hook saw, which a
+ * thread swapping the descriptor before the exit cannot change.
  */
 SEC("tp_btf/sys_exit")
 int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
@@ -546,29 +546,22 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct path_call call = {}; // so no field reaches the stack unset
 	long nr = sys_nr(regs);
 	int watched = classify(nr, regs, &call);
-	u64 id = bpf_get_current_pid_tgid();
-	struct held_key k = held_key_for(id, HELD_OP);
-	struct event *head = bpf_map_lookup_elem(&heads, &k);
-	// A hold tagged with another syscall is one whose own exit was skipped,
-	// left for this call to find; it belongs to no call now returning, so it
-	// is dropped as untracked rather than reported against the wrong one.
-	int held = head && head->err == (u32)nr;
-	int fd_held = held && names_fd(&call);
-	if (head && !held) {
-		bump(&untracked);
-		release(&k, tails_for(head->data_len));
-	} else if (head) {
-		u32 t = tails_for(head->data_len);
-		if (!is_restart(ret) && (ret >= 0 || !watched || fd_held))
-			report_held(slot, &k, head, ret < 0 ? -ret : 0);
-		release(&k, t);
-	}
-	if (watched && !fd_held)
-		op_exit(slot, &call, ret);
-	if (is_open_nr(nr))
-		open_returned(slot, regs, id, nr, ret);
-	else if (ret == -EPERM && !watched && !held && is_refusable(nr))
+	if (is_open_nr(nr)) {
+		// A name refused as too long reached no hook to send it, so a filter
+		// or tracer returning ENAMETOOLONG records one too.
+		if (ret == -ENAMETOOLONG)
+			open_name(slot, (const char *)sys_arg(regs, nr == nr_openat || nr == nr_openat2), 1);
+		send_result(slot, regs, nr, ret, RESULT_OPEN);
+	} else if ((watched && call.kind != K_ATTR_FAILED) || (nr >= 0 && nr == nr_bind)) {
+		u8 bits = watched ? RESULT_WATCHED : 0;
+		if (watched && ret < 0 && names_fd(&call))
+			bits |= RESULT_FD;
+		send_result(slot, regs, nr, ret, bits);
+	} else if (ret == -EPERM && !watched && is_refusable(nr)) {
 		syscall_refused(slot, nr, 0);
+	}
+	if (watched)
+		op_exit(slot, &call, ret);
 	return 0;
 }
 
