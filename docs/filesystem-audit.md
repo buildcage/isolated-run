@@ -453,7 +453,9 @@ tracer caught:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
 - `untracked` counts calls it could not follow because too many files were open, or too many calls
-  in progress, at once, and calls whose record it had to cut short or drop. The tracer's tally in
+  in progress, at once, and calls whose record it had to cut short or drop. An open whose call's
+  return it never saw, as one still waiting when it stopped, counts here too, and is recorded as
+  done. The tracer's tally in
   the step log ends with `tails-peak=<used>/<max>`: the most room for long paths it needed at once,
   out of the room it has.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see

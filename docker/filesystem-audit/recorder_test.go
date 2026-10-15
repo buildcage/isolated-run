@@ -102,6 +102,99 @@ func TestRecorderKeepsNothingOfASample(t *testing.T) {
 	}
 }
 
+// waitingOpen is an open recorded at its file whose call's result follows.
+func waitingOpen(tid uint32, path string) event {
+	return event{kind: filesystemAuditKindK_OPEN, pid: 9, comm: "sh", flags: unix.O_RDONLY, tid: tid, data: []byte(path + "\x00")}
+}
+
+func openResult(tid uint32, ret int32) event {
+	return event{kind: filesystemAuditKindK_OPEN_RESULT, pid: 9, comm: "sh", tid: tid, pathRet: ret}
+}
+
+// paths gives each line's path and err, the end line's as empty.
+func paths(t *testing.T, out *bytes.Buffer) string {
+	t.Helper()
+	var got []string
+	for _, l := range lines(t, out) {
+		p, _ := l["path"].(string)
+		e, _ := l["err"].(float64)
+		got = append(got, fmt.Sprintf("%s:%v", p, e))
+	}
+	return strings.Join(got, " ")
+}
+
+func TestRecorderSettlesAnOpenWithItsResult(t *testing.T) {
+	created := waitingOpen(13, "/tmp/new")
+	created.bases = 1
+	r, out, _ := newTestRecorder()
+	add(t, r, stepExec,
+		waitingOpen(11, "/tmp/fifo"), waitingOpen(12, "/tmp/refused"),
+		openResult(12, -int32(unix.ENXIO)), openResult(11, 3),
+		created, openResult(13, -int32(unix.EACCES)),
+		openResult(14, 0), // no open waits for it
+	)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("/bin/sh:0 /tmp/refused:%d /tmp/fifo:0 /tmp/new:0 /tmp/new:%d :0", unix.ENXIO, unix.EACCES)
+	if got := paths(t, out); got != want {
+		t.Fatalf("recording = %s, want %s", got, want)
+	}
+}
+
+func TestRecorderDropsARestartedOpen(t *testing.T) {
+	r, out, _ := newTestRecorder()
+	add(t, r, stepExec, waitingOpen(11, "/tmp/fifo"), openResult(11, -512), waitingOpen(11, "/tmp/fifo"), openResult(11, 3))
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paths(t, out); got != "/bin/sh:0 /tmp/fifo:0 :0" {
+		t.Fatalf("recording = %s, want the rerun's open alone", got)
+	}
+}
+
+func TestRecorderWritesAnOpenWhoseResultWasLost(t *testing.T) {
+	r, out, _ := newTestRecorder()
+	add(t, r, stepExec, waitingOpen(11, "/a"), waitingOpen(11, "/b"), openResult(11, -int32(unix.ENOENT)))
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := paths(t, out), fmt.Sprintf("/bin/sh:0 /a:0 /b:%d :0", unix.ENOENT); got != want {
+		t.Fatalf("recording = %s, want %s", got, want)
+	}
+	if got := lines(t, out); got[3]["untracked"] != float64(1) {
+		t.Fatalf("end line = %v, want /a untracked", got[3])
+	}
+}
+
+func TestRecorderWritesOpensStillWaitingAtTheEnd(t *testing.T) {
+	late, early := waitingOpen(12, "/late"), waitingOpen(11, "/early")
+	late.boot, early.boot = 2, 1
+	r, out, _ := newTestRecorder()
+	add(t, r, stepExec, late, early)
+	if err := r.finish(loss{untracked: 1}); err != nil {
+		t.Fatal(err)
+	}
+	got := lines(t, out)
+	if len(got) != 4 || got[1]["path"] != "/early" || got[2]["path"] != "/late" || got[3]["untracked"] != float64(3) {
+		t.Fatalf("recording = %v, want both opens in time order and three untracked", got)
+	}
+}
+
+func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
+	r, out, log := newTestRecorder()
+	add(t, r, waitingOpen(11, "/etc/passwd"), stepExec, openResult(11, 3))
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := paths(t, out); got != "/bin/sh:0 :0" {
+		t.Fatalf("recording = %s, want the exec alone", got)
+	}
+	if !strings.Contains(log.String(), "pre-exec-skipped=1 ") {
+		t.Fatalf("log = %q, want the open skipped", log)
+	}
+}
+
 func TestRecorderStopsAtAClockItCannotRead(t *testing.T) {
 	out := &bytes.Buffer{}
 	broken := errors.New("no clock")

@@ -64,14 +64,20 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 * program for: flags holds its number, mode is 1 when killed, path_len
 	 * the errno; no data.
 	 */
-	K_SYSCALL = 31
+	K_SYSCALL = 31,
+	/**
+	 * An open(2) call's return value, in path_len, for the open recorded at
+	 * its file under the same tid; no data, and no line of its own.
+	 */
+	K_OPEN_RESULT = 32
 };
 
 /**
  * Fixed header (decode.go reads it through the type bpf2go generates), then
  * data_len bytes of data:
  *
- * - open: d_path result (path_len is its return value)
+ * - open: d_path result (path_len is its return value); bases is 1 when an
+ *   open(2) whose result follows reached its create step first
  * - failed open: the name as passed to open(2), then its base directory if it
  *   is relative (see add_base); path_len holds the errno
  * - read/write: d_path result, once per open file, direction and program
@@ -96,9 +102,10 @@ struct event {
 	u8 truncated; ///< The path, or the first path of a two-path operation.
 	u8 trunc2;    ///< The second path of a rename or link.
 	char comm[16];
-	u32 err;   ///< A held path change's or open's errno when its syscall refused it.
+	u32 err;   ///< A held path change's errno when its syscall refused it.
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
+	u32 tid;   ///< The thread, on an open whose result follows and on that result.
 	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall as it returned.
 	char data[DATA_SZ + NAME_LEN]; ///< Slack: masked offset + one component.
 };
