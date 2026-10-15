@@ -69725,33 +69725,20 @@ function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
 	}
 }
 function writeRunnerFile(path, content) {
-	let fd = openRunnerFile(path, node_fs.constants.O_WRONLY);
-	try {
-		(0, node_fs.ftruncateSync)(fd), (0, node_fs.writeFileSync)(fd, content);
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
+	rewriteRunnerFile(path, () => content);
 }
 function rewriteRunnerFile(path, rewrite) {
-	let fd = openRunnerFile(path, node_fs.constants.O_RDWR);
+	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDWR | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
 	try {
+		let stats = (0, node_fs.fstatSync)(fd);
+		if (!stats.isFile()) throw Error("not a regular file");
+		if (stats.nlink !== 1) throw Error("a hard link to another file");
 		let content = rewrite((0, node_fs.readFileSync)(fd));
 		if (content === void 0) return;
 		(0, node_fs.ftruncateSync)(fd);
 		for (let done = 0; done < content.length;) done += (0, node_fs.writeSync)(fd, content, done, content.length - done, done);
 	} finally {
 		(0, node_fs.closeSync)(fd);
-	}
-}
-function openRunnerFile(path, flags) {
-	let fd = (0, node_fs.openSync)(path, flags | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
-	try {
-		let stats = (0, node_fs.fstatSync)(fd);
-		if (!stats.isFile()) throw Error("not a regular file");
-		if (stats.nlink !== 1) throw Error("a hard link to another file");
-		return fd;
-	} catch (e) {
-		throw (0, node_fs.closeSync)(fd), e;
 	}
 }
 function removeBackingDir(path) {

@@ -268,7 +268,7 @@ describe("writeRunnerFile", () => {
     dir = mkdtempSync(join(tmpdir(), "runner-"));
     const path = join(dir, "set_output_abc");
     execFileSync("mkfifo", [path]);
-    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow(/ENXIO/);
+    expect(() => writeRunnerFile(path, Buffer.from("a=1\n"))).toThrow("not a regular file");
   });
 
   it("refuses a directory", () => {

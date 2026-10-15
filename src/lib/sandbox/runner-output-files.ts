@@ -186,28 +186,23 @@ export function readBackingFile(
  * writes through a hard link to another file.
  */
 export function writeRunnerFile(path: string, content: Buffer): void {
-  const fd = openRunnerFile(path, constants.O_WRONLY);
-  try {
-    ftruncateSync(fd);
-    writeFileSync(fd, content);
-  } finally {
-    closeSync(fd);
-  }
+  rewriteRunnerFile(path, () => content);
 }
 
 /**
- * Rewrites a mediated file's real path in place with what `rewrite` makes of
- * what it holds, opened as writeRunnerFile opens it, or leaves it alone when
- * `rewrite` returns undefined. Not through a temp file and a rename: the
- * sandbox can write the directory the real path is in, so any name beside it
- * may be one the command left there.
+ * writeRunnerFile, with the new content made from the old. In place, not
+ * through a temp file and a rename: the sandbox can write the real path's
+ * directory, so a name beside it may be one the command left there.
  */
 export function rewriteRunnerFile(
   path: string,
   rewrite: (content: Buffer) => Buffer | undefined,
 ): void {
-  const fd = openRunnerFile(path, constants.O_RDWR);
+  const fd = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
+    const stats = fstatSync(fd);
+    if (!stats.isFile()) throw new Error("not a regular file");
+    if (stats.nlink !== 1) throw new Error("a hard link to another file");
     const content = rewrite(readFileSync(fd));
     if (content === undefined) return;
     ftruncateSync(fd);
@@ -217,19 +212,6 @@ export function rewriteRunnerFile(
     }
   } finally {
     closeSync(fd);
-  }
-}
-
-function openRunnerFile(path: string, flags: number): number {
-  const fd = openSync(path, flags | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  try {
-    const stats = fstatSync(fd);
-    if (!stats.isFile()) throw new Error("not a regular file");
-    if (stats.nlink !== 1) throw new Error("a hard link to another file");
-    return fd;
-  } catch (e) {
-    closeSync(fd);
-    throw e;
   }
 }
 
