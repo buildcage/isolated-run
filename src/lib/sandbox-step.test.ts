@@ -64,6 +64,7 @@ const mocks = {
   mediateRunnerOutputFiles: vi.fn(),
   readBackingFile: vi.fn(),
   removeBackingDir: vi.fn(),
+  writeBackOutputFile: vi.fn(),
   writeRunnerFile: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
   setFilesystemAuditOutput: vi.fn(),
@@ -171,6 +172,7 @@ beforeEach(() => {
   );
   // The command wrote nothing by default; a test that cares overrides this.
   mocks.readBackingFile.mockReturnValue({ empty: true });
+  mocks.writeBackOutputFile.mockReturnValue({});
 });
 
 /** Call order of a step that ran, for comparing two steps against each other. */
@@ -732,10 +734,14 @@ describe("runSandboxStep", () => {
     it("writes $GITHUB_OUTPUT back once the command has stopped, before the report", async () => {
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.alloc(0));
-      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(orderOf(mocks.writeRunnerFile));
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.readStepFilesystemAudit));
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+      expect(mocks.writeBackOutputFile).toHaveBeenCalledExactlyOnceWith(
+        expect.stringMatching(/GITHUB_OUTPUT$/),
+        ENV.GITHUB_OUTPUT,
+      );
+      const writeBack = orderOf(mocks.writeBackOutputFile);
+      expect(orderOf(mocks.runSandboxedCommand)).toBeLessThan(writeBack);
+      expect(writeBack).toBeLessThan(orderOf(mocks.readStepFilesystemAudit));
+      expect(writeBack).toBeLessThan(orderOf(mocks.reportStepTraffic));
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
@@ -746,7 +752,9 @@ describe("runSandboxStep", () => {
 
       expect(mocks.setTrafficArtifactOutput.mock.calls).toStrictEqual([[""]]);
       expect(mocks.setFilesystemAuditOutput.mock.calls).toStrictEqual([[""]]);
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.setTrafficArtifactOutput));
+      expect(orderOf(mocks.writeBackOutputFile)).toBeLessThan(
+        orderOf(mocks.setTrafficArtifactOutput),
+      );
       expect(orderOf(mocks.setFilesystemAuditOutput)).toBeLessThan(
         orderOf(mocks.readStepFilesystemAudit),
       );
@@ -762,34 +770,19 @@ describe("runSandboxStep", () => {
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
-    it("writes $GITHUB_OUTPUT back trimmed to what the runner reads, without failing", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_OUTPUT") ? { bytes: Buffer.from("key=value\n") } : { empty: true },
-      );
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
-        ENV.GITHUB_OUTPUT,
-        Buffer.from("key=value\n"),
-      );
-      expect(annotation.error).not.toHaveBeenCalled();
-    });
-
     it("writes nothing back and still reports where the runner gave neither file", async () => {
       await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: "" }, deps);
+      expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
       expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
     });
 
     it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_OUTPUT")
-          ? { bytes: Buffer.from("a=1\nx<<NEVER\nb=2\n") }
-          : { empty: true },
-      );
+      mocks.writeBackOutputFile.mockReturnValue({
+        error: 'line 2, output "x", never reaches its delimiter "NEVER"',
+      });
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.from("a=1\n"));
       expect(annotation.error).toHaveBeenCalledWith(
         '$GITHUB_OUTPUT was written without what the runner could not read: line 2, output "x", never reaches its delimiter "NEVER"; failing the step',
       );
@@ -799,8 +792,8 @@ describe("runSandboxStep", () => {
     });
 
     it("fails the step but still reports when $GITHUB_OUTPUT's real file cannot be written", async () => {
-      mocks.writeRunnerFile.mockImplementation((path: string) => {
-        if (path === ENV.GITHUB_OUTPUT) throw new Error("EACCES");
+      mocks.writeBackOutputFile.mockImplementation(() => {
+        throw new Error("EACCES");
       });
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
@@ -829,16 +822,12 @@ describe("runSandboxStep", () => {
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
-    it("reads $GITHUB_STEP_SUMMARY back up to GitHub's 1 MiB limit and $GITHUB_OUTPUT up to 64 MiB", async () => {
+    it("reads $GITHUB_STEP_SUMMARY back up to GitHub's 1 MiB limit", async () => {
       await runSandboxStep(ENV, deps);
 
-      expect(mocks.readBackingFile).toHaveBeenCalledWith(
+      expect(mocks.readBackingFile).toHaveBeenCalledExactlyOnceWith(
         expect.stringMatching(/GITHUB_STEP_SUMMARY$/),
         1024 * 1024,
-      );
-      expect(mocks.readBackingFile).toHaveBeenCalledWith(
-        expect.stringMatching(/GITHUB_OUTPUT$/),
-        64 * 1024 * 1024,
       );
     });
 
@@ -861,15 +850,12 @@ describe("runSandboxStep", () => {
       expect(process.exitCode).toBeUndefined();
     });
 
-    it("fails the step but still reports when $GITHUB_OUTPUT was over the limit", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_OUTPUT") ? { oversize: 64 * 1024 * 1024 + 1 } : { empty: true },
-      );
+    it("fails the step but still reports when the $GITHUB_OUTPUT backing was not a regular file", async () => {
+      mocks.writeBackOutputFile.mockReturnValue({ reason: "it was not a regular file" });
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.alloc(0));
       expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT it was over 64 MiB; failing the step",
+        "$GITHUB_OUTPUT it was not a regular file; failing the step",
       );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
@@ -916,6 +902,7 @@ describe("runSandboxStep", () => {
       await runSandboxStep(ENV, deps);
 
       expect(mocks.mediateRunnerOutputFiles.mock.calls[0][1]).toStrictEqual([]);
+      expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
       expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
       expect(mocks.removeBackingDir).not.toHaveBeenCalled();
     });
@@ -947,12 +934,13 @@ describe("runSandboxStep", () => {
 
     it("writes nothing back where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
       await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
-      const written = mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0]);
-      expect(written).toStrictEqual([ENV.GITHUB_OUTPUT]);
+      expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
+      expect(mocks.writeBackOutputFile.mock.calls[0][1]).toBe(ENV.GITHUB_OUTPUT);
     });
 
     it("writes nothing back where the runner gave no $GITHUB_OUTPUT", async () => {
       await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
+      expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
       const written = mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0]);
       expect(written).toStrictEqual([ENV.GITHUB_STEP_SUMMARY]);
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
@@ -1101,7 +1089,7 @@ describe("finalizeStep", () => {
   });
 
   it("says a runner file it could not write back failed the step, and still reports", async () => {
-    mocks.writeRunnerFile.mockImplementation(() => {
+    mocks.writeBackOutputFile.mockImplementation(() => {
       throw new Error("EACCES");
     });
     const mediation = {

@@ -64,7 +64,7 @@ let node_https = require("node:https");
 node_https = __toESM(node_https, 1);
 let stream = require("stream");
 stream = __toESM(stream, 1);
-let node_readline = require("node:readline");
+let node_string_decoder = require("node:string_decoder"), node_readline = require("node:readline");
 //#region src/core/lib/errors.ts
 var ActionError = class extends Error {
 	code;
@@ -8035,7 +8035,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 	}
 	module.exports = { getEncoding };
 })), require_util$8 = __commonJSMin(((exports, module) => {
-	let { kState, kError, kResult, kAborted, kLastProgressEventFired } = require_symbols$2(), { ProgressEvent } = require_progressevent(), { getEncoding } = require_encoding$1(), { serializeAMimeType, parseMIMEType } = require_data_url(), { types: types$1 } = require("node:util"), { StringDecoder: StringDecoder$1 } = require("string_decoder"), { btoa: btoa$1 } = require("node:buffer"), staticPropertyDescriptors = {
+	let { kState, kError, kResult, kAborted, kLastProgressEventFired } = require_symbols$2(), { ProgressEvent } = require_progressevent(), { getEncoding } = require_encoding$1(), { serializeAMimeType, parseMIMEType } = require_data_url(), { types: types$1 } = require("node:util"), { StringDecoder: StringDecoder$2 } = require("string_decoder"), { btoa: btoa$1 } = require("node:buffer"), staticPropertyDescriptors = {
 		enumerable: !0,
 		writable: !1,
 		configurable: !1
@@ -8087,7 +8087,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 			case "DataURL": {
 				let dataURL = "data:", parsed = parseMIMEType(mimeType || "application/octet-stream");
 				parsed !== "failure" && (dataURL += serializeAMimeType(parsed)), dataURL += ";base64,";
-				let decoder = new StringDecoder$1("latin1");
+				let decoder = new StringDecoder$2("latin1");
 				for (let chunk of bytes) dataURL += btoa$1(decoder.write(chunk));
 				return dataURL += btoa$1(decoder.end()), dataURL;
 			}
@@ -8101,7 +8101,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 			}
 			case "ArrayBuffer": return combineByteSequences(bytes).buffer;
 			case "BinaryString": {
-				let binaryString = "", decoder = new StringDecoder$1("latin1");
+				let binaryString = "", decoder = new StringDecoder$2("latin1");
 				for (let chunk of bytes) binaryString += decoder.write(chunk);
 				return binaryString += decoder.end(), binaryString;
 			}
@@ -69524,6 +69524,156 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	];
 }
 //#endregion
+//#region src/lib/step-output-file.ts
+const WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
+function copyOutputEntries(chunks, sink) {
+	let reader = new EntryReader(sink), decoder = new node_string_decoder.StringDecoder("utf8"), head = Buffer.alloc(0), bom = !0, feed = (text) => {
+		if (text !== "") return bom && (bom = !1, text.startsWith("﻿") && (text = text.slice(1))), reader.feed(Buffer.from(text, "utf8"));
+	};
+	for (let chunk of chunks) {
+		let bytes = chunk;
+		if (head) {
+			if (head = Buffer.concat([head, chunk]), head.length < 4) continue;
+			if (isWide(head)) return "it is not UTF-8";
+			bytes = head, head = void 0;
+		}
+		let error = feed(decoder.write(bytes));
+		if (error !== void 0) return error;
+	}
+	if (head) {
+		if (isWide(head)) return "it is not UTF-8";
+		let error = feed(decoder.write(head));
+		if (error !== void 0) return error;
+	}
+	return feed(decoder.end()) ?? reader.end();
+}
+function isWide(head) {
+	return WIDE_BOMS.some((bom) => bom.every((byte, i) => head[i] === byte));
+}
+var LinePart = class {
+	length = 0;
+	head = Buffer.alloc(260);
+	headLength = 0;
+	tail;
+	tailDigest;
+	reset() {
+		this.length = 0, this.headLength = 0, this.tail = void 0, this.tailDigest = void 0;
+	}
+	add(bytes, { hashTail = !0 } = {}) {
+		let copied = bytes.copy(this.head, this.headLength, 0, 260 - this.headLength);
+		this.headLength += copied, this.length += bytes.length, hashTail && copied < bytes.length && (this.tail ??= (0, node_crypto.createHash)("sha256")).update(bytes.subarray(copied));
+	}
+	text(end = this.headLength) {
+		return this.head.subarray(0, Math.min(end, this.headLength)).toString("utf8");
+	}
+	equals(other) {
+		return this.length === other.length && this.head.subarray(0, this.headLength).equals(other.head.subarray(0, other.headLength)) && (this.length <= 260 || this.digest().equals(other.digest()));
+	}
+	digest() {
+		return this.tailDigest ??= this.tail.digest();
+	}
+}, EntryReader = class {
+	mode = "between";
+	lineNumber = 0;
+	lineStart = !0;
+	line = new LinePart();
+	lastLessThan = !1;
+	at = "";
+	name = "";
+	delimiter = new LinePart();
+	value = new LinePart();
+	heredoc = Buffer.from("<<");
+	newline = Buffer.from("\n");
+	sink;
+	constructor(sink) {
+		this.sink = sink;
+	}
+	feed(bytes) {
+		for (let pos = 0; pos < bytes.length;) {
+			let lf = bytes.indexOf(10, pos), end = lf === -1 ? bytes.length : lf, error = this.segment(bytes.subarray(pos, end), lf !== -1);
+			if (error !== void 0) return error;
+			pos = end + 1;
+		}
+	}
+	end() {
+		switch (this.mode) {
+			case "between": return;
+			case "name": return this.neither();
+			case "value":
+				this.sink.write(this.newline), this.sink.commit();
+				return;
+			case "delimiter": return this.delimiter.length === 0 ? this.emptyDelimiter() : this.neverReached();
+			case "heredoc":
+				if (this.lineStart || !this.value.equals(this.delimiter)) return this.neverReached();
+				this.sink.write(this.newline), this.sink.commit();
+				return;
+		}
+	}
+	segment(bytes, eol) {
+		if (this.lineStart && (this.lineNumber++, this.lineStart = !1, this.mode === "between")) {
+			if (bytes.length === 0 && eol) {
+				this.lineStart = !0;
+				return;
+			}
+			this.mode = "name", this.line.reset(), this.lastLessThan = !1;
+		}
+		switch (this.lineStart = eol, this.sink.write(bytes), eol && this.sink.write(this.newline), this.mode) {
+			case "name": return this.readName(bytes, eol);
+			case "value": return this.readValue(eol);
+			case "delimiter": return this.readDelimiter(bytes, eol);
+			default: return this.readHeredoc(bytes, eol);
+		}
+	}
+	readName(bytes, eol) {
+		let start = this.line.length;
+		this.line.add(bytes, { hashTail: !1 });
+		let found = -1, heredoc = !1, rest = 0;
+		if (this.lastLessThan && bytes[0] === 60) found = start - 1, heredoc = !0, rest = 1;
+		else {
+			let equals = bytes.indexOf(61), lessThan = bytes.indexOf(this.heredoc);
+			equals !== -1 && (lessThan === -1 || equals < lessThan) ? found = start + equals : lessThan !== -1 && (found = start + lessThan, heredoc = !0, rest = lessThan + 2);
+		}
+		return found === -1 ? (this.lastLessThan = bytes.at(-1) === 60, eol ? this.neither() : void 0) : (this.at = `line ${this.lineNumber}`, heredoc ? found === 0 ? `${this.at} has an empty name before <<` : (this.name = this.line.text(found), this.mode = "delimiter", this.delimiter.reset(), this.readDelimiter(bytes.subarray(rest), eol)) : found === 0 ? `${this.at} has an empty name before =` : (this.mode = "value", this.readValue(eol)));
+	}
+	readValue(eol) {
+		eol && this.commit();
+	}
+	readDelimiter(bytes, eol) {
+		if (this.delimiter.add(bytes), eol) {
+			if (this.delimiter.length === 0) return this.emptyDelimiter();
+			this.mode = "heredoc", this.value.reset();
+		}
+	}
+	readHeredoc(bytes, eol) {
+		this.value.length + bytes.length <= this.delimiter.length ? this.value.add(bytes) : this.value.length = this.delimiter.length + 1, eol && (this.value.equals(this.delimiter) && this.commit(), this.value.reset());
+	}
+	commit() {
+		this.sink.commit(), this.mode = "between";
+	}
+	neither() {
+		return `line ${this.lineNumber} is neither NAME=VALUE nor NAME<<DELIMITER`;
+	}
+	emptyDelimiter() {
+		return `${this.at}, output ${quoted(this.name)}, has an empty delimiter`;
+	}
+	neverReached() {
+		return `${this.at}, output ${quoted(this.name)}, never reaches its delimiter ` + quoted(this.delimiter.text());
+	}
+};
+function quoted(text) {
+	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
+	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
+}
+//#endregion
 //#region src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
 	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
@@ -69710,7 +69860,7 @@ const realReadBackingDeps = {
 	readFile: (path) => (0, node_fs.readFileSync)(path)
 };
 function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
-	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
+	let stats;
 	try {
 		stats = deps.lstat(path);
 	} catch (e) {
@@ -69724,22 +69874,83 @@ function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
 		return unreadable(e);
 	}
 }
+function unreadable(e) {
+	return { reason: `it could not be read (${e.code ?? errorMessage(e)})` };
+}
+const CHUNK_BYTES$1 = 65536;
+function writeBackOutputFile(backingPath, realPath, { read, write } = {
+	read: node_fs.readSync,
+	write: node_fs.writeSync
+}) {
+	let opened = openBackingFile(backingPath), backing = "fd" in opened ? opened.fd : void 0, result = "reason" in opened ? opened : {};
+	try {
+		withRunnerFile(realPath, (fd) => {
+			if ((0, node_fs.ftruncateSync)(fd), backing === void 0) return;
+			let written = 0, committed = 0, pending = [], pendingBytes = 0, flush = () => {
+				writeAt(fd, Buffer.concat(pending), written, write), written += pendingBytes, pending = [], pendingBytes = 0;
+			};
+			try {
+				result = { error: copyOutputEntries(readChunks(backing, read), {
+					write: (bytes) => {
+						pending.push(bytes), pendingBytes += bytes.length, pendingBytes >= CHUNK_BYTES$1 && flush();
+					},
+					commit: () => committed = written + pendingBytes
+				}) }, flush(), (0, node_fs.ftruncateSync)(fd, committed);
+			} catch (e) {
+				if ((0, node_fs.ftruncateSync)(fd), !(e instanceof BackingReadError)) throw e;
+				result = unreadable(e.cause);
+			}
+		});
+	} finally {
+		backing !== void 0 && (0, node_fs.closeSync)(backing);
+	}
+	return result;
+}
+function openBackingFile(path) {
+	let fd;
+	try {
+		fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDONLY | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
+	} catch (e) {
+		let code = e.code;
+		return code === "ENOENT" ? { empty: !0 } : code === "ELOOP" || code === "EMLINK" ? { reason: "it was not a regular file" } : unreadable(e);
+	}
+	return (0, node_fs.fstatSync)(fd).isFile() ? { fd } : ((0, node_fs.closeSync)(fd), { reason: "it was not a regular file" });
+}
+var BackingReadError = class extends Error {};
+function* readChunks(fd, read) {
+	for (;;) {
+		let buffer = Buffer.allocUnsafe(CHUNK_BYTES$1), bytes;
+		try {
+			bytes = read(fd, buffer);
+		} catch (e) {
+			throw new BackingReadError("read", { cause: e });
+		}
+		if (bytes === 0) return;
+		yield buffer.subarray(0, bytes);
+	}
+}
 function writeRunnerFile(path, content) {
 	rewriteRunnerFile(path, () => content);
 }
 function rewriteRunnerFile(path, rewrite) {
+	withRunnerFile(path, (fd) => {
+		let content = rewrite((0, node_fs.readFileSync)(fd));
+		content !== void 0 && ((0, node_fs.ftruncateSync)(fd), writeAt(fd, content, 0));
+	});
+}
+function withRunnerFile(path, use) {
 	let fd = (0, node_fs.openSync)(path, node_fs.constants.O_RDWR | node_fs.constants.O_NOFOLLOW | node_fs.constants.O_NONBLOCK);
 	try {
 		let stats = (0, node_fs.fstatSync)(fd);
 		if (!stats.isFile()) throw Error("not a regular file");
 		if (stats.nlink !== 1) throw Error("a hard link to another file");
-		let content = rewrite((0, node_fs.readFileSync)(fd));
-		if (content === void 0) return;
-		(0, node_fs.ftruncateSync)(fd);
-		for (let done = 0; done < content.length;) done += (0, node_fs.writeSync)(fd, content, done, content.length - done, done);
+		use(fd);
 	} finally {
 		(0, node_fs.closeSync)(fd);
 	}
+}
+function writeAt(fd, bytes, position, write = node_fs.writeSync) {
+	for (let done = 0; done < bytes.length;) done += write(fd, bytes, done, bytes.length - done, position + done);
 }
 function removeBackingDir(path) {
 	let pending = [path];
@@ -73681,88 +73892,6 @@ async function runSandboxedCommand(options, overrides = {}) {
 	});
 }
 //#endregion
-//#region src/lib/step-output-file.ts
-const MAX_OUTPUT_BYTES = 67108864;
-function readOutputEntries(text) {
-	let entries = [], index = 0, lineNumber = 0, readLine = () => {
-		if (index >= text.length) return;
-		lineNumber++;
-		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
-		return index = lf === -1 ? text.length : lf + 1, {
-			line,
-			newline: lf !== -1
-		};
-	};
-	for (;;) {
-		let start = index, read = readLine();
-		if (!read) return { entries };
-		let { line } = read, at = `line ${lineNumber}`;
-		if (line === "") continue;
-		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
-		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-			if (equals === 0) return {
-				entries,
-				error: `${at} has an empty name before =`
-			};
-			entries.push({
-				name: line.slice(0, equals),
-				text: text.slice(start, index)
-			});
-			continue;
-		}
-		if (heredoc === -1) return {
-			entries,
-			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
-		};
-		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
-		if (name === "") return {
-			entries,
-			error: `${at} has an empty name before <<`
-		};
-		if (delimiter === "") return {
-			entries,
-			error: `${at}, output ${quoted(name)}, has an empty delimiter`
-		};
-		for (;;) {
-			let value = readLine();
-			if (!value || value.line !== delimiter && !value.newline) return {
-				entries,
-				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
-			};
-			if (value.line === delimiter) break;
-		}
-		entries.push({
-			name,
-			text: text.slice(start, index)
-		});
-	}
-}
-function quoted(text) {
-	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
-	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
-}
-const WIDE_BOMS = [
-	[255, 254],
-	[254, 255],
-	[
-		0,
-		0,
-		254,
-		255
-	]
-];
-function validatedOutputText(bytes) {
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
-		text: "",
-		error: "it is not UTF-8"
-	};
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
-	return {
-		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
-		error
-	};
-}
-//#endregion
 //#region src/core/lib/docker/container-env.ts
 function parseDockerInspectEnv(inspectOutput) {
 	let entries = JSON.parse(inspectOutput), env = {};
@@ -74416,6 +74545,7 @@ const realDeps = {
 	mediateRunnerOutputFiles,
 	readBackingFile,
 	removeBackingDir,
+	writeBackOutputFile,
 	writeRunnerFile,
 	setTrafficArtifactOutput,
 	setFilesystemAuditOutput,
@@ -74444,17 +74574,15 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 function writeBackMediatedFile(file, annotation, deps) {
-	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), output = file.variable === "GITHUB_OUTPUT", limit = output ? MAX_OUTPUT_BYTES : STEP_SUMMARY_LIMIT_BYTES, read = deps.readBackingFile(file.backingPath, limit), content = Buffer.alloc(0), failure;
-	if ("reason" in read) failure = read.reason;
-	else if ("oversize" in read) output ? failure = `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` : (content = commandSummaryDroppedNote(read.oversize), annotation.warning(commandSummaryDroppedMessage(read.oversize)));
-	else if ("bytes" in read) {
-		if (output) {
-			let { text, error } = validatedOutputText(read.bytes);
-			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
-		} else content = read.bytes;
-	}
+	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), content = Buffer.alloc(0), failure;
 	try {
-		deps.writeRunnerFile(file.realPath, content);
+		if (file.variable === "GITHUB_OUTPUT") {
+			let written = deps.writeBackOutputFile(file.backingPath, file.realPath);
+			"reason" in written ? failure = written.reason : written.error && (failure = `was written without what the runner could not read: ${written.error}`);
+		} else {
+			let read = deps.readBackingFile(file.backingPath, STEP_SUMMARY_LIMIT_BYTES);
+			"reason" in read ? failure = read.reason : "oversize" in read ? (content = commandSummaryDroppedNote(read.oversize), annotation.warning(commandSummaryDroppedMessage(read.oversize))) : "bytes" in read && (content = read.bytes), deps.writeRunnerFile(file.realPath, content);
+		}
 	} catch (e) {
 		return {
 			failed: fail(`could not be written: ${errorMessage(e)}`),

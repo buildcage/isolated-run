@@ -68,6 +68,7 @@ import {
   readBackingFile,
   removeBackingDir,
   runnerFilesDirFor,
+  writeBackOutputFile,
   writeRunnerFile,
   type MediatedRunnerFile,
   type RunnerOutputMediation,
@@ -76,7 +77,6 @@ import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { MAX_OUTPUT_BYTES, validatedOutputText } from "./step-output-file.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -155,6 +155,7 @@ const realDeps = {
   mediateRunnerOutputFiles,
   readBackingFile,
   removeBackingDir,
+  writeBackOutputFile,
   writeRunnerFile,
   setTrafficArtifactOutput,
   setFilesystemAuditOutput,
@@ -213,48 +214,44 @@ function saveCleanupState(
 /**
  * Writes a mediated runner file's real path from what the command left in its
  * backing copy, and returns whether that failed the step and how many bytes
- * it wrote. $GITHUB_OUTPUT is trimmed to the entries the runner can read; a
- * dropped entry fails the step, since the runner would stop at it. A
+ * of $GITHUB_STEP_SUMMARY it wrote. $GITHUB_OUTPUT is trimmed to the entries
+ * the runner can read; a dropped entry fails the step, since the runner would
+ * stop at it. A
  * $GITHUB_STEP_SUMMARY over GitHub's limit is replaced with a note, as GitHub
  * would drop it whole. A backing copy the command made unreadable (a symlink,
- * FIFO, a $GITHUB_OUTPUT over MAX_OUTPUT_BYTES, or permissions taken away)
- * leaves the real file empty and fails the step, and so does a real path that
- * is not a regular file (see writeRunnerFile).
+ * FIFO, or permissions taken away) leaves the real file empty and fails the
+ * step, and so does a real path that is not a regular file (see
+ * writeRunnerFile).
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
   annotation: Annotation,
-  deps: Pick<SandboxStepDeps, "readBackingFile" | "writeRunnerFile">,
+  deps: Pick<SandboxStepDeps, "readBackingFile" | "writeBackOutputFile" | "writeRunnerFile">,
 ): { failed: boolean; bytes: number } {
   const fail = (reason: string) => {
     annotation.error(`$${file.variable} ${reason}; failing the step`);
     return true;
   };
-  const output = file.variable === "GITHUB_OUTPUT";
-  const limit = output ? MAX_OUTPUT_BYTES : STEP_SUMMARY_LIMIT_BYTES;
-  const read = deps.readBackingFile(file.backingPath, limit);
   let content: Buffer = Buffer.alloc(0);
   let failure: string | undefined;
-  if ("reason" in read) failure = read.reason;
-  else if ("oversize" in read) {
-    if (output) failure = `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB`;
-    else {
-      content = commandSummaryDroppedNote(read.oversize);
-      annotation.warning(commandSummaryDroppedMessage(read.oversize));
-    }
-  } else if ("bytes" in read) {
-    if (output) {
-      const { text, error } = validatedOutputText(read.bytes);
-      content = Buffer.from(text, "utf8");
-      if (error) failure = `was written without what the runner could not read: ${error}`;
-    } else {
-      content = read.bytes;
-    }
-  }
-  // An empty read is the command removing its backing file: the real file is
-  // left empty, no failure.
   try {
-    deps.writeRunnerFile(file.realPath, content);
+    if (file.variable === "GITHUB_OUTPUT") {
+      const written = deps.writeBackOutputFile(file.backingPath, file.realPath);
+      if ("reason" in written) failure = written.reason;
+      else if (written.error) {
+        failure = `was written without what the runner could not read: ${written.error}`;
+      }
+    } else {
+      const read = deps.readBackingFile(file.backingPath, STEP_SUMMARY_LIMIT_BYTES);
+      if ("reason" in read) failure = read.reason;
+      else if ("oversize" in read) {
+        content = commandSummaryDroppedNote(read.oversize);
+        annotation.warning(commandSummaryDroppedMessage(read.oversize));
+      } else if ("bytes" in read) content = read.bytes;
+      // An empty read is the command removing its backing file: the real file
+      // is left empty, no failure.
+      deps.writeRunnerFile(file.realPath, content);
+    }
   } catch (e) {
     return { failed: fail(`could not be written: ${errorMessage(e)}`), bytes: 0 };
   }

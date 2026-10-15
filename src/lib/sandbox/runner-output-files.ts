@@ -33,6 +33,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   rmSync,
   writeFileSync,
   writeSync,
@@ -41,6 +42,7 @@ import { basename, dirname, join } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
+import { copyOutputEntries } from "../step-output-file.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase, scratchDirFor } from "./scratch-dir.ts";
 import type { MountEntry } from "./types.ts";
 
@@ -159,10 +161,6 @@ export function readBackingFile(
   maxBytes: number,
   deps: ReadBackingDeps = realReadBackingDeps,
 ): BackingRead {
-  // The code alone: the message names the host-side path.
-  const unreadable = (e: unknown) => ({
-    reason: `it could not be read (${(e as NodeJS.ErrnoException).code ?? errorMessage(e)})`,
-  });
   let stats: { isFile: () => boolean; size: number };
   try {
     stats = deps.lstat(path);
@@ -176,6 +174,113 @@ export function readBackingFile(
     return { bytes: deps.readFile(path) };
   } catch (e) {
     return unreadable(e);
+  }
+}
+
+// The code alone: the message names the host-side path.
+function unreadable(e: unknown): { reason: string } {
+  return {
+    reason: `it could not be read (${(e as NodeJS.ErrnoException).code ?? errorMessage(e)})`,
+  };
+}
+
+/** How writing $GITHUB_OUTPUT back went: why its backing file could not be
+ *  read, or why the runner would stop reading what it held. */
+export type OutputWriteBack = { reason: string } | { error?: string };
+
+const CHUNK_BYTES = 64 * 1024;
+
+export interface WriteBackOutputDeps {
+  read: typeof readSync;
+  write: typeof writeSync;
+}
+
+/**
+ * Writes $GITHUB_OUTPUT's real path from its backing file through
+ * copyOutputEntries, a chunk at a time. A backing file readBackingFile would
+ * refuse, or one that fails to read, leaves the real file empty. The real path
+ * is checked as writeRunnerFile checks it, throwing, and a failed write empties
+ * it and throws.
+ */
+export function writeBackOutputFile(
+  backingPath: string,
+  realPath: string,
+  { read, write }: WriteBackOutputDeps = { read: readSync, write: writeSync },
+): OutputWriteBack {
+  const opened = openBackingFile(backingPath);
+  const backing = "fd" in opened ? opened.fd : undefined;
+  let result: OutputWriteBack = "reason" in opened ? opened : {};
+  try {
+    withRunnerFile(realPath, (fd) => {
+      ftruncateSync(fd);
+      if (backing === undefined) return;
+      let written = 0;
+      let committed = 0;
+      let pending: Buffer[] = [];
+      let pendingBytes = 0;
+      const flush = () => {
+        writeAt(fd, Buffer.concat(pending), written, write);
+        written += pendingBytes;
+        pending = [];
+        pendingBytes = 0;
+      };
+      try {
+        result = {
+          error: copyOutputEntries(readChunks(backing, read), {
+            write: (bytes) => {
+              pending.push(bytes);
+              pendingBytes += bytes.length;
+              if (pendingBytes >= CHUNK_BYTES) flush();
+            },
+            commit: () => (committed = written + pendingBytes),
+          }),
+        };
+        flush();
+        ftruncateSync(fd, committed);
+      } catch (e) {
+        // Nothing is kept: a read cut short looks like the end of the file,
+        // and a failed write can stop inside an entry.
+        ftruncateSync(fd);
+        if (!(e instanceof BackingReadError)) throw e;
+        result = unreadable(e.cause);
+      }
+    });
+  } finally {
+    if (backing !== undefined) closeSync(backing);
+  }
+  return result;
+}
+
+/** The backing file opened as readBackingFile would read it, by the
+ *  descriptor alone, so nothing can swap it between a check and the open. */
+function openBackingFile(path: string): { fd: number } | { empty: true } | { reason: string } {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { empty: true };
+    if (code === "ELOOP" || code === "EMLINK") return { reason: "it was not a regular file" };
+    return unreadable(e);
+  }
+  if (fstatSync(fd).isFile()) return { fd };
+  closeSync(fd);
+  return { reason: "it was not a regular file" };
+}
+
+class BackingReadError extends Error {}
+
+function* readChunks(fd: number, read: typeof readSync): Generator<Buffer> {
+  for (;;) {
+    const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+    let bytes: number;
+    try {
+      bytes = read(fd, buffer);
+    } catch (e) {
+      throw new BackingReadError("read", { cause: e });
+    }
+    if (bytes === 0) return;
+    yield buffer.subarray(0, bytes);
   }
 }
 
@@ -198,20 +303,30 @@ export function rewriteRunnerFile(
   path: string,
   rewrite: (content: Buffer) => Buffer | undefined,
 ): void {
+  withRunnerFile(path, (fd) => {
+    const content = rewrite(readFileSync(fd));
+    if (content === undefined) return;
+    ftruncateSync(fd);
+    writeAt(fd, content, 0);
+  });
+}
+
+function withRunnerFile(path: string, use: (fd: number) => void): void {
   const fd = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stats = fstatSync(fd);
     if (!stats.isFile()) throw new Error("not a regular file");
     if (stats.nlink !== 1) throw new Error("a hard link to another file");
-    const content = rewrite(readFileSync(fd));
-    if (content === undefined) return;
-    ftruncateSync(fd);
-    // At explicit offsets: the read left the position at the old end.
-    for (let done = 0; done < content.length;) {
-      done += writeSync(fd, content, done, content.length - done, done);
-    }
+    use(fd);
   } finally {
     closeSync(fd);
+  }
+}
+
+// At explicit offsets: a read leaves the position at the old end.
+function writeAt(fd: number, bytes: Buffer, position: number, write = writeSync): void {
+  for (let done = 0; done < bytes.length;) {
+    done += write(fd, bytes, done, bytes.length - done, position + done);
   }
 }
 
