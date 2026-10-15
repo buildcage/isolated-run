@@ -28,6 +28,7 @@ export type AwsTrafficFields = {
     assumedAccount?: string;
     keyRef?: string;
     issuedKeyRef?: string;
+    roleAccount?: string;
   };
 };
 

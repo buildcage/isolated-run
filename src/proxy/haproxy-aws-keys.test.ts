@@ -87,8 +87,10 @@ describe("the check with no role account", () => {
         "    http-response set-var(txn.aws_log_assumed) var(txn.aws_new_account) if aws_new_account",
       ),
     ).toBe(true);
-    expect(rules.includes("aws_fed")).toBe(false);
-    expect(rules.includes("aws_role_account")).toBe(false);
+    // A web identity call is read for the record, but nothing judges it by account.
+    expect(rules.includes("str(role-not-allowed)")).toBe(false);
+    expect(rules.includes("!aws_role_account")).toBe(false);
+    expect(rules.includes("set-var(txn.aws_log_role)")).toBe(true);
   });
 
   it("lets no static CodeCommit credential through on its account", () => {
@@ -208,6 +210,7 @@ describe("the traffic record", () => {
         assumedAccount: "txn.aws_log_assumed",
         keyRef: "txn.aws_log_key_ref",
         issuedKeyRef: "txn.aws_log_issued_ref",
+        roleAccount: "txn.aws_log_role",
       },
     });
   });
@@ -225,7 +228,10 @@ describe("the traffic record", () => {
       awsKeyRequestRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }, "restrict"),
     ]) {
       const filled = rules.filter(
-        (l) => l.includes("set-var(txn.aws_log_") && !l.includes("txn.aws_log_key_ref"),
+        (l) =>
+          l.includes("set-var(txn.aws_log_") &&
+          !l.includes("txn.aws_log_key_ref") &&
+          !l.includes("txn.aws_log_role"),
       );
       for (const line of filled) {
         expect(/ if aws_allowed( |$)/.test(line) || line.includes("{ var(txn.aws_key_owner)")).toBe(
@@ -237,6 +243,18 @@ describe("the traffic record", () => {
           .filter((l) => l.includes("set-var(txn.aws_key_owner)"))
           .every((l) => / if aws_allowed( |$)/.test(l)),
       ).toBe(true);
+    }
+  });
+
+  it("names the account a web identity call is judged by, whatever the verdict", () => {
+    for (const check of [CHECK, { keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }]) {
+      for (const mode of ["restrict", "audit"] as const) {
+        expect(
+          awsKeyRequestRules(check, mode).includes(
+            "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_fed_ambiguous",
+          ),
+        ).toBe(true);
+      }
     }
   });
 
@@ -324,7 +342,7 @@ describe("a key ECR issues", () => {
   const request = awsKeyRequestRules(CHECK, "restrict");
   const response = awsKeyResponseRules(CHECK);
 
-  it("is learned only from a registry the check let a request through to", () => {
+  it("is read from any registry's answer over TLS, and learned only when the check let the request through", () => {
     const registry = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
     for (const host of [
       "111111111111.dkr.ecr.us-east-1.amazonaws.com",
@@ -344,12 +362,17 @@ describe("a key ECR issues", () => {
     }
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_read) bool(true) if { ssl_fc } aws_resource_host { var(txn.host) -m reg ${ECR_REGISTRY_HOST} }`,
       ),
     ).toBe(true);
     expect(
       request.includes(
-        `    http-request set-var(txn.aws_ecr_learn) bool(true) if { ssl_fc } !aws_blocked { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+        `    http-request set-var(txn.aws_ecr_read) bool(true) if { ssl_fc } { var(txn.host) -m end .on.aws } { var(txn.host) -m reg ${ECR_DUALSTACK_REGISTRY_HOST} }`,
+      ),
+    ).toBe(true);
+    expect(
+      request.includes(
+        "    http-request set-var(txn.aws_ecr_learn) bool(true) if { var(txn.aws_ecr_read) -m bool } !aws_blocked",
       ),
     ).toBe(true);
     // The on.aws name's regex runs only behind a suffix test that every
@@ -364,7 +387,7 @@ describe("a key ECR issues", () => {
     for (const line of learning) {
       expect(
         line.includes(
-          " if aws_ecr_learn { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many",
+          " if aws_ecr_read { status 300:399 } { res.fhdr_cnt(location) eq 1 } !aws_location_many",
         ),
       ).toBe(true);
     }
@@ -397,7 +420,7 @@ describe("a key ECR issues", () => {
     expect(
       response.some((l) =>
         l.endsWith(
-          "%[var(txn.aws_issued_key)] issued if aws_issued_key !{ var(txn.aws_issued_key),map(/rules/keys.map) -m found }",
+          "%[var(txn.aws_issued_key)] issued if aws_ecr_learn aws_issued_key !{ var(txn.aws_issued_key),map(/rules/keys.map) -m found }",
         ),
       ),
     ).toBe(true);

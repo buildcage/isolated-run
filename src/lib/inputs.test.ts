@@ -504,46 +504,93 @@ describe("awsExampleInputs", () => {
     ]);
   });
 
-  it("names an AssumeRoleWithWebIdentity call refused for its account", () => {
-    const webIdentity = (wouldBlock: string, assumedAccount: string): TrafficEvent => ({
+  describe("what naming an account alone lets through", () => {
+    const event = (
+      host: string,
+      aws: Record<string, string>,
+      wouldBlock?: string,
+    ): TrafficEvent => ({
       time: 0,
-      action: "audit",
+      action: wouldBlock ? "audit" : "allow",
       protocol: "https",
-      host: "sts.amazonaws.com",
+      host,
       port: 443,
-      wouldBlock,
-      extensions: { aws: { assumedAccount, issuedKeyRef: `${assumedAccount}-key` } },
+      ...(wouldBlock ? { wouldBlock } : {}),
+      extensions: { aws },
     });
-    const signed = (keyRef: string): TrafficEvent => ({
-      time: 1,
-      action: "audit",
-      protocol: "https",
-      host: "s3.amazonaws.com",
-      port: 443,
-      wouldBlock: "aws-key-not-allowed",
-      extensions: { aws: { keyRef } },
+    const signed = (keyRef: string, host = "s3.amazonaws.com") =>
+      event(host, { keyRef }, "aws-key-not-allowed");
+    const comments = (timeline: TrafficEvent[]) =>
+      awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline).slice(3);
+
+    it("names an AssumeRoleWithWebIdentity call judged by its account, and the key it issued", () => {
+      const webIdentity = (wouldBlock: string, account: string, roleAccount?: string) =>
+        event(
+          "sts.amazonaws.com",
+          {
+            assumedAccount: account,
+            issuedKeyRef: `${account}-key`,
+            ...(roleAccount ? { roleAccount } : {}),
+          },
+          wouldBlock,
+        );
+      expect(
+        comments([
+          webIdentity("aws-role-not-allowed", "222222222222", "222222222222"),
+          // No account named, so judged as unsigned; the proxy still names the account.
+          webIdentity("aws-no-credential", "333333333333", "333333333333"),
+          // A form the proxy does not judge by account, so naming it changes nothing.
+          webIdentity("aws-no-credential", "444444444444"),
+          signed("222222222222-key"),
+          signed("333333333333-key"),
+          signed("444444444444-key"),
+          // Signed, so its key decides, not the account of its role.
+          event(
+            "sts.amazonaws.com",
+            { keyRef: "ffff6666", assumedAccount: "555555555555", roleAccount: "555555555555" },
+            "aws-role-not-allowed",
+          ),
+        ]),
+      ).toStrictEqual([
+        "  # 222222222222 # lets key 1 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
+        "  # 333333333333 # lets key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
+        "  # 444444444444 # assumed in this run, check it is yours",
+        "  # 555555555555 # assumed in this run, check it is yours",
+      ]);
     });
-    const timeline = [
-      webIdentity("aws-role-not-allowed", "222222222222"),
-      // With no account named the proxy does not judge it by account, so it
-      // may stay blocked once one is.
-      webIdentity("aws-no-credential", "333333333333"),
-      // Signed, so its key decides, not the account of its role.
-      {
-        ...webIdentity("aws-role-not-allowed", "444444444444"),
-        extensions: { aws: { keyRef: "ffff6666", assumedAccount: "444444444444" } },
-      },
-      signed("222222222222-key"),
-      signed("333333333333-key"),
-    ];
-    expect(
-      awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline).slice(1),
-    ).toStrictEqual([
-      "allowed_aws_role_accounts: |",
-      "  111111111111",
-      "  # 222222222222 # lets key 1 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours",
-      "  # 333333333333 # assumed in this run, check it is yours",
-      "  # 444444444444 # assumed in this run, check it is yours",
-    ]);
+
+    it("names a key ECR issued for a registry request signed with a key the account lets through", () => {
+      const registry = "222222222222.dkr.ecr.us-east-1.amazonaws.com";
+      expect(
+        comments([
+          event("sts.amazonaws.com", {
+            key: "env",
+            assumedAccount: "222222222222",
+            issuedKeyRef: "aaaa1111",
+          }),
+          event(registry, { keyRef: "aaaa1111", issuedKeyRef: "bbbb2222" }, "aws-key-not-allowed"),
+          signed("bbbb2222"),
+          // ECR hands the same key out again, to a request no account lets through.
+          event(registry, { keyRef: "zzzz9999", issuedKeyRef: "bbbb2222" }, "aws-key-not-allowed"),
+          // Audit already learned this key, so naming an account changes nothing for it.
+          event(registry, { key: "env", issuedKeyRef: "gggg7777" }),
+          signed("gggg7777", "sqs.amazonaws.com"),
+          // An STS answer that named no account teaches nothing, whatever signed it.
+          event("sts.amazonaws.com", { key: "env", issuedKeyRef: "cccc3333" }),
+          signed("cccc3333"),
+          // A key that would lead back to itself.
+          event(registry, { keyRef: "dddd4444", issuedKeyRef: "dddd4444" }, "aws-key-not-allowed"),
+          // Another reason stays whatever account is named.
+          event(
+            registry,
+            { keyRef: "aaaa1111", issuedKeyRef: "eeee5555" },
+            "aws-ambiguous-credential",
+          ),
+          signed("eeee5555"),
+        ]),
+      ).toStrictEqual([
+        "  # 222222222222 # lets key 1 and key 2 through; assumed in this run, check it is yours",
+      ]);
+    });
   });
 });

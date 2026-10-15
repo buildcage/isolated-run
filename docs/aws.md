@@ -216,8 +216,8 @@ assumed a role in. It reads them from every STS answer, including one to a reque
 block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
 step can assume a role, in an account of its own too, so each added account is left commented out,
 and so is the input itself when you gave none. Its comment says what naming that account alone lets
-through: the keys from its roles in **⚠️ Restrict Would Block**, and an `AssumeRoleWithWebIdentity`
-call refused for it:
+through: the keys in **⚠️ Restrict Would Block** from its roles or from ECR registry requests they
+signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
 
 ```yaml
 aws_key_check: true
@@ -294,6 +294,9 @@ line in Communication details ends in:
   - An STS answer the proxy could not read, because the client asked for JSON with
     `Accept: application/json`, or it was unusually large. Let the SDK send its default headers to
     STS; shorten a large session policy or tag set.
+  - A layer's presigned URL from an ECR registry request signed with a key `restrict` would block,
+    which teaches no key. Fix that key first; in `audit`, the **Switch to restrict mode** example's
+    comment names both under the account that lets them through.
 
 ### `aws-no-credential`
 
@@ -558,17 +561,18 @@ allowed_url_rules: |
 
 Each request to an AWS API host that the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it blocked nothing. A request the check blocked has one only for `keyRef`, and for
-`assumedAccount` and `issuedKeyRef` on an STS call in `audit` mode. Its `reason` or `wouldBlock`
-says why.
+where it blocked nothing. A request the check blocked has one only for `keyRef` and `roleAccount`,
+and in `audit` mode for `assumedAccount` and `issuedKeyRef` on an STS call and `issuedKeyRef` on an
+ECR registry redirect. Its `reason` or `wouldBlock` says why.
 
-| Field            | When                                                                           | Notes                                                                                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`            | on every request the check let through                                         | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
-| `accountId`      | when the check confirmed an account                                            | the one an `assumed` key came from, a static CodeCommit Git credential names, or the role of an `AssumeRoleWithWebIdentity` call is in                                       |
-| `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it go   | the account of that role, whether or not it is named                                                                                                                         |
-| `keyRef`         | on every request signed with an access key, whether or not the check let it go | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
-| `issuedKeyRef`   | on an STS call or an ECR registry redirect that issued a key                   | the `keyRef` of the requests signed with that key                                                                                                                            |
+| Field            | When                                                                                                          | Notes                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`            | on every request the check let through                                                                        | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
+| `accountId`      | when the check confirmed an account                                                                           | the one an `assumed` key came from, a static CodeCommit Git credential names, or the role of an `AssumeRoleWithWebIdentity` call is in                                       |
+| `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it go                                  | the account of that role, whether or not it is named                                                                                                                         |
+| `keyRef`         | on every request signed with an access key, whether or not the check let it go                                | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
+| `issuedKeyRef`   | on an STS call or an ECR registry redirect that issued a key                                                  | the `keyRef` of the requests signed with that key                                                                                                                            |
+| `roleAccount`    | on an unsigned `AssumeRoleWithWebIdentity` form naming `Action` and `RoleArn` once each, whatever the verdict | the account of the role in `RoleArn`, whether or not it is named; the call is judged by it unless another reason, such as `aws-unreadable`, blocks it first                  |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
 ID is written either: `keyRef` is an HMAC of it under a secret the proxy draws for each run, so it
