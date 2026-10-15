@@ -313,10 +313,9 @@ export function awsExampleInputs(
   }
   // Whether naming `account` alone lets a request through. An answer teaches
   // its key only when restrict lets the call through: an AssumeRole's for a
-  // role in the account, and an ECR registry's for a request audit would block,
-  // since one it let through taught its key already. A call signed with another
-  // unnamed role's key needs that account too, so it does not pass here.
-  // `seen` stops a key that would lead back to itself.
+  // role in the account, and an ECR registry's only for a request audit would
+  // block, as audit already learned the rest. A chain through another unnamed
+  // account does not pass.
   const passes = (e: TrafficEvent, account: string, seen: Set<string>): boolean => {
     const { keyRef, roleAccount } = awsFieldsOf(e);
     switch (e.wouldBlock) {

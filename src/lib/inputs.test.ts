@@ -572,8 +572,7 @@ describe("awsExampleInputs", () => {
           signed("bbbb2222"),
           // ECR hands the same key out again, to a request no account lets through.
           event(registry, { keyRef: "zzzz9999", issuedKeyRef: "bbbb2222" }, "aws-key-not-allowed"),
-          // One audit let through taught its key already, so a request that key
-          // still fails is one it was not good for, whatever account is named.
+          // Audit already learned this key, so naming an account changes nothing for it.
           event(registry, { key: "env", issuedKeyRef: "gggg7777" }),
           signed("gggg7777", "sqs.amazonaws.com"),
           // An STS answer that named no account teaches nothing, whatever signed it.

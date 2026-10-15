@@ -245,8 +245,7 @@ function trafficRecord(roles?: RoleRules): string[] {
     "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",
     "    http-request set-var(txn.aws_log_account) var(txn.aws_key_owner) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     ...(roles?.logAccount ?? []),
-    "    # And, whatever the verdict, the role account an AssumeRoleWithWebIdentity",
-    "    # call would be judged by.",
+    "    # Whatever the verdict, the account a web identity call is judged by.",
     "    http-request set-var(txn.aws_log_role) var(txn.aws_role_account) if aws_role_account !aws_fed_ambiguous",
   ];
 }
