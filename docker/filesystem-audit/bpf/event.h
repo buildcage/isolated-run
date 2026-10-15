@@ -72,7 +72,7 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	/**
 	 * A syscall's return in path_len, with RESULT_* in n1. A failed open(2)
 	 * also has its flags, and its descriptor's or working directory's path in
-	 * data (see add_base).
+	 * data (see add_base) unless the caller's name starts with '/'.
 	 */
 	K_RESULT = 32,
 	/** The open(2) in tid reached its create step. */

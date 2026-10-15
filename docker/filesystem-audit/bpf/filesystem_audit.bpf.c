@@ -494,8 +494,10 @@ int BPF_PROG(on_file_free, struct file *file)
 
 /**
  * Sends the return of syscall @p nr, with @p bits (RESULT_*). A failed
- * open(2) adds its flags and the base directory of its descriptor or working
- * directory, which the reader joins to the name only if that is relative.
+ * open(2) adds its flags and, unless the caller's name starts with '/', the
+ * base directory of its descriptor or working directory. The reader joins it
+ * to the kernel's copy of the name if that is relative, so a caller rewriting
+ * its name can only leave a relative one without its directory.
  */
 static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr, long ret, u8 bits)
 {
@@ -517,7 +519,10 @@ static __always_inline void send_result(u32 slot, struct pt_regs *regs, long nr,
 		} else {
 			e->flags = sys_arg(regs, at + 1);
 		}
-		e->data_len = add_base(e, 0, at ? (int)sys_arg(regs, 0) : AT_FDCWD, 1, 0);
+		char c = 0;
+		bpf_probe_read_user(&c, 1, (void *)sys_arg(regs, at));
+		if (c != '/')
+			e->data_len = add_base(e, 0, at ? (int)sys_arg(regs, 0) : AT_FDCWD, 1, 0);
 	}
 	submit(e);
 }

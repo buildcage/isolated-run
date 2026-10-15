@@ -117,14 +117,15 @@ func TestFailedOpen(t *testing.T) {
 			want:     record{Kind: "open", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
-			// The base is walked whatever the name, which only getname's copy
-			// says is relative.
+			// Sent when the caller's copy of the name is not absolute; only
+			// getname's copy decides.
 			name:     "absolute, with the base walked",
 			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("/etc/x\x00")},
 			res:      event{kind: filesystemAuditKindK_RESULT, comm: "sh", n1: resultOpen, pathRet: ret, bases: 1, mode: 1, data: comps("work")},
 			want:     record{Kind: "open", Comm: "sh", Path: "/etc/x", Access: "r", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
+			// As when the caller's copy of the name starts with '/'.
 			name:     "relative with no base walked",
 			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("x\x00")},
 			res:      event{kind: filesystemAuditKindK_RESULT, comm: "sh", n1: resultOpen, pathRet: -int32(unix.EBADF)},
