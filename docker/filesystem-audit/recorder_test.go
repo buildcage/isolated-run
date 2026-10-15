@@ -252,6 +252,7 @@ func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
 func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 	eperm := -int32(unix.EPERM)
 	exitFailure := event{kind: filesystemAuditKindK_CHMOD_FAILED, pid: 9, comm: "chmod", tid: 11, pathRet: -eperm, data: []byte("/exit\x00")}
+	refused := event{kind: filesystemAuditKindK_SYSCALL, pid: 9, comm: "nc", tid: 11, flags: nrBind, pathRet: -eperm}
 	for _, c := range []struct {
 		name      string
 		events    []event
@@ -275,6 +276,12 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			"/exit:1", 0,
 		},
 		{"refused in a call recorded from no exit", []event{unlink(11, nrBind, "s"), result(11, nrBind, 0, eperm)}, "/s:1", 0},
+		{
+			"refused, with the call refused too",
+			[]event{unlink(11, nrBind, "s"), result(11, nrBind, 0, eperm), refused},
+			"/s:1", 0,
+		},
+		{"refused by seccomp", []event{result(11, nrBind, 0, eperm), refused}, ":1", 0},
 		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
 		{
 			"hook run again in its call",
@@ -365,7 +372,7 @@ func TestRecorderCountsUnnamedFailedOpensUntrackedWhenNoOpenWasNamed(t *testing.
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r, out, log := newTestRecorder()
-			add(t, r, stepExec)
+			add(t, r, failed, stepExec) // runc's own, before the step starts
 			add(t, r, c.events...)
 			if err := r.finish(loss{untracked: 1}); err != nil {
 				t.Fatal(err)
