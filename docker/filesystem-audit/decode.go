@@ -148,7 +148,6 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 	return under(base, name), rest
 }
 
-// under is name in directory base.
 func under(base, name string) string {
 	return strings.TrimSuffix(base, "/") + "/" + name
 }
