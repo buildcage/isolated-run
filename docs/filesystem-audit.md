@@ -452,9 +452,9 @@ The last line is the end line, such as
 tracer caught:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
-- `untracked` counts calls it could not follow because too many files were open at once, and calls
-  whose return it never saw, as one still waiting when it stopped. Such an open that had reached its
-  file is recorded as done.
+- `untracked` counts calls it could not follow because too many files were open at once or a name
+  could not be read, and calls whose return it never saw, as one still waiting when it stopped. Such
+  an open that had reached its file is recorded as done.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
 

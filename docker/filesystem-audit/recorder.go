@@ -181,6 +181,7 @@ func (r *recorder) openName(h hdr, raw []byte) error {
 // done and a failure as recorded, counting the call once.
 func (r *recorder) lose(c *call) error {
 	if !c.pending() {
+		c.created = false
 		return nil
 	}
 	open, failure, hasOpen, hasFailure := c.open, c.failure, c.hasOpen, c.hasFailure
@@ -209,6 +210,9 @@ func (c *call) clear() {
 // restarted call drops them, as its rerun sends them again.
 func (r *recorder) settle(h hdr, raw []byte) error {
 	c := r.calls[h.tid]
+	if c != nil && !c.pending() {
+		c.created = false // the mark of a call whose name was lost
+	}
 	if c == nil || !c.pending() {
 		// runc's own opens before the first exec send no name the reader keeps.
 		if r.started && h.n1&resultOpen != 0 && h.ret < 0 && !isRestart(h.ret) {

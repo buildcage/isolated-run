@@ -145,11 +145,7 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 	if name == "" { // futimens, fchmod: the descriptor's own path
 		return base, rest
 	}
-	return under(base, name), rest
-}
-
-func under(base, name string) string {
-	return strings.TrimSuffix(base, "/") + "/" + name
+	return strings.TrimSuffix(base, "/") + "/" + name, rest
 }
 
 // tidy drops the spellings that never change where a path leads: a "."
@@ -204,27 +200,22 @@ func passed(data []byte, has bool, n int, truncated bool) (string, string) {
 	return p, passedName(name, p)
 }
 
-// RESULT_* in bpf/event.h.
 const (
-	resultOpen    = 1
-	resultWatched = 2
-	resultFD      = 4
+	resultOpen    = uint8(filesystemAuditResultBitRESULT_OPEN)
+	resultWatched = uint8(filesystemAuditResultBitRESULT_WATCHED)
+	resultFD      = uint8(filesystemAuditResultBitRESULT_FD)
 )
 
-// failedOpen is the record of an open(2) that failed before reaching a file,
-// from its result raw: its name, cut short when cut, joined to the base
-// directory the result carries when relative.
+// failedOpen is the record of an open(2) that failed before reaching a file:
+// its name, cut short when cut, joined to the base directory its result raw
+// carries when the name is relative.
 func failedOpen(name string, cut bool, raw []byte) (record, error) {
 	res, err := decode(raw)
 	if err != nil {
 		return record{}, err
 	}
-	p := name
-	if raw[offBases]&1 != 0 && p != "" && p[0] != '/' {
-		le := binary.LittleEndian
-		base, _ := components(raw[hdrLen:], int(le.Uint32(raw[offMode:])), raw[offTruncated] != 0)
-		p = under(base, p)
-	}
+	relative := raw[offBases]&1 != 0 && name != "" && name[0] != '/'
+	p, _ := joinBase(name, raw[hdrLen:], relative, int(binary.LittleEndian.Uint32(raw[offMode:])), raw[offTruncated] != 0)
 	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
 	r.Path = tidy(p)
 	r.Name = passedName(name, r.Path)

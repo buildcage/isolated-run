@@ -174,6 +174,15 @@ func TestRecorderSettlesAnOpenWithItsResult(t *testing.T) {
 	}
 }
 
+// A create mark whose call sent no name ends with that call.
+func TestRecorderDropsTheCreateMarkOfACallWithNoName(t *testing.T) {
+	got, _ := recordEvents(t, event{kind: filesystemAuditKindK_OPEN_CREATE, tid: 11}, openResult(11, -int32(unix.EEXIST)),
+		openName(11, "/f"), waitingOpen(11, "/f"), openResult(11, -int32(unix.EACCES)))
+	if want := fmt.Sprintf("/bin/sh:0 /f:%d :0", unix.EACCES); got != want {
+		t.Fatalf("recording = %s, want %s", got, want)
+	}
+}
+
 func TestRecorderRecordsAnOpenThatFailedBeforeItsFile(t *testing.T) {
 	got, _ := recordEvents(t, openName(11, "/missing"), openResult(11, -int32(unix.ENOENT)),
 		openName(11, "/etc/hosts"), waitingOpen(11, "/etc/hosts"), openResult(11, 3))
