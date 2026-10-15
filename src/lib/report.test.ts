@@ -1,4 +1,13 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -523,6 +532,28 @@ describe("moveCommandSummaryLast", () => {
       file: "report\n\n\n---\n\n```\nmine\n",
     });
     expect(readdirSync(dir)).toStrictEqual(["step_summary"]);
+  });
+
+  it("does not write through a symlink the command left beside the file", () => {
+    const target = join(dir, "add_path");
+    writeFileSync(target, "/usr/bin\n");
+    symlinkSync(target, `${path}.buildcage`);
+    expect(move("mine\n", "report\n").file).toBe("report\n\n\n---\n\nmine\n");
+    expect(readFileSync(target, "utf8")).toBe("/usr/bin\n");
+    expect(lstatSync(path).isFile()).toBe(true);
+  });
+
+  it("is not stopped by a directory the command left beside the file", () => {
+    mkdirSync(`${path}.buildcage`);
+    expect(move("mine\n", "report\n").file).toBe("report\n\n\n---\n\nmine\n");
+  });
+
+  it("refuses a file that is a symlink", () => {
+    const target = join(dir, "add_path");
+    writeFileSync(target, "mine\nreport\n");
+    symlinkSync(target, path);
+    expect(() => moveCommandSummaryLast(path, 5)).toThrow(/ELOOP|EMLINK/);
+    expect(readFileSync(target, "utf8")).toBe("mine\nreport\n");
   });
 
   it("leaves the file alone when the command wrote nothing", () => {

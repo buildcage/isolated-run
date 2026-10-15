@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, statSync } from "node:fs";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { writeStepSummary } from "#core/lib/actions/write-step-summary.ts";
@@ -26,6 +26,7 @@ import {
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { withAwsTroubleshootingLink } from "./aws-report.ts";
+import { rewriteRunnerFile } from "./sandbox/runner-output-files.ts";
 import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
 import {
   blockedKeys,
@@ -176,23 +177,23 @@ function cutCommandSummary(summary: Buffer, room: number): Buffer {
  * what buildcage wrote, under a rule, and cuts it to what buildcage left of
  * GitHub's limit. There, whatever it leaves open (a code fence, a comment, a
  * `<details>`) has nothing after it to swallow. It is written first so that
- * neither a cancelled step nor a failure in between can lose it, and the file
- * is replaced by a rename so it never holds only part of either. Returns
+ * neither a cancelled step nor a failure in between can lose it. Returns
  * whether the command's summary was cut.
  */
 export function moveCommandSummaryLast(path: string, commandBytes: number): boolean {
   if (commandBytes === 0) return false;
-  const file = readFileSync(path);
-  const command = file.subarray(0, commandBytes);
-  const ours = file.subarray(commandBytes);
-  const separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0);
-  const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - ours.length - separator.length;
-  const kept = cutCommandSummary(command, room);
-  if (ours.length === 0 && kept === command) return false;
-  const temp = `${path}.buildcage`;
-  writeFileSync(temp, Buffer.concat([ours, kept.length > 0 ? separator : Buffer.alloc(0), kept]));
-  renameSync(temp, path);
-  return kept !== command;
+  let cut = false;
+  rewriteRunnerFile(path, (file) => {
+    const command = file.subarray(0, commandBytes);
+    const ours = file.subarray(commandBytes);
+    const separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0);
+    const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - ours.length - separator.length;
+    const kept = cutCommandSummary(command, room);
+    if (ours.length === 0 && kept === command) return undefined;
+    cut = kept !== command;
+    return Buffer.concat([ours, kept.length > 0 ? separator : Buffer.alloc(0), kept]);
+  });
+  return cut;
 }
 
 /** Where the full report is when it did not reach the summary. */

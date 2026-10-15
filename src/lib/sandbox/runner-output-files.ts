@@ -35,6 +35,7 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
@@ -185,13 +186,30 @@ export function readBackingFile(
  * writes through a hard link to another file.
  */
 export function writeRunnerFile(path: string, content: Buffer): void {
-  const fd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  rewriteRunnerFile(path, () => content);
+}
+
+/**
+ * writeRunnerFile, with the new content made from the old. In place, not
+ * through a temp file and a rename: the sandbox can write the real path's
+ * directory, so a name beside it may be one the command left there.
+ */
+export function rewriteRunnerFile(
+  path: string,
+  rewrite: (content: Buffer) => Buffer | undefined,
+): void {
+  const fd = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stats = fstatSync(fd);
     if (!stats.isFile()) throw new Error("not a regular file");
     if (stats.nlink !== 1) throw new Error("a hard link to another file");
+    const content = rewrite(readFileSync(fd));
+    if (content === undefined) return;
     ftruncateSync(fd);
-    writeFileSync(fd, content);
+    // At explicit offsets: the read left the position at the old end.
+    for (let done = 0; done < content.length;) {
+      done += writeSync(fd, content, done, content.length - done, done);
+    }
   } finally {
     closeSync(fd);
   }
