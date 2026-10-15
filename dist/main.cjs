@@ -69525,7 +69525,7 @@ function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 }
 //#endregion
 //#region src/lib/step-output-file.ts
-const HEREDOC = Buffer.from("<<"), NEWLINE = Buffer.from("\n"), WIDE_BOMS = [
+const WIDE_BOMS = [
 	[255, 254],
 	[254, 255],
 	[
@@ -69559,7 +69559,6 @@ function copyOutputEntries(chunks, sink) {
 function isWide(head) {
 	return WIDE_BOMS.some((bom) => bom.every((byte, i) => head[i] === byte));
 }
-const NO_TAIL = Buffer.alloc(0);
 var LinePart = class {
 	length = 0;
 	head = Buffer.alloc(260);
@@ -69577,10 +69576,10 @@ var LinePart = class {
 		return this.head.subarray(0, Math.min(end, this.headLength)).toString("utf8");
 	}
 	equals(other) {
-		return this.length === other.length && this.head.subarray(0, this.headLength).equals(other.head.subarray(0, other.headLength)) && this.digest().equals(other.digest());
+		return this.length === other.length && this.head.subarray(0, this.headLength).equals(other.head.subarray(0, other.headLength)) && (this.length <= 260 || this.digest().equals(other.digest()));
 	}
 	digest() {
-		return this.tailDigest ??= this.tail?.digest() ?? NO_TAIL;
+		return this.tailDigest ??= this.tail.digest();
 	}
 }, EntryReader = class {
 	mode = "between";
@@ -69592,6 +69591,8 @@ var LinePart = class {
 	name = "";
 	delimiter = new LinePart();
 	value = new LinePart();
+	heredoc = Buffer.from("<<");
+	newline = Buffer.from("\n");
 	sink;
 	constructor(sink) {
 		this.sink = sink;
@@ -69608,12 +69609,12 @@ var LinePart = class {
 			case "between": return;
 			case "name": return this.neither();
 			case "value":
-				this.sink.write(NEWLINE), this.sink.commit();
+				this.sink.write(this.newline), this.sink.commit();
 				return;
 			case "delimiter": return this.delimiter.length === 0 ? this.emptyDelimiter() : this.neverReached();
 			case "heredoc":
 				if (this.lineStart || !this.value.equals(this.delimiter)) return this.neverReached();
-				this.sink.write(NEWLINE), this.sink.commit();
+				this.sink.write(this.newline), this.sink.commit();
 				return;
 		}
 	}
@@ -69625,7 +69626,7 @@ var LinePart = class {
 			}
 			this.mode = "name", this.line.reset(), this.lastLessThan = !1;
 		}
-		switch (this.lineStart = eol, this.sink.write(bytes), eol && this.sink.write(NEWLINE), this.mode) {
+		switch (this.lineStart = eol, this.sink.write(bytes), eol && this.sink.write(this.newline), this.mode) {
 			case "name": return this.readName(bytes, eol);
 			case "value": return this.readValue(eol);
 			case "delimiter": return this.readDelimiter(bytes, eol);
@@ -69638,7 +69639,7 @@ var LinePart = class {
 		let found = -1, heredoc = !1, rest = 0;
 		if (this.lastLessThan && bytes[0] === 60) found = start - 1, heredoc = !0, rest = 1;
 		else {
-			let equals = bytes.indexOf(61), lessThan = bytes.indexOf(HEREDOC);
+			let equals = bytes.indexOf(61), lessThan = bytes.indexOf(this.heredoc);
 			equals !== -1 && (lessThan === -1 || equals < lessThan) ? found = start + equals : lessThan !== -1 && (found = start + lessThan, heredoc = !0, rest = lessThan + 2);
 		}
 		return found === -1 ? (this.lastLessThan = bytes.at(-1) === 60, eol ? this.neither() : void 0) : (this.at = `line ${this.lineNumber}`, heredoc ? found === 0 ? `${this.at} has an empty name before <<` : (this.name = this.line.text(found), this.mode = "delimiter", this.delimiter.reset(), this.readDelimiter(bytes.subarray(rest), eol)) : found === 0 ? `${this.at} has an empty name before =` : (this.mode = "value", this.readValue(eol)));

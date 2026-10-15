@@ -28,9 +28,6 @@ export interface OutputSink {
 const LF = 0x0a;
 const EQUALS = 0x3d;
 const LESS_THAN = 0x3c;
-// Marked pure so a bundle that does not read $GITHUB_OUTPUT leaves them out.
-const HEREDOC = /* @__PURE__ */ Buffer.from("<<");
-const NEWLINE = /* @__PURE__ */ Buffer.from("\n");
 
 // UTF-16 and UTF-32 byte order marks: the runner decodes by them, this reads
 // UTF-8 only.
@@ -99,8 +96,6 @@ const MAX_QUOTED = 64;
 // delimiter cut to them still shows as cut.
 const QUOTED_BYTES = (MAX_QUOTED + 1) * 4;
 
-const NO_TAIL = /* @__PURE__ */ Buffer.alloc(0);
-
 /**
  * Part of a line, kept as its first QUOTED_BYTES, for a message, and a SHA-256
  * of the rest, so a delimiter or value line of any length is compared without
@@ -137,12 +132,13 @@ class LinePart {
     return (
       this.length === other.length &&
       this.head.subarray(0, this.headLength).equals(other.head.subarray(0, other.headLength)) &&
-      this.digest().equals(other.digest())
+      // Of the same length, both have a tail or neither does.
+      (this.length <= QUOTED_BYTES || this.digest().equals(other.digest()))
     );
   }
 
   private digest(): Buffer {
-    return (this.tailDigest ??= this.tail?.digest() ?? NO_TAIL);
+    return (this.tailDigest ??= this.tail!.digest());
   }
 }
 
@@ -159,6 +155,10 @@ class EntryReader {
   private name = "";
   private readonly delimiter = new LinePart();
   private readonly value = new LinePart();
+  // Made here rather than at module level, where a bundle that never reads
+  // $GITHUB_OUTPUT would keep the calls.
+  private readonly heredoc = Buffer.from("<<");
+  private readonly newline = Buffer.from("\n");
 
   private readonly sink: OutputSink;
 
@@ -184,14 +184,14 @@ class EntryReader {
       case "name":
         return this.neither();
       case "value":
-        this.sink.write(NEWLINE);
+        this.sink.write(this.newline);
         this.sink.commit();
         return undefined;
       case "delimiter":
         return this.delimiter.length === 0 ? this.emptyDelimiter() : this.neverReached();
       case "heredoc":
         if (this.lineStart || !this.value.equals(this.delimiter)) return this.neverReached();
-        this.sink.write(NEWLINE);
+        this.sink.write(this.newline);
         this.sink.commit();
         return undefined;
     }
@@ -214,7 +214,7 @@ class EntryReader {
     }
     this.lineStart = eol;
     this.sink.write(bytes);
-    if (eol) this.sink.write(NEWLINE);
+    if (eol) this.sink.write(this.newline);
     switch (this.mode) {
       case "name":
         return this.readName(bytes, eol);
@@ -239,7 +239,7 @@ class EntryReader {
       rest = 1;
     } else {
       const equals = bytes.indexOf(EQUALS);
-      const lessThan = bytes.indexOf(HEREDOC);
+      const lessThan = bytes.indexOf(this.heredoc);
       if (equals !== -1 && (lessThan === -1 || equals < lessThan)) {
         found = start + equals;
       } else if (lessThan !== -1) {
