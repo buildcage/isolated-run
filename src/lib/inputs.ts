@@ -272,19 +272,18 @@ export function readAwsKeyInputs(
   return { key, roleAccounts };
 }
 
-/** Ends the restrict example's line for an account the run assumed a role in but was not given. */
+/** Closes the comment on an account the run assumed a role in but was not given. */
 const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
-const NO_CREDENTIAL = "aws-no-credential" satisfies AwsBlockedReason;
 const ROLE_NOT_ALLOWED = "aws-role-not-allowed" satisfies AwsBlockedReason;
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
  * for this run: the accounts given, and every account the run assumed a role
  * in. A build's own AssumeRole names an account too, so each one not given is
- * left commented out for a look, with the blocked keys naming it would let
- * through. One account is quoted, since YAML reads an ID that begins with 0 as
- * a number; more are a block, one to a line, which needs no quotes and lets
- * each carry its own comment.
+ * left commented out for a look, with what naming it alone would let through.
+ * One account is quoted, since YAML reads an ID that begins with 0 as a number;
+ * more are a block, one to a line, which needs no quotes and lets each carry
+ * its own comment.
  */
 export function awsExampleInputs(
   { key, roleAccounts }: AwsKeyInputs,
@@ -298,21 +297,33 @@ export function awsExampleInputs(
     .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  const keys = [...blockedKeys(timeline).values()];
-  // An unsigned AssumeRoleWithWebIdentity is judged by its role's account, so
-  // naming that account lets the call itself through too.
-  const webIdentity = new Set(
-    timeline.flatMap((e) => {
-      const { keyRef, assumedAccount } = awsFieldsOf(e);
-      const byAccount = e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED;
-      return byAccount && !keyRef && assumedAccount ? [assumedAccount] : [];
-    }),
-  );
+  // A role's AssumeRole answer teaches its key only when restrict lets the call
+  // through. Naming the role's account alone does that for a call nothing would
+  // block, and for an AssumeRoleWithWebIdentity refused for that account. A
+  // call signed with a key from another unnamed role depends on that one too,
+  // so its key is left out rather than promised.
+  const passesOnceNamed = (e: TrafficEvent, account: string) => {
+    const { keyRef, assumedAccount } = awsFieldsOf(e);
+    if (e.wouldBlock === undefined) return true;
+    return e.wouldBlock === ROLE_NOT_ALLOWED && !keyRef && assumedAccount === account;
+  };
+  const issuers = new Map<string, TrafficEvent>();
+  for (const e of timeline) {
+    const { issuedKeyRef } = awsFieldsOf(e);
+    if (issuedKeyRef) issuers.set(issuedKeyRef, e);
+  }
+  const keys = [...blockedKeys(timeline)].flatMap(([keyRef, k]) => {
+    const issuer = issuers.get(keyRef);
+    return k.account && issuer && passesOnceNamed(issuer, k.account) ? [k] : [];
+  });
   const mark = (a: string) => {
     const names = keys
       .filter((k) => k.account === a)
       .map((k) => (k.name === "key" ? "the key" : k.name));
-    if (webIdentity.has(a)) names.push("its AssumeRoleWithWebIdentity call");
+    const webIdentity = timeline.some(
+      (e) => e.wouldBlock === ROLE_NOT_ALLOWED && passesOnceNamed(e, a),
+    );
+    if (webIdentity) names.push("its AssumeRoleWithWebIdentity call");
     const last = names.pop();
     const list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
     return ` # ${list ? `lets ${list} through; ` : ""}${ASSUMED_ACCOUNT_MARK}`;
@@ -320,6 +331,10 @@ export function awsExampleInputs(
   const line = (a: string, text: string) => (added.has(a) ? `# ${text}${mark(a)}` : text);
   if (accounts.length === 1) {
     lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`));
+  } else if (accounts.length > 1 && roleAccounts.length === 0) {
+    // With every line commented out, the input's own line is too, so the
+    // example sets nothing until one is uncommented along with it.
+    lines.push("# allowed_aws_role_accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`));
   } else if (accounts.length > 1) {
     lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`));
   }

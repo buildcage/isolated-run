@@ -128,9 +128,9 @@ if [ "$RUN_EXIT" != "0" ]; then
   cat "$TMPDIR/keyonlyaudit.log"
 fi
 SUMMARY=$(cat "$TMPDIR/keyonlyaudit.md")
-assert_summary_contains "# 111111111111 # lets the key through; assumed in this run, check it is yours" \
+assert_summary_contains "#   111111111111 # lets the key through; assumed in this run, check it is yours" \
   "with no account named, the restrict example names the first role of a chain"
-assert_summary_contains "# 999999999999 # assumed in this run, check it is yours" \
+assert_summary_contains "#   999999999999 # assumed in this run, check it is yours" \
   "with no account named, the restrict example names the second role of a chain"
 if grep -qF "333333333333" <<< "$SUMMARY"; then
   fail "the restrict example names the account of an AssumeRole answer over plaintext"

@@ -70720,18 +70720,27 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 		roleAccounts
 	};
 }
+const ROLE_NOT_ALLOWED = "aws-role-not-allowed";
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), keys = [...blockedKeys(timeline).values()], webIdentity = new Set(timeline.flatMap((e) => {
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), passesOnceNamed = (e, account) => {
 		let { keyRef, assumedAccount } = awsFieldsOf(e);
-		return (e.wouldBlock === "aws-no-credential" || e.wouldBlock === "aws-role-not-allowed") && !keyRef && assumedAccount ? [assumedAccount] : [];
-	})), mark = (a) => {
+		return e.wouldBlock === void 0 || e.wouldBlock === ROLE_NOT_ALLOWED && !keyRef && assumedAccount === account;
+	}, issuers = new Map();
+	for (let e of timeline) {
+		let { issuedKeyRef } = awsFieldsOf(e);
+		issuedKeyRef && issuers.set(issuedKeyRef, e);
+	}
+	let keys = [...blockedKeys(timeline)].flatMap(([keyRef, k]) => {
+		let issuer = issuers.get(keyRef);
+		return k.account && issuer && passesOnceNamed(issuer, k.account) ? [k] : [];
+	}), mark = (a) => {
 		let names = keys.filter((k) => k.account === a).map((k) => k.name === "key" ? "the key" : k.name);
-		webIdentity.has(a) && names.push("its AssumeRoleWithWebIdentity call");
+		timeline.some((e) => e.wouldBlock === ROLE_NOT_ALLOWED && passesOnceNamed(e, a)) && names.push("its AssumeRoleWithWebIdentity call");
 		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
-	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
+	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed_aws_role_accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
 }
 //#endregion
 //#region src/lib/retry-briefly.ts
