@@ -952,9 +952,9 @@ paths it is shown at; only then are they mediated and written back, without a bi
 
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
 the step). `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report, cut to
-what the report leaves of GitHub's limit (see
-[The Job Summary size cap](../README.md#the-job-summary-size-cap)). `$GITHUB_ENV`, `$GITHUB_PATH`
-and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox.
+what the report leaves of GitHub's limit, or replaced by a note when it is over 1 MiB on its own
+(see [The Job Summary size cap](../README.md#the-job-summary-size-cap)). `$GITHUB_ENV`,
+`$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox.
 
 ### Paths under `/run`
 

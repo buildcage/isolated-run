@@ -23185,6 +23185,37 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	return requireDigest(digest, actionRef);
 }
 //#endregion
+//#region src/core/lib/report/render/fit-step-summary.ts
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+function withNotices(blocks, noticeFor) {
+	return blocks.map((b) => b.cut === "keep" ? b : {
+		...b,
+		notice: noticeFor(b)
+	});
+}
+function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
+	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
+	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
+	for (let i of order) {
+		let b = blocks[i];
+		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
+	}
+	return out.join("");
+}
+function cutBlock(b, budget) {
+	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	if (b.cut === "atomic") return alone;
+	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
+	for (let pos = 0;;) {
+		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
+		if (usedBytes + lineBytes > room) break;
+		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
+	}
+	let head = b.head ?? 0;
+	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
+}
+//#endregion
 //#region src/core/lib/docker/host-addresses.ts
 function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
 	let found = new Set();
@@ -68607,37 +68638,6 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
-function withNotices(blocks, noticeFor) {
-	return blocks.map((b) => b.cut === "keep" ? b : {
-		...b,
-		notice: noticeFor(b)
-	});
-}
-function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
-	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
-	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
-	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
-	for (let i of order) {
-		let b = blocks[i];
-		(cutAt.get(b.section) ?? Infinity) < b.level || (b.cut === "keep" || sizes[i] <= budget ? (out[i] = full[i], budget -= sizes[i]) : (out[i] = cutBlock(b, Math.max(0, budget)), budget -= bytes(out[i]), cutAt.set(b.section, Math.min(cutAt.get(b.section) ?? Infinity, b.level)), onCut?.(b)));
-	}
-	return out.join("");
-}
-function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
-	if (b.cut === "atomic") return alone;
-	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
-	for (let pos = 0;;) {
-		let nl = b.text.indexOf("\n", pos), line = nl === -1 ? b.text.slice(pos) : b.text.slice(pos, nl), withNewline = `${line}\n`, lineBytes = bytes(withNewline);
-		if (usedBytes + lineBytes > room) break;
-		kept += withNewline, usedBytes += lineBytes, count++, line.trim().startsWith("```") && (fenceOpen = !fenceOpen), pos = nl + 1;
-	}
-	let head = b.head ?? 0;
-	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
-}
-//#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
@@ -69900,6 +69900,12 @@ function summarySize(path, fileSize) {
 	}
 }
 const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
+function commandSummaryDroppedMessage(size) {
+	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit.`;
+}
+function commandSummaryDroppedNote(size) {
+	return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");
+}
 function cutCommandSummary(summary, room) {
 	if (summary.length <= room) return summary;
 	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
@@ -72559,85 +72565,6 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
-function readOutputEntries(text) {
-	let entries = [], index = 0, lineNumber = 0, readLine = () => {
-		if (index >= text.length) return;
-		lineNumber++;
-		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
-		return index = lf === -1 ? text.length : lf + 1, {
-			line,
-			newline: lf !== -1
-		};
-	};
-	for (;;) {
-		let start = index, read = readLine();
-		if (!read) return { entries };
-		let { line } = read, at = `line ${lineNumber}`;
-		if (line === "") continue;
-		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
-		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
-			if (equals === 0) return {
-				entries,
-				error: `${at} has an empty name before =`
-			};
-			entries.push({
-				name: line.slice(0, equals),
-				text: text.slice(start, index)
-			});
-			continue;
-		}
-		if (heredoc === -1) return {
-			entries,
-			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
-		};
-		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
-		if (name === "") return {
-			entries,
-			error: `${at} has an empty name before <<`
-		};
-		if (delimiter === "") return {
-			entries,
-			error: `${at}, output ${quoted(name)}, has an empty delimiter`
-		};
-		for (;;) {
-			let value = readLine();
-			if (!value || value.line !== delimiter && !value.newline) return {
-				entries,
-				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
-			};
-			if (value.line === delimiter) break;
-		}
-		entries.push({
-			name,
-			text: text.slice(start, index)
-		});
-	}
-}
-function quoted(text) {
-	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
-	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
-}
-const WIDE_BOMS = [
-	[255, 254],
-	[254, 255],
-	[
-		0,
-		0,
-		254,
-		255
-	]
-];
-function validatedOutputText(bytes) {
-	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
-		text: "",
-		error: "it is not UTF-8"
-	};
-	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
-	return {
-		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
-		error
-	};
-}
 //#endregion
 //#region src/lib/sandbox/runner-output-files.ts
 const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
@@ -72680,7 +72607,7 @@ const realReadBackingDeps = {
 	lstat: (path) => (0, node_fs.lstatSync)(path),
 	readFile: (path) => (0, node_fs.readFileSync)(path)
 };
-function readBackingFile(path, deps = realReadBackingDeps) {
+function readBackingFile(path, maxBytes, deps = realReadBackingDeps) {
 	let unreadable = (e) => ({ reason: `it could not be read (${e.code ?? errorMessage(e)})` }), stats;
 	try {
 		stats = deps.lstat(path);
@@ -72688,7 +72615,7 @@ function readBackingFile(path, deps = realReadBackingDeps) {
 		return e.code === "ENOENT" ? { empty: !0 } : unreadable(e);
 	}
 	if (!stats.isFile()) return { reason: "it was not a regular file" };
-	if (stats.size > 67108864) return { reason: "it was over 64 MiB" };
+	if (stats.size > maxBytes) return { oversize: stats.size };
 	try {
 		return { bytes: deps.readFile(path) };
 	} catch (e) {
@@ -73697,6 +73624,88 @@ async function runSandboxedCommand(options, overrides = {}) {
 	});
 }
 //#endregion
+//#region src/lib/step-output-file.ts
+const MAX_OUTPUT_BYTES = 67108864;
+function readOutputEntries(text) {
+	let entries = [], index = 0, lineNumber = 0, readLine = () => {
+		if (index >= text.length) return;
+		lineNumber++;
+		let lf = text.indexOf("\n", index), end = lf === -1 ? text.length : lf, line = text.slice(index, end);
+		return index = lf === -1 ? text.length : lf + 1, {
+			line,
+			newline: lf !== -1
+		};
+	};
+	for (;;) {
+		let start = index, read = readLine();
+		if (!read) return { entries };
+		let { line } = read, at = `line ${lineNumber}`;
+		if (line === "") continue;
+		let equals = line.indexOf("="), heredoc = line.indexOf("<<");
+		if (equals !== -1 && (heredoc === -1 || equals < heredoc)) {
+			if (equals === 0) return {
+				entries,
+				error: `${at} has an empty name before =`
+			};
+			entries.push({
+				name: line.slice(0, equals),
+				text: text.slice(start, index)
+			});
+			continue;
+		}
+		if (heredoc === -1) return {
+			entries,
+			error: `${at} is neither NAME=VALUE nor NAME<<DELIMITER`
+		};
+		let name = line.slice(0, heredoc), delimiter = line.slice(heredoc + 2);
+		if (name === "") return {
+			entries,
+			error: `${at} has an empty name before <<`
+		};
+		if (delimiter === "") return {
+			entries,
+			error: `${at}, output ${quoted(name)}, has an empty delimiter`
+		};
+		for (;;) {
+			let value = readLine();
+			if (!value || value.line !== delimiter && !value.newline) return {
+				entries,
+				error: `${at}, output ${quoted(name)}, never reaches its delimiter ${quoted(delimiter)}`
+			};
+			if (value.line === delimiter) break;
+		}
+		entries.push({
+			name,
+			text: text.slice(start, index)
+		});
+	}
+}
+function quoted(text) {
+	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
+	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
+}
+const WIDE_BOMS = [
+	[255, 254],
+	[254, 255],
+	[
+		0,
+		0,
+		254,
+		255
+	]
+];
+function validatedOutputText(bytes) {
+	if (WIDE_BOMS.some((bom) => bom.every((byte, i) => bytes[i] === byte))) return {
+		text: "",
+		error: "it is not UTF-8"
+	};
+	let { entries, error } = readOutputEntries(bytes.toString("utf8").replace(/^\uFEFF/, "")), text = entries.map((e) => e.text).join("");
+	return {
+		text: text === "" || text.endsWith("\n") ? text : `${text}\n`,
+		error
+	};
+}
+//#endregion
 //#region src/core/lib/docker/container-env.ts
 function parseDockerInspectEnv(inspectOutput) {
 	let entries = JSON.parse(inspectOutput), env = {};
@@ -74378,10 +74387,11 @@ function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, 
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
 }
 function writeBackMediatedFile(file, annotation, deps) {
-	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), read = deps.readBackingFile(file.backingPath), content = Buffer.alloc(0), failure;
+	let fail = (reason) => (annotation.error(`$${file.variable} ${reason}; failing the step`), !0), output = file.variable === "GITHUB_OUTPUT", limit = output ? MAX_OUTPUT_BYTES : STEP_SUMMARY_LIMIT_BYTES, read = deps.readBackingFile(file.backingPath, limit), content = Buffer.alloc(0), failure;
 	if ("reason" in read) failure = read.reason;
+	else if ("oversize" in read) output ? failure = `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` : (content = commandSummaryDroppedNote(read.oversize), annotation.warning(commandSummaryDroppedMessage(read.oversize)));
 	else if ("bytes" in read) {
-		if (file.variable === "GITHUB_OUTPUT") {
+		if (output) {
 			let { text, error } = validatedOutputText(read.bytes);
 			content = Buffer.from(text, "utf8"), error && (failure = `was written without what the runner could not read: ${error}`);
 		} else content = read.bytes;

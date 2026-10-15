@@ -829,6 +829,52 @@ describe("runSandboxStep", () => {
       expect(annotation.error).not.toHaveBeenCalled();
     });
 
+    it("reads $GITHUB_STEP_SUMMARY back up to GitHub's 1 MiB limit and $GITHUB_OUTPUT up to 64 MiB", async () => {
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.readBackingFile).toHaveBeenCalledWith(
+        expect.stringMatching(/GITHUB_STEP_SUMMARY$/),
+        1024 * 1024,
+      );
+      expect(mocks.readBackingFile).toHaveBeenCalledWith(
+        expect.stringMatching(/GITHUB_OUTPUT$/),
+        64 * 1024 * 1024,
+      );
+    });
+
+    // GitHub drops a summary over its limit whole without failing the step.
+    it("writes a note in place of a $GITHUB_STEP_SUMMARY over the limit, without failing", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_STEP_SUMMARY") ? { oversize: 1024 * 1024 + 1 } : { empty: true },
+      );
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+
+      // Rounded up: a byte over the limit does not read as 1024 KiB.
+      const message =
+        "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit.";
+      const note = Buffer.from(`> ⚠️ ${message}\n`);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, note);
+      expect(annotation.warning).toHaveBeenCalledWith(message);
+      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(note.length);
+      expect(annotation.error).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it("fails the step but still reports when $GITHUB_OUTPUT was over the limit", async () => {
+      mocks.readBackingFile.mockImplementation((path: string) =>
+        path.endsWith("GITHUB_OUTPUT") ? { oversize: 64 * 1024 * 1024 + 1 } : { empty: true },
+      );
+
+      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
+      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_OUTPUT, Buffer.alloc(0));
+      expect(annotation.error).toHaveBeenCalledWith(
+        "$GITHUB_OUTPUT it was over 64 MiB; failing the step",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+    });
+
     it("counts nothing of a $GITHUB_STEP_SUMMARY it could not write", async () => {
       mocks.readBackingFile.mockImplementation((path: string) =>
         path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("mine\n") } : { empty: true },

@@ -7,12 +7,12 @@
  *
  * $GITHUB_STEP_SUMMARY is not read entry by entry, by the runner or here: the
  * backing file is checked as a file (readBackingFile) and written back as the
- * command left it, to be moved after the reports (moveCommandSummaryLast).
+ * command left it, or as a note when it is over GitHub's limit, to be moved
+ * after the reports (moveCommandSummaryLast).
  */
 
-/** The most this action reads back of $GITHUB_OUTPUT or $GITHUB_STEP_SUMMARY.
- *  Far above what GitHub keeps of either, and quick to read in the seconds a
- *  cancelled step has left. */
+/** The most this action reads back of $GITHUB_OUTPUT, which it parses whole in
+ *  memory: quick to read in the seconds a cancelled step has left. */
 export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 export interface OutputEntries {

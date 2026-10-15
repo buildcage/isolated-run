@@ -40,7 +40,6 @@ import { basename, dirname, join } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
-import { MAX_OUTPUT_BYTES } from "../step-output-file.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase, scratchDirFor } from "./scratch-dir.ts";
 import type { MountEntry } from "./types.ts";
 
@@ -128,8 +127,13 @@ export function mediateRunnerOutputFiles(
 }
 
 /** What a backing file held: the command's bytes, nothing (it removed the
- *  file), or a reason it could not be read as a regular file. */
-export type BackingRead = { bytes: Buffer } | { empty: true } | { reason: string };
+ *  file), the size of one over the limit, or a reason it could not be read as
+ *  a regular file. */
+export type BackingRead =
+  | { bytes: Buffer }
+  | { empty: true }
+  | { oversize: number }
+  | { reason: string };
 
 export interface ReadBackingDeps {
   lstat: (path: string) => { isFile: () => boolean; size: number };
@@ -143,14 +147,15 @@ const realReadBackingDeps: ReadBackingDeps = {
 
 /**
  * Reads a backing file the command wrote. A missing one (the command removed
- * it) is empty. Anything but a regular file, or one larger than
- * MAX_OUTPUT_BYTES, is refused with a reason rather than followed, piped through
- * or read into memory, and so is one the command made unreadable, by its mode
- * or the directory's: this never throws, so the reports after it still go out.
- * The command has exited, so the lstat and the read do not race.
+ * it) is empty, and one larger than `maxBytes` is only measured, never read
+ * into memory. Anything but a regular file is refused with a reason rather than
+ * followed or piped through, and so is one the command made unreadable, by its
+ * mode or the directory's: this never throws, so the reports after it still go
+ * out. The command has exited, so the lstat and the read do not race.
  */
 export function readBackingFile(
   path: string,
+  maxBytes: number,
   deps: ReadBackingDeps = realReadBackingDeps,
 ): BackingRead {
   // The code alone: the message names the host-side path.
@@ -165,8 +170,7 @@ export function readBackingFile(
     return unreadable(e);
   }
   if (!stats.isFile()) return { reason: "it was not a regular file" };
-  if (stats.size > MAX_OUTPUT_BYTES)
-    return { reason: `it was over ${MAX_OUTPUT_BYTES / 1024 / 1024} MiB` };
+  if (stats.size > maxBytes) return { oversize: stats.size };
   try {
     return { bytes: deps.readFile(path) };
   } catch (e) {
