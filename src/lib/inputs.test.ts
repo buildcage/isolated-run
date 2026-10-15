@@ -451,7 +451,7 @@ describe("awsExampleInputs", () => {
     ]);
   });
 
-  it("names the blocked keys an account commented out would alone let through", () => {
+  it("names the blocked keys that naming the account alone lets through", () => {
     const sts = (aws: Record<string, string>, wouldBlock?: string): TrafficEvent => ({
       time: 0,
       action: wouldBlock ? "audit" : "allow",

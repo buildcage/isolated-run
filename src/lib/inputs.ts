@@ -300,8 +300,8 @@ export function awsExampleInputs(
   // A role's AssumeRole answer teaches its key only when restrict lets the call
   // through. Naming the role's account alone does that for a call nothing would
   // block, and for an AssumeRoleWithWebIdentity refused for that account. A
-  // call signed with a key from another unnamed role depends on that one too,
-  // so its key is left out rather than promised.
+  // call signed with another unnamed role's key needs that account too, so its
+  // key is left out.
   const passesOnceNamed = (e: TrafficEvent, account: string) => {
     const { keyRef, assumedAccount } = awsFieldsOf(e);
     if (e.wouldBlock === undefined) return true;

@@ -26,8 +26,8 @@ jobs:
           aws-region: us-east-1
 
       # Same command as the audit example, with the rules that run produced and
-      # the account it left commented out for checking, kept in a repository
-      # variable. The compromised dependency's call is blocked even though the
+      # the account it commented out, uncommented once checked, kept in a
+      # repository variable. The compromised dependency's call is blocked even though the
       # URL rule allows its host. fail_on_blocked is false only because this
       # example blocks on purpose; leave it at its default so a real workflow
       # fails on a block.
