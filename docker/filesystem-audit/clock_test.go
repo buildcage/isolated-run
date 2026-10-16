@@ -54,3 +54,22 @@ func TestBootClockTakesANewOffsetAtEachStep(t *testing.T) {
 		t.Fatalf("steps = %v, want the new offset after the first", steps)
 	}
 }
+
+// Once sets cannot be followed, each line reads the clocks itself.
+func TestBootClockReadsTheClocksWhenUnfollowed(t *testing.T) {
+	c := &bootClock{}
+	c.add(clockStep{boot: 0, offset: 1})
+	log := &bytes.Buffer{}
+	c.unfollow(log, unix.EBADF)
+	var boot unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
+		t.Fatal(err)
+	}
+	got := wallClock(uint64(boot.Nano()), c.offset(uint64(boot.Nano())))
+	if d := time.Since(got); d < -time.Second || d > time.Second {
+		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
+	}
+	if !bytes.Contains(log.Bytes(), []byte("cannot be followed")) {
+		t.Fatalf("log = %q", log)
+	}
+}

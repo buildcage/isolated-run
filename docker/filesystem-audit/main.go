@@ -158,6 +158,10 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	defer bw.Flush()
 
 	// Before the ready file, which lets the step start.
+	clock, err := newBootClock(os.Stderr)
+	if err != nil {
+		return err
+	}
 	base, errBase := missedRuns(coll)
 	if readyPath != "" {
 		if err := writeNew(readyPath, nil); err != nil {
@@ -178,7 +182,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
 	}()
 
-	return readLoop(rd, bw, coll, missed)
+	return readLoop(rd, bw, coll, clock, missed)
 }
 
 var errStoppedEarly = errors.New("stopped before it attached")
@@ -197,11 +201,7 @@ func stopRequested(sig <-chan os.Signal) bool {
 
 // readLoop drains the ring buffer into the recording until the reader is
 // flushed.
-func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
-	clock, err := newBootClock(os.Stderr)
-	if err != nil {
-		return err
-	}
+func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
 	rec := newRecorder(w, os.Stderr, clock.offset)
 	// Reused for each sample: what decode keeps of it is copied.
 	var sample ringbuf.Record

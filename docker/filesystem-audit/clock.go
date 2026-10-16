@@ -17,6 +17,9 @@ import (
 // start and after each set rather than for every line.
 type bootClock struct {
 	steps atomic.Pointer[[]clockStep]
+	// unfollowed is set once sets can no longer be told, after which the
+	// clocks are read for every line, as without a timerfd.
+	unfollowed atomic.Bool
 }
 
 // clockStep is the offset from boot on.
@@ -25,12 +28,12 @@ type clockStep struct {
 	offset int64
 }
 
-// farFuture is when the timerfd that watches for sets would expire: never,
-// in practice.
-var farFuture = unix.Timespec{Sec: 7258118400} // 2200-01-01
+// farFuture is when the timerfd that watches for sets expires, just short of
+// the latest time a timer can hold.
+var farFuture = unix.Timespec{Sec: 9_200_000_000}
 
 // newBootClock reads the offset and follows the realtime clock's sets from
-// then on. Without a timerfd, later sets are not followed.
+// then on.
 func newBootClock(log io.Writer) (*bootClock, error) {
 	c := &bootClock{}
 	fd, err := unix.TimerfdCreate(unix.CLOCK_REALTIME, unix.TFD_CLOEXEC)
@@ -40,13 +43,17 @@ func newBootClock(log io.Writer) (*bootClock, error) {
 			unix.Close(fd)
 		}
 	}
-	if err != nil {
-		fmt.Fprintln(log, "filesystem-audit: the realtime clock being set will not be followed:", err)
+	following := err == nil
+	if !following {
+		c.unfollow(log, err)
 	}
 	if err := c.step(); err != nil {
+		if following {
+			unix.Close(fd)
+		}
 		return nil, err
 	}
-	if err == nil {
+	if following {
 		go c.follow(fd, log)
 	}
 	return c, nil
@@ -68,14 +75,16 @@ func armClockSet(fd int) error {
 // follow takes a new offset each time the realtime clock is set. An event
 // between a set and its new offset still takes the old one.
 func (c *bootClock) follow(fd int, log io.Writer) {
+	defer unix.Close(fd)
 	var buf [8]byte
 	for {
 		_, err := unix.Read(fd, buf[:])
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
-		if !errors.Is(err, unix.ECANCELED) {
-			fmt.Fprintln(log, "filesystem-audit: stopped following the realtime clock:", err)
+		// A set cancels the timer; one past farFuture makes it expire.
+		if err != nil && !errors.Is(err, unix.ECANCELED) {
+			c.unfollow(log, err)
 			return
 		}
 		// Rearmed first, so a set while the offset is read fires again.
@@ -84,23 +93,37 @@ func (c *bootClock) follow(fd int, log io.Writer) {
 			err = c.step()
 		}
 		if err != nil {
-			fmt.Fprintln(log, "filesystem-audit: stopped following the realtime clock:", err)
+			c.unfollow(log, err)
 			return
 		}
 	}
 }
 
+func (c *bootClock) unfollow(log io.Writer, err error) {
+	fmt.Fprintln(log, "filesystem-audit: reading the clocks for every line, as their sets cannot be followed:", err)
+	c.unfollowed.Store(true)
+}
+
 // step reads the offset and records it from now on.
 func (c *bootClock) step() error {
-	var boot, real unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
-		return fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+	boot, offset, err := readOffset()
+	if err != nil {
+		return err
 	}
-	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &real); err != nil {
-		return fmt.Errorf("read CLOCK_REALTIME: %w", err)
-	}
-	c.add(clockStep{uint64(boot.Nano()), real.Nano() - boot.Nano()})
+	c.add(clockStep{boot, offset})
 	return nil
+}
+
+// readOffset reads CLOCK_BOOTTIME and CLOCK_REALTIME back to back.
+func readOffset() (boot uint64, offset int64, err error) {
+	var b, r unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &b); err != nil {
+		return 0, 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+	}
+	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &r); err != nil {
+		return 0, 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
+	}
+	return uint64(b.Nano()), r.Nano() - b.Nano(), nil
 }
 
 func (c *bootClock) add(s clockStep) {
@@ -115,6 +138,11 @@ func (c *bootClock) add(s clockStep) {
 // offset is the offset at boot: the latest step at or before it, or the
 // first for an event from before the tracer started.
 func (c *bootClock) offset(boot uint64) int64 {
+	if c.unfollowed.Load() {
+		if _, offset, err := readOffset(); err == nil {
+			return offset
+		}
+	}
 	steps := *c.steps.Load()
 	for i := len(steps) - 1; i > 0; i-- {
 		if steps[i].boot <= boot {
