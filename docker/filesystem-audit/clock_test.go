@@ -7,14 +7,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestWallTime(t *testing.T) {
-	// 1.5 s after boot, with boot at 2026-10-06T00:00:00Z.
-	offset := int64(1_791_244_800) * 1_000_000_000
-	if got, want := wallClock(1_500_000_000, offset).Format(timeLayout), "2026-10-06T00:00:01.500Z"; got != want {
-		t.Fatalf("wallClock = %s, want %s", got, want)
-	}
-}
-
 func TestBootClockConvertsNow(t *testing.T) {
 	c, err := newBootClock()
 	if err != nil {
@@ -24,7 +16,7 @@ func TestBootClockConvertsNow(t *testing.T) {
 	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
 		t.Fatal(err)
 	}
-	got := wallClock(uint64(boot.Nano()), c.offset(uint64(boot.Nano())))
+	got := time.Unix(0, boot.Nano()+c.offset(uint64(boot.Nano())))
 	if d := time.Since(got); d < -time.Second || d > time.Second {
 		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
 	}

@@ -65,6 +65,27 @@ func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
 	}
 }
 
+// Each line's "t" is its boot stamp plus the offset at that stamp.
+func TestRecorderTimesALineByItsOffset(t *testing.T) {
+	out := &bytes.Buffer{}
+	r := newRecorder(bufio.NewWriter(out), &bytes.Buffer{}, func(boot uint64) int64 {
+		if boot < 2e9 {
+			return 1_791_244_800e9
+		}
+		return 1_791_244_900e9
+	})
+	exec, open := stepExec, stepOpen
+	exec.boot, open.boot = 1_500_000_000, 2_250_000_000
+	add(t, r, exec, open)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	got := lines(t, out)
+	if got[0]["t"] != "2026-10-06T00:00:01.500Z" || got[1]["t"] != "2026-10-06T00:01:42.250Z" {
+		t.Fatalf("times = %v, %v", got[0]["t"], got[1]["t"])
+	}
+}
+
 func TestRecorderGivesAnExecTheFileItResolvedTo(t *testing.T) {
 	r, out, _ := newTestRecorder()
 	add(t, r,

@@ -22,8 +22,10 @@ type recorder struct {
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
-	// line is reused for each line written.
+	// line is reused for each line written, and stamp keeps the second's
+	// text from line to line.
 	line    []byte
+	stamp   timeText
 	counts  map[tally]int
 	preExec int
 	// unsettled counts calls whose result never arrived.
@@ -298,10 +300,10 @@ func isRestart(ret int32) bool {
 func (r *recorder) write(rec record) error {
 	// Taken at the event, so a wall-clock step mid-run shifts later times as
 	// it shifts the proxy's.
-	offset := r.offset(rec.boot)
+	at := int64(rec.boot) + r.offset(rec.boot)
 	r.counts[tally{rec.Kind, rec.Failed}]++
 	r.total++
-	r.line = appendRecord(r.line[:0], &rec, wallClock(rec.boot, offset))
+	r.line = appendRecord(r.line[:0], &rec, &r.stamp, at)
 	_, err := r.w.Write(r.line)
 	return err
 }
