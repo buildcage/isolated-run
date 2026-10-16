@@ -16,6 +16,20 @@
 #ifndef EEXIST
 #define EEXIST 17
 #endif
+#ifndef ENAMETOOLONG
+#define ENAMETOOLONG 36
+#endif
+
+/**
+ * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
+ * interrupted the call, which the kernel runs again, and that run records it.
+ * One the kernel turns into EINTR instead, as ERESTARTSYS without SA_RESTART,
+ * is not run again, and goes unrecorded and uncounted.
+ */
+static __always_inline int is_restart(long ret)
+{
+	return ret <= -512 && ret >= -516;
+}
 
 /** A path syscall as it returned: what it records and what it was given. */
 struct path_call {
@@ -61,6 +75,16 @@ const volatile long nr_setxattr = -1, nr_lsetxattr = -1, nr_fsetxattr = -1;
 const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = -1;
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
 const volatile long nr_truncate = -1, nr_ftruncate = -1;
+/**
+ * Other syscalls whose path hooks can run: bind(2) to a path,
+ * open_by_handle_at(2) with O_TRUNC, and bpf(2) pinning an object.
+ */
+const volatile long nr_bind = -1, nr_open_by_handle_at = -1, nr_bpf = -1;
+
+static __always_inline int other_hooked(long nr)
+{
+	return nr >= 0 && (nr == nr_bind || nr == nr_open_by_handle_at || nr == nr_bpf);
+}
 
 /**
  * A syscall's argument @p i (0 to 4), from the register it was passed in.
@@ -228,6 +252,9 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 		return;
 	if (ret < 0)
 		e->path_len = -ret;
+	// So the reader can drop it for the path change its hook sent (RESULT_FD).
+	if (call->kind != K_ATTR_FAILED)
+		e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = call->val1;
 	e->gid = call->val2;
 	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;
@@ -346,7 +373,8 @@ struct {
 /**
  * Records the step's syscall @p nr as refused, once per program: with
  * @p killed, a 32-bit one seccomp killed the program for, else one that
- * failed with EPERM.
+ * failed with EPERM, with the thread so the reader can drop it for a path
+ * change its hook sent.
  */
 static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 {
@@ -361,6 +389,8 @@ static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
 	struct event *e = start(slot, K_SYSCALL);
 	if (!e)
 		return;
+	if (!killed)
+		e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = nr;
 	e->mode = killed;
 	e->path_len = killed ? 0 : EPERM;

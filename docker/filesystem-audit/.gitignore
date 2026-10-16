@@ -5,3 +5,5 @@
 out/
 # gensyscallnames output, regenerated at image build time
 syscallnames_*.go
+# go test -c output
+*.test

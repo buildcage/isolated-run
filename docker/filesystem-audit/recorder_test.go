@@ -61,7 +61,7 @@ func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
 	if len(got) != 3 || got[0]["kind"] != "exec" || got[1]["path"] != "/etc/hosts" || got[2]["kind"] != "end" {
 		t.Fatalf("recording = %v, want the exec, the step's open and the end line", got)
 	}
-	if !strings.Contains(log.String(), "total=2 ") || !strings.Contains(log.String(), "pre-exec-skipped=2 ") {
+	if !strings.Contains(log.String(), "total=2 ") || !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
 		t.Fatalf("log = %q, want two written and two skipped", log)
 	}
 }
@@ -107,8 +107,29 @@ func waitingOpen(tid uint32, path string) event {
 	return event{kind: filesystemAuditKindK_OPEN, pid: 9, comm: "sh", flags: unix.O_RDONLY, tid: tid, data: []byte(path + "\x00")}
 }
 
+// openName is the name an open(2) passed, as getname copied it.
+func openName(tid uint32, name string) event {
+	return event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, comm: "sh", tid: tid, data: []byte(name + "\x00")}
+}
+
+const (
+	nrOpenat = 257
+	nrUnlink = 87
+	nrFchmod = 91
+	nrBind   = 49
+)
+
 func openResult(tid uint32, ret int32) event {
-	return event{kind: filesystemAuditKindK_OPEN_RESULT, pid: 9, comm: "sh", tid: tid, pathRet: ret}
+	return result(tid, nrOpenat, resultOpen, ret)
+}
+
+func result(tid uint32, nr int32, bits uint8, ret int32) event {
+	return event{kind: filesystemAuditKindK_RESULT, pid: 9, comm: "sh", tid: tid, nr: nr, n1: bits, pathRet: ret}
+}
+
+// unlink is a path change its hook sent from syscall nr.
+func unlink(tid uint32, nr int32, path string) event {
+	return event{kind: filesystemAuditKindK_UNLINK, pid: 9, comm: "rm", tid: tid, nr: nr, n1: 1, data: comps(path)}
 }
 
 // paths gives each line's path and err, the end line's as empty.
@@ -123,47 +144,88 @@ func paths(t *testing.T, out *bytes.Buffer) string {
 	return strings.Join(got, " ")
 }
 
-func TestRecorderSettlesAnOpenWithItsResult(t *testing.T) {
-	created := waitingOpen(13, "/tmp/new")
-	created.bases = 1
+// recordEvents runs events through a recorder after the step's exec and returns its
+// lines' paths and its end line's untracked count.
+func recordEvents(t *testing.T, events ...event) (string, any) {
+	t.Helper()
 	r, out, _ := newTestRecorder()
-	add(t, r, stepExec,
-		waitingOpen(11, "/tmp/fifo"), waitingOpen(12, "/tmp/refused"),
-		openResult(12, -int32(unix.ENXIO)), openResult(11, 3),
-		created, openResult(13, -int32(unix.EACCES)),
-		openResult(14, 0), // no open waits for it
-	)
+	add(t, r, stepExec)
+	add(t, r, events...)
 	if err := r.finish(loss{}); err != nil {
 		t.Fatal(err)
 	}
+	got := lines(t, out)
+	return paths(t, out), got[len(got)-1]["untracked"]
+}
+
+func TestRecorderSettlesAnOpenWithItsResult(t *testing.T) {
+	got, untracked := recordEvents(t,
+		openName(11, "/tmp/fifo"), waitingOpen(11, "/tmp/fifo"),
+		openName(12, "/tmp/refused"), waitingOpen(12, "/tmp/refused"),
+		openResult(12, -int32(unix.ENXIO)), openResult(11, 3),
+		openName(13, "/tmp/new"), event{kind: filesystemAuditKindK_OPEN_CREATE, tid: 13}, waitingOpen(13, "/tmp/new"),
+		openResult(13, -int32(unix.EACCES)),
+		openResult(14, 0),                         // no open waits for it
+		openName(15, "/opath"), openResult(15, 3), // O_PATH reaches no security_file_open
+	)
 	want := fmt.Sprintf("/bin/sh:0 /tmp/refused:%d /tmp/fifo:0 /tmp/new:0 /tmp/new:%d :0", unix.ENXIO, unix.EACCES)
-	if got := paths(t, out); got != want {
+	if got != want || untracked != float64(0) {
+		t.Fatalf("recording = %s, untracked %v, want %s", got, untracked, want)
+	}
+}
+
+// A create mark whose call sent no name ends with that call.
+func TestRecorderDropsTheCreateMarkOfACallWithNoName(t *testing.T) {
+	got, _ := recordEvents(t, event{kind: filesystemAuditKindK_OPEN_CREATE, tid: 11}, openResult(11, -int32(unix.EEXIST)),
+		openName(11, "/f"), waitingOpen(11, "/f"), openResult(11, -int32(unix.EACCES)))
+	if want := fmt.Sprintf("/bin/sh:0 /f:%d :0", unix.EACCES); got != want {
+		t.Fatalf("recording = %s, want %s", got, want)
+	}
+}
+
+func TestRecorderRecordsAnOpenThatFailedBeforeItsFile(t *testing.T) {
+	got, _ := recordEvents(t, openName(11, "/missing"), openResult(11, -int32(unix.ENOENT)),
+		openName(11, "/etc/hosts"), waitingOpen(11, "/etc/hosts"), openResult(11, 3))
+	if want := fmt.Sprintf("/bin/sh:0 /missing:%d /etc/hosts:0 :0", unix.ENOENT); got != want {
+		t.Fatalf("recording = %s, want %s", got, want)
+	}
+}
+
+// A name the kernel copied gives way to none read from the caller.
+func TestRecorderKeepsTheKernelsCopyOfAName(t *testing.T) {
+	caller := openName(11, "/from-caller")
+	caller.n1 = 1
+	ret := -int32(unix.ENAMETOOLONG)
+	got, _ := recordEvents(t, openName(11, "/kernel"), caller, openResult(11, ret), caller, openResult(11, ret))
+	if want := fmt.Sprintf("/bin/sh:0 /kernel:%d /from-caller:%d :0", -ret, -ret); got != want {
 		t.Fatalf("recording = %s, want %s", got, want)
 	}
 }
 
 func TestRecorderDropsARestartedOpen(t *testing.T) {
-	r, out, _ := newTestRecorder()
-	add(t, r, stepExec, waitingOpen(11, "/tmp/fifo"), openResult(11, -512), waitingOpen(11, "/tmp/fifo"), openResult(11, 3))
-	if err := r.finish(loss{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := paths(t, out); got != "/bin/sh:0 /tmp/fifo:0 :0" {
+	got, _ := recordEvents(t, openName(11, "/tmp/fifo"), waitingOpen(11, "/tmp/fifo"), openResult(11, -512),
+		openName(11, "/tmp/missing"), openResult(11, -513),
+		openName(11, "/tmp/fifo"), waitingOpen(11, "/tmp/fifo"), openResult(11, 3))
+	if got != "/bin/sh:0 /tmp/fifo:0 :0" {
 		t.Fatalf("recording = %s, want the rerun's open alone", got)
 	}
 }
 
-func TestRecorderWritesAnOpenWhoseResultWasLost(t *testing.T) {
-	r, out, _ := newTestRecorder()
-	add(t, r, stepExec, waitingOpen(11, "/a"), waitingOpen(11, "/b"), openResult(11, -int32(unix.ENOENT)))
-	if err := r.finish(loss{}); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := paths(t, out), fmt.Sprintf("/bin/sh:0 /a:0 /b:%d :0", unix.ENOENT); got != want {
+// A second file before the call's result is one nested in the open, written
+// as done at once.
+func TestRecorderTakesTheFirstFileAsTheOpens(t *testing.T) {
+	got, _ := recordEvents(t, openName(11, "/fuse/f"), waitingOpen(11, "/fuse/f"), waitingOpen(11, "/backing/f"),
+		openResult(11, -int32(unix.EACCES)))
+	if want := fmt.Sprintf("/bin/sh:0 /backing/f:0 /fuse/f:%d :0", unix.EACCES); got != want {
 		t.Fatalf("recording = %s, want %s", got, want)
 	}
-	if got := lines(t, out); got[3]["untracked"] != float64(1) {
-		t.Fatalf("end line = %v, want /a untracked", got[3])
+}
+
+func TestRecorderWritesAnOpenWhoseResultWasLost(t *testing.T) {
+	got, untracked := recordEvents(t, openName(11, "/a"), waitingOpen(11, "/a"), openName(11, "/b"), waitingOpen(11, "/b"),
+		openResult(11, -int32(unix.ENOENT)), openName(11, "/c"), openName(11, "/d"))
+	if want := fmt.Sprintf("/bin/sh:0 /a:0 /b:%d :0", unix.ENOENT); got != want || untracked != float64(3) {
+		t.Fatalf("recording = %s, untracked %v, want %s with /a, /c and /d untracked", got, untracked, want)
 	}
 }
 
@@ -171,27 +233,129 @@ func TestRecorderWritesOpensStillWaitingAtTheEnd(t *testing.T) {
 	late, early := waitingOpen(12, "/late"), waitingOpen(11, "/early")
 	late.boot, early.boot = 2, 1
 	r, out, _ := newTestRecorder()
-	add(t, r, stepExec, late, early)
+	add(t, r, stepExec, late, early, openName(13, "/named"))
 	if err := r.finish(loss{untracked: 1}); err != nil {
 		t.Fatal(err)
 	}
 	got := lines(t, out)
-	if len(got) != 4 || got[1]["path"] != "/early" || got[2]["path"] != "/late" || got[3]["untracked"] != float64(3) {
-		t.Fatalf("recording = %v, want both opens in time order and three untracked", got)
+	if len(got) != 4 || got[1]["path"] != "/early" || got[2]["path"] != "/late" || got[3]["untracked"] != float64(4) {
+		t.Fatalf("recording = %v, want both opens in time order and four untracked", got)
 	}
 }
 
 func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
 	r, out, log := newTestRecorder()
-	add(t, r, waitingOpen(11, "/etc/passwd"), stepExec, openResult(11, 3))
+	add(t, r, openName(11, "/etc/passwd"), waitingOpen(11, "/etc/passwd"), unlink(12, nrUnlink, "x"), stepExec,
+		openResult(11, 3), result(12, nrUnlink, resultWatched, 0))
 	if err := r.finish(loss{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := paths(t, out); got != "/bin/sh:0 :0" {
 		t.Fatalf("recording = %s, want the exec alone", got)
 	}
-	if !strings.Contains(log.String(), "pre-exec-skipped=1 ") {
-		t.Fatalf("log = %q, want the open skipped", log)
+	if !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
+		t.Fatalf("log = %q, want the open and the unlink skipped", log)
+	}
+}
+
+func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
+	eperm := -int32(unix.EPERM)
+	exitFailure := event{kind: filesystemAuditKindK_CHMOD_FAILED, pid: 9, comm: "chmod", tid: 11, pathRet: -eperm, data: []byte("/exit\x00")}
+	refused := event{kind: filesystemAuditKindK_SYSCALL, pid: 9, comm: "nc", tid: 11, flags: nrBind, pathRet: -eperm}
+	for _, c := range []struct {
+		name      string
+		events    []event
+		want      string
+		untracked float64
+	}{
+		{"done", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, 0)}, "/a:0", 0},
+		{
+			"refused, recorded from the exit",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, result(11, nrFchmod, resultWatched, eperm)},
+			"/exit:1", 0,
+		},
+		{
+			"refused through a descriptor",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, result(11, nrFchmod, resultWatched|resultFD, eperm)},
+			"/a:1", 0,
+		},
+		{
+			"refused, recorded from the exit through a descriptor",
+			[]event{exitFailure, result(11, nrFchmod, resultWatched|resultFD, eperm)},
+			"/exit:1", 0,
+		},
+		{"refused in a call recorded from no exit", []event{unlink(11, nrBind, "s"), result(11, nrBind, 0, eperm)}, "/s:1", 0},
+		{
+			"refused, with the call refused too",
+			[]event{unlink(11, nrBind, "s"), refused, result(11, nrBind, 0, eperm)},
+			"/s:1", 0,
+		},
+		{"refused by seccomp", []event{refused, result(11, nrBind, 0, eperm)}, ":1", 0},
+		{
+			"refused by seccomp after a refused path change",
+			[]event{unlink(11, nrBind, "s"), result(11, nrBind, 0, -int32(unix.EACCES)), refused, result(11, nrBind, 0, eperm)},
+			fmt.Sprintf("/s:%d :1", unix.EACCES), 0,
+		},
+		{
+			"refused, its result lost",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, {kind: filesystemAuditKindK_EXIT, tid: 11}},
+			"/exit:1", 1,
+		},
+		{"refused, its result not yet come at the end", []event{unlink(11, nrFchmod, "a"), exitFailure}, "/exit:1", 1},
+		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
+		{
+			"hook run again in its call",
+			[]event{unlink(11, nrUnlink, "a"), unlink(11, nrUnlink, "b"), result(11, nrUnlink, resultWatched, 0)},
+			"/b:0", 0,
+		},
+		{
+			"from a call whose result never came",
+			[]event{unlink(11, nrBind, "a"), result(11, nrUnlink, resultWatched, 0)},
+			"", 1,
+		},
+		{
+			"replaced by one from another call",
+			[]event{unlink(11, nrBind, "a"), unlink(11, nrUnlink, "b"), result(11, nrUnlink, resultWatched, 0)},
+			"/b:0", 1,
+		},
+		{"at its thread's exit", []event{unlink(11, nrUnlink, "a"), {kind: filesystemAuditKindK_EXIT, tid: 11}}, "", 1},
+		{"at the end", []event{unlink(11, nrUnlink, "a")}, "", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, untracked := recordEvents(t, c.events...)
+			want := strings.TrimSpace("/bin/sh:0 " + c.want + " :0")
+			if c.want == "" {
+				want = "/bin/sh:0 :0"
+			}
+			if got != want || untracked != c.untracked {
+				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
+	}
+}
+
+// A truncating open whose result never came is one call, counted once.
+func TestRecorderCountsALostCallOnce(t *testing.T) {
+	call := []event{openName(11, "/f"), unlink(11, nrOpenat, "f"), waitingOpen(11, "/f")}
+	for name, events := range map[string][]event{
+		"at its thread's exit": append(call, event{kind: filesystemAuditKindK_EXIT, tid: 11}),
+		"at the end":           call,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, untracked := recordEvents(t, events...)
+			if got != "/bin/sh:0 /f:0 :0" || untracked != float64(1) {
+				t.Fatalf("recording = %s, untracked %v, want /f as done and one untracked", got, untracked)
+			}
+		})
+	}
+}
+
+func TestRecorderDropsAnExitedThreadsOpen(t *testing.T) {
+	got, untracked := recordEvents(t, event{kind: filesystemAuditKindK_EXIT, tid: 11},
+		openName(11, "/a"), waitingOpen(11, "/a"), event{kind: filesystemAuditKindK_EXIT, tid: 11},
+		openName(11, "/b"), event{kind: filesystemAuditKindK_EXIT, tid: 11}, openResult(11, -int32(unix.ENOENT)))
+	if got != "/bin/sh:0 /a:0 :0" || untracked != float64(2) {
+		t.Fatalf("recording = %s, untracked %v, want /a as done and both untracked", got, untracked)
 	}
 }
 
@@ -211,8 +375,6 @@ func TestRecorderLeavesOutTheEndLineWithoutEveryCount(t *testing.T) {
 	for name, l := range map[string]loss{
 		"dropped":     {errDropped: errors.New("x")},
 		"untracked":   {errUntracked: errors.New("x")},
-		"open named":  {errNamed: errors.New("x")},
-		"open unheld": {errUnheld: errors.New("x")},
 		"host missed": {missed: count{err: errors.New("x")}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -231,27 +393,25 @@ func TestRecorderLeavesOutTheEndLineWithoutEveryCount(t *testing.T) {
 	}
 }
 
-func TestRecorderCountsUnheldOpensUntrackedWhenNoOpenWasNamed(t *testing.T) {
+func TestRecorderCountsUnnamedFailedOpensUntrackedWhenNoOpenWasNamed(t *testing.T) {
+	failed := openResult(11, -int32(unix.ENOENT))
 	for _, c := range []struct {
 		name      string
-		l         loss
+		events    []event
 		untracked float64
 	}{
-		{"none named", loss{untracked: 1, unheld: 3}, 4},
-		{"some named", loss{untracked: 1, named: 2, unheld: 3}, 1},
-		{"named unreadable", loss{untracked: 1, unheld: 3, errNamed: errors.New("x")}, 1},
+		{"none named", []event{failed, waitingOpen(11, "/a"), failed, {kind: filesystemAuditKindK_OPEN_CREATE, tid: 11}, failed, unlink(11, nrOpenat, "t"), failed}, 4},
+		{"some named", []event{failed, openName(11, "/b"), failed, failed}, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r, out, log := newTestRecorder()
-			if err := r.finish(c.l); err != nil {
+			add(t, r, failed, stepExec) // runc's own, before the step starts
+			add(t, r, c.events...)
+			if err := r.finish(loss{untracked: 1}); err != nil {
 				t.Fatal(err)
 			}
 			got := lines(t, out)
-			if !strings.Contains(log.String(), fmt.Sprintf(" untracked=%v ", c.untracked)) {
-				t.Fatalf("log = %q, want untracked %v", log, c.untracked)
-			}
-			// An unreadable counter leaves the end line out.
-			if c.l.errNamed == nil && (len(got) != 1 || got[0]["untracked"] != c.untracked) {
+			if got[len(got)-1]["untracked"] != c.untracked {
 				t.Fatalf("recording = %v, want untracked %v", got, c.untracked)
 			}
 			warned := strings.Contains(log.String(), "no open passed do_filp_open")

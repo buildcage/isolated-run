@@ -48,12 +48,11 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
 	// "t" is its wall-clock time.
 	boot uint64
-	// tid is the thread of an open whose open-result follows, and of that
-	// result; created marks such an open that made its file, and ret is the
-	// result's return value.
-	tid     uint32
-	created bool
-	ret     int32
+	// tid and nr are the thread and syscall an event was sent from, and ret
+	// a result's return value.
+	tid uint32
+	nr  int32
+	ret int32
 }
 
 const timeLayout = "2006-01-02T15:04:05.000Z07:00"
