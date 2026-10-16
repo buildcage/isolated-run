@@ -76,6 +76,22 @@ func benchDropDump() {
 			}
 		}
 	}
+	// How each wait ended, and for timeouts how much had queued by then.
+	var ended = map[byte]int{}
+	var timeoutsOver1m, timeoutsOver16m int
+	for _, e := range benchEvs {
+		if e.kind == 'T' || e.kind == 'D' || e.kind == 'F' {
+			ended[e.kind]++
+			if e.kind == 'T' && e.backlog > 1<<20 {
+				timeoutsOver1m++
+			}
+			if e.kind == 'T' && e.backlog > 16<<20 {
+				timeoutsOver16m++
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "dropscan: waits woken=%d timed_out=%d timed_out_over_1m=%d timed_out_over_16m=%d\n",
+		ended['D'], ended['T'], timeoutsOver1m, timeoutsOver16m)
 	fmt.Fprintf(os.Stderr, "dropscan: events=%d max_backlog_kb=%d longest_wait_ms=%.1f ended=%c backlog_at_end_kb=%d\n",
 		len(benchEvs), maxB>>10, float64(longest.Microseconds())/1000, longestWake, longestB>>10)
 	if first < 0 {
