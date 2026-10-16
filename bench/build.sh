@@ -11,7 +11,7 @@ for t in main:/tmp/main base:/tmp/base pr:$root; do
 	name=${t%%:*} tree=${t#*:}
 	fa=$tree/docker/filesystem-audit
 	cp bench/bench.go "$fa/zz_bench.go"
-	perl -0pi -e 's/(\t\tif err := rec\.add\(sample\.RawSample\); err != nil \{)/\t\tbenchCount(sample.RawSample)\n$1/; s/(\treturn rec\.finish\(readLoss\(coll, <-missedRun\)\))/\tbenchReport(coll)\n$1/' "$fa/main.go"
+	perl -0pi -e 's/(\t\tif err := rec\.add\(sample\.RawSample\); err != nil \{)/\t\tbenchCount(sample.RawSample)\n$1/; s/(\t(?:return rec\.finish\(readLoss|l := readLoss)\(coll, <-missedRun\))/\tbenchReport(coll)\n$1/' "$fa/main.go"
 	grep -q benchCount "$fa/main.go" && grep -q benchReport "$fa/main.go"
 	docker run --rm -v "$fa":/src -v "$root/out":/out -w /src \
 		golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b sh -c "
