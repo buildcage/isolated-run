@@ -158,7 +158,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	defer bw.Flush()
 
 	// Before the ready file, which lets the step start.
-	clock, err := newBootClock(os.Stderr)
+	clock, err := newBootClock()
 	if err != nil {
 		return err
 	}
@@ -225,5 +225,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock 
 			return err
 		}
 	}
-	return rec.finish(readLoss(coll, <-missedRun))
+	l := readLoss(coll, <-missedRun)
+	l.errClock = clock.err()
+	return rec.finish(l)
 }

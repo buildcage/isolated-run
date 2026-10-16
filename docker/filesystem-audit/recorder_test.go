@@ -358,6 +358,20 @@ func TestRecorderDropsAnExitedThreadsOpen(t *testing.T) {
 	}
 }
 
+func TestRecorderLogsALostClock(t *testing.T) {
+	r, out, log := newTestRecorder()
+	add(t, r, stepExec)
+	if err := r.finish(loss{errClock: errors.New("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lines(t, out); len(got) != 2 || got[1]["kind"] != "end" {
+		t.Fatalf("recording = %v, want the exec and the end line", got)
+	}
+	if !strings.Contains(log.String(), "lost track of the realtime clock") {
+		t.Fatalf("log = %q", log)
+	}
+}
+
 func TestRecorderLeavesOutTheEndLineWithoutEveryCount(t *testing.T) {
 	for name, l := range map[string]loss{
 		"dropped":     {errDropped: errors.New("x")},

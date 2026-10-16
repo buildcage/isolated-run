@@ -312,11 +312,17 @@ type loss struct {
 	dropped, untracked, internal uint64
 	errDropped, errUntracked     error
 	missed                       count
+	// errClock is why the realtime clock's sets stopped being followed.
+	errClock error
 }
 
 // finish reports a one-line tally to the log and writes the end line, then
 // flushes the recording.
 func (r *recorder) finish(l loss) error {
+	// Times are off only if the clock was set after it was lost.
+	if l.errClock != nil {
+		fmt.Fprintln(r.log, "filesystem-audit: lost track of the realtime clock:", l.errClock)
+	}
 	// An open whose call never returned while the tracer ran reached its
 	// file, but whether it succeeded is unknown.
 	waiting := make([]record, 0, len(r.calls))
@@ -362,6 +368,7 @@ func (r *recorder) finish(l loss) error {
 		fmt.Fprintln(r.log, "filesystem-audit: read loss counters:", err)
 		return r.w.Flush()
 	}
+
 	if err := json.NewEncoder(r.w).Encode(end{Kind: "end", Dropped: l.dropped, Untracked: untracked, HostMissed: l.missed.n}); err != nil {
 		return err
 	}
