@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -16,7 +15,7 @@ import (
 // newTestRecorder records to out and logs to log, at a fixed clock offset.
 func newTestRecorder() (r *recorder, out, log *bytes.Buffer) {
 	out, log = &bytes.Buffer{}, &bytes.Buffer{}
-	return newRecorder(bufio.NewWriter(out), log, func() (int64, error) { return 0, nil }), out, log
+	return newRecorder(bufio.NewWriter(out), log, func(uint64) int64 { return 0 }), out, log
 }
 
 // lines decodes each line of the recording.
@@ -359,15 +358,17 @@ func TestRecorderDropsAnExitedThreadsOpen(t *testing.T) {
 	}
 }
 
-func TestRecorderStopsAtAClockItCannotRead(t *testing.T) {
-	out := &bytes.Buffer{}
-	broken := errors.New("no clock")
-	r := newRecorder(bufio.NewWriter(out), &bytes.Buffer{}, func() (int64, error) { return 0, broken })
-	if err := r.add(runcOpen.bytes()); err != nil {
-		t.Fatalf("a dropped event read the clock: %v", err)
+func TestRecorderLogsALostClock(t *testing.T) {
+	r, out, log := newTestRecorder()
+	add(t, r, stepExec)
+	if err := r.finish(loss{errClock: errors.New("x")}); err != nil {
+		t.Fatal(err)
 	}
-	if err := r.add(stepExec.bytes()); !errors.Is(err, broken) {
-		t.Fatalf("add = %v, want the clock's error", err)
+	if got := lines(t, out); len(got) != 2 || got[1]["kind"] != "end" {
+		t.Fatalf("recording = %v, want the exec and the end line", got)
+	}
+	if !strings.Contains(log.String(), "lost track of the realtime clock") {
+		t.Fatalf("log = %q", log)
 	}
 }
 
@@ -419,29 +420,6 @@ func TestRecorderCountsUnnamedFailedOpensUntrackedWhenNoOpenWasNamed(t *testing.
 				t.Fatalf("log = %q", log)
 			}
 		})
-	}
-}
-
-func TestWallTime(t *testing.T) {
-	// 1.5 s after boot, with boot at 2026-10-06T00:00:00Z.
-	offset := int64(1_791_244_800) * 1_000_000_000
-	if got, want := wallClock(1_500_000_000, offset).Format(timeLayout), "2026-10-06T00:00:01.500Z"; got != want {
-		t.Fatalf("wallClock = %s, want %s", got, want)
-	}
-}
-
-func TestBootOffset(t *testing.T) {
-	off, err := bootOffset()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var boot unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
-		t.Fatal(err)
-	}
-	got := wallClock(uint64(boot.Nano()), off)
-	if d := time.Since(got); d < -time.Second || d > time.Second {
-		t.Fatalf("boot time now converts to %s, %s from the wall clock", got, d)
 	}
 }
 
