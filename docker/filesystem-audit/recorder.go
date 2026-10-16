@@ -22,7 +22,8 @@ type recorder struct {
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
-	// line is reused for each line written.
+	// line is reused for each line written, and stamp keeps the second's
+	// text from line to line.
 	line    []byte
 	stamp   timeText
 	counts  map[tally]int
