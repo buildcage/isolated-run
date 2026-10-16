@@ -177,7 +177,7 @@ func tidy(p string) string {
 	return strings.Join(kept, "/")
 }
 
-// untidy reports whether p holds "//" or "/./", in one pass.
+// untidy reports whether p holds "//" or "/./".
 func untidy(p string) bool {
 	for i := 0; i+1 < len(p); i++ {
 		if p[i] != '/' {
