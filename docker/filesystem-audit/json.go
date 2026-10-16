@@ -55,11 +55,10 @@ type record struct {
 	ret int32
 }
 
-const timeLayout = "2006-01-02T15:04:05.000Z07:00"
-
-// timeText writes a time in nanoseconds since the Unix epoch as timeLayout
-// does in UTC. Lines come in runs within one second, so the text up to the
-// second is kept and formatted again only when the second changes.
+// timeText writes a time in nanoseconds since the Unix epoch in UTC to the
+// millisecond, as "2006-01-02T15:04:05.000Z". Lines come in runs within one
+// second, so the text up to the second is kept and formatted again only when
+// the second changes.
 type timeText struct {
 	sec    int64
 	prefix []byte
@@ -70,7 +69,7 @@ func (t *timeText) append(b []byte, ns int64) []byte {
 	if frac < 0 {
 		sec, frac = sec-1, frac+1e9
 	}
-	if t.prefix == nil || sec != t.sec {
+	if len(t.prefix) == 0 || sec != t.sec {
 		t.sec = sec
 		t.prefix = time.Unix(sec, 0).UTC().AppendFormat(t.prefix[:0], "2006-01-02T15:04:05.")
 	}

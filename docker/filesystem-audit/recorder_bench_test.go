@@ -66,3 +66,12 @@ func benchCall(b *testing.B, events ...event) {
 		}
 	}
 }
+
+// BenchmarkTimeText writes the time of lines 1 µs apart.
+func BenchmarkTimeText(b *testing.B) {
+	var text timeText
+	var buf []byte
+	for i := int64(0); b.Loop(); i++ {
+		buf = text.append(buf[:0], testTime+i*1000)
+	}
+}
