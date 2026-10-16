@@ -159,20 +159,26 @@ func TestRingReadCallsIdleAndEndsAfterFlush(t *testing.T) {
 }
 
 // The flag is set while the reader waits on an empty ring and cleared once
-// it wakes, so the BPF side wakes it only then.
+// it wakes, before it reads, so the BPF side wakes only a waiting reader.
 func TestRingFlagsItsWait(t *testing.T) {
 	f := newFakeRing(t, 64)
-	sawWaiting := make(chan bool, 1)
+	var sawFlag atomic.Bool
 	go func() {
-		for atomic.LoadUint32(&f.waiting) == 0 {
+		deadline := time.Now().Add(5 * time.Second)
+		for atomic.LoadUint32(&f.waiting) == 0 && time.Now().Before(deadline) {
 			time.Sleep(time.Millisecond)
 		}
-		sawWaiting <- true
-		f.Flush()
+		sawFlag.Store(atomic.LoadUint32(&f.waiting) != 0)
+		f.put("woken", 0)
+		unix.Write(f.wake, []byte{1, 0, 0, 0, 0, 0, 0, 0})
 	}()
-	err := f.read(func([]byte) error { return nil }, time.Hour, func() error { return nil })
-	if err != nil || !<-sawWaiting || f.waiting != 0 {
-		t.Fatalf("err=%v waiting=%d after read", err, f.waiting)
+	var flagged []uint32
+	err := f.read(func([]byte) error {
+		flagged = append(flagged, atomic.LoadUint32(&f.waiting))
+		return f.Flush()
+	}, time.Hour, func() error { return nil })
+	if err != nil || !sawFlag.Load() || !slices.Equal(flagged, []uint32{0}) {
+		t.Fatalf("err=%v, flag set while waiting: %v, while reading: %v, want true, [0]", err, sawFlag.Load(), flagged)
 	}
 }
 
