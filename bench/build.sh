@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 root=$PWD
 mkdir -p out
 git worktree add -q /tmp/main origin/main
-git worktree add -q /tmp/base origin/fix/record-path-changes-and-open-names-without-holding
+git worktree add -q /tmp/base origin/stack/filesystem-audit-reader/clock-offset
 for t in main:/tmp/main base:/tmp/base pr:$root; do
 	name=${t%%:*} tree=${t#*:}
 	fa=$tree/docker/filesystem-audit
