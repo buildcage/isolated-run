@@ -27,7 +27,7 @@ run() { # bin label rep cmd...
 	local ready=$res/$id.ready pidf=$res/$id.pid
 	local tp=
 	if [ "$bin" != none ]; then
-		sudo /usr/bin/time -f "bench: cpu user=%U sys=%S" "$out/$bin" --cgroup "$cg" --out "$res/$id.jsonl" \
+		sudo BENCH_PROFILE="${profile:+$res/$id.pprof}" /usr/bin/time -f "bench: cpu user=%U sys=%S" "$out/$bin" --cgroup "$cg" --out "$res/$id.jsonl" \
 			--ready "$ready" --pidfile "$pidf" 2>"$res/$id.log" &
 		tp=$!
 		for _ in $(seq 300); do [ -e "$ready" ] && break; sleep 0.1; done
@@ -50,6 +50,23 @@ run() { # bin label rep cmd...
 	echo "$id: $(grep -h 'stress:\|wall_ms' "$res/$id.wl" | tr '\n' ' ') $(grep -h 'total=' "$res/$id.log" 2>/dev/null || true)"
 }
 
+if [ "${BENCH_MODE:-}" = profile ]; then
+	profile=1
+	for bin in main pr; do
+		for w in open fail; do
+			run $bin $w-w4 1 "$out/stress" -mode $w -workers 4 -dur 5s -dir "$work"
+		done
+	done
+	for f in "$res"/*.pprof; do
+		echo "::group::$(basename "$f")"
+		grep -h "gc=" "${f%.pprof}.log" || true
+		go tool pprof -top -nodecount 25 "$f" 2>/dev/null
+		go tool pprof -top -cum -nodecount 25 "$f" 2>/dev/null
+		echo "::endgroup::"
+	done
+	exit 0
+fi
+profile=
 for rep in 1 2 3; do
 	for bin in none main base pr; do
 		for w in 1 4 16 64; do
