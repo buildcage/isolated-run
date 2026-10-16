@@ -368,7 +368,6 @@ func (r *recorder) finish(l loss) error {
 		fmt.Fprintln(r.log, "filesystem-audit: read loss counters:", err)
 		return r.w.Flush()
 	}
-
 	if err := json.NewEncoder(r.w).Encode(end{Kind: "end", Dropped: l.dropped, Untracked: untracked, HostMissed: l.missed.n}); err != nil {
 		return err
 	}
