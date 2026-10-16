@@ -199,14 +199,23 @@ func stopRequested(sig <-chan os.Signal) bool {
 	}
 }
 
+const deadlineEvery = 1024
+
 // readLoop drains the ring buffer into the recording until the reader is
 // flushed.
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
 	rec := newRecorder(w, os.Stderr, clock.offset)
 	// Reused for each sample: what decode keeps of it is copied.
 	var sample ringbuf.Record
+	// Setting the deadline reads the clock and takes the reader's lock, so it
+	// is renewed every deadlineEvery samples and after each timeout. One left
+	// stale only brings the next idle flush sooner.
+	n := 0
 	for {
-		rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		if n%deadlineEvery == 0 {
+			rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		}
+		n++
 		if err := rd.ReadInto(&sample); err != nil {
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
@@ -217,6 +226,7 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock 
 				if err := w.Flush(); err != nil {
 					return err
 				}
+				n = 0
 				continue
 			}
 			return err
