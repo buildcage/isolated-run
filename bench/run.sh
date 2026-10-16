@@ -54,6 +54,22 @@ run() { # bin label rep cmd...
 # wakeup raises.
 irqwork() { awk '/IRQ work/ { for (i = 2; i <= NF && $i ~ /^[0-9]+$/; i++) n += $i } END { print n + 0 }' /proc/interrupts; }
 
+if [ "${BENCH_MODE:-}" = dropscan ]; then
+	for rep in 1 2 3 4 5 6 7 8; do
+		for w in 4 64; do
+			run l5 open-w$w $rep "$out/stress" -mode open -workers $w -dur 5s -dir "$work"
+			grep -h "dropscan: events" "$res/open-w$w.l5.$rep.log"
+		done
+	done
+	for f in "$res"/open-w*.l5.*.log; do
+		if grep -q "dropscan: .*ms " "$f"; then
+			echo "::group::$(basename "$f")"
+			grep -h "total=\|dropscan" "$f"
+			echo "::endgroup::"
+		fi
+	done
+	exit 0
+fi
 if [ "${BENCH_MODE:-}" = profile ]; then
 	profile=1
 	sudo apt-get install -qy "linux-tools-$(uname -r)" >/dev/null 2>&1 || sudo apt-get install -qy linux-tools-generic >/dev/null 2>&1 || true
