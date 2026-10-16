@@ -100,28 +100,37 @@ func cstr(b []byte) string {
 // path, and returns the bytes left after them. A truncated walk is marked
 // with a leading ellipsis.
 func components(b []byte, n int, truncated bool) (string, []byte) {
-	// Leaf first; fewer than n if the buffer ran out. Each takes at least a
-	// byte of b, so b bounds the count however large n is.
-	names := make([]string, 0, min(n, len(b)))
-	for i := 0; i < n && len(b) > 0; i++ {
-		j := bytes.IndexByte(b, 0)
-		if j < 0 {
-			j = len(b)
-		}
-		names = append(names, string(b[:j]))
-		if j < len(b) {
-			j++
-		}
-		b = b[j:]
-	}
-	for l, r := 0, len(names)-1; l < r; l, r = l+1, r-1 {
-		names[l], names[r] = names[r], names[l]
-	}
 	prefix := "/"
 	if truncated {
 		prefix = "…/"
 	}
-	return prefix + strings.Join(names, "/"), b
+	// Leaf first; fewer than n if the buffer ran out. Each is located first,
+	// so the path is built root first in one allocation.
+	var buf [32][2]int
+	spans := buf[:0]
+	off, size := 0, len(prefix)
+	for i := 0; i < n && off < len(b); i++ {
+		j := bytes.IndexByte(b[off:], 0)
+		if j < 0 {
+			j = len(b) - off
+		}
+		spans = append(spans, [2]int{off, off + j})
+		size += j + 1
+		off += j
+		if off < len(b) {
+			off++
+		}
+	}
+	var p strings.Builder
+	p.Grow(size)
+	p.WriteString(prefix)
+	for i := len(spans) - 1; i >= 0; i-- {
+		p.Write(b[spans[i][0]:spans[i][1]])
+		if i > 0 {
+			p.WriteByte('/')
+		}
+	}
+	return p.String(), b[off:]
 }
 
 // after returns what follows a NUL-terminated name of length n, or nothing
@@ -153,7 +162,7 @@ func joinBase(name string, rest []byte, has bool, n int, truncated bool) (string
 // stays, since it makes the kernel follow a final symlink, and ".." stays,
 // since through a symlink it leads somewhere a lexical clean would not.
 func tidy(p string) string {
-	if !strings.Contains(p, "//") && !strings.Contains(p, "/./") {
+	if !untidy(p) {
 		return p
 	}
 	parts := strings.Split(p, "/")
@@ -166,6 +175,19 @@ func tidy(p string) string {
 		kept = append(kept, part)
 	}
 	return strings.Join(kept, "/")
+}
+
+// untidy reports whether p holds "//" or "/./".
+func untidy(p string) bool {
+	for i := 0; i+1 < len(p); i++ {
+		if p[i] != '/' {
+			continue
+		}
+		if p[i+1] == '/' || p[i+1] == '.' && i+2 < len(p) && p[i+2] == '/' {
+			return true
+		}
+	}
+	return false
 }
 
 // filePath decodes an open, read or write's path: the d_path string, or the

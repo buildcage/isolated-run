@@ -205,18 +205,22 @@ func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock 
 	rec := newRecorder(w, os.Stderr, clock.offset)
 	// Reused for each sample: what decode keeps of it is copied.
 	var sample ringbuf.Record
+	// Setting the deadline reads the clock and takes the reader's lock, so it
+	// is renewed only after it passes. Under load it then passes while
+	// samples keep coming, which only writes out the buffer sooner.
+	rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
 	for {
-		rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
 		if err := rd.ReadInto(&sample); err != nil {
 			if errors.Is(err, ringbuf.ErrFlushed) {
 				break
 			}
-			// Idle: write out what is buffered, so a tracer killed later loses
-			// at most what came since.
+			// The ring is empty past the deadline: write out what is buffered,
+			// so a tracer killed later loses at most what came since.
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				if err := w.Flush(); err != nil {
 					return err
 				}
+				rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
 				continue
 			}
 			return err

@@ -143,6 +143,14 @@ func appendTrue(b []byte, key string, v bool) []byte {
 
 const hexDigits = "0123456789abcdef"
 
+// jsonPlain marks the ASCII bytes appendString copies as they are.
+var jsonPlain = func() (t [utf8.RuneSelf]bool) {
+	for c := 0x20; c < utf8.RuneSelf; c++ {
+		t[c] = c != '"' && c != '\\' && c != '<' && c != '>' && c != '&'
+	}
+	return t
+}()
+
 // appendString appends s quoted as encoding/json quotes it, HTML characters
 // and U+2028/U+2029 escaped. A byte that is not part of valid UTF-8 becomes
 // U+FFFD, or for a name the step chose (raw), the escaped lone surrogate
@@ -154,7 +162,7 @@ func appendString(b []byte, s string, raw bool) []byte {
 	for i := 0; i < len(s); {
 		c := s[i]
 		if c < utf8.RuneSelf {
-			if c >= 0x20 && c != '"' && c != '\\' && c != '<' && c != '>' && c != '&' {
+			if jsonPlain[c] {
 				i++
 				continue
 			}
