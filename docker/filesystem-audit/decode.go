@@ -104,43 +104,33 @@ func components(b []byte, n int, truncated bool) (string, []byte) {
 	if truncated {
 		prefix = "…/"
 	}
-	// Leaf first; fewer than n if the buffer ran out. Measured first, so the
-	// path is written back to front into one allocation.
-	count, size, used := 0, len(prefix), 0
-	for ; count < n && used < len(b); count++ {
-		j := bytes.IndexByte(b[used:], 0)
+	// Leaf first; fewer than n if the buffer ran out. Each is located first,
+	// so the path is built root first in one allocation.
+	var buf [32][2]int
+	spans := buf[:0]
+	off, size := 0, len(prefix)
+	for i := 0; i < n && off < len(b); i++ {
+		j := bytes.IndexByte(b[off:], 0)
 		if j < 0 {
-			j = len(b) - used
+			j = len(b) - off
 		}
-		size += j
-		used += j
-		if used < len(b) {
-			used++
+		spans = append(spans, [2]int{off, off + j})
+		size += j + 1
+		off += j
+		if off < len(b) {
+			off++
 		}
 	}
-	if count > 1 {
-		size += count - 1
+	var p strings.Builder
+	p.Grow(size)
+	p.WriteString(prefix)
+	for i := len(spans) - 1; i >= 0; i-- {
+		p.Write(b[spans[i][0]:spans[i][1]])
+		if i > 0 {
+			p.WriteByte('/')
+		}
 	}
-	out := make([]byte, size)
-	copy(out, prefix)
-	end := size
-	for i := 0; i < count; i++ {
-		j := bytes.IndexByte(b, 0)
-		if j < 0 {
-			j = len(b)
-		}
-		end -= copy(out[end-j:end], b[:j])
-		if i < count-1 {
-			end--
-			out[end] = '/'
-		}
-		if j < len(b) {
-			j++
-		}
-		b = b[j:]
-	}
-	// out is not written again, so the string can share it.
-	return unsafe.String(unsafe.SliceData(out), len(out)), b
+	return p.String(), b[off:]
 }
 
 // after returns what follows a NUL-terminated name of length n, or nothing
