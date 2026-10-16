@@ -16,8 +16,7 @@ import (
 // start and after each set rather than for every line.
 type bootClock struct {
 	steps atomic.Pointer[[]clockStep]
-	// lost holds why sets stopped being followed, after which a set can
-	// leave later times off by its step.
+	// lost is why sets stopped being followed, if they did.
 	lost atomic.Pointer[error]
 }
 
@@ -110,16 +109,32 @@ func (c *bootClock) step() error {
 	return nil
 }
 
-// readOffset reads CLOCK_BOOTTIME and CLOCK_REALTIME back to back.
+// maxBracket is how far apart the two CLOCK_BOOTTIME reads around
+// CLOCK_REALTIME may be. The offset holds until the next set, so a thread
+// preempted in between would skew every time until then.
+const maxBracket = 50 * time.Microsecond
+
+// readOffset reads CLOCK_REALTIME between two CLOCK_BOOTTIME reads and takes
+// their midpoint, reading again while they lie more than maxBracket apart.
+// The last try is taken whatever its gap.
 func readOffset() (boot uint64, offset int64, err error) {
-	var b, r unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &b); err != nil {
-		return 0, 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+	var b1, r, b2 unix.Timespec
+	for range 10 {
+		if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &b1); err != nil {
+			return 0, 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+		}
+		if err := unix.ClockGettime(unix.CLOCK_REALTIME, &r); err != nil {
+			return 0, 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
+		}
+		if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &b2); err != nil {
+			return 0, 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
+		}
+		if b2.Nano()-b1.Nano() <= maxBracket.Nanoseconds() {
+			break
+		}
 	}
-	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &r); err != nil {
-		return 0, 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
-	}
-	return uint64(b.Nano()), r.Nano() - b.Nano(), nil
+	mid := b1.Nano() + (b2.Nano()-b1.Nano())/2
+	return uint64(mid), r.Nano() - mid, nil
 }
 
 func (c *bootClock) add(s clockStep) {
