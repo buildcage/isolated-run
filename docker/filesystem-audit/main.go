@@ -203,8 +203,8 @@ func stopRequested(sig <-chan os.Signal) bool {
 // flushed.
 func readLoop(rd *ring, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
 	rec := newRecorder(w, os.Stderr, clock.offset)
-	// Idle: write out what is buffered, so a tracer killed later loses at
-	// most what came since. What rec.add keeps of a record is copied.
+	// Written out every 100 ms, so a tracer killed later loses at most what
+	// came since. What rec.add keeps of a record is copied.
 	if err := rd.read(rec.add, 100*time.Millisecond, w.Flush); err != nil {
 		return err
 	}

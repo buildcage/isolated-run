@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -25,18 +26,19 @@ type ring struct {
 	consPos, prodPos *uintptr
 	data             []byte
 	mask             uintptr
-	epfd, flushFd    int
+	// release is how much is read before it is handed back mid-batch. The
+	// BPF side counts what is not handed back as queued when it decides to
+	// wake the reader, so this stays well below WAKEUP_BYTES.
+	release uintptr
+	epfd    int
+	// flushFd is closed under mu, so a late Flush does not write to a
+	// reused descriptor.
+	mu      sync.Mutex
+	flushFd int
 }
-
-// releaseBytes is how much is read before it is handed back mid-batch, so a
-// long batch does not hold the producers' space.
-const releaseBytes = 1 << 20
 
 func newRing(m *ebpf.Map) (*ring, error) {
 	size := int(m.MaxEntries())
-	if size == 0 || size&(size-1) != 0 {
-		return nil, fmt.Errorf("ring buffer size %d is not a power of two", size)
-	}
 	page := os.Getpagesize()
 	cons, err := unix.Mmap(m.FD(), 0, page, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
@@ -54,6 +56,7 @@ func newRing(m *ebpf.Map) (*ring, error) {
 		prodPos:   (*uintptr)(unsafe.Pointer(&data[0])),
 		data:      data[page:],
 		mask:      uintptr(size - 1),
+		release:   64 << 10,
 	}
 	if err := r.openWait(m.FD()); err != nil {
 		r.Close()
@@ -83,17 +86,25 @@ func (r *ring) openWait(fd int) error {
 
 // Flush makes read return once it has read what is queued.
 func (r *ring) Flush() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flushFd < 0 {
+		return os.ErrClosed
+	}
 	_, err := unix.Write(r.flushFd, []byte{1, 0, 0, 0, 0, 0, 0, 0})
 	return err
 }
 
 func (r *ring) Close() error {
 	var errs []error
-	for _, fd := range []int{r.epfd, r.flushFd} {
-		if fd >= 0 {
-			errs = append(errs, unix.Close(fd))
+	r.mu.Lock()
+	for _, fd := range []*int{&r.epfd, &r.flushFd} {
+		if *fd >= 0 {
+			errs = append(errs, unix.Close(*fd))
+			*fd = -1
 		}
 	}
+	r.mu.Unlock()
 	if r.dataPages != nil {
 		errs = append(errs, unix.Munmap(r.dataPages))
 	}
@@ -103,91 +114,97 @@ func (r *ring) Close() error {
 	return errors.Join(errs...)
 }
 
-// read passes each record to f until Flush, and calls idle each time the ring
-// stays empty for wait. A record is valid only until f returns.
-func (r *ring) read(f func([]byte) error, wait time.Duration, idle func() error) error {
-	flushing := false
+// busySpins is how often read yields for a record still being written
+// before it sleeps on the ring instead, should its writer be preempted.
+const busySpins = 64
+
+// read passes each record to f until Flush. It calls tick when the ring stays
+// empty for every, and at least that often while records keep coming. A
+// record is valid only until f returns.
+func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error) error {
+	flushing, spins := false, 0
+	last := time.Now()
 	for {
-		n, busy, err := r.drain(f)
+		moved, busy, err := r.drain(f)
 		if err != nil {
 			return err
 		}
-		// A record still being written is done within microseconds.
-		if busy {
-			runtime.Gosched()
-			continue
-		}
-		if n > 0 {
-			continue
-		}
-		if flushing {
-			return nil
-		}
-		ready, err := r.wait(wait)
-		if err != nil {
-			return err
-		}
-		switch ready {
-		case waitTimeout:
-			if err := idle(); err != nil {
+		if moved && time.Since(last) >= every {
+			if err := tick(); err != nil {
 				return err
 			}
-		case waitFlush:
-			flushing = true
+			last = time.Now()
+		}
+		wait := every
+		switch {
+		case busy && spins < busySpins:
+			spins++
+			runtime.Gosched()
+			continue
+		case busy:
+			wait = time.Millisecond
+		case moved:
+			spins = 0
+			continue
+		case flushing:
+			return nil
+		}
+		spins = 0
+		flushed, timedOut, err := r.wait(wait)
+		if err != nil {
+			return err
+		}
+		flushing = flushing || flushed
+		if timedOut && !busy {
+			if err := tick(); err != nil {
+				return err
+			}
+			last = time.Now()
 		}
 	}
 }
 
-// drain reads the records committed so far and returns how many it read,
-// and whether it stopped at one reserved but not yet committed.
-func (r *ring) drain(f func([]byte) error) (n int, busy bool, err error) {
+// drain reads the records committed so far. It reports whether it moved past
+// any, and whether it stopped at one reserved but not yet committed.
+func (r *ring) drain(f func([]byte) error) (moved, busy bool, err error) {
 	prod := atomic.LoadUintptr(r.prodPos)
-	cons := atomic.LoadUintptr(r.consPos)
-	released := cons
+	start := atomic.LoadUintptr(r.consPos)
+	cons, released := start, start
 	defer func() {
 		if cons != released {
 			atomic.StoreUintptr(r.consPos, cons)
 		}
 	}()
 	for cons < prod {
-		start := cons & r.mask
+		at := cons & r.mask
 		// Loaded atomically: the kernel clears the busy bit after writing the
 		// record, so the record is complete once the bit reads clear.
-		hdr := atomic.LoadUint32((*uint32)(unsafe.Pointer(&r.data[start])))
+		hdr := atomic.LoadUint32((*uint32)(unsafe.Pointer(&r.data[at])))
 		if hdr&unix.BPF_RINGBUF_BUSY_BIT != 0 {
-			return n, true, nil
+			return cons != start, true, nil
 		}
 		size := uintptr(hdr &^ (unix.BPF_RINGBUF_BUSY_BIT | unix.BPF_RINGBUF_DISCARD_BIT))
-		begin := start + unix.BPF_RINGBUF_HDR_SZ
+		begin := at + unix.BPF_RINGBUF_HDR_SZ
 		if begin+size > uintptr(len(r.data)) {
-			return n, false, fmt.Errorf("ring buffer record of %d bytes at %d runs past the ring", size, start)
+			return cons != start, false, fmt.Errorf("ring buffer record of %d bytes at %d runs past the ring", size, at)
 		}
 		if hdr&unix.BPF_RINGBUF_DISCARD_BIT == 0 {
 			if err := f(r.data[begin : begin+size]); err != nil {
-				return n, false, err
+				return cons != start, false, err
 			}
-			n++
 		}
 		cons += unix.BPF_RINGBUF_HDR_SZ + (size+7)&^7
-		if cons-released >= releaseBytes {
+		if cons-released >= r.release {
 			atomic.StoreUintptr(r.consPos, cons)
 			released = cons
 		}
 	}
-	return n, false, nil
+	return cons != start, false, nil
 }
-
-type waitResult int
-
-const (
-	waitData waitResult = iota
-	waitTimeout
-	waitFlush
-)
 
 // wait blocks until the kernel wakes the reader, Flush is called, or timeout
 // passes.
-func (r *ring) wait(timeout time.Duration) (waitResult, error) {
+func (r *ring) wait(timeout time.Duration) (flushed, timedOut bool, err error) {
 	var events [2]unix.EpollEvent
 	for {
 		n, err := unix.EpollWait(r.epfd, events[:], int(timeout.Milliseconds()))
@@ -195,16 +212,13 @@ func (r *ring) wait(timeout time.Duration) (waitResult, error) {
 			continue
 		}
 		if err != nil {
-			return 0, fmt.Errorf("epoll wait: %w", err)
-		}
-		if n == 0 {
-			return waitTimeout, nil
+			return false, false, fmt.Errorf("epoll wait: %w", err)
 		}
 		for _, ev := range events[:n] {
 			if int(ev.Fd) == r.flushFd {
-				return waitFlush, nil
+				return true, false, nil
 			}
 		}
-		return waitData, nil
+		return false, n == 0, nil
 	}
 }
