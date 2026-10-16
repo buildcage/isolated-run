@@ -4,14 +4,25 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
 
 	"github.com/cilium/ebpf"
 )
+
+// benchProfile is the CPU profile being written, from the first sample on.
+var benchProfile *os.File
 
 // benchKinds counts the ring buffer's samples and bytes per kind.
 var benchKinds = map[string]*[2]uint64{}
 
 func benchCount(raw []byte) {
+	if path := os.Getenv("BENCH_PROFILE"); path != "" && benchProfile == nil {
+		f, err := os.Create(path)
+		if err == nil && pprof.StartCPUProfile(f) == nil {
+			benchProfile = f
+		}
+	}
 	if len(raw) < 4 {
 		return
 	}
@@ -26,6 +37,13 @@ func benchCount(raw []byte) {
 }
 
 func benchReport(coll *ebpf.Collection) {
+	if benchProfile != nil {
+		pprof.StopCPUProfile()
+		benchProfile.Close()
+	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fmt.Fprintf(os.Stderr, "bench: gc=%d gc_pause_ms=%d alloc_mb=%d\n", ms.NumGC, ms.PauseTotalNs/1e6, ms.TotalAlloc>>20)
 	var events, bytes uint64
 	for k, c := range benchKinds {
 		fmt.Fprintf(os.Stderr, "bench: kind=%s events=%d bytes=%d\n", k, c[0], c[1])
