@@ -157,8 +157,3 @@ func (c *bootClock) offset(boot uint64) int64 {
 	}
 	return steps[0].offset
 }
-
-// wallClock is an event's boot timestamp as UTC wall-clock time.
-func wallClock(boot uint64, offset int64) time.Time {
-	return time.Unix(0, int64(boot)+offset).UTC()
-}
