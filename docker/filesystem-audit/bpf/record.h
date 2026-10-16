@@ -15,7 +15,7 @@
 #include "event.h"
 #include "kernel.h"
 
-#define WAKEUP_BYTES (1 << 20)
+#define WAKEUP_BYTES (512 << 10)
 
 /** Keeps struct event in BTF for bpf2go's -type. */
 const struct event *unused_event __attribute__((unused));
@@ -122,8 +122,11 @@ static __always_inline void submit_cap(struct event *e, u32 cap)
 	if (size > cap)
 		size = cap;
 	// Waking the reader per event costs more than the event itself; it
-	// polls on a timer and is woken only once a backlog builds up.
-	u64 flags = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA) > WAKEUP_BYTES ?
+	// polls on a timer and is woken early by the event that takes the
+	// backlog past WAKEUP_BYTES. Events that pass it together may all miss
+	// that, which leaves the reader to its timer.
+	u64 avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
+	u64 flags = avail <= WAKEUP_BYTES && avail + size > WAKEUP_BYTES ?
 		    BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
 	if (bpf_ringbuf_output(&events, e, size, flags) != 0)
 		bump(&drops);
