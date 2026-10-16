@@ -29,7 +29,7 @@ jobs:
       # restrict example's, since this example is about the filesystem.
       - name: Record what an install touches
         id: sandboxed
-        uses: buildcage/isolated-run@4533b0b5f31b7084de488a0d7a46b8917afcbb4d # v2.2.0-rc4
+        uses: buildcage/isolated-run@ffdb50bd32bd29c8a76d8563daeb585f163207da # v2.2.0-rc8
         with:
           proxy_mode: restrict
           allowed_url_rules: |
