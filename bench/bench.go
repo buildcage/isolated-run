@@ -28,13 +28,14 @@ var benchProfilePath = os.Getenv("BENCH_PROFILE")
 var benchCountN int
 
 func benchCount(rd *ringbuf.Reader, raw []byte) {
+	// rd is nil for the tracer that maps the ring itself.
 	if path := benchProfilePath; path != "" && benchProfile == nil {
 		f, err := os.Create(path)
 		if err == nil && pprof.StartCPUProfile(f) == nil {
 			benchProfile = f
 		}
 	}
-	if benchCountN++; benchCountN%256 == 0 {
+	if benchCountN++; rd != nil && benchCountN%256 == 0 {
 		a := rd.AvailableBytes()
 		b := &benchBacklog
 		b.n++
