@@ -116,8 +116,13 @@ func TestTimeTextMatchesFormat(t *testing.T) {
 		}
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
-	for range 10000 {
-		times = append(times, testTime+rng.Int64N(4e9)-2e9, rng.Int64())
+	for range 1000 {
+		ns := rng.Int64N(math.MaxInt64 - 1e10)
+		for range 20 {
+			ns += rng.Int64N(3e8)
+			times = append(times, ns)
+		}
+		times = append(times, rng.Int64())
 	}
 	var text timeText
 	for _, ns := range times {
@@ -170,8 +175,6 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 func FuzzAppendRecord(f *testing.F) {
 	f.Add("open", "sh", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
 	f.Add("exec", "c\xff<", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
-	// Shared across inputs, as the recorder shares one across lines.
-	var text timeText
 	f.Fuzz(func(t *testing.T, kind, comm, path, name, to, toName, access, mode, owner, syscall string,
 		pid, ppid, flags uint32, errno int32, bits uint16, ns int64) {
 		r := record{
@@ -180,7 +183,7 @@ func FuzzAppendRecord(f *testing.F) {
 			Failed: bits&1 != 0, Image: bits&2 != 0, Memfd: bits&4 != 0, Deleted: bits&8 != 0,
 			Exchange: bits&16 != 0, Compat: bits&32 != 0, Killed: bits&64 != 0,
 		}
-		if got, want := appendRecord(nil, &r, &text, ns), reference(r, ns); string(got) != string(want) {
+		if got, want := appendRecord(nil, &r, &timeText{}, ns), reference(r, ns); string(got) != string(want) {
 			t.Fatalf("got  %s\nwant %s", got, want)
 		}
 	})
