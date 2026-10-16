@@ -19,12 +19,14 @@ import (
 // the producer position and hands space back once per batch rather than per
 // record.
 type ring struct {
-	consPage, dataPages []byte
+	consPage, dataPages, waitingPage []byte
 	// consPos and prodPos are the positions the kernel shares; data maps the
 	// ring twice over, so no record wraps.
 	consPos, prodPos *uintptr
 	data             []byte
 	mask             uintptr
+	// waiting is the BPF side's reader_waiting flag.
+	waiting *uint32
 	// release is how much is read before it is handed back mid-batch. The
 	// BPF side counts what is not handed back as queued when it decides to
 	// wake the reader, so this stays well below WAKEUP_BYTES.
@@ -38,7 +40,7 @@ type ring struct {
 	flushed atomic.Bool
 }
 
-func newRing(m *ebpf.Map) (*ring, error) {
+func newRing(m, waiting *ebpf.Map) (*ring, error) {
 	size := int(m.MaxEntries())
 	page := os.Getpagesize()
 	cons, err := unix.Mmap(m.FD(), 0, page, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
@@ -50,14 +52,22 @@ func newRing(m *ebpf.Map) (*ring, error) {
 		unix.Munmap(cons)
 		return nil, fmt.Errorf("map the ring buffer: %w", err)
 	}
+	flag, err := unix.Mmap(waiting.FD(), 0, page, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		unix.Munmap(data)
+		unix.Munmap(cons)
+		return nil, fmt.Errorf("map the reader's waiting flag: %w", err)
+	}
 	r := &ring{
-		consPage:  cons,
-		dataPages: data,
-		consPos:   (*uintptr)(unsafe.Pointer(&cons[0])),
-		prodPos:   (*uintptr)(unsafe.Pointer(&data[0])),
-		data:      data[page:],
-		mask:      uintptr(size - 1),
-		release:   64 << 10,
+		consPage:    cons,
+		dataPages:   data,
+		waitingPage: flag,
+		waiting:     (*uint32)(unsafe.Pointer(&flag[0])),
+		consPos:     (*uintptr)(unsafe.Pointer(&cons[0])),
+		prodPos:     (*uintptr)(unsafe.Pointer(&data[0])),
+		data:        data[page:],
+		mask:        uintptr(size - 1),
+		release:     64 << 10,
 	}
 	if err := r.openWait(m.FD()); err != nil {
 		r.Close()
@@ -113,6 +123,9 @@ func (r *ring) Close() error {
 	if r.consPage != nil {
 		errs = append(errs, unix.Munmap(r.consPage))
 	}
+	if r.waitingPage != nil {
+		errs = append(errs, unix.Munmap(r.waitingPage))
+	}
 	return errors.Join(errs...)
 }
 
@@ -161,7 +174,15 @@ func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error
 		case flushing:
 			return nil
 		}
+		// Set before the last look at the ring, so a record committed
+		// after it finds the flag set and wakes the reader.
+		atomic.StoreUint32(r.waiting, 1)
+		if atomic.LoadUintptr(r.prodPos) != atomic.LoadUintptr(r.consPos) {
+			atomic.StoreUint32(r.waiting, 0)
+			continue
+		}
 		timedOut, err := r.wait(every)
+		atomic.StoreUint32(r.waiting, 0)
 		if err != nil {
 			return err
 		}

@@ -144,7 +144,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		return errStoppedEarly
 	}
 
-	rd, err := newRing(coll.Maps["events"])
+	rd, err := newRing(coll.Maps["events"], coll.Maps["reader_waiting"])
 	if err != nil {
 		return err
 	}
