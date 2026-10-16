@@ -52,16 +52,29 @@ run() { # bin label rep cmd...
 
 if [ "${BENCH_MODE:-}" = profile ]; then
 	profile=1
-	for bin in main pr; do
-		for w in open fail; do
-			run $bin $w-w4 1 "$out/stress" -mode $w -workers 4 -dur 5s -dir "$work"
-		done
+	sudo apt-get install -qy "linux-tools-$(uname -r)" >/dev/null 2>&1 || sudo apt-get install -qy linux-tools-generic >/dev/null 2>&1 || true
+	perf=$(ls /usr/lib/linux-tools/*/perf 2>/dev/null | head -1)
+	for w in open fail ops; do
+		run none $w-w4 1 "$out/stress" -mode $w -workers 4 -dur 5s -dir "$work"
+		run pr $w-w4 1 "$out/stress" -mode $w -workers 4 -dur 5s -dir "$work"
+		if [ -n "$perf" ]; then
+			# The whole system while the tracer runs, kernel and BPF included.
+			sudo "$perf" record -q -a -g -o "$res/$w.perf" -- bash -c "$(declare -f run); out='$out' res='$res' work='$work' profile= run pr $w-w4 2 '$out/stress' -mode $w -workers 4 -dur 5s -dir '$work'" >/dev/null 2>&1 || true
+		fi
 	done
+	run pr npm-ci 1 sh -c "cd '$npmdir' && rm -rf node_modules && npm ci --ignore-scripts --no-audit --no-fund --offline"
 	for f in "$res"/*.pprof; do
 		echo "::group::$(basename "$f")"
-		grep -h "gc=" "${f%.pprof}.log" || true
-		go tool pprof -top -nodecount 25 "$f" 2>/dev/null
-		go tool pprof -top -cum -nodecount 25 "$f" 2>/dev/null
+		grep -h "gc=\|cpu user" "${f%.pprof}.log" || true
+		grep -h "prog=" "${f%.pprof}.log" | sort -t= -k4 -n -r | head -15 || true
+		go tool pprof -top -nodecount 30 "$f" 2>/dev/null
+		go tool pprof -top -cum -nodecount 30 "$f" 2>/dev/null
+		echo "::endgroup::"
+	done
+	for f in "$res"/*.perf; do
+		[ -e "$f" ] || continue
+		echo "::group::$(basename "$f")"
+		sudo "$perf" report -i "$f" --no-children --sort comm,dso,sym --stdio 2>/dev/null | grep -v '^#' | grep '%' | head -60
 		echo "::endgroup::"
 	done
 	exit 0
