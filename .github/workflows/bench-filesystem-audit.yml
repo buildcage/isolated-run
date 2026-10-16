@@ -25,3 +25,5 @@ jobs:
         run: bench/build.sh
       - name: Run the workloads
         run: bench/run.sh
+        env:
+          BENCH_MODE: profile
