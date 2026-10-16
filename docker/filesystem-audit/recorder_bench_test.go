@@ -16,7 +16,7 @@ func BenchmarkRecorderAdd(b *testing.B) {
 		event{kind: filesystemAuditKindK_READ, pid: 9, ppid: 1, comm: "node", n1: 4, data: comps("index.js", "x", "node_modules", "app")}.bytes(),
 		event{kind: filesystemAuditKindK_WRITE, pid: 9, ppid: 1, comm: "node", n1: 2, data: comps("out.log", "tmp")}.bytes(),
 	}
-	r := newRecorder(bufio.NewWriter(io.Discard), io.Discard, func() (int64, error) { return 0, nil })
+	r := newRecorder(bufio.NewWriter(io.Discard), io.Discard, func(uint64) int64 { return 0 })
 	if err := r.add(event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "node", data: []byte("/usr/bin/node\x00")}.bytes()); err != nil {
 		b.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func benchCall(b *testing.B, events ...event) {
 	for i, e := range events {
 		samples[i] = e.bytes()
 	}
-	r := newRecorder(bufio.NewWriter(io.Discard), io.Discard, func() (int64, error) { return 0, nil })
+	r := newRecorder(bufio.NewWriter(io.Discard), io.Discard, func(uint64) int64 { return 0 })
 	if err := r.add(event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "node", data: []byte("/usr/bin/node\x00")}.bytes()); err != nil {
 		b.Fatal(err)
 	}

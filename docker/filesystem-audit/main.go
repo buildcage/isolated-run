@@ -198,7 +198,11 @@ func stopRequested(sig <-chan os.Signal) bool {
 // readLoop drains the ring buffer into the recording until the reader is
 // flushed.
 func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
-	rec := newRecorder(w, os.Stderr, bootOffset)
+	clock, err := newBootClock(os.Stderr)
+	if err != nil {
+		return err
+	}
+	rec := newRecorder(w, os.Stderr, clock.offset)
 	// Reused for each sample: what decode keeps of it is copied.
 	var sample ringbuf.Record
 	for {
