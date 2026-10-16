@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // recorder writes the ring buffer's samples as the recording's lines, and
@@ -18,8 +15,9 @@ import (
 type recorder struct {
 	w   *bufio.Writer
 	log io.Writer
-	// offset is bootOffset, read once per line written.
-	offset func() (int64, error)
+	// offset is the realtime clock's offset over the boot clock at a boot
+	// timestamp (see bootClock).
+	offset func(boot uint64) int64
 	files  execFiles
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
@@ -63,7 +61,7 @@ type tally struct {
 	failed bool
 }
 
-func newRecorder(w *bufio.Writer, log io.Writer, offset func() (int64, error)) *recorder {
+func newRecorder(w *bufio.Writer, log io.Writer, offset func(boot uint64) int64) *recorder {
 	return &recorder{
 		w:      w,
 		log:    log,
@@ -298,16 +296,13 @@ func isRestart(ret int32) bool {
 
 // write writes rec as the recording's next line.
 func (r *recorder) write(rec record) error {
-	// Read per event, so a wall-clock step mid-run shifts later times as it
-	// shifts the proxy's.
-	offset, err := r.offset()
-	if err != nil {
-		return err
-	}
+	// Taken at the event, so a wall-clock step mid-run shifts later times as
+	// it shifts the proxy's.
+	offset := r.offset(rec.boot)
 	r.counts[tally{rec.Kind, rec.Failed}]++
 	r.total++
 	r.line = appendRecord(r.line[:0], &rec, wallClock(rec.boot, offset))
-	_, err = r.w.Write(r.line)
+	_, err := r.w.Write(r.line)
 	return err
 }
 
@@ -410,23 +405,4 @@ func (f execFiles) attach(r *record) bool {
 		}
 	}
 	return false
-}
-
-// bootOffset is CLOCK_REALTIME minus CLOCK_BOOTTIME, read back to back, so
-// adding it to an event's boot timestamp gives the wall-clock time of the
-// access.
-func bootOffset() (int64, error) {
-	var boot, real unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &boot); err != nil {
-		return 0, fmt.Errorf("read CLOCK_BOOTTIME: %w", err)
-	}
-	if err := unix.ClockGettime(unix.CLOCK_REALTIME, &real); err != nil {
-		return 0, fmt.Errorf("read CLOCK_REALTIME: %w", err)
-	}
-	return real.Nano() - boot.Nano(), nil
-}
-
-// wallClock is an event's boot timestamp as UTC wall-clock time.
-func wallClock(boot uint64, offset int64) time.Time {
-	return time.Unix(0, int64(boot)+offset).UTC()
 }
