@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"sync/atomic"
 	"time"
 
@@ -17,9 +16,9 @@ import (
 // start and after each set rather than for every line.
 type bootClock struct {
 	steps atomic.Pointer[[]clockStep]
-	// unfollowed is set once sets can no longer be told, after which the
-	// clocks are read for every line, as without a timerfd.
-	unfollowed atomic.Bool
+	// lost holds why sets stopped being followed, after which a set can
+	// leave later times off by its step.
+	lost atomic.Pointer[error]
 }
 
 // clockStep is the offset from boot on.
@@ -34,28 +33,22 @@ var farFuture = unix.Timespec{Sec: 9_200_000_000}
 
 // newBootClock reads the offset and follows the realtime clock's sets from
 // then on.
-func newBootClock(log io.Writer) (*bootClock, error) {
+func newBootClock() (*bootClock, error) {
 	c := &bootClock{}
 	fd, err := unix.TimerfdCreate(unix.CLOCK_REALTIME, unix.TFD_CLOEXEC)
-	if err == nil {
-		// Armed before the first read, so a set in between is not missed.
-		if err = armClockSet(fd); err != nil {
-			unix.Close(fd)
-		}
+	if err != nil {
+		return nil, fmt.Errorf("watch the realtime clock: %w", err)
 	}
-	following := err == nil
-	if !following {
-		c.unfollow(log, err)
+	// Armed before the first read, so a set in between is not missed.
+	if err := armClockSet(fd); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("watch the realtime clock: %w", err)
 	}
 	if err := c.step(); err != nil {
-		if following {
-			unix.Close(fd)
-		}
+		unix.Close(fd)
 		return nil, err
 	}
-	if following {
-		go c.follow(fd, log)
-	}
+	go c.follow(fd)
 	return c, nil
 }
 
@@ -74,7 +67,7 @@ func armClockSet(fd int) error {
 
 // follow takes a new offset each time the realtime clock is set. An event
 // between a set and its new offset still takes the old one.
-func (c *bootClock) follow(fd int, log io.Writer) {
+func (c *bootClock) follow(fd int) {
 	defer unix.Close(fd)
 	var buf [8]byte
 	for {
@@ -84,7 +77,7 @@ func (c *bootClock) follow(fd int, log io.Writer) {
 		}
 		// A set cancels the timer; one past farFuture makes it expire.
 		if err != nil && !errors.Is(err, unix.ECANCELED) {
-			c.unfollow(log, err)
+			c.lost.Store(&err)
 			return
 		}
 		// Rearmed first, so a set while the offset is read fires again.
@@ -93,15 +86,18 @@ func (c *bootClock) follow(fd int, log io.Writer) {
 			err = c.step()
 		}
 		if err != nil {
-			c.unfollow(log, err)
+			c.lost.Store(&err)
 			return
 		}
 	}
 }
 
-func (c *bootClock) unfollow(log io.Writer, err error) {
-	fmt.Fprintln(log, "filesystem-audit: reading the clocks for every line, as their sets cannot be followed:", err)
-	c.unfollowed.Store(true)
+// err is why sets stopped being followed, or nil.
+func (c *bootClock) err() error {
+	if p := c.lost.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // step reads the offset and records it from now on.
@@ -138,11 +134,6 @@ func (c *bootClock) add(s clockStep) {
 // offset is the offset at boot: the latest step at or before it, or the
 // first for an event from before the tracer started.
 func (c *bootClock) offset(boot uint64) int64 {
-	if c.unfollowed.Load() {
-		if _, offset, err := readOffset(); err == nil {
-			return offset
-		}
-	}
 	steps := *c.steps.Load()
 	for i := len(steps) - 1; i > 0; i-- {
 		if steps[i].boot <= boot {
