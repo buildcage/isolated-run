@@ -57,13 +57,35 @@ type record struct {
 
 const timeLayout = "2006-01-02T15:04:05.000Z07:00"
 
-// appendRecord appends r as one line of the recording, at the wall-clock
-// time at. It writes what encoding/json writes for r with "t" first, field
-// for field, except that a name the step chose keeps a byte that is not UTF-8
-// (see appendString).
-func appendRecord(b []byte, r *record, at time.Time) []byte {
+// timeText writes a time in nanoseconds since the Unix epoch as timeLayout
+// does in UTC. Lines come in runs within one second, so the text up to the
+// second is kept and formatted again only when the second changes.
+type timeText struct {
+	sec    int64
+	prefix []byte
+}
+
+func (t *timeText) append(b []byte, ns int64) []byte {
+	sec, frac := ns/1e9, ns%1e9
+	if frac < 0 {
+		sec, frac = sec-1, frac+1e9
+	}
+	if t.prefix == nil || sec != t.sec {
+		t.sec = sec
+		t.prefix = time.Unix(sec, 0).UTC().AppendFormat(t.prefix[:0], "2006-01-02T15:04:05.")
+	}
+	ms := frac / 1e6
+	b = append(b, t.prefix...)
+	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
+}
+
+// appendRecord appends r as one line of the recording, at ns nanoseconds
+// since the Unix epoch. It writes what encoding/json writes for r with "t"
+// first, field for field, except that a name the step chose keeps a byte that
+// is not UTF-8 (see appendString).
+func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 	b = append(b, `{"t":"`...)
-	b = at.AppendFormat(b, timeLayout)
+	b = t.append(b, ns)
 	b = append(b, `","kind":`...)
 	b = appendString(b, r.Kind, false)
 	b = append(b, `,"pid":`...)
