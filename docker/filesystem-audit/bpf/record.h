@@ -126,8 +126,11 @@ static __always_inline void submit_cap(struct event *e, u32 cap)
 	// backlog past WAKEUP_BYTES. Events that pass it together may all miss
 	// that, which leaves the reader to its timer.
 	u64 avail = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA);
-	u64 flags = avail <= WAKEUP_BYTES && avail + size > WAKEUP_BYTES ?
-		    BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
+	// The record takes its header too, then rounds up to 8 bytes, which
+	// changes nothing here: the backlog and the mark are multiples of 8.
+	int crossing = avail <= WAKEUP_BYTES &&
+			avail + size + BPF_RINGBUF_HDR_SZ > WAKEUP_BYTES;
+	u64 flags = crossing ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
 	if (bpf_ringbuf_output(&events, e, size, flags) != 0)
 		bump(&drops);
 }
