@@ -136,7 +136,8 @@ static __always_inline void submit_cap(struct event *e, u32 cap)
 	// Waking the reader per event costs more than the event itself. It
 	// polls on a timer and is woken early only while it waits with more
 	// than WAKEUP_BYTES queued; any event past the mark wakes it, so one
-	// that reads the flag before the reader sets it is made up by the next.
+	// that reads the flag before the reader sets it is made up by the next,
+	// or by the timer if none follows.
 	u64 flags = BPF_RB_NO_WAKEUP;
 	u32 zero = 0;
 	u32 *waiting = bpf_map_lookup_elem(&reader_waiting, &zero);

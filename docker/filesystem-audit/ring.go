@@ -27,9 +27,8 @@ type ring struct {
 	mask             uintptr
 	// waiting is the BPF side's reader_waiting flag.
 	waiting *uint32
-	// release is how much is read before it is handed back mid-batch. The
-	// BPF side counts what is not handed back as queued when it decides to
-	// wake the reader, so this stays well below WAKEUP_BYTES.
+	// release is how much is read before it is handed back mid-batch, so a
+	// long batch does not hold the producers' space.
 	release uintptr
 	epfd    int
 	// flushFd is closed under mu, so a late Flush does not write to a
