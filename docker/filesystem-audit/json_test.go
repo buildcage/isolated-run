@@ -104,8 +104,7 @@ const timeLayout = "2006-01-02T15:04:05.000Z07:00"
 
 var testTime = time.Date(2026, 10, 6, 0, 0, 1, 500_000_000, time.UTC).UnixNano()
 
-// One timeText is used for every line, so a second kept from the line before
-// must not show in the next.
+// One timeText for every time, as the recorder keeps one for every line.
 func TestTimeTextMatchesFormat(t *testing.T) {
 	var times []int64
 	for _, base := range []int64{testTime, 0, -1, -1e9, -1e9 - 1, math.MinInt64, math.MaxInt64} {
@@ -171,7 +170,7 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 func FuzzAppendRecord(f *testing.F) {
 	f.Add("open", "sh", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
 	f.Add("exec", "c\xff<", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
-	// Shared, so a second kept from one input meets the next.
+	// Shared across inputs, as the recorder shares one across lines.
 	var text timeText
 	f.Fuzz(func(t *testing.T, kind, comm, path, name, to, toName, access, mode, owner, syscall string,
 		pid, ppid, flags uint32, errno int32, bits uint16, ns int64) {
