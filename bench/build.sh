@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 root=$PWD
 mkdir -p out
 git worktree add -q /tmp/main origin/main
-for t in main:/tmp/main pr:$root; do
+git worktree add -q /tmp/base origin/fix/record-path-changes-and-open-names-without-holding
+for t in main:/tmp/main base:/tmp/base pr:$root; do
 	name=${t%%:*} tree=${t#*:}
 	fa=$tree/docker/filesystem-audit
 	cp bench/bench.go "$fa/zz_bench.go"

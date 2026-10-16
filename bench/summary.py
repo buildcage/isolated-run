@@ -59,7 +59,7 @@ cols = [
 print(f"### {os.environ.get('RUNNER_ARCH', '')} {os.uname().release}, {os.cpu_count()} CPUs\n")
 print("| workload | tracer | " + " | ".join(c[1] for c in cols) + " |")
 print("|" + "---|" * (len(cols) + 2))
-order = {"none": 0, "main": 1, "pr": 2}
+order = {"none": 0, "main": 1, "base": 2, "pr": 3}
 for label, binary in sorted(runs, key=lambda k: (k[0], order[k[1]])):
     rs = runs[(label, binary)]
     print(f"| {label} | {binary} | " + " | ".join(med(rs, k, f) for k, _, f in cols) + " |")
