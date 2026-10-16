@@ -179,7 +179,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 			n, base = 0, 0
 		}
 		missed <- count{n - base, err}
-		rd.Flush() // read drains what is queued, then returns.
+		rd.Flush()
 	}()
 
 	return readLoop(rd, bw, coll, clock, missed)

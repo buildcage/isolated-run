@@ -17,8 +17,7 @@ import (
 // ring reads the BPF ring buffer where it is mapped. One goroutine reads it,
 // so unlike cilium/ebpf's reader it takes no lock per record, and it reads
 // the producer position and hands space back once per batch rather than per
-// record. On arm that lock and those atomics took a third of the reader's
-// time.
+// record.
 type ring struct {
 	consPage, dataPages []byte
 	// consPos and prodPos are the positions the kernel shares; data maps the
