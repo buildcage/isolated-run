@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"errors"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ type fakeRing struct {
 func newFakeRing(t *testing.T, size int) *fakeRing {
 	t.Helper()
 	f := &fakeRing{size: size}
-	f.ring = &ring{data: make([]byte, 2*size), mask: uintptr(size - 1)}
+	f.ring = &ring{data: make([]byte, 2*size), mask: uintptr(size - 1), release: uintptr(size)}
 	f.consPos, f.prodPos = &f.cons, &f.prod
 	wake, err := unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
 	if err != nil {
@@ -68,6 +69,34 @@ func TestRingReadsRecordsAndSkipsDiscarded(t *testing.T) {
 	}
 	if f.cons != f.prod {
 		t.Fatalf("consumer at %d, want %d", f.cons, f.prod)
+	}
+}
+
+// Space is handed back every release bytes, not only at the batch's end.
+func TestRingHandsSpaceBackMidBatch(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.release = 16
+	f.put("one", 0)
+	f.put("two", 0)
+	var seen []uintptr
+	if _, _, err := f.drain(func([]byte) error {
+		seen = append(seen, f.cons)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(seen, []uintptr{0, 16}) || f.cons != 32 {
+		t.Fatalf("consumer at %v while reading, %d after; want [0 16], 32", seen, f.cons)
+	}
+}
+
+// A batch of discarded records still counts as moving, so read drains again.
+func TestRingMovesPastDiscardedRecords(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.put("gone", unix.BPF_RINGBUF_DISCARD_BIT)
+	moved, _, err := f.drain(func([]byte) error { return nil })
+	if err != nil || !moved || f.cons != f.prod {
+		t.Fatalf("moved=%v err=%v consumer at %d, want %d", moved, err, f.cons, f.prod)
 	}
 }
 
@@ -120,6 +149,31 @@ func TestRingReadCallsIdleAndEndsAfterFlush(t *testing.T) {
 	})
 	if err != nil || idle != 2 || !slices.Equal(got, []string{"first", "queued at the flush"}) {
 		t.Fatalf("got %q idle=%d err=%v", got, idle, err)
+	}
+}
+
+// While records keep coming, tick still runs every interval.
+func TestRingReadTicksWhileRecordsKeepComing(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.put("x", 0)
+	err := f.read(func([]byte) error {
+		time.Sleep(time.Millisecond)
+		f.put("x", 0)
+		return nil
+	}, 5*time.Millisecond, func() error {
+		f.prod = f.cons // stop feeding, then end
+		return f.Flush()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRingFlushAfterCloseFails(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.Close()
+	if err := f.Flush(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Flush after Close = %v, want %v", err, os.ErrClosed)
 	}
 }
 
