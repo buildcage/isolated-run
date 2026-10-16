@@ -16,8 +16,10 @@ var benchProfile *os.File
 // benchKinds counts the ring buffer's samples and bytes per kind.
 var benchKinds = map[string]*[2]uint64{}
 
+var benchProfilePath = os.Getenv("BENCH_PROFILE")
+
 func benchCount(raw []byte) {
-	if path := os.Getenv("BENCH_PROFILE"); path != "" && benchProfile == nil {
+	if path := benchProfilePath; path != "" && benchProfile == nil {
 		f, err := os.Create(path)
 		if err == nil && pprof.StartCPUProfile(f) == nil {
 			benchProfile = f
