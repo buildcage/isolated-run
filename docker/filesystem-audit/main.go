@@ -24,7 +24,6 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
-	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
 )
@@ -145,10 +144,11 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		return errStoppedEarly
 	}
 
-	rd, err := ringbuf.NewReader(coll.Maps["events"])
+	rd, err := newRing(coll.Maps["events"])
 	if err != nil {
 		return err
 	}
+	defer rd.Close()
 	f, err := create(outPath)
 	if err != nil {
 		return err
@@ -179,7 +179,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 			n, base = 0, 0
 		}
 		missed <- count{n - base, err}
-		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
+		rd.Flush()
 	}()
 
 	return readLoop(rd, bw, coll, clock, missed)
@@ -201,33 +201,12 @@ func stopRequested(sig <-chan os.Signal) bool {
 
 // readLoop drains the ring buffer into the recording until the reader is
 // flushed.
-func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
+func readLoop(rd *ring, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
 	rec := newRecorder(w, os.Stderr, clock.offset)
-	// Reused for each sample: what decode keeps of it is copied.
-	var sample ringbuf.Record
-	// Setting the deadline reads the clock and takes the reader's lock, so it
-	// is renewed only after it passes. Under load it then passes while
-	// samples keep coming, which only writes out the buffer sooner.
-	rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
-	for {
-		if err := rd.ReadInto(&sample); err != nil {
-			if errors.Is(err, ringbuf.ErrFlushed) {
-				break
-			}
-			// The ring is empty past the deadline: write out what is buffered,
-			// so a tracer killed later loses at most what came since.
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				if err := w.Flush(); err != nil {
-					return err
-				}
-				rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
-				continue
-			}
-			return err
-		}
-		if err := rec.add(sample.RawSample); err != nil {
-			return err
-		}
+	// Written out every 100 ms, so a tracer killed later loses at most what
+	// came since. What rec.add keeps of a record is copied.
+	if err := rd.read(rec.add, 100*time.Millisecond, w.Flush); err != nil {
+		return err
 	}
 	l := readLoss(coll, <-missedRun)
 	l.errClock = clock.err()
