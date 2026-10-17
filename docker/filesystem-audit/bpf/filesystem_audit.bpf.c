@@ -42,8 +42,6 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "access.h"
 #include "syscalls.h"
 
-#define PF_SIGNALED 0x00000400 ///< Dying of a fatal signal; set before a core dump.
-
 /**
  * Sends the path change @p e. Its hook runs before the kernel's own permission
  * checks (may_delete, may_create, notify_change), so whether it happened is
@@ -53,7 +51,7 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
  */
 static __always_inline void send_op(struct event *e)
 {
-	if (bpf_get_current_task_btf()->flags & PF_SIGNALED)
+	if (dying())
 		return;
 	e->tid = (u32)bpf_get_current_pid_tgid();
 	e->nr = current_sys_nr();
@@ -373,7 +371,12 @@ static __always_inline void open_name(u32 slot, const char *name, int user)
 	e->tid = (u32)bpf_get_current_pid_tgid();
 	e->data_len = r;
 	e->n1 = user;
-	e->n2 = user && r == PATH_LEN;
+	// A full read of the caller's name is cut unless the name ends there.
+	if (user && r == PATH_LEN) {
+		char last = 1;
+		bpf_probe_read_user(&last, 1, name + PATH_LEN - 1);
+		e->n2 = last != 0;
+	}
 	submit(e);
 }
 
