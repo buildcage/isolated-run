@@ -49,7 +49,7 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
  * checks (may_delete, may_create, notify_change), so whether it happened is
  * known only from the call's K_RESULT. A core dump creates its file from the
  * dying task, outside any call that sends one, so nothing is sent for it; the
- * file's open, marked created, records it.
+ * file's open, with O_CREAT, records it.
  */
 static __always_inline void send_op(struct event *e)
 {

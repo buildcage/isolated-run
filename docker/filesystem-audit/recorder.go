@@ -161,6 +161,13 @@ func (r *recorder) add(raw []byte) error {
 	// same syscall in a row are confused only once a result was dropped.
 	if c.hasOp && c.op.nr != rec.nr {
 		r.unsettled++
+		// Its failure stands, as the failure of a call with no result does.
+		if c.hasFailure {
+			c.hasFailure = false
+			if err := r.write(c.failure); err != nil {
+				return err
+			}
+		}
 	}
 	c.op, c.hasOp = rec, true
 	return nil
@@ -357,7 +364,7 @@ func (r *recorder) finish(l loss) error {
 		}
 		waiting = c.leftovers(waiting)
 	}
-	sort.Slice(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })
+	sort.SliceStable(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })
 	for _, rec := range waiting {
 		if err := r.write(rec); err != nil {
 			return err
