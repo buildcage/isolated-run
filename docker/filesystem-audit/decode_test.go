@@ -63,7 +63,7 @@ func TestDecodeShort(t *testing.T) {
 	}
 }
 
-func TestDecodeOpenAndItsResult(t *testing.T) {
+func TestDecodeOpenSentFromItsCall(t *testing.T) {
 	r, err := decode(event{kind: filesystemAuditKindK_OPEN, flags: unix.O_WRONLY | unix.O_CREAT, tid: 12, data: []byte("/tmp/f\x00")}.bytes())
 	if err != nil {
 		t.Fatal(err)
@@ -71,12 +71,49 @@ func TestDecodeOpenAndItsResult(t *testing.T) {
 	if r.Kind != "open" || r.Path != "/tmp/f" || r.tid != 12 || r.Failed {
 		t.Errorf("open decode: %+v", r)
 	}
-	r, err = decode(event{kind: filesystemAuditKindK_RESULT, tid: 12, nr: 257, n1: resultOpen, pathRet: -int32(unix.ENXIO)}.bytes())
+}
+
+func TestAccessLetters(t *testing.T) {
+	for _, c := range []struct{ got, want string }{
+		{openAccess(unix.O_RDONLY, 0), "r"},
+		{openAccess(unix.O_RDWR|unix.O_CREAT|unix.O_TRUNC, 0), "rwct"},
+		{openAccess(unix.O_RDONLY, fmodeExec), "rx"},
+		{mmapAccess(unix.PROT_WRITE, unix.MAP_SHARED), "w"},
+		{mmapAccess(unix.PROT_WRITE, unix.MAP_PRIVATE), "r"},
+		{mmapAccess(unix.PROT_EXEC, 0), "x"},
+	} {
+		if c.got != c.want {
+			t.Errorf("got %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+func TestDecodeGivesAnUnknownKindNoName(t *testing.T) {
+	r, err := decode(event{kind: 1000}.bytes())
+	if err != nil || r.Kind != "" {
+		t.Fatalf("decode: %+v, %v", r, err)
+	}
+}
+
+// The kinds the recorder takes from their header never become lines.
+func TestDecodeRefusesTheKindsThatSettleOthers(t *testing.T) {
+	for _, k := range []filesystemAuditKind{filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT,
+		filesystemAuditKindK_OPEN_NAME, filesystemAuditKindK_OPEN_CREATE} {
+		if _, err := decode(event{kind: k}.bytes()); err == nil {
+			t.Errorf("kind %d decoded to a line", k)
+		}
+	}
+}
+
+// An open whose file has neither a d_path nor walked components keeps the
+// error that left it without one.
+func TestDecodeOpenWithoutAPath(t *testing.T) {
+	r, err := decode(event{kind: filesystemAuditKindK_OPEN, pathRet: -int32(unix.ENOMEM)}.bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "result" || r.tid != 12 || r.nr != 257 || r.ret != -int32(unix.ENXIO) {
-		t.Errorf("result decode: %+v", r)
+	if r.Path != "" || r.Err != -int32(unix.ENOMEM) {
+		t.Errorf("open decode: %+v", r)
 	}
 }
 
@@ -148,11 +185,7 @@ func TestFailedOpen(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := failedOpen(cstr(c.openName.data), c.openName.n2 != 0, c.res.bytes())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != c.want {
+			if got := failedOpen(cstr(c.openName.data), c.openName.n2 != 0, c.res.bytes()); got != c.want {
 				t.Errorf("failedOpen mismatch\n got: %+v\nwant: %+v", got, c.want)
 			}
 		})

@@ -212,13 +212,32 @@ func TestRecorderRecordsAnOpenThatFailedBeforeItsFile(t *testing.T) {
 }
 
 // A name the kernel copied gives way to none read from the caller.
+// The kernel's copy of a name is kept over the caller's; a caller's copy
+// that differs from it counts as untracked, since the kernel's may then be an
+// earlier call's.
 func TestRecorderKeepsTheKernelsCopyOfAName(t *testing.T) {
-	caller := openName(11, "/from-caller")
-	caller.n1 = 1
 	ret := -int32(unix.ENAMETOOLONG)
-	got, _ := recordEvents(t, openName(11, "/kernel"), caller, openResult(11, ret), caller, openResult(11, ret))
-	if want := fmt.Sprintf("/bin/sh:0 /kernel:%d /from-caller:%d :0", -ret, -ret); got != want {
-		t.Fatalf("recording = %s, want %s", got, want)
+	caller := func(name string) event {
+		e := openName(11, name)
+		e.n1 = 1
+		return e
+	}
+	for _, c := range []struct {
+		name      string
+		events    []event
+		want      string
+		untracked float64
+	}{
+		{"the same name", []event{openName(11, "/a"), caller("/a"), openResult(11, ret)}, "/a", 0},
+		{"another name", []event{openName(11, "/kernel"), caller("/from-caller"), openResult(11, ret)}, "/kernel", 1},
+		{"only the caller's", []event{caller("/from-caller"), openResult(11, ret)}, "/from-caller", 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, untracked := recordEvents(t, c.events...)
+			if want := fmt.Sprintf("/bin/sh:0 %s:%d :0", c.want, -ret); got != want || untracked != c.untracked {
+				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
 	}
 }
 
@@ -322,6 +341,21 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			"/exit:1", 1,
 		},
 		{"refused, its result not yet come at the end", []event{unlink(11, nrFchmod, "a"), exitFailure}, "/exit:1", 1},
+		{
+			"refused after a path change whose result was lost, then the same syscall done",
+			[]event{unlink(11, nrBind, "a"), refused, unlink(11, nrBind, "b"), result(11, nrBind, 0, 0)},
+			":1 /b:0", 0,
+		},
+		{
+			"refused, its result lost, then another call's path change done",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, unlink(11, nrUnlink, "b"), result(11, nrUnlink, resultWatched, 0)},
+			"/exit:1 /b:0", 1,
+		},
+		{
+			"two refused calls after a path change whose result was lost",
+			[]event{unlink(11, nrFchmod, "a"), refused, refused},
+			":1 :1", 1,
+		},
 		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
 		{
 			"hook run again in its call",
@@ -349,6 +383,63 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			}
 			if got != want || untracked != c.untracked {
 				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
+	}
+}
+
+func TestRecorderRefusesAShortSample(t *testing.T) {
+	r, _, _ := newTestRecorder()
+	if err := r.add([]byte{1, 2, 3}); err == nil {
+		t.Fatal("added a sample shorter than its header")
+	}
+}
+
+// failingWriter accepts ok writes, then fails.
+type failingWriter struct{ ok int }
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.ok == 0 {
+		return 0, errors.New("disk full")
+	}
+	w.ok--
+	return len(p), nil
+}
+
+// A failed write reaches the caller from wherever a line is written.
+func TestRecorderReturnsAFailedWrite(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		events []event
+	}{
+		{"a line", []event{waitingOpen(0, "/a")}},
+		{"a lost call's open", []event{waitingOpen(11, "/a"), openName(11, "b")}},
+		{"a result's", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, 0)}},
+		{"an exited thread's open", []event{waitingOpen(11, "/a"), {kind: filesystemAuditKindK_EXIT, tid: 11}}},
+		{"one still waiting at the end", []event{waitingOpen(11, "/a")}},
+		{"a held failure replaced", []event{unlink(11, nrFchmod, "a"),
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1},
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1}}},
+		{"a held failure before a path change", []event{unlink(11, nrFchmod, "a"),
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1}, unlink(11, nrUnlink, "b")}},
+		{"the end line", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// A buffer smaller than a line, so each goes straight to the
+			// writer, which takes the exec's alone.
+			r := newRecorder(bufio.NewWriterSize(&failingWriter{ok: 1}, 16), &bytes.Buffer{}, func(uint64) int64 { return 0 })
+			add(t, r, stepExec)
+			var err error
+			for _, e := range c.events {
+				if err = r.add(e.bytes()); err != nil {
+					break
+				}
+			}
+			if err == nil {
+				err = r.finish(loss{})
+			}
+			if err == nil {
+				t.Fatal("no error from a failed write")
 			}
 		})
 	}

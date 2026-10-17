@@ -317,13 +317,22 @@ static __always_inline int is_open_nr(long nr)
 #define O_CREAT 0100
 #define O_TRUNC 01000
 
+#define PF_SIGNALED 0x00000400 ///< Dying of a fatal signal; set before a core dump.
+
+/** Whether the current task is dying of a fatal signal, as when it dumps core. */
+static __always_inline int dying(void)
+{
+	return bpf_get_current_task_btf()->flags & PF_SIGNALED;
+}
+
 /**
  * Whether the current task is in an open(2) family call, whose name
- * do_filp_open is given (see open_name()).
+ * do_filp_open is given (see open_name()). A core dump is not, though it
+ * keeps the number of a call the signal interrupted.
  */
 static __always_inline int in_open_call(void)
 {
-	return is_open_nr(current_sys_nr());
+	return !dying() && is_open_nr(current_sys_nr());
 }
 
 #ifndef EPERM

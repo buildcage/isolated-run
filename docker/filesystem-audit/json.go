@@ -48,11 +48,9 @@ type record struct {
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
 	// "t" is its wall-clock time.
 	boot uint64
-	// tid and nr are the thread and syscall an event was sent from, and ret
-	// a result's return value.
+	// tid and nr are the thread and syscall an event was sent from.
 	tid uint32
 	nr  int32
-	ret int32
 }
 
 // timeText writes a time in nanoseconds since the Unix epoch in UTC to the

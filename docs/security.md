@@ -665,8 +665,11 @@ spells a path. What it can do:
   `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command then
   does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
 - Crash a process where the host's `core_pattern` names a path: the kernel writes the core file
-  itself, outside any system call, so its creation and contents go unrecorded. The step cannot
-  choose that path, which needs host privilege to set, and reading the file afterwards is recorded.
+  itself, outside any system call. Its open is recorded, with the flags the kernel opens it with
+  (`wc`), but what the kernel writes is not, nor its removal of an old core file first, which it
+  does only for a setuid program when `suid_dumpable` is 2. Setting `core_pattern` needs host
+  privilege, but a relative one, as the default `core` is, puts the file in the crashing process's
+  working directory, which the step chooses. Reading the file afterwards is recorded.
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete. Flooding can hide which accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or

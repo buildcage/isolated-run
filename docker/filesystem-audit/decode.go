@@ -25,7 +25,6 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK:            "link",
 	filesystemAuditKindK_TRUNCATE:        "truncate",
 	filesystemAuditKindK_CHOWN:           "chown",
-	filesystemAuditKindK_OPEN_NAME:       "open-name",
 	filesystemAuditKindK_READ:            "read",
 	filesystemAuditKindK_WRITE:           "write",
 	filesystemAuditKindK_MMAP:            "mmap",
@@ -45,9 +44,6 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK_FAILED:     "link",
 	filesystemAuditKindK_TRUNCATE_FAILED: "truncate",
 	filesystemAuditKindK_SYSCALL:         "syscall",
-	filesystemAuditKindK_RESULT:          "result",
-	filesystemAuditKindK_OPEN_CREATE:     "open-create",
-	filesystemAuditKindK_EXIT:            "exit",
 }
 
 func kindName(kind filesystemAuditKind) string {
@@ -90,10 +86,15 @@ const (
 const fmodeExec = 0x20 // FMODE_EXEC
 
 func cstr(b []byte) string {
+	return string(cbytes(b))
+}
+
+// cbytes is b up to its first NUL.
+func cbytes(b []byte) []byte {
 	if i := bytes.IndexByte(b, 0); i >= 0 {
-		b = b[:i]
+		return b[:i]
 	}
-	return string(b)
+	return b
 }
 
 // components joins n NUL-terminated names stored leaf first into an absolute
@@ -230,15 +231,13 @@ const (
 
 // failedOpen is the record of an open(2) that failed before reaching a file:
 // its name, cut short when cut, joined to the base directory its result raw
-// carries when the name is relative.
-func failedOpen(name string, cut bool, raw []byte) (record, error) {
-	res, err := decode(raw)
-	if err != nil {
-		return record{}, err
-	}
+// carries when the name is relative. raw is at least hdrLen long.
+func failedOpen(name string, cut bool, raw []byte) record {
+	le := binary.LittleEndian
 	relative := raw[offBases]&1 != 0 && name != "" && name[0] != '/'
-	p, _ := joinBase(name, raw[hdrLen:], relative, int(binary.LittleEndian.Uint32(raw[offMode:])), raw[offTruncated] != 0)
-	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
+	p, _ := joinBase(name, raw[hdrLen:], relative, int(le.Uint32(raw[offMode:])), raw[offTruncated] != 0)
+	c := common(raw)
+	r := record{Kind: "open", PID: c.PID, PPID: c.PPID, Comm: c.Comm, boot: c.boot}
 	r.Path = tidy(p)
 	r.Name = passedName(name, r.Path)
 	// A cut name has lost its end, the part that names the file.
@@ -248,11 +247,11 @@ func failedOpen(name string, cut bool, raw []byte) (record, error) {
 			r.Name += "…"
 		}
 	}
-	r.Err = -res.ret
-	r.Flags = res.Flags
-	r.Access = openAccess(res.Flags, 0)
+	r.Err = -int32(le.Uint32(raw[offPathLen:]))
+	r.Flags = le.Uint32(raw[offFlags:])
+	r.Access = openAccess(r.Flags, 0)
 	r.Failed = true
-	return r, nil
+	return r
 }
 
 // applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
@@ -298,6 +297,21 @@ func header(raw []byte) hdr {
 	}
 }
 
+// common is the record of a sample at least hdrLen long with only what every
+// event carries filled in.
+func common(raw []byte) record {
+	le := binary.LittleEndian
+	return record{
+		Kind: kindName(filesystemAuditKind(le.Uint32(raw[offKind:]))),
+		PID:  le.Uint32(raw[offPid:]),
+		PPID: le.Uint32(raw[offPpid:]),
+		Comm: cstr(raw[offComm : offComm+commLen]),
+		boot: le.Uint64(raw[offTs:]),
+		tid:  le.Uint32(raw[offTid:]),
+		nr:   int32(le.Uint32(raw[offNr:])),
+	}
+}
+
 // decode turns one raw ring-buffer sample into a record.
 func decode(raw []byte) (record, error) {
 	if len(raw) < hdrLen {
@@ -314,24 +328,17 @@ func decode(raw []byte) (record, error) {
 	data := raw[hdrLen:]
 	marks := le.Uint32(raw[offMarks:])
 	gid := le.Uint32(raw[offGid:]) // a failed chown's; a hooked one's is in mode
-	r := record{
-		Kind: kindName(kind),
-		PID:  le.Uint32(raw[offPid:]),
-		PPID: le.Uint32(raw[offPpid:]),
-		Comm: cstr(raw[offComm : offComm+commLen]),
-		boot: le.Uint64(raw[offTs:]),
-		tid:  le.Uint32(raw[offTid:]),
-		nr:   int32(le.Uint32(raw[offNr:])),
-	}
+	r := common(raw)
 	switch kind {
+	case filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT, filesystemAuditKindK_OPEN_NAME,
+		filesystemAuditKindK_OPEN_CREATE:
+		// The recorder takes these from their header; they make no line.
+		return record{}, fmt.Errorf("kind %d settles other events and is no line of its own", kind)
 	case filesystemAuditKindK_OPEN:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
-	case filesystemAuditKindK_RESULT:
-		r.ret = pathRet
-		r.Flags = flags
 	case filesystemAuditKindK_READ, filesystemAuditKindK_WRITE:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
