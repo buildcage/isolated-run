@@ -30,11 +30,14 @@ type recorder struct {
 	preExec int
 	// unsettled counts calls whose result never arrived.
 	unsettled int
-	// named counts the names open(2) calls passed do_filp_open with, and
-	// unnamed their failures that came with none.
-	named, unnamed int
-	total          int
-	started        bool
+	// named says an open(2) passed do_filp_open its name, and unnamed counts
+	// the failures that came with none.
+	named   bool
+	unnamed int
+	total   int
+	started bool
+	// none stands in for the call of a thread that sent nothing yet.
+	none call
 }
 
 // call is what one thread sent while in a syscall. It stays with its thread,
@@ -55,6 +58,18 @@ type call struct {
 // pending says whether c holds anything of a call.
 func (c *call) pending() bool {
 	return c.hasOp || c.hasName || c.hasOpen
+}
+
+// leftovers appends what c holds that stands without its call's result: a
+// failure recorded from its exit and the file an open reached.
+func (c *call) leftovers(recs []record) []record {
+	if c.hasFailure {
+		recs = append(recs, c.failure)
+	}
+	if c.hasOpen {
+		recs = append(recs, c.open)
+	}
+	return recs
 }
 
 // tally is what the step log counts lines by.
@@ -93,7 +108,7 @@ func (r *recorder) add(raw []byte) error {
 			return nil
 		case filesystemAuditKindK_OPEN_CREATE:
 			if r.started {
-				r.call(h.tid).created = true
+				r.callOf(h.tid).created = true
 			}
 			return nil
 		}
@@ -119,12 +134,18 @@ func (r *recorder) add(raw []byte) error {
 		// Recorded from its call's exit, just before the call's result,
 		// which can keep the path change its hook sent instead.
 		if c := r.calls[rec.tid]; c != nil && c.hasOp {
+			// One already held is from a call whose result never came.
+			if c.hasFailure {
+				if err := r.write(c.failure); err != nil {
+					return err
+				}
+			}
 			c.failure, c.hasFailure = rec, true
 			return nil
 		}
 		return r.write(rec)
 	}
-	c := r.call(rec.tid)
+	c := r.callOf(rec.tid)
 	if rec.Kind == "open" {
 		// The call's own file is the first it reaches; a later one, as a
 		// FUSE passthrough's backing file, is written as done.
@@ -136,7 +157,8 @@ func (r *recorder) add(raw []byte) error {
 	}
 	// A path change from another call means that call's result never came;
 	// one from the same call is its hook run again, as after breaking a
-	// delegation.
+	// delegation. Calls are told apart by syscall number alone, so two of the
+	// same syscall in a row are confused only once a result was dropped.
 	if c.hasOp && c.op.nr != rec.nr {
 		r.unsettled++
 	}
@@ -144,8 +166,8 @@ func (r *recorder) add(raw []byte) error {
 	return nil
 }
 
-// call is thread tid's call, created if absent.
-func (r *recorder) call(tid uint32) *call {
+// callOf is thread tid's call, created if absent.
+func (r *recorder) callOf(tid uint32) *call {
 	c := r.calls[tid]
 	if c == nil {
 		c = &call{}
@@ -158,12 +180,12 @@ func (r *recorder) call(tid uint32) *call {
 // the caller comes at the call's return, when getname refused it, and gives
 // way to the kernel's copy if the call had one.
 func (r *recorder) openName(h hdr, raw []byte) error {
-	c := r.call(h.tid)
+	c := r.callOf(h.tid)
 	if h.n1 != 0 && c.hasName {
 		return nil
 	}
 	if h.n1 == 0 {
-		r.named++
+		r.named = true
 	}
 	// An open still waiting is the last call's, whose result never came.
 	if err := r.lose(c); err != nil {
@@ -184,18 +206,16 @@ func (r *recorder) lose(c *call) error {
 		c.created = false
 		return nil
 	}
-	open, failure, hasOpen, hasFailure := c.open, c.failure, c.hasOpen, c.hasFailure
+	var buf [2]record
+	recs := c.leftovers(buf[:0])
 	c.clear()
 	r.unsettled++
-	if hasFailure {
-		if err := r.write(failure); err != nil {
+	for _, rec := range recs {
+		if err := r.write(rec); err != nil {
 			return err
 		}
 	}
-	if !hasOpen {
-		return nil
-	}
-	return r.write(open)
+	return nil
 }
 
 // clear empties c, keeping its name's buffer.
@@ -210,15 +230,12 @@ func (c *call) clear() {
 // restarted call drops them, as its rerun sends them again.
 func (r *recorder) settle(h hdr, raw []byte) error {
 	c := r.calls[h.tid]
-	if c != nil && !c.pending() {
-		c.created = false // the mark of a call whose name was lost
+	if c == nil {
+		r.none = call{}
+		c = &r.none
 	}
-	if c == nil || !c.pending() {
-		// runc's own opens before the first exec send no name the reader keeps.
-		if r.started && h.n1&resultOpen != 0 && h.ret < 0 && !isRestart(h.ret) {
-			r.unnamed++
-		}
-		return nil
+	if !c.pending() {
+		c.created = false // a mark left by a call that sent neither name nor file
 	}
 	if err := r.settleOp(c, h); err != nil {
 		return err
@@ -229,6 +246,10 @@ func (r *recorder) settle(h hdr, raw []byte) error {
 	return r.settleOpen(c, h, raw)
 }
 
+// settleOp writes the path change c holds by the result h. On a failure the
+// record from the call's exit stands instead, unless there is none to stand
+// (the syscall is not watched) or the hook saw the file of a descriptor,
+// which the thread could have swapped before the exit.
 func (r *recorder) settleOp(c *call, h hdr) error {
 	op, failure, hasOp, hasFailure := &c.op, c.failure, c.hasOp, c.hasFailure
 	c.hasOp, c.hasFailure = false, false
@@ -251,6 +272,10 @@ func (r *recorder) settleOp(c *call, h hdr) error {
 	return r.write(failure)
 }
 
+// settleOpen writes the open c holds by the result h: the file it reached,
+// done or refused, or both if the call created the file before failing; or,
+// failed before reaching a file, the name it passed. A failure with neither
+// counts as unnamed; runc's own opens before the first exec are not counted.
 func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 	open, hasOpen, hasName, created := &c.open, c.hasOpen, c.hasName, c.created
 	c.hasOpen, c.hasName, c.created = false, false, false
@@ -268,13 +293,11 @@ func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 	case h.ret >= 0:
 		return nil
 	case hasName:
-		rec, err := failedOpen(string(c.name), c.cut, raw)
-		if err != nil {
-			return err
-		}
-		return r.write(rec)
+		return r.write(failedOpen(string(c.name), c.cut, raw))
 	}
-	r.unnamed++
+	if r.started {
+		r.unnamed++
+	}
 	return nil
 }
 
@@ -332,12 +355,7 @@ func (r *recorder) finish(l loss) error {
 		if c.pending() {
 			r.unsettled++
 		}
-		if c.hasOpen {
-			waiting = append(waiting, c.open)
-		}
-		if c.hasFailure {
-			waiting = append(waiting, c.failure)
-		}
+		waiting = c.leftovers(waiting)
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i].boot < waiting[j].boot })
 	for _, rec := range waiting {
@@ -346,7 +364,9 @@ func (r *recorder) finish(l loss) error {
 		}
 	}
 	untracked := l.untracked + uint64(r.unsettled)
-	if r.named == 0 && r.unnamed > 0 {
+	// attachAll refuses to start without do_filp_open or do_file_open, so
+	// this is a kernel whose open(2) no longer passes the one attached.
+	if !r.named && r.unnamed > 0 {
 		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
 		untracked += uint64(r.unnamed)
 	}
@@ -379,7 +399,8 @@ func (r *recorder) finish(l loss) error {
 // end is the recording's last line, written only once every queued event is
 // out, so a recording without it was cut short. Dropped events found the ring
 // buffer full, and Untracked calls found a tracking map full or had a return
-// the tracer never saw. HostMissed runs the kernel skipped between attaching
+// the tracer never saw, or, when no open passed its name, failed opens that
+// came without one. HostMissed runs the kernel skipped between attaching
 // and the stop signal; the summary does not count them as lost, since any of
 // them may have been another process's.
 type end struct {
