@@ -323,6 +323,11 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 		},
 		{"refused, its result not yet come at the end", []event{unlink(11, nrFchmod, "a"), exitFailure}, "/exit:1", 1},
 		{
+			"refused, its result lost, then another call's path change done",
+			[]event{unlink(11, nrFchmod, "a"), exitFailure, unlink(11, nrUnlink, "b"), result(11, nrUnlink, resultWatched, 0)},
+			"/exit:1 /b:0", 1,
+		},
+		{
 			"two refused calls after a path change whose result was lost",
 			[]event{unlink(11, nrFchmod, "a"), refused, refused},
 			":1 :1", 1,
