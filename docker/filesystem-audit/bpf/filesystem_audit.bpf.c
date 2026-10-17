@@ -42,13 +42,19 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "access.h"
 #include "syscalls.h"
 
+#define PF_SIGNALED 0x00000400 ///< Dying of a fatal signal; set before a core dump.
+
 /**
  * Sends the path change @p e. Its hook runs before the kernel's own permission
  * checks (may_delete, may_create, notify_change), so whether it happened is
- * known only from the call's K_RESULT.
+ * known only from the call's K_RESULT. A core dump creates its file from the
+ * dying task, outside any call that sends one, so nothing is sent for it; the
+ * file's open, marked created, records it.
  */
 static __always_inline void send_op(struct event *e)
 {
+	if (bpf_get_current_task_btf()->flags & PF_SIGNALED)
+		return;
 	e->tid = (u32)bpf_get_current_pid_tgid();
 	e->nr = current_sys_nr();
 	submit(e);
