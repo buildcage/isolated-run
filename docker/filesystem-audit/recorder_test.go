@@ -322,6 +322,11 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			"/exit:1", 1,
 		},
 		{"refused, its result not yet come at the end", []event{unlink(11, nrFchmod, "a"), exitFailure}, "/exit:1", 1},
+		{
+			"two refused calls after a path change whose result was lost",
+			[]event{unlink(11, nrFchmod, "a"), refused, refused},
+			":1 :1", 1,
+		},
 		{"restarted", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, -514)}, "", 0},
 		{
 			"hook run again in its call",
@@ -349,6 +354,61 @@ func TestRecorderSettlesAPathChangeWithItsResult(t *testing.T) {
 			}
 			if got != want || untracked != c.untracked {
 				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
+	}
+}
+
+func TestRecorderRefusesAShortSample(t *testing.T) {
+	r, _, _ := newTestRecorder()
+	if err := r.add([]byte{1, 2, 3}); err == nil {
+		t.Fatal("added a sample shorter than its header")
+	}
+}
+
+// failingWriter accepts ok writes, then fails.
+type failingWriter struct{ ok int }
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.ok == 0 {
+		return 0, errors.New("disk full")
+	}
+	w.ok--
+	return len(p), nil
+}
+
+// A failed write reaches the caller from wherever a line is written.
+func TestRecorderReturnsAFailedWrite(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		events []event
+	}{
+		{"a line", []event{waitingOpen(0, "/a")}},
+		{"a lost call's open", []event{waitingOpen(11, "/a"), openName(11, "b")}},
+		{"a result's", []event{unlink(11, nrUnlink, "a"), result(11, nrUnlink, resultWatched, 0)}},
+		{"an exited thread's open", []event{waitingOpen(11, "/a"), {kind: filesystemAuditKindK_EXIT, tid: 11}}},
+		{"one still waiting at the end", []event{waitingOpen(11, "/a")}},
+		{"a held failure replaced", []event{unlink(11, nrFchmod, "a"),
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1},
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1}}},
+		{"the end line", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// A buffer smaller than a line, so each goes straight to the
+			// writer, which takes the exec's alone.
+			r := newRecorder(bufio.NewWriterSize(&failingWriter{ok: 1}, 16), &bytes.Buffer{}, func(uint64) int64 { return 0 })
+			add(t, r, stepExec)
+			var err error
+			for _, e := range c.events {
+				if err = r.add(e.bytes()); err != nil {
+					break
+				}
+			}
+			if err == nil {
+				err = r.finish(loss{})
+			}
+			if err == nil {
+				t.Fatal("no error from a failed write")
 			}
 		})
 	}

@@ -230,15 +230,13 @@ const (
 
 // failedOpen is the record of an open(2) that failed before reaching a file:
 // its name, cut short when cut, joined to the base directory its result raw
-// carries when the name is relative.
-func failedOpen(name string, cut bool, raw []byte) (record, error) {
-	res, err := decode(raw)
-	if err != nil {
-		return record{}, err
-	}
+// carries when the name is relative. raw is at least hdrLen long.
+func failedOpen(name string, cut bool, raw []byte) record {
+	le := binary.LittleEndian
 	relative := raw[offBases]&1 != 0 && name != "" && name[0] != '/'
-	p, _ := joinBase(name, raw[hdrLen:], relative, int(binary.LittleEndian.Uint32(raw[offMode:])), raw[offTruncated] != 0)
-	r := record{Kind: "open", PID: res.PID, PPID: res.PPID, Comm: res.Comm, boot: res.boot}
+	p, _ := joinBase(name, raw[hdrLen:], relative, int(le.Uint32(raw[offMode:])), raw[offTruncated] != 0)
+	c := common(raw)
+	r := record{Kind: "open", PID: c.PID, PPID: c.PPID, Comm: c.Comm, boot: c.boot}
 	r.Path = tidy(p)
 	r.Name = passedName(name, r.Path)
 	// A cut name has lost its end, the part that names the file.
@@ -248,11 +246,11 @@ func failedOpen(name string, cut bool, raw []byte) (record, error) {
 			r.Name += "…"
 		}
 	}
-	r.Err = -res.ret
-	r.Flags = res.Flags
-	r.Access = openAccess(res.Flags, 0)
+	r.Err = -int32(le.Uint32(raw[offPathLen:]))
+	r.Flags = le.Uint32(raw[offFlags:])
+	r.Access = openAccess(r.Flags, 0)
 	r.Failed = true
-	return r, nil
+	return r
 }
 
 // applyMarks sets Memfd or Deleted from the BPF side's marks and drops the
@@ -298,6 +296,21 @@ func header(raw []byte) hdr {
 	}
 }
 
+// common is the record of a sample at least hdrLen long with only what every
+// event carries filled in.
+func common(raw []byte) record {
+	le := binary.LittleEndian
+	return record{
+		Kind: kindName(filesystemAuditKind(le.Uint32(raw[offKind:]))),
+		PID:  le.Uint32(raw[offPid:]),
+		PPID: le.Uint32(raw[offPpid:]),
+		Comm: cstr(raw[offComm : offComm+commLen]),
+		boot: le.Uint64(raw[offTs:]),
+		tid:  le.Uint32(raw[offTid:]),
+		nr:   int32(le.Uint32(raw[offNr:])),
+	}
+}
+
 // decode turns one raw ring-buffer sample into a record.
 func decode(raw []byte) (record, error) {
 	if len(raw) < hdrLen {
@@ -314,24 +327,13 @@ func decode(raw []byte) (record, error) {
 	data := raw[hdrLen:]
 	marks := le.Uint32(raw[offMarks:])
 	gid := le.Uint32(raw[offGid:]) // a failed chown's; a hooked one's is in mode
-	r := record{
-		Kind: kindName(kind),
-		PID:  le.Uint32(raw[offPid:]),
-		PPID: le.Uint32(raw[offPpid:]),
-		Comm: cstr(raw[offComm : offComm+commLen]),
-		boot: le.Uint64(raw[offTs:]),
-		tid:  le.Uint32(raw[offTid:]),
-		nr:   int32(le.Uint32(raw[offNr:])),
-	}
+	r := common(raw)
 	switch kind {
 	case filesystemAuditKindK_OPEN:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
 		r.Flags = flags
 		r.Access = openAccess(flags, mode)
-	case filesystemAuditKindK_RESULT:
-		r.ret = pathRet
-		r.Flags = flags
 	case filesystemAuditKindK_READ, filesystemAuditKindK_WRITE:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
