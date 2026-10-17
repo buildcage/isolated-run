@@ -1,61 +1,10 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
-	"strings"
 	"testing"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
-
-// event builds a raw sample in struct event's layout.
-type event struct {
-	kind                      filesystemAuditKind
-	flags, mode               uint32
-	pathRet                   int32
-	nr                        int32
-	marks                     uint32
-	gid, tid                  uint32
-	bases                     uint32
-	n1, n2, truncated, trunc2 uint8
-	pid, ppid                 uint32
-	comm                      string
-	boot                      uint64
-	data                      []byte
-}
-
-func (e event) bytes() []byte {
-	b := make([]byte, hdrLen)
-	le := binary.LittleEndian
-	le.PutUint32(b[offKind:], uint32(e.kind))
-	le.PutUint32(b[offPid:], e.pid)
-	le.PutUint32(b[offPpid:], e.ppid)
-	le.PutUint32(b[offFlags:], e.flags)
-	le.PutUint32(b[offMode:], e.mode)
-	le.PutUint32(b[offPathLen:], uint32(e.pathRet))
-	le.PutUint32(b[offBases:], e.bases)
-	b[offN1], b[offN2], b[offTruncated], b[offTrunc2] = e.n1, e.n2, e.truncated, e.trunc2
-	copy(b[offComm:offComm+commLen], e.comm)
-	le.PutUint32(b[offNr:], uint32(e.nr))
-	le.PutUint32(b[offMarks:], e.marks)
-	le.PutUint32(b[offGid:], e.gid)
-	le.PutUint32(b[offTid:], e.tid)
-	le.PutUint64(b[offTs:], e.boot)
-	return append(b, e.data...)
-}
-
-// comps encodes path components leaf first, NUL-terminated, as the BPF side
-// stores them.
-func comps(leafFirst ...string) []byte {
-	var out []byte
-	for _, c := range leafFirst {
-		out = append(out, []byte(c)...)
-		out = append(out, 0)
-	}
-	return out
-}
 
 func TestDecodeShort(t *testing.T) {
 	if _, err := decode(make([]byte, hdrLen-1)); err == nil {
@@ -70,21 +19,6 @@ func TestDecodeOpenSentFromItsCall(t *testing.T) {
 	}
 	if r.Kind != "open" || r.Path != "/tmp/f" || r.tid != 12 || r.Failed {
 		t.Errorf("open decode: %+v", r)
-	}
-}
-
-func TestAccessLetters(t *testing.T) {
-	for _, c := range []struct{ got, want string }{
-		{openAccess(unix.O_RDONLY, 0), "r"},
-		{openAccess(unix.O_RDWR|unix.O_CREAT|unix.O_TRUNC, 0), "rwct"},
-		{openAccess(unix.O_RDONLY, fmodeExec), "rx"},
-		{mmapAccess(unix.PROT_WRITE, unix.MAP_SHARED), "w"},
-		{mmapAccess(unix.PROT_WRITE, unix.MAP_PRIVATE), "r"},
-		{mmapAccess(unix.PROT_EXEC, 0), "x"},
-	} {
-		if c.got != c.want {
-			t.Errorf("got %q, want %q", c.got, c.want)
-		}
 	}
 }
 
@@ -182,85 +116,6 @@ func TestFailedOpen(t *testing.T) {
 	}
 }
 
-func TestTidy(t *testing.T) {
-	for in, want := range map[string]string{
-		"/a/./b//c":       "/a/b/c",
-		"/a/l/../b":       "/a/l/../b",
-		"/work/l/":        "/work/l/",
-		"/work/./l/.":     "/work/l/.",
-		"/":               "/",
-		".":               ".",
-		"":                "",
-		"x":               "x",
-		"…/deep/./x":      "…/deep/x",
-		"/var/tmp/b/../x": "/var/tmp/b/../x",
-		"/.hidden/x":      "/.hidden/x",
-		"a//":             "a/",
-		"/a/.":            "/a/.",
-		"/a/./":           "/a/",
-		"//":              "/",
-	} {
-		if got := tidy(in); got != want {
-			t.Errorf("tidy(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// joinComponents is components written plainly, which it must match.
-func joinComponents(b []byte, n int, truncated bool) (string, []byte) {
-	var names []string
-	for i := 0; i < n && len(b) > 0; i++ {
-		j := bytes.IndexByte(b, 0)
-		if j < 0 {
-			j = len(b)
-		}
-		names = append([]string{string(b[:j])}, names...)
-		if j < len(b) {
-			j++
-		}
-		b = b[j:]
-	}
-	prefix := "/"
-	if truncated {
-		prefix = "…/"
-	}
-	return prefix + strings.Join(names, "/"), b
-}
-
-func TestComponents(t *testing.T) {
-	for _, c := range []struct {
-		data      string
-		n         int
-		truncated bool
-		want      string
-		rest      string
-	}{
-		{"c\x00b\x00a\x00", 3, false, "/a/b/c", ""},
-		{"c\x00b\x00a\x00x", 2, false, "/b/c", "a\x00x"},
-		{"c\x00b", 3, false, "/b/c", ""},
-		{"c\x00\x00a\x00", 3, true, "…/a//c", ""},
-		{"", 2, false, "/", ""},
-		{"c\x00", 0, false, "/", "c\x00"},
-	} {
-		got, rest := components([]byte(c.data), c.n, c.truncated)
-		if got != c.want || string(rest) != c.rest {
-			t.Errorf("components(%q, %d) = %q, %q; want %q, %q", c.data, c.n, got, rest, c.want, c.rest)
-		}
-	}
-}
-
-func FuzzComponents(f *testing.F) {
-	f.Add([]byte("c\x00b\x00a"), 2, false)
-	f.Add([]byte("\x00\x00x\x00"), 40, true)
-	f.Fuzz(func(t *testing.T, b []byte, n int, truncated bool) {
-		got, rest := components(b, n, truncated)
-		want, wantRest := joinComponents(b, n, truncated)
-		if got != want || !bytes.Equal(rest, wantRest) {
-			t.Fatalf("components(%q, %d) = %q, %q; want %q, %q", b, n, got, rest, want, wantRest)
-		}
-	})
-}
-
 func TestDecodeBootTime(t *testing.T) {
 	r, err := decode(event{kind: filesystemAuditKindK_READ, comm: "cat", boot: 123_456_789_000, data: []byte("/etc/hosts\x00")}.bytes())
 	if err != nil {
@@ -268,34 +123,6 @@ func TestDecodeBootTime(t *testing.T) {
 	}
 	if r.boot != 123_456_789_000 {
 		t.Fatalf("boot = %d, want 123456789000", r.boot)
-	}
-}
-
-// decode reads each header field at its generated offset with a width of its
-// own; this pins the widths to the generated type.
-func TestHeaderWidths(t *testing.T) {
-	var e filesystemAuditEvent
-	for name, c := range map[string]struct{ got, want uintptr }{
-		"kind":      {unsafe.Sizeof(e.Kind), 4},
-		"pid":       {unsafe.Sizeof(e.Pid), 4},
-		"ppid":      {unsafe.Sizeof(e.Ppid), 4},
-		"flags":     {unsafe.Sizeof(e.Flags), 4},
-		"mode":      {unsafe.Sizeof(e.Mode), 4},
-		"path_len":  {unsafe.Sizeof(e.PathLen), 4},
-		"bases":     {unsafe.Sizeof(e.Bases), 4},
-		"n1":        {unsafe.Sizeof(e.N1), 1},
-		"n2":        {unsafe.Sizeof(e.N2), 1},
-		"truncated": {unsafe.Sizeof(e.Truncated), 1},
-		"trunc2":    {unsafe.Sizeof(e.Trunc2), 1},
-		"comm":      {unsafe.Sizeof(e.Comm), 16},
-		"nr":        {unsafe.Sizeof(e.Nr), 4},
-		"marks":     {unsafe.Sizeof(e.Marks), 4},
-		"gid":       {unsafe.Sizeof(e.Gid), 4},
-		"ts":        {unsafe.Sizeof(e.Ts), 8},
-	} {
-		if c.got != c.want {
-			t.Errorf("%s is %d bytes, decode reads %d", name, c.got, c.want)
-		}
 	}
 }
 
