@@ -190,8 +190,7 @@ func TestRingReadEndsAtWhatFlushFound(t *testing.T) {
 		f.put("more", 0)
 		return nil
 	}, time.Hour, func() error { return nil })
-	// The first record, the one queued when it was read, and the one queued
-	// when the second was read, which is when Flush came.
+	// The two read before Flush, and the one queued as it came.
 	if err != nil || n != 3 {
 		t.Fatalf("read %d records, err=%v; want 3", n, err)
 	}
