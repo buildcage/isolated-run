@@ -36,7 +36,8 @@ type recorder struct {
 	unnamed int
 	total   int
 	started bool
-	// none stands in for the call of a thread that sent nothing yet.
+	// none stands in for the call of a thread that sent nothing yet; settling
+	// it never sets anything, so it stays empty.
 	none call
 }
 
@@ -161,12 +162,13 @@ func (r *recorder) add(raw []byte) error {
 	// same syscall in a row are confused only once a result was dropped.
 	if c.hasOp && c.op.nr != rec.nr {
 		r.unsettled++
-		// Its failure stands, as the failure of a call with no result does.
-		if c.hasFailure {
-			c.hasFailure = false
-			if err := r.write(c.failure); err != nil {
-				return err
-			}
+	}
+	// A failure comes after its call's hooks, so one held is from an earlier
+	// call; it stands, as the failure of a call with no result does.
+	if c.hasFailure {
+		c.hasFailure = false
+		if err := r.write(c.failure); err != nil {
+			return err
 		}
 	}
 	c.op, c.hasOp = rec, true
@@ -238,7 +240,6 @@ func (c *call) clear() {
 func (r *recorder) settle(h hdr, raw []byte) error {
 	c := r.calls[h.tid]
 	if c == nil {
-		r.none = call{}
 		c = &r.none
 	}
 	if !c.pending() {
