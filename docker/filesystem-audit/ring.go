@@ -137,12 +137,13 @@ func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error
 		}
 		if moved {
 			spins = 0
-			if time.Since(last) >= every {
-				if err := tick(); err != nil {
-					return err
-				}
-				last = time.Now()
+		}
+		// Also while waiting out a record still being written.
+		if (moved || busy) && time.Since(last) >= every {
+			if err := tick(); err != nil {
+				return err
 			}
+			last = time.Now()
 		}
 		switch {
 		case busy && spins < busySpins:

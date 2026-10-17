@@ -219,6 +219,33 @@ func TestRingWaitsForABusyRecord(t *testing.T) {
 	}
 }
 
+// The recording is still written out while a record stays reserved.
+func TestRingTicksWhileARecordIsBeingWritten(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.put("stuck", unix.BPF_RINGBUF_BUSY_BIT)
+	hdr := (*uint32)(unsafe.Pointer(&f.data[0]))
+	commit := func() { atomic.StoreUint32(hdr, 5) }
+	// Committed after a while regardless, so a missing tick fails the test
+	// rather than hanging it.
+	go func() {
+		time.Sleep(time.Second)
+		commit()
+		f.Flush()
+	}()
+	tickedBusy := false
+	err := f.read(func([]byte) error { return nil }, 5*time.Millisecond, func() error {
+		if atomic.LoadUint32(hdr)&unix.BPF_RINGBUF_BUSY_BIT != 0 {
+			tickedBusy = true
+			commit()
+			return f.Flush()
+		}
+		return nil
+	})
+	if err != nil || !tickedBusy {
+		t.Fatalf("ticked while the record was busy: %v, err=%v", tickedBusy, err)
+	}
+}
+
 func TestRingFlushAfterCloseFails(t *testing.T) {
 	f := newFakeRing(t, 64)
 	f.Close()
