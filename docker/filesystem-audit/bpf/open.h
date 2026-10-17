@@ -21,7 +21,7 @@ int BPF_PROG(on_open, struct file *file)
 	e->flags = file->f_flags;
 	e->mode = file->f_mode;
 	file_path(e, file);
-	// The first file an open(2) reaches is its own (see recorder.go).
+	// The first file an open(2) reaches is its own (see calls.go).
 	if (in_open_call())
 		e->tid = (u32)bpf_get_current_pid_tgid();
 	submit(e);

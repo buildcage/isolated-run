@@ -2,8 +2,8 @@
 /**
  * @file syscalls.h
  * Path syscalls recorded from their exit, chiefly the ones that fail
- * before the tracer's path hooks. It defines maps, so only
- * filesystem_audit.bpf.c includes it.
+ * before the tracer's path hooks. It defines the syscall numbers the loader
+ * sets, so only filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_SYSCALLS_H
 #define FILESYSTEM_AUDIT_SYSCALLS_H

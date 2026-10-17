@@ -1,7 +1,5 @@
 package main
 
-import ()
-
 // execFiles holds each process's resolved exec target until its exec record
 // arrives. An exec that fails after resolving its file sends no exec record, so
 // its entry stays until the process's next exec-file replaces it or a fork

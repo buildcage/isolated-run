@@ -1,7 +1,5 @@
 package main
 
-import ()
-
 // record is one line of the JSON output. Kind is the action; Path (and To,
 // for the two-path operations) name the target; Access carries the open or
 // mmap flags as letters; Failed and Err describe an operation that did not

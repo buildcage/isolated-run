@@ -89,7 +89,7 @@ enum result_bit {
 };
 
 /**
- * Fixed header (decode.go reads it through the type bpf2go generates), then
+ * Fixed header (sample.go reads it through the type bpf2go generates), then
  * data_len bytes of data:
  *
  * - open: d_path result (path_len is its return value)
