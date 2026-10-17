@@ -174,6 +174,7 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 
 func FuzzAppendRecord(f *testing.F) {
 	f.Add("open", "sh", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
+	f.Add("open", "c", "a\fb\nc\rd\te", "", "", "", "r", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
 	f.Add("exec", "c\xff<", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
 	f.Fuzz(func(t *testing.T, kind, comm, path, name, to, toName, access, mode, owner, syscall string,
 		pid, ppid, flags uint32, errno int32, bits uint16, ns int64) {

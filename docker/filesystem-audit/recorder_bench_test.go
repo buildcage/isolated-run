@@ -38,11 +38,11 @@ func BenchmarkRecorderOpen(b *testing.B) {
 	)
 }
 
-// BenchmarkRecorderFailedOpen settles an open(2) of a missing file by an
-// absolute name, its result carrying the working directory.
+// BenchmarkRecorderFailedOpen settles an open(2) of a missing file by a
+// relative name, its result carrying the working directory to join it to.
 func BenchmarkRecorderFailedOpen(b *testing.B) {
 	benchCall(b,
-		event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, ppid: 1, comm: "node", tid: 9, data: []byte("/usr/lib/x86_64-linux-gnu/libmissing.so\x00")},
+		event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, ppid: 1, comm: "node", tid: 9, data: []byte("lib/libmissing.so\x00")},
 		event{kind: filesystemAuditKindK_RESULT, pid: 9, ppid: 1, comm: "node", tid: 9, nr: 257, n1: resultOpen, pathRet: -2,
 			bases: 1, mode: 5, data: comps("x", "node_modules", "app", "work", "runner")},
 	)
