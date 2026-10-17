@@ -31,9 +31,11 @@ type ring struct {
 	release uintptr
 	epfd    int
 	// flushFd is closed under mu, so a late Flush does not write to a
-	// reused descriptor.
+	// reused descriptor. flushed is checked on every batch, since the ring
+	// may never empty for read to see flushFd while producers keep up.
 	mu      sync.Mutex
 	flushFd int
+	flushed atomic.Bool
 }
 
 func newRing(m *ebpf.Map) (*ring, error) {
@@ -90,6 +92,7 @@ func (r *ring) Flush() error {
 	if r.flushFd < 0 {
 		return os.ErrClosed
 	}
+	r.flushed.Store(true)
 	_, err := unix.Write(r.flushFd, []byte{1, 0, 0, 0, 0, 0, 0, 0})
 	return err
 }
@@ -114,47 +117,54 @@ func (r *ring) Close() error {
 }
 
 // busySpins is how often read yields for a record still being written
-// before it sleeps on the ring instead, should its writer be preempted.
+// before it sleeps instead, should its writer be preempted.
 const busySpins = 64
 
-// read passes each record to f until Flush. It calls tick when the ring stays
+// read passes each record to f until Flush, then returns once it has read
+// what was queued when Flush was called. It calls tick when the ring stays
 // empty for every, and at least that often while records keep coming. A
 // record is valid only until f returns.
 func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error) error {
-	flushing, spins := false, 0
+	flushing, until, spins := false, ^uintptr(0), 0
 	last := time.Now()
 	for {
-		moved, busy, err := r.drain(f)
+		if !flushing && r.flushed.Load() {
+			flushing, until = true, atomic.LoadUintptr(r.prodPos)
+		}
+		moved, busy, err := r.drain(f, until)
 		if err != nil {
 			return err
 		}
-		if moved && time.Since(last) >= every {
-			if err := tick(); err != nil {
-				return err
+		if moved {
+			spins = 0
+			if time.Since(last) >= every {
+				if err := tick(); err != nil {
+					return err
+				}
+				last = time.Now()
 			}
-			last = time.Now()
 		}
-		wait := every
 		switch {
 		case busy && spins < busySpins:
 			spins++
 			runtime.Gosched()
 			continue
 		case busy:
-			wait = time.Millisecond
-		case moved:
+			// Not an epoll wait: the ring reads as ready while a record is
+			// reserved, so that wait could return at once.
 			spins = 0
+			time.Sleep(time.Millisecond)
+			continue
+		case moved:
 			continue
 		case flushing:
 			return nil
 		}
-		spins = 0
-		flushed, timedOut, err := r.wait(wait)
+		timedOut, err := r.wait(every)
 		if err != nil {
 			return err
 		}
-		flushing = flushing || flushed
-		if timedOut && !busy {
+		if timedOut {
 			if err := tick(); err != nil {
 				return err
 			}
@@ -163,10 +173,11 @@ func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error
 	}
 }
 
-// drain reads the records committed so far. It reports whether it moved past
-// any, and whether it stopped at one reserved but not yet committed.
-func (r *ring) drain(f func([]byte) error) (moved, busy bool, err error) {
-	prod := atomic.LoadUintptr(r.prodPos)
+// drain reads the records committed so far, up to until. It reports whether
+// it moved past any, and whether it stopped at one reserved but not yet
+// committed.
+func (r *ring) drain(f func([]byte) error, until uintptr) (moved, busy bool, err error) {
+	prod := min(atomic.LoadUintptr(r.prodPos), until)
 	start := atomic.LoadUintptr(r.consPos)
 	cons, released := start, start
 	defer func() {
@@ -203,7 +214,7 @@ func (r *ring) drain(f func([]byte) error) (moved, busy bool, err error) {
 
 // wait blocks until the kernel wakes the reader, Flush is called, or timeout
 // passes.
-func (r *ring) wait(timeout time.Duration) (flushed, timedOut bool, err error) {
+func (r *ring) wait(timeout time.Duration) (timedOut bool, err error) {
 	var events [2]unix.EpollEvent
 	for {
 		n, err := unix.EpollWait(r.epfd, events[:], int(timeout.Milliseconds()))
@@ -211,13 +222,8 @@ func (r *ring) wait(timeout time.Duration) (flushed, timedOut bool, err error) {
 			continue
 		}
 		if err != nil {
-			return false, false, fmt.Errorf("epoll wait: %w", err)
+			return false, fmt.Errorf("epoll wait: %w", err)
 		}
-		for _, ev := range events[:n] {
-			if int(ev.Fd) == r.flushFd {
-				return true, false, nil
-			}
-		}
-		return false, n == 0, nil
+		return n == 0, nil
 	}
 }

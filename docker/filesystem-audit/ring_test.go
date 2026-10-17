@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -17,6 +19,8 @@ type fakeRing struct {
 	*ring
 	cons, prod uintptr
 	size       int
+	// wake stands in for the ring buffer's wakeup.
+	wake int
 }
 
 func newFakeRing(t *testing.T, size int) *fakeRing {
@@ -28,6 +32,7 @@ func newFakeRing(t *testing.T, size int) *fakeRing {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.wake = wake
 	if err := f.openWait(wake); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +59,7 @@ func (f *fakeRing) collect() (got []string, busy bool, err error) {
 	_, busy, err = f.drain(func(b []byte) error {
 		got = append(got, string(b))
 		return nil
-	})
+	}, ^uintptr(0))
 	return got, busy, err
 }
 
@@ -82,7 +87,7 @@ func TestRingHandsSpaceBackMidBatch(t *testing.T) {
 	if _, _, err := f.drain(func([]byte) error {
 		seen = append(seen, f.cons)
 		return nil
-	}); err != nil {
+	}, ^uintptr(0)); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(seen, []uintptr{0, 16}) || f.cons != 32 {
@@ -94,7 +99,7 @@ func TestRingHandsSpaceBackMidBatch(t *testing.T) {
 func TestRingMovesPastDiscardedRecords(t *testing.T) {
 	f := newFakeRing(t, 64)
 	f.put("gone", unix.BPF_RINGBUF_DISCARD_BIT)
-	moved, _, err := f.drain(func([]byte) error { return nil })
+	moved, _, err := f.drain(func([]byte) error { return nil }, ^uintptr(0))
 	if err != nil || !moved || f.cons != f.prod {
 		t.Fatalf("moved=%v err=%v consumer at %d, want %d", moved, err, f.cons, f.prod)
 	}
@@ -166,6 +171,52 @@ func TestRingReadTicksWhileRecordsKeepComing(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Records keep coming after Flush, so the ring never empties: read stops at
+// what was queued when Flush was called.
+func TestRingReadEndsAtWhatFlushFound(t *testing.T) {
+	f := newFakeRing(t, 64)
+	f.put("0", 0)
+	n := 0
+	err := f.read(func(b []byte) error {
+		if n++; n == 2 {
+			f.Flush()
+		}
+		if n > 100 {
+			return errors.New("read on past the flush")
+		}
+		f.put("more", 0)
+		return nil
+	}, time.Hour, func() error { return nil })
+	// The first record, the one queued when it was read, and the one queued
+	// when the second was read, which is when Flush came.
+	if err != nil || n != 3 {
+		t.Fatalf("read %d records, err=%v; want 3", n, err)
+	}
+}
+
+// A record still being written is waited for, and read once committed.
+func TestRingWaitsForABusyRecord(t *testing.T) {
+	f := newFakeRing(t, 64)
+	at := f.prod
+	f.put("late", unix.BPF_RINGBUF_BUSY_BIT)
+	// The wakeup reads as ready, as the ring buffer's does while a record is
+	// reserved; read must not spin on it.
+	unix.Write(f.wake, []byte{1, 0, 0, 0, 0, 0, 0, 0})
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		atomic.StoreUint32((*uint32)(unsafe.Pointer(&f.data[at])), 4)
+		f.Flush()
+	}()
+	var got []string
+	err := f.read(func(b []byte) error {
+		got = append(got, string(b))
+		return nil
+	}, time.Hour, func() error { return nil })
+	if err != nil || !slices.Equal(got, []string{"late"}) {
+		t.Fatalf("got %q err=%v", got, err)
 	}
 }
 
