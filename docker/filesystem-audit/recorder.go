@@ -28,8 +28,9 @@ type recorder struct {
 	stamp   timeText
 	counts  map[tally]int
 	preExec int
-	// unsettled counts calls whose result never arrived.
-	unsettled int
+	// unsettled counts calls whose result never arrived, and renamed opens
+	// whose caller's name differed from the kernel's copy.
+	unsettled, renamed int
 	// named says an open(2) passed do_filp_open its name, and unnamed counts
 	// the failures that came with none.
 	named   bool
@@ -190,7 +191,15 @@ func (r *recorder) callOf(tid uint32) *call {
 // way to the kernel's copy if the call had one.
 func (r *recorder) openName(h hdr, raw []byte) error {
 	c := r.callOf(h.tid)
+	name := cbytes(raw[hdrLen:])
 	if h.n1 != 0 && c.hasName {
+		// The caller's copy of a name the kernel copied matches it, unless
+		// the copy held is an earlier call's whose result was lost, or
+		// another thread rewrote the name during the call. The two cannot be
+		// told apart, and either may leave the open under the wrong name.
+		if !bytes.Equal(name, c.name) {
+			r.renamed++
+		}
 		return nil
 	}
 	if h.n1 == 0 {
@@ -199,10 +208,6 @@ func (r *recorder) openName(h hdr, raw []byte) error {
 	// An open still waiting is the last call's, whose result never came.
 	if err := r.lose(c); err != nil {
 		return err
-	}
-	name := raw[hdrLen:]
-	if i := bytes.IndexByte(name, 0); i >= 0 {
-		name = name[:i]
 	}
 	c.name, c.hasName, c.cut = append(c.name[:0], name...), true, h.n2 != 0
 	return nil
@@ -371,7 +376,7 @@ func (r *recorder) finish(l loss) error {
 			return err
 		}
 	}
-	untracked := l.untracked + uint64(r.unsettled)
+	untracked := l.untracked + uint64(r.unsettled) + uint64(r.renamed)
 	// attachAll refuses to start without do_filp_open or do_file_open, so
 	// this is a kernel whose open(2) no longer passes the one attached.
 	if !r.named && r.unnamed > 0 {
@@ -408,7 +413,8 @@ func (r *recorder) finish(l loss) error {
 // out, so a recording without it was cut short. Dropped events found the ring
 // buffer full, and Untracked calls found a tracking map full or had a return
 // the tracer never saw, or, when no open passed its name, failed opens that
-// came without one. HostMissed runs the kernel skipped between attaching
+// came without one, or opens whose caller's name differed from the kernel's
+// copy. HostMissed runs the kernel skipped between attaching
 // and the stop signal; the summary does not count them as lost, since any of
 // them may have been another process's.
 type end struct {

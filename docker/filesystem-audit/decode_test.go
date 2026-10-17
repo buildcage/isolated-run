@@ -89,9 +89,19 @@ func TestAccessLetters(t *testing.T) {
 }
 
 func TestDecodeGivesAnUnknownKindNoName(t *testing.T) {
-	r, err := decode(event{kind: filesystemAuditKind(len(kindNames))}.bytes())
+	r, err := decode(event{kind: 1000}.bytes())
 	if err != nil || r.Kind != "" {
 		t.Fatalf("decode: %+v, %v", r, err)
+	}
+}
+
+// The kinds the recorder takes from their header never become lines.
+func TestDecodeRefusesTheKindsThatSettleOthers(t *testing.T) {
+	for _, k := range []filesystemAuditKind{filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT,
+		filesystemAuditKindK_OPEN_NAME, filesystemAuditKindK_OPEN_CREATE} {
+		if _, err := decode(event{kind: k}.bytes()); err == nil {
+			t.Errorf("kind %d decoded to a line", k)
+		}
 	}
 }
 

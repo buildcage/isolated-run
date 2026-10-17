@@ -212,13 +212,32 @@ func TestRecorderRecordsAnOpenThatFailedBeforeItsFile(t *testing.T) {
 }
 
 // A name the kernel copied gives way to none read from the caller.
+// The kernel's copy of a name is kept over the caller's; a caller's copy
+// that differs from it counts as untracked, since the kernel's may then be an
+// earlier call's.
 func TestRecorderKeepsTheKernelsCopyOfAName(t *testing.T) {
-	caller := openName(11, "/from-caller")
-	caller.n1 = 1
 	ret := -int32(unix.ENAMETOOLONG)
-	got, _ := recordEvents(t, openName(11, "/kernel"), caller, openResult(11, ret), caller, openResult(11, ret))
-	if want := fmt.Sprintf("/bin/sh:0 /kernel:%d /from-caller:%d :0", -ret, -ret); got != want {
-		t.Fatalf("recording = %s, want %s", got, want)
+	caller := func(name string) event {
+		e := openName(11, name)
+		e.n1 = 1
+		return e
+	}
+	for _, c := range []struct {
+		name      string
+		events    []event
+		want      string
+		untracked float64
+	}{
+		{"the same name", []event{openName(11, "/a"), caller("/a"), openResult(11, ret)}, "/a", 0},
+		{"another name", []event{openName(11, "/kernel"), caller("/from-caller"), openResult(11, ret)}, "/kernel", 1},
+		{"only the caller's", []event{caller("/from-caller"), openResult(11, ret)}, "/from-caller", 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, untracked := recordEvents(t, c.events...)
+			if want := fmt.Sprintf("/bin/sh:0 %s:%d :0", c.want, -ret); got != want || untracked != c.untracked {
+				t.Fatalf("recording = %s, untracked %v, want %s, untracked %v", got, untracked, want, c.untracked)
+			}
+		})
 	}
 }
 
@@ -401,6 +420,8 @@ func TestRecorderReturnsAFailedWrite(t *testing.T) {
 		{"a held failure replaced", []event{unlink(11, nrFchmod, "a"),
 			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1},
 			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1}}},
+		{"a held failure before a path change", []event{unlink(11, nrFchmod, "a"),
+			{kind: filesystemAuditKindK_SYSCALL, tid: 11, flags: nrBind, pathRet: 1}, unlink(11, nrUnlink, "b")}},
 		{"the end line", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -25,7 +25,6 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK:            "link",
 	filesystemAuditKindK_TRUNCATE:        "truncate",
 	filesystemAuditKindK_CHOWN:           "chown",
-	filesystemAuditKindK_OPEN_NAME:       "open-name",
 	filesystemAuditKindK_READ:            "read",
 	filesystemAuditKindK_WRITE:           "write",
 	filesystemAuditKindK_MMAP:            "mmap",
@@ -45,9 +44,6 @@ var kindNames = [...]string{
 	filesystemAuditKindK_LINK_FAILED:     "link",
 	filesystemAuditKindK_TRUNCATE_FAILED: "truncate",
 	filesystemAuditKindK_SYSCALL:         "syscall",
-	filesystemAuditKindK_RESULT:          "result",
-	filesystemAuditKindK_OPEN_CREATE:     "open-create",
-	filesystemAuditKindK_EXIT:            "exit",
 }
 
 func kindName(kind filesystemAuditKind) string {
@@ -90,10 +86,15 @@ const (
 const fmodeExec = 0x20 // FMODE_EXEC
 
 func cstr(b []byte) string {
+	return string(cbytes(b))
+}
+
+// cbytes is b up to its first NUL.
+func cbytes(b []byte) []byte {
 	if i := bytes.IndexByte(b, 0); i >= 0 {
-		b = b[:i]
+		return b[:i]
 	}
-	return string(b)
+	return b
 }
 
 // components joins n NUL-terminated names stored leaf first into an absolute
@@ -329,6 +330,10 @@ func decode(raw []byte) (record, error) {
 	gid := le.Uint32(raw[offGid:]) // a failed chown's; a hooked one's is in mode
 	r := common(raw)
 	switch kind {
+	case filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT, filesystemAuditKindK_OPEN_NAME,
+		filesystemAuditKindK_OPEN_CREATE:
+		// The recorder takes these from their header; they make no line.
+		return record{}, fmt.Errorf("kind %d settles other events and is no line of its own", kind)
 	case filesystemAuditKindK_OPEN:
 		r.Path, r.Err = filePath(data, pathRet, n1, truncated)
 		applyMarks(&r, marks, pathRet >= 0)
