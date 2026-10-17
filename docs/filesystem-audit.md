@@ -562,8 +562,9 @@ only the first read and the first write after each open count, whichever program
 - The sandbox's own setup, and the step's shell reading its script.
 - What the kernel writes into a core dump when a process crashes, where `core_pattern` names a
   path. The file's open is recorded, with the flags the kernel opens it with (`wc`), and so is
-  reading it afterwards. GitHub-hosted runners pipe core dumps to a handler, which does not write a
-  file here.
+  reading it afterwards; the kernel removing an old core file first, which it does only for a
+  setuid program when `suid_dumpable` is 2, is not. GitHub-hosted runners pipe core dumps to a
+  handler, which does not write a file here.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.
