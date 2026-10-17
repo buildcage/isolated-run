@@ -18,6 +18,7 @@ import (
 type fakeRing struct {
 	*ring
 	cons, prod uintptr
+	waiting    uint32
 	size       int
 	// wake stands in for the ring buffer's wakeup.
 	wake int
@@ -27,7 +28,7 @@ func newFakeRing(t *testing.T, size int) *fakeRing {
 	t.Helper()
 	f := &fakeRing{size: size}
 	f.ring = &ring{data: make([]byte, 2*size), mask: uintptr(size - 1), release: uintptr(size)}
-	f.consPos, f.prodPos = &f.cons, &f.prod
+	f.consPos, f.prodPos, f.ring.waiting = &f.cons, &f.prod, &f.waiting
 	wake, err := unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
 	if err != nil {
 		t.Fatal(err)
@@ -154,6 +155,30 @@ func TestRingReadCallsIdleAndEndsAfterFlush(t *testing.T) {
 	})
 	if err != nil || idle != 2 || !slices.Equal(got, []string{"first", "queued at the flush"}) {
 		t.Fatalf("got %q idle=%d err=%v", got, idle, err)
+	}
+}
+
+// The flag is set while the reader waits on an empty ring and cleared once
+// it wakes, before it reads, so the BPF side wakes only a waiting reader.
+func TestRingFlagsItsWait(t *testing.T) {
+	f := newFakeRing(t, 64)
+	var sawFlag atomic.Bool
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for atomic.LoadUint32(&f.waiting) == 0 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		sawFlag.Store(atomic.LoadUint32(&f.waiting) != 0)
+		f.put("woken", 0)
+		unix.Write(f.wake, []byte{1, 0, 0, 0, 0, 0, 0, 0})
+	}()
+	var flagged []uint32
+	err := f.read(func([]byte) error {
+		flagged = append(flagged, atomic.LoadUint32(&f.waiting))
+		return f.Flush()
+	}, time.Hour, func() error { return nil })
+	if err != nil || !sawFlag.Load() || !slices.Equal(flagged, []uint32{0}) {
+		t.Fatalf("err=%v, flag set while waiting: %v, while reading: %v, want true, [0]", err, sawFlag.Load(), flagged)
 	}
 }
 
