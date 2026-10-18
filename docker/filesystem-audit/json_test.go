@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand/v2"
 	"reflect"
 	"testing"
 	"time"
@@ -89,20 +91,52 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 }
 
 // reference is the line appendRecord must write, as legacy wrote it.
-func reference(r record, at time.Time) []byte {
+func reference(r record, ns int64) []byte {
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(legacy{r, at.Format(timeLayout)}); err != nil {
+	if err := json.NewEncoder(&buf).Encode(legacy{r, time.Unix(0, ns).UTC().Format(timeLayout)}); err != nil {
 		panic(err)
 	}
 	return buf.Bytes()
 }
 
-var testTime = time.Date(2026, 10, 6, 0, 0, 1, 500_000_000, time.UTC)
+// timeLayout is the "t" a line must carry.
+const timeLayout = "2006-01-02T15:04:05.000Z07:00"
+
+var testTime = time.Date(2026, 10, 6, 0, 0, 1, 500_000_000, time.UTC).UnixNano()
+
+// One timeText for every time, as the recorder keeps one for every line.
+func TestTimeTextMatchesFormat(t *testing.T) {
+	var times []int64
+	for _, base := range []int64{testTime, 0, -1, -1e9, -1e9 - 1, math.MinInt64, math.MaxInt64} {
+		for _, d := range []int64{0, 1, 999_999, 1e6, 999_999_999, 1e9, -1, -1e9, 86_400e9} {
+			if (d > 0 && base > math.MaxInt64-d) || (d < 0 && base < math.MinInt64-d) {
+				continue
+			}
+			times = append(times, base+d)
+		}
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 1000 {
+		ns := rng.Int64N(math.MaxInt64 - 1e10)
+		for range 20 {
+			ns += rng.Int64N(3e8)
+			times = append(times, ns)
+		}
+		times = append(times, rng.Int64())
+	}
+	var text timeText
+	for _, ns := range times {
+		got := string(text.append(nil, ns))
+		if want := time.Unix(0, ns).UTC().Format(timeLayout); got != want {
+			t.Fatalf("%d: got %s, want %s", ns, got, want)
+		}
+	}
+}
 
 func TestRecordJSONKeepsBytesThatAreNotUTF8(t *testing.T) {
 	r := record{Kind: "open", Comm: "c\xff", Path: "/tmp/a\xfe\xc3\xa9<", To: "\xed\xb3\xbf"}
 	want := `{"t":"2026-10-06T00:00:01.500Z","kind":"open","pid":0,"ppid":0,"comm":"c\udcff","path":"/tmp/a\udcfeé\u003c","to":"\udced\udcb3\udcbf"}` + "\n"
-	if got := string(appendRecord(nil, &r, testTime)); got != want {
+	if got := string(appendRecord(nil, &r, &timeText{}, testTime)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
 }
@@ -131,7 +165,7 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 	}
 	for _, comm := range []string{"c", "c\xff"} {
 		r.Comm = comm
-		got, want := appendRecord(nil, &r, testTime), reference(r, testTime)
+		got, want := appendRecord(nil, &r, &timeText{}, testTime), reference(r, testTime)
 		if string(got) != string(want) {
 			t.Fatalf("got  %s\nwant %s", got, want)
 		}
@@ -140,6 +174,7 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 
 func FuzzAppendRecord(f *testing.F) {
 	f.Add("open", "sh", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
+	f.Add("open", "c", "a\fb\nc\rd\te", "", "", "", "r", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
 	f.Add("exec", "c\xff<", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
 	f.Fuzz(func(t *testing.T, kind, comm, path, name, to, toName, access, mode, owner, syscall string,
 		pid, ppid, flags uint32, errno int32, bits uint16, ns int64) {
@@ -149,8 +184,7 @@ func FuzzAppendRecord(f *testing.F) {
 			Failed: bits&1 != 0, Image: bits&2 != 0, Memfd: bits&4 != 0, Deleted: bits&8 != 0,
 			Exchange: bits&16 != 0, Compat: bits&32 != 0, Killed: bits&64 != 0,
 		}
-		at := time.Unix(0, ns).UTC()
-		if got, want := appendRecord(nil, &r, at), reference(r, at); string(got) != string(want) {
+		if got, want := appendRecord(nil, &r, &timeText{}, ns), reference(r, ns); string(got) != string(want) {
 			t.Fatalf("got  %s\nwant %s", got, want)
 		}
 	})

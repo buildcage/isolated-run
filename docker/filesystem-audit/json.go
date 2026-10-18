@@ -6,65 +6,36 @@ import (
 	"unicode/utf8"
 )
 
-// record is one line of the JSON output. Kind is the action; Path (and To,
-// for the two-path operations) name the target; Access carries the open or
-// mmap flags as letters; Failed and Err describe an operation that did not
-// succeed. The tags name each field as appendRecord writes it, which the
-// tests check against encoding/json.
-type record struct {
-	Kind string `json:"kind"`
-	PID  uint32 `json:"pid"`
-	PPID uint32 `json:"ppid"`
-	Comm string `json:"comm"`
-	Path string `json:"path,omitempty"`
-	// Name is the name the command passed, where Path is not that name as
-	// written: the file an exec resolved to, or a passed name joined to its
-	// directory. ToName is the same for To.
-	Name   string `json:"name,omitempty"`
-	To     string `json:"to,omitempty"`
-	ToName string `json:"to_name,omitempty"`
-	Access string `json:"access,omitempty"`
-	Flags  uint32 `json:"flags,omitempty"`
-	// Mode is a chmod's new mode in octal, and Owner a chown's new uid:gid.
-	Mode   string `json:"mode,omitempty"`
-	Owner  string `json:"owner,omitempty"`
-	Err    int32  `json:"err,omitempty"`
-	Failed bool   `json:"failed,omitempty"`
-	// Image marks a mapping the kernel made while starting a program: the
-	// program itself, its dynamic loader, or a script's interpreter.
-	Image bool `json:"image,omitempty"`
-	// Memfd marks a memfd, whose Path is "memfd:" and the name its creator
-	// chose; Deleted a file unlinked while in use, or an O_TMPFILE.
-	Memfd   bool `json:"memfd,omitempty"`
-	Deleted bool `json:"deleted,omitempty"`
-	// Exchange marks a rename that swapped Path and To (RENAME_EXCHANGE).
-	Exchange bool `json:"exchange,omitempty"`
-	// Syscall names a refused syscall, or gives its number where the tracer
-	// has no name for it; Compat marks one of the 32-bit ABI, and Killed one
-	// seccomp killed the program for.
-	Syscall string `json:"syscall,omitempty"`
-	Compat  bool   `json:"compat,omitempty"`
-	Killed  bool   `json:"killed,omitempty"`
-	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
-	// "t" is its wall-clock time.
-	boot uint64
-	// tid is the thread of an open whose open-result follows, and of that
-	// result; created marks such an open that made its file, and ret is the
-	// result's return value.
-	tid     uint32
-	created bool
-	ret     int32
+// timeText writes a time in nanoseconds since the Unix epoch in UTC to the
+// millisecond, as "2006-01-02T15:04:05.000Z". Lines come in runs within one
+// second, so the text up to the second is kept and formatted again only when
+// the second changes.
+type timeText struct {
+	sec    int64
+	prefix []byte
 }
 
-const timeLayout = "2006-01-02T15:04:05.000Z07:00"
+func (t *timeText) append(b []byte, ns int64) []byte {
+	sec, frac := ns/1e9, ns%1e9
+	if frac < 0 {
+		sec, frac = sec-1, frac+1e9
+	}
+	if len(t.prefix) == 0 || sec != t.sec {
+		t.sec = sec
+		t.prefix = time.Unix(sec, 0).UTC().AppendFormat(t.prefix[:0], "2006-01-02T15:04:05.")
+	}
+	ms := frac / 1e6
+	b = append(b, t.prefix...)
+	return append(b, byte('0'+ms/100), byte('0'+ms/10%10), byte('0'+ms%10), 'Z')
+}
 
-// appendRecord appends r as one line of the recording, at the wall-clock
-// time at. It writes what encoding/json writes for r with "t" first, field
-// for field, except that a name the step chose keeps a byte that is not UTF-8
-// (see appendString).
-func appendRecord(b []byte, r *record, at time.Time) []byte {
+// appendRecord appends r as one line of the recording, at ns nanoseconds
+// since the Unix epoch. It writes what encoding/json writes for r with "t"
+// first, field for field, except that a name the step chose keeps a byte that
+// is not UTF-8 (see appendString).
+func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 	b = append(b, `{"t":"`...)
-	b = at.AppendFormat(b, timeLayout)
+	b = t.append(b, ns)
 	b = append(b, `","kind":`...)
 	b = appendString(b, r.Kind, false)
 	b = append(b, `,"pid":`...)
@@ -123,6 +94,14 @@ func appendTrue(b []byte, key string, v bool) []byte {
 
 const hexDigits = "0123456789abcdef"
 
+// jsonPlain marks the ASCII bytes appendString copies as they are.
+var jsonPlain = func() (t [utf8.RuneSelf]bool) {
+	for c := 0x20; c < utf8.RuneSelf; c++ {
+		t[c] = c != '"' && c != '\\' && c != '<' && c != '>' && c != '&'
+	}
+	return t
+}()
+
 // appendString appends s quoted as encoding/json quotes it, HTML characters
 // and U+2028/U+2029 escaped. A byte that is not part of valid UTF-8 becomes
 // U+FFFD, or for a name the step chose (raw), the escaped lone surrogate
@@ -134,7 +113,7 @@ func appendString(b []byte, s string, raw bool) []byte {
 	for i := 0; i < len(s); {
 		c := s[i]
 		if c < utf8.RuneSelf {
-			if c >= 0x20 && c != '"' && c != '\\' && c != '<' && c != '>' && c != '&' {
+			if jsonPlain[c] {
 				i++
 				continue
 			}

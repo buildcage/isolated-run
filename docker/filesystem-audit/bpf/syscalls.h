@@ -2,8 +2,8 @@
 /**
  * @file syscalls.h
  * Path syscalls recorded from their exit, chiefly the ones that fail
- * before the tracer's path hooks. It defines maps, so only
- * filesystem_audit.bpf.c includes it.
+ * before the tracer's path hooks. It defines the syscall numbers the loader
+ * sets, so only filesystem_audit.bpf.c includes it.
  */
 #ifndef FILESYSTEM_AUDIT_SYSCALLS_H
 #define FILESYSTEM_AUDIT_SYSCALLS_H
@@ -16,6 +16,20 @@
 #ifndef EEXIST
 #define EEXIST 17
 #endif
+#ifndef ENAMETOOLONG
+#define ENAMETOOLONG 36
+#endif
+
+/**
+ * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
+ * interrupted the call, which the kernel runs again, and that run records it.
+ * One the kernel turns into EINTR instead, as ERESTARTSYS without SA_RESTART,
+ * is not run again, and goes unrecorded and uncounted.
+ */
+static __always_inline int is_restart(long ret)
+{
+	return ret <= -512 && ret >= -516;
+}
 
 /** A path syscall as it returned: what it records and what it was given. */
 struct path_call {
@@ -61,6 +75,16 @@ const volatile long nr_setxattr = -1, nr_lsetxattr = -1, nr_fsetxattr = -1;
 const volatile long nr_mkdirat = -1, nr_mkdir = -1, nr_mknodat = -1, nr_mknod = -1;
 const volatile long nr_symlinkat = -1, nr_symlink = -1, nr_linkat = -1, nr_link = -1;
 const volatile long nr_truncate = -1, nr_ftruncate = -1;
+/**
+ * Other syscalls whose path hooks can run: bind(2) to a path,
+ * open_by_handle_at(2) with O_TRUNC, and bpf(2) pinning an object.
+ */
+const volatile long nr_bind = -1, nr_open_by_handle_at = -1, nr_bpf = -1;
+
+static __always_inline int other_hooked(long nr)
+{
+	return nr >= 0 && (nr == nr_bind || nr == nr_open_by_handle_at || nr == nr_bpf);
+}
 
 /**
  * A syscall's argument @p i (0 to 4), from the register it was passed in.
@@ -228,6 +252,9 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 		return;
 	if (ret < 0)
 		e->path_len = -ret;
+	// So the reader can drop it for the path change its hook sent (RESULT_FD).
+	if (call->kind != K_ATTR_FAILED)
+		e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = call->val1;
 	e->gid = call->val2;
 	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;
@@ -290,82 +317,22 @@ static __always_inline int is_open_nr(long nr)
 #define O_CREAT 0100
 #define O_TRUNC 01000
 
+#define PF_SIGNALED 0x00000400 ///< Dying of a fatal signal; set before a core dump.
+
+/** Whether the current task is dying of a fatal signal, as when it dumps core. */
+static __always_inline int dying(void)
+{
+	return bpf_get_current_task_btf()->flags & PF_SIGNALED;
+}
+
 /**
  * Whether the current task is in an open(2) family call, whose name
- * do_filp_open is given (see open_name()).
+ * do_filp_open is given (see open_name()). A core dump is not, though it
+ * keeps the number of a call the signal interrupted.
  */
 static __always_inline int in_open_call(void)
 {
-	return is_open_nr(current_sys_nr());
-}
-
-#ifndef EPERM
-#define EPERM 1
-#endif
-#define SIGSYS 31
-
-/** The native architecture as seccomp names it (AUDIT_ARCH_*), set by the loader. */
-const volatile long native_arch = -1;
-
-#define N_REFUSABLE 1024
-
-/**
- * The native syscalls the sandbox's seccomp profile does not allow outright,
- * marked by the loader: one of them failing EPERM is the profile's refusal.
- */
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, N_REFUSABLE);
-	__type(key, u32);
-	__type(value, u8);
-} refusable SEC(".maps");
-
-static __always_inline int is_refusable(long nr)
-{
-	if (nr < 0 || nr >= N_REFUSABLE)
-		return 0;
-	u32 k = nr;
-	u8 *v = bpf_map_lookup_elem(&refusable, &k);
-	return v && *v;
-}
-
-/** A program and a syscall it was refused, recorded once. */
-struct refused_key {
-	struct proc proc;
-	u32 nr;
-	u32 killed;
-};
-
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 4096);
-	__type(key, struct refused_key);
-	__type(value, u8);
-} refused_seen SEC(".maps");
-
-/**
- * Records the step's syscall @p nr as refused, once per program: with
- * @p killed, a 32-bit one seccomp killed the program for, else one that
- * failed with EPERM.
- */
-static __always_inline void syscall_refused(u32 slot, long nr, u32 killed)
-{
-	struct refused_key k;
-	__builtin_memset(&k, 0, sizeof(k));
-	k.proc = current_proc();
-	k.nr = nr;
-	k.killed = killed;
-	u8 one = 1;
-	if (bpf_map_update_elem(&refused_seen, &k, &one, BPF_NOEXIST))
-		return; // recorded already
-	struct event *e = start(slot, K_SYSCALL);
-	if (!e)
-		return;
-	e->flags = nr;
-	e->mode = killed;
-	e->path_len = killed ? 0 : EPERM;
-	e->data_len = 0;
-	submit(e);
+	return !dying() && is_open_nr(current_sys_nr());
 }
 
 #endif

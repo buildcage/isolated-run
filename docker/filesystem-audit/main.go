@@ -24,16 +24,14 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
-	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
 )
 
 //go:generate go run ./cmd/gensyscallnames
 
-// -mcpu=v3 for the fetch-and-add that takes tails; every kernel the tracer
-// runs on has it.
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event -type kind filesystemAudit bpf/filesystem_audit.bpf.c
+// -mcpu=v3 for its 32-bit jumps; every kernel the tracer runs on has them.
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target bpfel -cflags -mcpu=v3 -type event -type kind -type result_bit filesystemAudit bpf/filesystem_audit.bpf.c
 
 func main() {
 	cgPath := flag.String("cgroup", "", "cgroup v2 directory to watch, created if missing")
@@ -146,10 +144,11 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		return errStoppedEarly
 	}
 
-	rd, err := ringbuf.NewReader(coll.Maps["events"])
+	rd, err := newRing(coll.Maps["events"], coll.Maps["reader_waiting"])
 	if err != nil {
 		return err
 	}
+	defer rd.Close()
 	f, err := create(outPath)
 	if err != nil {
 		return err
@@ -159,6 +158,10 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	defer bw.Flush()
 
 	// Before the ready file, which lets the step start.
+	clock, err := newBootClock()
+	if err != nil {
+		return err
+	}
 	base, errBase := missedRuns(coll)
 	if readyPath != "" {
 		if err := writeNew(readyPath, nil); err != nil {
@@ -176,10 +179,10 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 			n, base = 0, 0
 		}
 		missed <- count{n - base, err}
-		rd.Flush() // Read drains what is queued, then returns ErrFlushed.
+		rd.Flush()
 	}()
 
-	return readLoop(rd, bw, coll, missed)
+	return readLoop(rd, bw, coll, clock, missed)
 }
 
 var errStoppedEarly = errors.New("stopped before it attached")
@@ -198,29 +201,14 @@ func stopRequested(sig <-chan os.Signal) bool {
 
 // readLoop drains the ring buffer into the recording until the reader is
 // flushed.
-func readLoop(rd *ringbuf.Reader, w *bufio.Writer, coll *ebpf.Collection, missedRun <-chan count) error {
-	rec := newRecorder(w, os.Stderr, bootOffset)
-	// Reused for each sample: what decode keeps of it is copied.
-	var sample ringbuf.Record
-	for {
-		rd.SetDeadline(time.Now().Add(100 * time.Millisecond))
-		if err := rd.ReadInto(&sample); err != nil {
-			if errors.Is(err, ringbuf.ErrFlushed) {
-				break
-			}
-			// Idle: write out what is buffered, so a tracer killed later loses
-			// at most what came since.
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				if err := w.Flush(); err != nil {
-					return err
-				}
-				continue
-			}
-			return err
-		}
-		if err := rec.add(sample.RawSample); err != nil {
-			return err
-		}
+func readLoop(rd *ring, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock, missedRun <-chan count) error {
+	rec := newRecorder(w, os.Stderr, clock.offset)
+	// Written out every 100 ms, so a tracer killed later loses at most what
+	// came since. What rec.add keeps of a record is copied.
+	if err := rd.read(rec.add, 100*time.Millisecond, w.Flush); err != nil {
+		return err
 	}
-	return rec.finish(readLoss(coll, <-missedRun))
+	l := readLoss(coll, <-missedRun)
+	l.errClock = clock.err()
+	return rec.finish(l)
 }

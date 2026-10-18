@@ -15,10 +15,11 @@
 #include "event.h"
 #include "kernel.h"
 
-#define WAKEUP_BYTES (1 << 20)
+#define WAKEUP_BYTES (512 << 10)
 
 /** Keeps struct event in BTF for bpf2go's -type. */
 const struct event *unused_event __attribute__((unused));
+const enum result_bit *unused_result_bit __attribute__((unused));
 
 /**
  * The watched cgroup, set by the loader. Descent is checked in the kernel's
@@ -43,6 +44,18 @@ struct {
 	__type(value, u64);
 } drops SEC(".maps"), untracked SEC(".maps"), skipped_internal SEC(".maps");
 
+/**
+ * Nonzero while the reader waits on the ring: it sets this before it last
+ * checks the ring and waits, and clears it on waking. Mapped by the reader.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, u32);
+	__type(value, u32);
+	__uint(map_flags, BPF_F_MMAPABLE);
+} reader_waiting SEC(".maps");
+
 static __always_inline void bump(void *counter)
 {
 	u32 zero = 0;
@@ -64,7 +77,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, N_SLOTS);
 	__type(key, u32);
-	__type(value, struct scratch_buf);
+	__type(value, struct event);
 } scratch SEC(".maps");
 
 /** The scratch event of the program whose BPF_PROG @p slot is. */
@@ -102,7 +115,7 @@ static __always_inline struct event *start(u32 slot, u32 kind)
 	// The process's name, as ps shows it, not the thread's: a JVM or tokio
 	// worker thread names itself after its pool.
 	BPF_CORE_READ_STR_INTO(&e->comm, t, group_leader, comm);
-	e->err = 0;
+	e->nr = 0;
 	e->ts = bpf_ktime_get_boot_ns();
 	return e;
 }
@@ -120,10 +133,17 @@ static __always_inline void submit_cap(struct event *e, u32 cap)
 	u64 size = __builtin_offsetof(struct event, data) + len;
 	if (size > cap)
 		size = cap;
-	// Waking the reader per event costs more than the event itself; it
-	// polls on a timer and is woken only once a backlog builds up.
-	u64 flags = bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA) > WAKEUP_BYTES ?
-		    BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
+	// Waking the reader per event costs more than the event itself. It
+	// polls on a timer and is woken early only while it waits with more
+	// than WAKEUP_BYTES queued; any event past the mark wakes it, so one
+	// that reads the flag before the reader sets it is made up by the next,
+	// or by the timer if none follows.
+	u64 flags = BPF_RB_NO_WAKEUP;
+	u32 zero = 0;
+	u32 *waiting = bpf_map_lookup_elem(&reader_waiting, &zero);
+	if (waiting && *(volatile u32 *)waiting &&
+	    bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA) > WAKEUP_BYTES)
+		flags = BPF_RB_FORCE_WAKEUP;
 	if (bpf_ringbuf_output(&events, e, size, flags) != 0)
 		bump(&drops);
 }

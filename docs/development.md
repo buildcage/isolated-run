@@ -70,9 +70,8 @@ the real action wrapper (see `test/integration-test-*.sh`) and is what CI's `tes
 cover or just to keep off the real internet. The CI-only `test_sandbox_*` end-to-end jobs run on a real
 runner host with no nested container, and are the final word on whether a change works.
 
-The filesystem audit tracer's Go tests, and `docker/filesystem-audit/bpf/held_test.c`, which runs
-the BPF program's holding logic on the build host with its maps replaced, run while the proxy image
-is built, so every job that builds it runs them.
+The filesystem audit tracer's Go tests run while the proxy image is built, so every job that builds
+it runs them.
 
 The kernels on GitHub-hosted runners never preempt the tracer's programs mid-run, so no job there
 can catch two of them sharing a buffer. After changing the BPF program, run "Test / Filesystem audit

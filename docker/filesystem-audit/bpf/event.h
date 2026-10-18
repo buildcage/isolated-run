@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file event.h
- * The event the tracer records, shared by the BPF program and the userspace
- * tests of held.h.
+ * The event the tracer records, shared by the BPF program and the reader,
+ * through the type bpf2go generates.
  */
 #ifndef FILESYSTEM_AUDIT_EVENT_H
 #define FILESYSTEM_AUDIT_EVENT_H
@@ -20,7 +20,11 @@ typedef __u64 u64;
 
 enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_MKDIR = 6, K_CHMOD = 7, K_SYMLINK = 8, K_LINK = 9, K_TRUNCATE = 10, K_CHOWN = 11,
-	K_OPEN_FAILED = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
+	/**
+	 * An open(2)'s name as getname copied it; n1 is 1 when it was read from
+	 * the caller instead, n2 when that read stopped at PATH_LEN.
+	 */
+	K_OPEN_NAME = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
 	/**
 	 * @name Failed path syscalls
 	 * data holds the user path(s), NUL-separated (old then new for rename),
@@ -66,20 +70,29 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 */
 	K_SYSCALL = 31,
 	/**
-	 * An open(2) call's return value, in path_len, for the open recorded at
-	 * its file under the same tid; no data, and no line of its own.
+	 * A syscall's return in path_len, with RESULT_* in n1. A failed open(2)
+	 * also has its flags, and its descriptor's or working directory's path in
+	 * data (see add_base) unless the caller's name starts with '/'.
 	 */
-	K_OPEN_RESULT = 32
+	K_RESULT = 32,
+	/** The open(2) in tid reached its create step. */
+	K_OPEN_CREATE = 33,
+	/** Thread tid exited. */
+	K_EXIT = 34
+};
+
+/** K_RESULT bits, in n1. */
+enum result_bit {
+	RESULT_OPEN = 1,    ///< An open(2) family call.
+	RESULT_WATCHED = 2, ///< A failure is recorded from the call's arguments (see op_exit()).
+	RESULT_FD = 4,      ///< The call names its file by descriptor (see names_fd()).
 };
 
 /**
- * Fixed header (decode.go reads it through the type bpf2go generates), then
+ * Fixed header (sample.go reads it through the type bpf2go generates), then
  * data_len bytes of data:
  *
- * - open: d_path result (path_len is its return value); bases is 1 when an
- *   open(2) whose result follows reached its create step first
- * - failed open: the name as passed to open(2), then its base directory if it
- *   is relative (see add_base); path_len holds the errno
+ * - open: d_path result (path_len is its return value)
  * - read/write: d_path result, once per open file, direction and program
  * - mmap: path components; mode holds prot, flags the map flags, and path_len
  *   is 1 when an exec mapped it (see in_execve)
@@ -102,18 +115,12 @@ struct event {
 	u8 truncated; ///< The path, or the first path of a two-path operation.
 	u8 trunc2;    ///< The second path of a rename or link.
 	char comm[16];
-	u32 err;   ///< A held path change's errno when its syscall refused it.
+	s32 nr;    ///< The syscall an event with tid was sent from.
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
-	u32 tid;   ///< The thread, on an open whose result follows and on that result.
+	u32 tid;   ///< The thread, on an event whose syscall's K_RESULT follows.
 	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall as it returned.
 	char data[DATA_SZ + NAME_LEN]; ///< Slack: masked offset + one component.
-};
-
-/** An event, with room past its end for the whole of its last tail (see held.h). */
-struct scratch_buf {
-	struct event e;
-	char slack[256];
 };
 
 #endif

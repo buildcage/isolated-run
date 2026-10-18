@@ -452,12 +452,11 @@ The last line is the end line, such as
 tracer caught:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
-- `untracked` counts calls it could not follow because too many files were open, or too many calls
-  in progress, at once, and calls whose record it had to cut short or drop. An open whose call's
-  return it never saw, as one still waiting when it stopped, counts here too, and is recorded as
-  done. The tracer's tally in
-  the step log ends with `tails-peak=<used>/<max>`: the most room for long paths it needed at once,
-  out of the room it has.
+- `untracked` counts calls it could not follow because too many files were open at once or a name
+  could not be read, opens refused as too long whose name the command passed differs from the
+  kernel's copy, as when another thread rewrote it during the call, and calls whose return it never
+  saw, as one still waiting when it stopped. Such an open that had reached its file is recorded as
+  done.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
 
@@ -563,10 +562,11 @@ only the first read and the first write after each open count, whichever program
   `link` on a name already there, and one made by `bind(2)` that the kernel refuses before reaching
   its file.
 - The sandbox's own setup, and the step's shell reading its script.
-- The kernel writing a core dump when a process crashes, where `core_pattern` names a path: the file
-  is created and written by the kernel, not through a system call, so neither is recorded. Reading
-  that file afterwards is. GitHub-hosted runners pipe core dumps to a handler, which does not write
-  a file here.
+- What the kernel writes into a core dump when a process crashes, where `core_pattern` names a
+  path. The file's open is recorded, with the flags the kernel opens it with (`wc`), and so is
+  reading it afterwards; the kernel removing an old core file first, which it does only for a
+  setuid program when `suid_dumpable` is 2, is not. GitHub-hosted runners pipe core dumps to a
+  handler, which does not write a file here.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.

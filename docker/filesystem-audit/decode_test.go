@@ -1,59 +1,10 @@
 package main
 
 import (
-	"encoding/binary"
 	"testing"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
-
-// event builds a raw sample in struct event's layout.
-type event struct {
-	kind                      filesystemAuditKind
-	flags, mode               uint32
-	pathRet                   int32
-	err                       uint32
-	marks                     uint32
-	gid, tid                  uint32
-	bases                     uint32
-	n1, n2, truncated, trunc2 uint8
-	pid, ppid                 uint32
-	comm                      string
-	boot                      uint64
-	data                      []byte
-}
-
-func (e event) bytes() []byte {
-	b := make([]byte, hdrLen)
-	le := binary.LittleEndian
-	le.PutUint32(b[offKind:], uint32(e.kind))
-	le.PutUint32(b[offPid:], e.pid)
-	le.PutUint32(b[offPpid:], e.ppid)
-	le.PutUint32(b[offFlags:], e.flags)
-	le.PutUint32(b[offMode:], e.mode)
-	le.PutUint32(b[offPathLen:], uint32(e.pathRet))
-	le.PutUint32(b[offBases:], e.bases)
-	b[offN1], b[offN2], b[offTruncated], b[offTrunc2] = e.n1, e.n2, e.truncated, e.trunc2
-	copy(b[offComm:offComm+commLen], e.comm)
-	le.PutUint32(b[offErr:], e.err)
-	le.PutUint32(b[offMarks:], e.marks)
-	le.PutUint32(b[offGid:], e.gid)
-	le.PutUint32(b[offTid:], e.tid)
-	le.PutUint64(b[offTs:], e.boot)
-	return append(b, e.data...)
-}
-
-// comps encodes path components leaf first, NUL-terminated, as the BPF side
-// stores them.
-func comps(leafFirst ...string) []byte {
-	var out []byte
-	for _, c := range leafFirst {
-		out = append(out, []byte(c)...)
-		out = append(out, 0)
-	}
-	return out
-}
 
 func TestDecodeShort(t *testing.T) {
 	if _, err := decode(make([]byte, hdrLen-1)); err == nil {
@@ -61,49 +12,117 @@ func TestDecodeShort(t *testing.T) {
 	}
 }
 
-func TestDecodeHeldRefusal(t *testing.T) {
-	r, err := decode(event{kind: filesystemAuditKindK_UNLINK, n1: 2, err: 1, data: comps("f", "tmp")}.bytes())
+func TestDecodeOpenSentFromItsCall(t *testing.T) {
+	r, err := decode(event{kind: filesystemAuditKindK_OPEN, flags: unix.O_WRONLY | unix.O_CREAT, tid: 12, data: []byte("/tmp/f\x00")}.bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "unlink" || r.Path != "/tmp/f" || !r.Failed || r.Err != 1 {
-		t.Errorf("held refusal decode: %+v", r)
-	}
-}
-
-func TestDecodeOpenAndItsResult(t *testing.T) {
-	r, err := decode(event{kind: filesystemAuditKindK_OPEN, flags: unix.O_WRONLY | unix.O_CREAT, tid: 12, bases: 1, data: []byte("/tmp/f\x00")}.bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Kind != "open" || r.Path != "/tmp/f" || r.tid != 12 || !r.created || r.Failed {
+	if r.Kind != "open" || r.Path != "/tmp/f" || r.tid != 12 || r.Failed {
 		t.Errorf("open decode: %+v", r)
 	}
-	r, err = decode(event{kind: filesystemAuditKindK_OPEN_RESULT, tid: 12, pathRet: -int32(unix.ENXIO)}.bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Kind != "open-result" || r.tid != 12 || r.ret != -int32(unix.ENXIO) {
-		t.Errorf("open result decode: %+v", r)
+}
+
+func TestDecodeGivesAnUnknownKindNoName(t *testing.T) {
+	r, err := decode(event{kind: 1000}.bytes())
+	if err != nil || r.Kind != "" {
+		t.Fatalf("decode: %+v, %v", r, err)
 	}
 }
 
-func TestTidy(t *testing.T) {
-	for in, want := range map[string]string{
-		"/a/./b//c":       "/a/b/c",
-		"/a/l/../b":       "/a/l/../b",
-		"/work/l/":        "/work/l/",
-		"/work/./l/.":     "/work/l/.",
-		"/":               "/",
-		".":               ".",
-		"":                "",
-		"x":               "x",
-		"…/deep/./x":      "…/deep/x",
-		"/var/tmp/b/../x": "/var/tmp/b/../x",
-	} {
-		if got := tidy(in); got != want {
-			t.Errorf("tidy(%q) = %q, want %q", in, got, want)
+// The kinds the recorder takes from their header never become lines.
+func TestDecodeRefusesTheKindsThatSettleOthers(t *testing.T) {
+	for _, k := range []filesystemAuditKind{filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT,
+		filesystemAuditKindK_OPEN_NAME, filesystemAuditKindK_OPEN_CREATE} {
+		if _, err := decode(event{kind: k}.bytes()); err == nil {
+			t.Errorf("kind %d decoded to a line", k)
 		}
+	}
+}
+
+// An open whose file has neither a d_path nor walked components keeps the
+// error that left it without one.
+func TestDecodeOpenWithoutAPath(t *testing.T) {
+	r, err := decode(event{kind: filesystemAuditKindK_OPEN, pathRet: -int32(unix.ENOMEM)}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Path != "" || r.Err != -int32(unix.ENOMEM) {
+		t.Errorf("open decode: %+v", r)
+	}
+}
+
+func TestDecodePathChangeSentFromItsCall(t *testing.T) {
+	r, err := decode(event{kind: filesystemAuditKindK_UNLINK, tid: 12, nr: 263, n1: 2, data: comps("f", "tmp")}.bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != "unlink" || r.Path != "/tmp/f" || r.tid != 12 || r.nr != 263 || r.Failed {
+		t.Errorf("path change decode: %+v", r)
+	}
+}
+
+func TestFailedOpen(t *testing.T) {
+	ret := -int32(unix.ENOENT)
+	cases := []struct {
+		name     string
+		openName event
+		res      event
+		want     record
+	}{
+		{
+			name:     "absolute",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("/missing\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "node", pid: 9, n1: resultOpen, pathRet: ret},
+			want:     record{Kind: "open", PID: 9, Comm: "node", Path: "/missing", Access: "r", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			name:     "to write",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("/usr/local/bin/tool\x00")},
+			res: event{kind: filesystemAuditKindK_RESULT, comm: "cp", n1: resultOpen, pathRet: -int32(unix.EACCES),
+				flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC},
+			want: record{Kind: "open", Comm: "cp", Path: "/usr/local/bin/tool",
+				Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct", Err: int32(unix.EACCES), Failed: true},
+		},
+		{
+			name:     "relative to the cwd",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("./textflag.h\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "asm", n1: resultOpen, pathRet: ret, bases: 1, mode: 2, data: comps("runtime", "src")},
+			want:     record{Kind: "open", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			// Sent when the caller's copy of the name is not absolute; only
+			// getname's copy decides.
+			name:     "absolute, with the base walked",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("/etc/x\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "sh", n1: resultOpen, pathRet: ret, bases: 1, mode: 1, data: comps("work")},
+			want:     record{Kind: "open", Comm: "sh", Path: "/etc/x", Access: "r", Err: int32(unix.ENOENT), Failed: true},
+		},
+		{
+			// As when the caller's copy of the name starts with '/'.
+			name:     "relative with no base walked",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, data: []byte("x\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "sh", n1: resultOpen, pathRet: -int32(unix.EBADF)},
+			want:     record{Kind: "open", Comm: "sh", Path: "x", Access: "r", Err: int32(unix.EBADF), Failed: true},
+		},
+		{
+			name:     "name cut",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, n1: 1, n2: 1, data: []byte("/a/b/lon\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "node", n1: resultOpen, pathRet: -int32(unix.ENAMETOOLONG)},
+			want:     record{Kind: "open", Comm: "node", Path: "/a/b/lon…", Access: "r", Err: int32(unix.ENAMETOOLONG), Failed: true},
+		},
+		{
+			name:     "relative name cut",
+			openName: event{kind: filesystemAuditKindK_OPEN_NAME, n1: 1, n2: 1, data: []byte("a/lon\x00")},
+			res:      event{kind: filesystemAuditKindK_RESULT, comm: "node", n1: resultOpen, pathRet: -int32(unix.ENAMETOOLONG), bases: 1, mode: 1, data: comps("w")},
+			want:     record{Kind: "open", Comm: "node", Path: "/w/a/lon…", Name: "a/lon…", Access: "r", Err: int32(unix.ENAMETOOLONG), Failed: true},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := failedOpen(cstr(c.openName.data), c.openName.n2 != 0, c.res.bytes()); got != c.want {
+				t.Errorf("failedOpen mismatch\n got: %+v\nwant: %+v", got, c.want)
+			}
+		})
 	}
 }
 
@@ -114,34 +133,6 @@ func TestDecodeBootTime(t *testing.T) {
 	}
 	if r.boot != 123_456_789_000 {
 		t.Fatalf("boot = %d, want 123456789000", r.boot)
-	}
-}
-
-// decode reads each header field at its generated offset with a width of its
-// own; this pins the widths to the generated type.
-func TestHeaderWidths(t *testing.T) {
-	var e filesystemAuditEvent
-	for name, c := range map[string]struct{ got, want uintptr }{
-		"kind":      {unsafe.Sizeof(e.Kind), 4},
-		"pid":       {unsafe.Sizeof(e.Pid), 4},
-		"ppid":      {unsafe.Sizeof(e.Ppid), 4},
-		"flags":     {unsafe.Sizeof(e.Flags), 4},
-		"mode":      {unsafe.Sizeof(e.Mode), 4},
-		"path_len":  {unsafe.Sizeof(e.PathLen), 4},
-		"bases":     {unsafe.Sizeof(e.Bases), 4},
-		"n1":        {unsafe.Sizeof(e.N1), 1},
-		"n2":        {unsafe.Sizeof(e.N2), 1},
-		"truncated": {unsafe.Sizeof(e.Truncated), 1},
-		"trunc2":    {unsafe.Sizeof(e.Trunc2), 1},
-		"comm":      {unsafe.Sizeof(e.Comm), 16},
-		"err":       {unsafe.Sizeof(e.Err), 4},
-		"marks":     {unsafe.Sizeof(e.Marks), 4},
-		"gid":       {unsafe.Sizeof(e.Gid), 4},
-		"ts":        {unsafe.Sizeof(e.Ts), 8},
-	} {
-		if c.got != c.want {
-			t.Errorf("%s is %d bytes, decode reads %d", name, c.got, c.want)
-		}
 	}
 }
 
@@ -160,18 +151,6 @@ func TestDecode(t *testing.T) {
 			name: "open create+truncate",
 			ev:   event{kind: filesystemAuditKindK_OPEN, comm: "sh", flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, data: []byte("/tmp/x\x00")},
 			want: record{Kind: "open", Comm: "sh", Path: "/tmp/x", Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct"},
-		},
-		{
-			name: "failed open",
-			ev:   event{kind: filesystemAuditKindK_OPEN_FAILED, comm: "node", pathRet: int32(unix.ENOENT), data: []byte("/missing\x00")},
-			want: record{Kind: "open", Comm: "node", Path: "/missing", Access: "r", Err: int32(unix.ENOENT), Failed: true},
-		},
-		{
-			name: "failed open to write",
-			ev: event{kind: filesystemAuditKindK_OPEN_FAILED, comm: "cp", pathRet: int32(unix.EACCES), flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC,
-				data: []byte("/usr/local/bin/tool\x00")},
-			want: record{Kind: "open", Comm: "cp", Path: "/usr/local/bin/tool",
-				Flags: unix.O_WRONLY | unix.O_CREAT | unix.O_TRUNC, Access: "wct", Err: int32(unix.EACCES), Failed: true},
 		},
 		{
 			name: "open, path too long for d_path",
@@ -298,12 +277,6 @@ func TestDecode(t *testing.T) {
 			want: record{Kind: "unlink", Comm: "go", Path: "/tmp/go-build1/b001", Name: "b001", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
-			name: "failed open, relative to the cwd",
-			ev: event{kind: filesystemAuditKindK_OPEN_FAILED, comm: "asm", pathRet: int32(unix.ENOENT), bases: 1, mode: 2,
-				data: append([]byte("./textflag.h\x00"), comps("runtime", "src")...)},
-			want: record{Kind: "open", Comm: "asm", Path: "/src/runtime/textflag.h", Name: "./textflag.h", Access: "r", Err: int32(unix.ENOENT), Failed: true},
-		},
-		{
 			// Joined as passed: cleaning would drop "link/..", and with it the
 			// symlink the kernel followed.
 			name: "failed chmod, relative through a symlink",
@@ -336,17 +309,6 @@ func TestDecode(t *testing.T) {
 			name: "relative with no base walked",
 			ev:   event{kind: filesystemAuditKindK_UNLINK_FAILED, comm: "rm", pathRet: int32(unix.EBADF), data: []byte("x\x00")},
 			want: record{Kind: "unlink", Comm: "rm", Path: "x", Err: int32(unix.EBADF), Failed: true},
-		},
-		{
-			name: "failed open, name cut",
-			ev:   event{kind: filesystemAuditKindK_OPEN_FAILED, comm: "node", pathRet: int32(unix.ENOENT), n2: 1, data: []byte("/a/b/lon\x00")},
-			want: record{Kind: "open", Comm: "node", Path: "/a/b/lon…", Access: "r", Err: int32(unix.ENOENT), Failed: true},
-		},
-		{
-			name: "failed open, relative name cut",
-			ev: event{kind: filesystemAuditKindK_OPEN_FAILED, comm: "node", pathRet: int32(unix.ENOENT), n2: 1, bases: 1, mode: 1,
-				data: append([]byte("a/lon\x00"), comps("w")...)},
-			want: record{Kind: "open", Comm: "node", Path: "/w/a/lon…", Name: "a/lon…", Access: "r", Err: int32(unix.ENOENT), Failed: true},
 		},
 		{
 			name: "failed rename, each name on its own base",
