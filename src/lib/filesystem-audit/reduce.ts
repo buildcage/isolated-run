@@ -16,6 +16,7 @@ import {
   components,
   DELETED,
   DELETED_MARK,
+  isRunnerFile,
   marked,
   MEMFD,
   MEMFD_PREFIX,
@@ -296,7 +297,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // relative one there is d_path's pipe:, socket: or anon_inode: target, or
       // an attribute change whose directory descriptor closed meanwhile, which
       // is lost; a failed one may keep the relative name it was given.
-      if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+      if (
+        !c.failed &&
+        !r.memfd &&
+        !isRunnerFile(path) &&
+        !path.startsWith("/") &&
+        !path.startsWith("…/")
+      )
+        continue;
       // A read of what the process loaded prints nothing.
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
       const t = Date.parse(r.t ?? "");

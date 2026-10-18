@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { dropWalkedDirs } from "../test/filesystem-audit.ts";
 import { fmtFlags, type Access } from "./agg.ts";
 import { keyOf, Lines } from "./fold-tree.ts";
-import { components, MEMFD, MEMFDS } from "./paths.ts";
+import { canonical, components, MEMFD, MEMFDS } from "./paths.ts";
 import { BIT } from "./record.ts";
 
 describe("dropWalkedDirs", () => {
@@ -188,6 +188,20 @@ describe("Lines", () => {
         "R c /w/a/../**",
         `W c ${MEMFDS}`,
       ]);
+    });
+
+    it("never folds a runner file", () => {
+      const runnerFiles = new Map([
+        ["/o", "GITHUB_OUTPUT"],
+        ["/s", "GITHUB_STEP_SUMMARY"],
+      ]);
+      const [output, summary] = ["/o", "/s"].map((p) =>
+        canonical(p, { workspace: [], home: [], runnerFiles }),
+      );
+      const l = tight(4);
+      for (const p of five) l.add(access(p));
+      for (const p of [output, summary, output]) l.add(access(p, BIT.W));
+      expect(printed(l)).toStrictEqual(["R c /**", `W c ${output}`, `W c ${summary}`]);
     });
 
     it("joins a path spelled like the line its group folds into", () => {

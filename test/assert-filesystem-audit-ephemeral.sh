@@ -36,6 +36,13 @@ assert_one_row "A lower-layer file mapped shared and made writable has one row" 
 assert_one_row "A discarded write has one row" ' W +bash +\./discarded\.txt$'
 assert_one_row "A write under write_through has one row" ' W +bash +\./kept/written\.txt$'
 
+# The runner's files go by their variables: $GITHUB_OUTPUT written back through
+# write_through, $GITHUB_STEP_SUMMARY discarded at its real path.
+assert_one_row "\$GITHUB_OUTPUT has one row under its name" ' W +bash +\$GITHUB_OUTPUT$'
+assert_one_row "\$GITHUB_STEP_SUMMARY has one row under its name" ' W +bash +\$GITHUB_STEP_SUMMARY$'
+assert_file_lacks "$f" "No path names the backing copy" '/dev/buildcage-runner-files'
+assert_file_lacks "$f" "No path names the runner's real files" '_runner_file_commands'
+
 # The overlay's layers and the scratch dir behind them are buildcage's.
 assert_file_lacks "$f" "No path names the scratch dir" '/var/tmp/buildcage-'
 assert_file_lacks "$f" "buildcage's own wrappers are left out" -E ' (setpriv|buildcage-init|run-script\.sh) '

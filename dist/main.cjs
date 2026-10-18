@@ -69823,7 +69823,7 @@ async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) 
 const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
 	GITHUB_OUTPUT: "output",
 	GITHUB_STEP_SUMMARY: "step-summary"
-}, MEDIATED_VARIABLES = Object.keys(LEAF), realMediateDeps = {
+}, MEDIATED_VARIABLES = Object.keys(LEAF), mediatedPathOf = (variable) => `${RUNNER_FILES_DIR}/${LEAF[variable]}`, realMediateDeps = {
 	mkdir: (path) => {
 		ensureOwnScratchBase((0, node_path.dirname)(path)), (0, node_fs.mkdirSync)(path, { mode: 448 });
 	},
@@ -70086,11 +70086,12 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
 function relativize(path, prefixes) {
+	if (isRunnerFile(path)) return `$${path.slice(2)}`;
 	for (let ws of prefixes.workspace) {
 		if (path === ws) return ".";
 		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
@@ -70102,6 +70103,8 @@ function relativize(path, prefixes) {
 	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
 }
 function canonical(path, prefixes) {
+	let variable = prefixes.runnerFiles?.get(path);
+	if (variable) return "\0$" + variable;
 	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
 		if (path === alt) return first;
 		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
@@ -70427,7 +70430,7 @@ const starred = (path) => path === "/" ? "/**" : `${path}/**`, looseKids = (node
 	return n;
 };
 function climbGroup(path, parts = components(path)) {
-	return path.startsWith(MEMFD) ? MEMFDS : starred(spell(parts.slice(0, parts.indexOf("..") + 1)));
+	return path.startsWith(MEMFD) ? MEMFDS : isRunnerFile(path) ? path : starred(spell(parts.slice(0, parts.indexOf("..") + 1)));
 }
 const ran = (a) => ((a.ok | a.failed) & BIT.X) !== 0, keyOf = (comm, path) => `${comm} ${path}`, commOf = (key) => key.slice(0, key.indexOf("\0")), pathOf = (key) => key.slice(key.indexOf("\0") + 1);
 function walkedNodes(top) {
@@ -70793,7 +70796,7 @@ function createAuditSummary(prefixes) {
 			}
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
 				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
-				if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: r.comm ?? "",
 					path: normalize$2(path),
@@ -70955,6 +70958,11 @@ function prefixes(value, realpath) {
 	} catch {}
 	return out;
 }
+function runnerFiles(env, realpath) {
+	let out = new Map();
+	for (let variable of MEDIATED_VARIABLES) for (let path of [mediatedPathOf(variable), ...prefixes(env[variable], realpath)]) out.set(path, variable);
+	return out;
+}
 const NONE = { blocks: () => [] };
 function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
@@ -70974,7 +70982,8 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!audit) return settled(NONE);
 	let options = {
 		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-		home: prefixes(env.HOME, deps.realpath)
+		home: prefixes(env.HOME, deps.realpath),
+		runnerFiles: runnerFiles(env, deps.realpath)
 	}, cleanPath = audit.stepPath, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);

@@ -222,7 +222,8 @@ Under `filesystem_mode: ephemeral` every write is thrown away when the step ends
 paths `write_through` names. Two kinds of path are easy to miss:
 
 - **The runner's files.** `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` are written like any other
-  file, so the step's outputs and its own summary are lost unless named. `$GITHUB_ENV` and
+  file, so the step's outputs and its own summary are lost unless named. The audit shows them under
+  those names, whether named or not. `$GITHUB_ENV` and
   `$GITHUB_PATH` are read-only in either mode, and need naming to be written at all.
 - **Caches.** `actions/cache`, and setup actions with `cache:`, save a directory such as `~/.npm`
   after the job. Unless it is named, the save finds nothing the step added to it.
@@ -488,8 +489,8 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 
 - `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them, and
   `/proc/<pid>`.
-- A program run, a path containing `..`, which may lead elsewhere through a symlink, and a memfd. A
-  file a program loaded is not counted either.
+- A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
+  `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 
 That changes once a table or the details would pass 300 KB, more rows than anyone reads:
 
@@ -500,21 +501,22 @@ That changes once a table or the details would pass 300 KB, more rows than anyon
   `./a/../**`.
 - Memfds fold once there are five, into `memfd:**`: five of one program's in the table, of one
   command's in the details.
-- A program run still never folds.
+- A program run, `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` still never fold.
 
 **Quoting.** A command or path holding a space is quoted in the details, as `"VM Thread"`, except a
 memfd's name, which is quoted already, and a refused system call.
 
 ### Other notations
 
-| Shown as                     | Means                                                                                                             |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `…/name`                     | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
-| `path…`                      | A failed open's name too long to record in full, cut at its end                                                   |
-| `memfd:"name"`               | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
-| `path (deleted)`             | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
-| `\n`, `\u{202e}`, `\"`, `\\` | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
-| `\xff`                       | A byte that is not UTF-8 in a path or command name                                                                |
+| Shown as                                 | Means                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
+| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                   |
+| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
+| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
+| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                               |
+| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
+| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                |
 
 ### Refused system calls
 

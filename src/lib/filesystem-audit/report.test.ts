@@ -396,6 +396,35 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
+  it("names the runner's files, mediated or at their real paths", async () => {
+    const { deps: d, summaries } = deps({
+      raw: [
+        { kind: "write", comm: "bash", path: "/dev/buildcage-runner-files/output" },
+        { kind: "write", comm: "bash", path: "/real/temp/summary" },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n"),
+      realpath: (p) => (p === "/sym/temp/summary" ? "/real/temp/summary" : p),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: {
+          GITHUB_WORKSPACE: "/work",
+          GITHUB_OUTPUT: "/real/temp/output",
+          GITHUB_STEP_SUMMARY: "/sym/temp/summary",
+        },
+      },
+      d,
+    );
+
+    expect(summaries[0]).toMatch(/W +bash +\$GITHUB_OUTPUT\n/);
+    expect(summaries[0]).toMatch(/W +bash +\$GITHUB_STEP_SUMMARY\n/);
+  });
+
   it("falls back to the raw prefix when the realpath cannot be resolved", async () => {
     const { deps: d, summaries } = deps({
       realpath: () => {

@@ -1,5 +1,5 @@
 import { apply, flagBits, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
-import { components, MEMFD, MEMFDS, spell, unfoldable } from "./paths.ts";
+import { components, isRunnerFile, MEMFD, MEMFDS, spell, unfoldable } from "./paths.ts";
 import { BIT } from "./record.ts";
 
 /**
@@ -20,11 +20,12 @@ const looseKids = (node: Node): number => {
 
 /**
  * The line a ".." path or a memfd folds into once a table is loosened: the
- * path up to its first "..", or all of a command's memfds. A line that is
- * neither is a program run, which never folds.
+ * path up to its first "..", or all of a command's memfds. A runner file and
+ * a program run never fold.
  */
 function climbGroup(path: string, parts = components(path)): string {
   if (path.startsWith(MEMFD)) return MEMFDS;
+  if (isRunnerFile(path)) return path;
   return starred(spell(parts.slice(0, parts.indexOf("..") + 1)));
 }
 

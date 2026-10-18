@@ -20,6 +20,7 @@ import {
 import { failOrWarn } from "../fail-or-warn.ts";
 import { reportTitle } from "../report.ts";
 import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit-paths.ts";
+import { MEDIATED_VARIABLES, mediatedPathOf } from "../sandbox/runner-output-files.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import {
   filesystemAuditArtifactName,
@@ -172,6 +173,17 @@ function prefixes(value: string | undefined, realpath: (p: string) => string): s
   return out;
 }
 
+// A runner file is written at its backing copy once mediated, and at its real
+// path under the overlay when ephemeral leaves it unmediated.
+function runnerFiles(env: NodeJS.ProcessEnv, realpath: (p: string) => string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const variable of MEDIATED_VARIABLES) {
+    for (const path of [mediatedPathOf(variable), ...prefixes(env[variable], realpath)])
+      out.set(path, variable);
+  }
+  return out;
+}
+
 export interface StepFilesystemAudit {
   /**
    * The audit's Job Summary blocks under `title`, timed from the proxy's start
@@ -244,6 +256,7 @@ export function readStepFilesystemAudit(
   const options: SummaryOptions = {
     workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
     home: prefixes(env.HOME, deps.realpath),
+    runnerFiles: runnerFiles(env, deps.realpath),
   };
   // The stripped copy goes beside the recording under the scratch base,
   // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
