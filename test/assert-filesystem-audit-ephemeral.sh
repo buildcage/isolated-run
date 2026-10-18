@@ -2,7 +2,6 @@
 # Checks the Job Summary of test-e2e.yml's ephemeral filesystem audit step and
 # what the step left on the host. Run on the runner host from the checkout the
 # step wrote its files in.
-# The backticks in the patterns are the summary's Markdown code spans.
 # shellcheck disable=SC2016
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
@@ -24,26 +23,22 @@ echo ""
 assert_file_has "$f" "The summary has the Process Activity section" "^## Process Activity Report"
 assert_file_lacks "$f" "The record is not marked incomplete" "This record is incomplete"
 
-# Changes to files the checkout left on the overlay's lower layer, each of
-# which copies the file up.
 assert_one_row "An append to a lower-layer file has one row" ' W +bash +\./README\.md$'
 assert_one_row "A chmod of a lower-layer file has one row" ' A +chmod +\./LICENSE$'
 assert_one_row "A move of a lower-layer file has one row" ' M +mv +\./SECURITY\.md$'
 assert_one_row "A delete of a lower-layer file has one row" ' D +rm +\./MAINTAINERS\.md$'
 assert_one_row "A lower-layer file mapped shared and made writable has one row" ' RW +python3 +\./renovate\.json$'
 
-# Writes the overlay discards and writes write_through keeps read the same.
 assert_one_row "A discarded write has one row" ' W +bash +\./discarded\.txt$'
 assert_one_row "A write under write_through has one row" ' W +bash +\./kept/written\.txt$'
 
-# The runner's files go by their variables: $GITHUB_OUTPUT written back through
-# write_through, $GITHUB_STEP_SUMMARY discarded at its real path.
+# $GITHUB_OUTPUT is written back and $GITHUB_STEP_SUMMARY discarded; both go
+# by name.
 assert_one_row "\$GITHUB_OUTPUT has one row under its name" ' W +bash +\$GITHUB_OUTPUT$'
 assert_one_row "\$GITHUB_STEP_SUMMARY has one row under its name" ' W +bash +\$GITHUB_STEP_SUMMARY$'
 assert_file_lacks "$f" "No path names the backing copy" '/dev/buildcage-runner-files'
 assert_file_lacks "$f" "No path names the runner's real files" '_runner_file_commands'
 
-# The overlay's layers and the scratch dir behind them are buildcage's.
 assert_file_lacks "$f" "No path names the scratch dir" '/var/tmp/buildcage-'
 assert_file_lacks "$f" "buildcage's own wrappers are left out" -E ' (setpriv|buildcage-init|run-script\.sh) '
 

@@ -8,8 +8,8 @@ export const MEMFD = `\0${MEMFD_PREFIX}`;
 export const MEMFDS = `${MEMFD}\0`;
 export const DELETED_MARK = " (deleted)";
 export const DELETED = `\0${DELETED_MARK}`;
-// The runner's $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY key under their
-// variables' names, behind a mark of their own, wherever the sandbox put them.
+// $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY key under their variables' names,
+// wherever the step wrote them.
 const RUNNER_FILE = "\0$";
 
 export function marked(r: AuditRecord, path: string): string {
