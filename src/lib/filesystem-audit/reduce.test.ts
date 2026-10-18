@@ -1008,6 +1008,14 @@ describe("createAuditSummary", () => {
     ]);
   });
 
+  it("names a runner file deleted while open by its variable, marked", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "write", comm: "bash", path: "/o", deleted: true }),
+      { ...PREFIXES, runnerFiles: new Map([["/o", "GITHUB_OUTPUT"]]) },
+    );
+    expect(lines(md)).toEqual(["W bash $GITHUB_OUTPUT (deleted)"]);
+  });
+
   it("names the workspace and home roots themselves", () => {
     const md = render(
       { kind: "read", comm: "node", path: "/work" },

@@ -70795,7 +70795,7 @@ function createAuditSummary(prefixes) {
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
 			}
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
-				let path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: r.comm ?? "",

@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vite
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
+import { mediatedPathOf } from "../sandbox/runner-output-files.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 import {
@@ -399,7 +400,7 @@ describe("readStepFilesystemAudit", () => {
   it("names the runner's files, mediated or at their real paths", async () => {
     const { deps: d, summaries } = deps({
       raw: [
-        { kind: "write", comm: "bash", path: "/dev/buildcage-runner-files/output" },
+        { kind: "write", comm: "bash", path: mediatedPathOf("GITHUB_OUTPUT") },
         { kind: "write", comm: "bash", path: "/real/temp/summary" },
       ]
         .map((r) => JSON.stringify(r))

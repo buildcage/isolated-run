@@ -223,8 +223,8 @@ paths `write_through` names. Two kinds of path are easy to miss:
 
 - **The runner's files.** `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` are written like any other
   file, so the step's outputs and its own summary are lost unless named. The audit shows them under
-  those names, whether named or not. `$GITHUB_ENV` and
-  `$GITHUB_PATH` are read-only in either mode, and need naming to be written at all.
+  those names whether `write_through` names them or not. `$GITHUB_ENV` and `$GITHUB_PATH` are
+  read-only in either mode, and need naming to be written at all.
 - **Caches.** `actions/cache`, and setup actions with `cache:`, save a directory such as `~/.npm`
   after the job. Unless it is named, the save finds nothing the step added to it.
 
