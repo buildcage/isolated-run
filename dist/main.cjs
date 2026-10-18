@@ -70789,7 +70789,7 @@ function createAuditSummary(prefixes) {
 				return;
 			}
 			if (r.kind === "exec" && r.path) {
-				let p = normalize$2(canonical(marked(r, r.path), prefixes));
+				let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 				programs.set(r.pid, rank(p, !1));
 				let runs = executed.get(p);
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
@@ -70958,13 +70958,16 @@ function prefixes(value, realpath) {
 	} catch {}
 	return out;
 }
-function runnerFiles(env, realpath) {
+function runnerFiles(env, mediated, realpath) {
 	let out = new Map();
-	for (let variable of MEDIATED_VARIABLES) for (let path of [mediatedPathOf(variable), ...prefixes(env[variable], realpath)]) out.set(path, variable);
+	for (let variable of MEDIATED_VARIABLES) {
+		let paths = mediated.includes(variable) ? [mediatedPathOf(variable)] : prefixes(env[variable], realpath);
+		for (let path of paths) out.set(path, variable);
+	}
 	return out;
 }
 const NONE = { blocks: () => [] };
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, actionRepo, actionRef, failClosed }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -70983,7 +70986,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	let options = {
 		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 		home: prefixes(env.HOME, deps.realpath),
-		runnerFiles: runnerFiles(env, deps.realpath)
+		runnerFiles: runnerFiles(env, mediated, deps.realpath)
 	}, cleanPath = audit.stepPath, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
@@ -74692,6 +74695,7 @@ async function finalizeStep(run, deps) {
 		containerName,
 		annotation,
 		env,
+		mediated: mediation?.files.map((f) => f.variable) ?? [],
 		actionRepo,
 		actionRef: reportActionRef,
 		failClosed: proxyMode !== "audit" && failOnBlocked

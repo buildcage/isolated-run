@@ -281,7 +281,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return;
     }
     if (r.kind === "exec" && r.path) {
-      const p = normalize(canonical(marked(r, r.path), prefixes));
+      const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
       const runs = executed.get(p);
       if (runs !== undefined) executed.set(p, runs + 1);

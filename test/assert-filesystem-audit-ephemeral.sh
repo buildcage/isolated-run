@@ -50,6 +50,8 @@ check_status "The write under write_through reached the host" "$(test -f kept/wr
 check_status "The discarded write did not" "$(test -e discarded.txt && echo yes || echo no)" no
 check_status "The lower-layer files are as checked out" \
   "$(git diff --quiet -- README.md LICENSE SECURITY.md MAINTAINERS.md renovate.json && echo yes || echo no)" yes
+# git keeps only the exec bit, so the chmod is checked by its mode.
+check_status "The chmod did not reach the host" "$(stat -c %a LICENSE)" "$(stat -c %a README.md)"
 check_status "The moved file's new name did not reach the host" "$(test -e SECURITY.moved && echo yes || echo no)" no
 check_status "The step's output went through write_through" "$PROBE_OUTPUT" kept
 
