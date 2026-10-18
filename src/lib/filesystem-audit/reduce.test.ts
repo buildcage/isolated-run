@@ -977,6 +977,45 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R node ./a"]);
   });
 
+  it("names a runner file by its variable, on a row of its own", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "write", comm: "bash", path: "/dev/buildcage-runner-files/output" },
+        { kind: "write", comm: "bash", path: "/home/u/_temp/cmds/summary" },
+        ...["a", "b", "c"].map((f) => ({
+          kind: "write",
+          comm: "bash",
+          path: `/home/u/_temp/cmds/${f}`,
+        })),
+      ),
+      {
+        ...PREFIXES,
+        runnerFiles: new Map([
+          ["/dev/buildcage-runner-files/output", "GITHUB_OUTPUT"],
+          ["/home/u/_temp/cmds/summary", "GITHUB_STEP_SUMMARY"],
+        ]),
+      },
+    );
+    expect(lines(md)).toEqual([
+      "W bash ~/_temp/cmds/**",
+      "W bash $GITHUB_OUTPUT",
+      "W bash $GITHUB_STEP_SUMMARY",
+    ]);
+    expect(tableRows(md)).toEqual([
+      "| `~/_temp/cmds/**` | W |",
+      "| `$GITHUB_OUTPUT` | W |",
+      "| `$GITHUB_STEP_SUMMARY` | W |",
+    ]);
+  });
+
+  it("names a runner file deleted while open by its variable, marked", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "write", comm: "bash", path: "/o", deleted: true }),
+      { ...PREFIXES, runnerFiles: new Map([["/o", "GITHUB_OUTPUT"]]) },
+    );
+    expect(lines(md)).toEqual(["W bash $GITHUB_OUTPUT (deleted)"]);
+  });
+
   it("names the workspace and home roots themselves", () => {
     const md = render(
       { kind: "read", comm: "node", path: "/work" },

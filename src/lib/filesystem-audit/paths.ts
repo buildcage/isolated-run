@@ -8,6 +8,9 @@ export const MEMFD = `\0${MEMFD_PREFIX}`;
 export const MEMFDS = `${MEMFD}\0`;
 export const DELETED_MARK = " (deleted)";
 export const DELETED = `\0${DELETED_MARK}`;
+// $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY key under their variables' names,
+// wherever the step wrote them.
+const RUNNER_FILE = "\0$";
 
 export function marked(r: AuditRecord, path: string): string {
   if (r.memfd) return MEMFD + path.slice(MEMFD_PREFIX.length);
@@ -17,11 +20,13 @@ export function marked(r: AuditRecord, path: string): string {
 export const unmarked = (path: string): string =>
   path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path;
 
+export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FILE);
+
 // Never folded, nor credited to the directories it names: a path with "..",
-// which may lead elsewhere through a symlink, and a memfd, whose name only
-// looks like a path.
+// which may lead elsewhere through a symlink, a memfd, whose name only looks
+// like a path, and a runner file, whose name is no path.
 export const unfoldable = (parts: string[], path: string): boolean =>
-  parts.includes("..") || path.startsWith(MEMFD);
+  parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 
 export function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
@@ -33,9 +38,12 @@ export function normalize(path: string): string {
 export interface Prefixes {
   workspace: string[];
   home: string[];
+  /** Each path a runner file may be written at, to its variable's name. */
+  runnerFiles?: ReadonlyMap<string, string>;
 }
 
 export function relativize(path: string, prefixes: Prefixes): string {
+  if (isRunnerFile(path)) return `$${path.slice(RUNNER_FILE.length)}`;
   for (const ws of prefixes.workspace) {
     if (path === ws) return ".";
     if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
@@ -53,6 +61,8 @@ export function relativize(path: string, prefixes: Prefixes): string {
 // The workspace and $HOME may each be reached by two spellings (as given and
 // with symlinks resolved); fold a path onto the first so one file keys once.
 export function canonical(path: string, prefixes: Prefixes): string {
+  const variable = prefixes.runnerFiles?.get(path);
+  if (variable) return RUNNER_FILE + variable;
   for (const [first, ...rest] of [prefixes.workspace, prefixes.home]) {
     for (const alt of rest) {
       if (path === alt) return first;

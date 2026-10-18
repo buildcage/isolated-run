@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vite
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
+import { mediatedPathOf } from "../sandbox/runner-output-files.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 import {
@@ -117,6 +118,7 @@ describe("readStepFilesystemAudit", () => {
     failClosed: false,
     attached: true,
     cancelled: false,
+    mediated: [],
   };
 
   it("links the skipped-hooks note to the guide", async () => {
@@ -394,6 +396,41 @@ describe("readStepFilesystemAudit", () => {
     );
 
     expect(summaries[0]).toContain("W node ./a.txt");
+  });
+
+  it("names a mediated runner file at its backing copy and another at its real path", async () => {
+    const { deps: d, summaries } = deps({
+      raw: [
+        { kind: "write", comm: "bash", path: mediatedPathOf("GITHUB_OUTPUT") },
+        { kind: "write", comm: "bash", path: "/real/temp/summary" },
+        // The masked real file of the mediated one, and the unused backing copy.
+        { kind: "write", comm: "sh", path: "/real/temp/output" },
+        { kind: "write", comm: "sh", path: mediatedPathOf("GITHUB_STEP_SUMMARY") },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n"),
+      realpath: (p) => (p === "/sym/temp/summary" ? "/real/temp/summary" : p),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: {
+          GITHUB_WORKSPACE: "/work",
+          GITHUB_OUTPUT: "/real/temp/output",
+          GITHUB_STEP_SUMMARY: "/sym/temp/summary",
+        },
+        mediated: ["GITHUB_OUTPUT"],
+      },
+      d,
+    );
+
+    expect(summaries[0]).toMatch(/W +bash +\$GITHUB_OUTPUT\n/);
+    expect(summaries[0]).toMatch(/W +bash +\$GITHUB_STEP_SUMMARY\n/);
+    expect(summaries[0]).toMatch(/W +sh +\/real\/temp\/output\n/);
+    expect(summaries[0]).toMatch(/W +sh +\/dev\/buildcage-runner-files\/step-summary\n/);
   });
 
   it("falls back to the raw prefix when the realpath cannot be resolved", async () => {
@@ -757,6 +794,7 @@ describe("readStepFilesystemAudit: failures while reading", () => {
     cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
+    mediated: [],
   };
   const line = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" });
 
@@ -856,6 +894,7 @@ describe("readStepFilesystemAudit: an upload that throws", () => {
       {
         upload: true,
         retentionDays: 3,
+        mediated: [],
         containerName: "buildcage-proxy-deadbeef",
         actionRepo: "buildcage/isolated-run",
         actionRef: "v2",
@@ -890,6 +929,7 @@ describe("readStepFilesystemAudit", () => {
     cancelled: false,
     audit: AUDIT,
     env: { GITHUB_WORKSPACE: "/work" },
+    mediated: [],
   };
 
   // A cancelled step writes the summary first and uploads after it.

@@ -474,6 +474,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     containerName,
     annotation,
     env,
+    mediated: mediation?.files.map((f) => f.variable) ?? [],
     actionRepo,
     actionRef: reportActionRef,
     failClosed: proxyMode !== "audit" && failOnBlocked,

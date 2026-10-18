@@ -16,6 +16,7 @@ import {
   components,
   DELETED,
   DELETED_MARK,
+  isRunnerFile,
   marked,
   MEMFD,
   MEMFD_PREFIX,
@@ -280,7 +281,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return;
     }
     if (r.kind === "exec" && r.path) {
-      const p = normalize(canonical(marked(r, r.path), prefixes));
+      const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
       const runs = executed.get(p);
       if (runs !== undefined) executed.set(p, runs + 1);
@@ -291,12 +292,21 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     if (isLibraryMap(r)) return;
     for (const c of classify(r)) {
-      const path = canonical(c.path === r.path ? marked(r, c.path) : c.path, prefixes);
+      // Marked after, so a runner file deleted while open still keys by name.
+      const own = canonical(c.path, prefixes);
+      const path = c.path === r.path ? marked(r, own) : own;
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target, or
       // an attribute change whose directory descriptor closed meanwhile, which
       // is lost; a failed one may keep the relative name it was given.
-      if (!c.failed && !r.memfd && !path.startsWith("/") && !path.startsWith("…/")) continue;
+      if (
+        !c.failed &&
+        !r.memfd &&
+        !isRunnerFile(path) &&
+        !path.startsWith("/") &&
+        !path.startsWith("…/")
+      )
+        continue;
       // A read of what the process loaded prints nothing.
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
       const t = Date.parse(r.t ?? "");

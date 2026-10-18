@@ -20,6 +20,11 @@ import {
 import { failOrWarn } from "../fail-or-warn.ts";
 import { reportTitle } from "../report.ts";
 import type { FilesystemAuditPaths } from "../sandbox/filesystem-audit-paths.ts";
+import {
+  MEDIATED_VARIABLES,
+  mediatedPathOf,
+  type MediatedVariable,
+} from "../sandbox/runner-output-files.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import {
   filesystemAuditArtifactName,
@@ -58,6 +63,8 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
+  /** The runner files the command wrote through backing copies. */
+  mediated: readonly MediatedVariable[];
   /** Where the guide the summary links to is read from. */
   actionRepo: string;
   actionRef: string;
@@ -172,6 +179,24 @@ function prefixes(value: string | undefined, realpath: (p: string) => string): s
   return out;
 }
 
+// A mediated runner file is written at its backing copy, its real path masked
+// from the command, so an access there keeps that path. One ephemeral leaves
+// unmediated is written at its real path under the overlay.
+function runnerFiles(
+  env: NodeJS.ProcessEnv,
+  mediated: readonly MediatedVariable[],
+  realpath: (p: string) => string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const variable of MEDIATED_VARIABLES) {
+    const paths = mediated.includes(variable)
+      ? [mediatedPathOf(variable)]
+      : prefixes(env[variable], realpath);
+    for (const path of paths) out.set(path, variable);
+  }
+  return out;
+}
+
 export interface StepFilesystemAudit {
   /**
    * The audit's Job Summary blocks under `title`, timed from the proxy's start
@@ -213,6 +238,7 @@ export function readStepFilesystemAudit(
     containerName,
     annotation,
     env,
+    mediated,
     actionRepo,
     actionRef,
     failClosed,
@@ -244,6 +270,7 @@ export function readStepFilesystemAudit(
   const options: SummaryOptions = {
     workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
     home: prefixes(env.HOME, deps.realpath),
+    runnerFiles: runnerFiles(env, mediated, deps.realpath),
   };
   // The stripped copy goes beside the recording under the scratch base,
   // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a

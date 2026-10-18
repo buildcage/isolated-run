@@ -343,6 +343,60 @@ jobs:
           STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
           if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
 
+      - name: Run an ephemeral step with filesystem_audit enabled
+        id: ephemeral_audit
+        if: matrix.filesystem_mode == 'ephemeral'
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/ephemeral-summary.md
+          BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/ephemeral-raw.jsonl
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          filesystem_mode: ephemeral
+          filesystem_audit: record
+          write_through: |
+            $GITHUB_OUTPUT
+            ./kept
+          run: |
+            echo probe=kept >> "$GITHUB_OUTPUT"
+            echo 'From the command' >> "$GITHUB_STEP_SUMMARY"
+            echo data > "$GITHUB_WORKSPACE/kept/written.txt"
+            echo data > "$GITHUB_WORKSPACE/discarded.txt"
+            # Files the checkout left on the overlay's lower layer, each
+            # copied up by the change.
+            echo appended >> "$GITHUB_WORKSPACE/README.md"
+            chmod 600 "$GITHUB_WORKSPACE/LICENSE"
+            mv "$GITHUB_WORKSPACE/SECURITY.md" "$GITHUB_WORKSPACE/SECURITY.moved"
+            rm "$GITHUB_WORKSPACE/MAINTAINERS.md"
+            python3 -c 'import ctypes, mmap, os, sys
+            f = os.open(sys.argv[1], os.O_RDWR)
+            m = mmap.mmap(f, 0)
+            libc = ctypes.CDLL(None)
+            addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
+            assert libc.mprotect(ctypes.c_void_p(addr), mmap.PAGESIZE, 7) == 0' "$GITHUB_WORKSPACE/renovate.json"
+
+      - name: Verify the ephemeral step's record and what it left
+        if: matrix.filesystem_mode == 'ephemeral'
+        env:
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/ephemeral-summary.md
+          PROBE_OUTPUT: ${{ steps.ephemeral_audit.outputs.probe }}
+        run: |
+          echo "::group::Filesystem audit summary"; cat "$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"; echo "::endgroup::"
+          echo "::group::Raw recording"; cat "${{ runner.temp }}/ephemeral-raw.jsonl" 2>/dev/null || true; echo "::endgroup::"
+          ./test/assert-filesystem-audit-ephemeral.sh
+
+      - name: The post step removes the ephemeral step's audit files
+        if: matrix.filesystem_mode == 'ephemeral'
+        run: |
+          base="/var/tmp/buildcage-$(id -u)"
+          rec=$(ls "$base"/filesystem-audit-*.jsonl | head -1)
+          suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/p')
+          if [ -z "$suffix" ]; then echo "::error::no recording left for the post step"; exit 1; fi
+          STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
+          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+
       # One representative case through the real action wrapper, against real
       # internet hosts (no fixture network), proves proxy_engine: universal
       # wiring end-to-end: an allowed host reaches its origin, a blocked one does

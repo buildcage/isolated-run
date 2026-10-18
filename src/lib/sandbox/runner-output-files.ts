@@ -56,6 +56,10 @@ const LEAF = { GITHUB_OUTPUT: "output", GITHUB_STEP_SUMMARY: "step-summary" } as
 export type MediatedVariable = keyof typeof LEAF;
 export const MEDIATED_VARIABLES = Object.keys(LEAF) as MediatedVariable[];
 
+/** Where the command writes `variable` once it is mediated. */
+export const mediatedPathOf = (variable: MediatedVariable): string =>
+  `${RUNNER_FILES_DIR}/${LEAF[variable]}`;
+
 export interface MediatedRunnerFile {
   variable: MediatedVariable;
   /** The real path the runner created and reads after the step. */

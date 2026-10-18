@@ -905,6 +905,20 @@ describe("runSandboxStep", () => {
       expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
       expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
       expect(mocks.removeBackingDir).not.toHaveBeenCalled();
+      expect(mocks.readStepFilesystemAudit.mock.calls[0][0].mediated).toStrictEqual([]);
+    });
+
+    it("tells the audit report which runner files were mediated", async () => {
+      mocks.resolveFilesystemPlan.mockReturnValue({
+        overlayRoots: ["/home/runner"],
+        writeThroughPaths: [],
+        mediatedVariables: ["GITHUB_OUTPUT"],
+      });
+      await runSandboxStep(ENV, deps);
+
+      expect(mocks.readStepFilesystemAudit.mock.calls[0][0].mediated).toStrictEqual([
+        "GITHUB_OUTPUT",
+      ]);
     });
 
     // The sandbox sees the backing directory only through its bind, and the
