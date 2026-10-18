@@ -32,7 +32,7 @@ jobs:
       # example blocks on purpose; leave it at its default so a real workflow
       # fails on a block.
       - name: Call AWS with outbound network isolation
-        uses: buildcage/isolated-run@2eb9d194819908755c59bad31081e5db67cfe7a8 # v2.2.0
+        uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
         env:
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
