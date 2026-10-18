@@ -100,7 +100,7 @@ if [ "${BENCH_MODE:-}" = profile ]; then
 fi
 profile=
 for rep in 1 2 3; do
-	for bin in none main base pr; do
+	for bin in none base pr; do
 		for w in 1 4 16 64; do
 			run $bin open-w$w $rep "$out/stress" -mode open -workers $w -dur 5s -dir "$work"
 		done
