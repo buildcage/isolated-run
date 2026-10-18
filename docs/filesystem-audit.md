@@ -107,7 +107,6 @@ A shortened example:
 
 ```
 ## Process Activity Report
-> 🚫 Refused system calls: io_uring_setup (node).
 
 ### Executed Programs
 | Path                  | Count |
@@ -143,9 +142,8 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 
 From the top:
 
-- The **🚫 Refused system calls** note names system calls the sandbox does not allow, such as
-  `io_uring_setup`, and the commands that made them; see
-  [Refused system calls](#refused-system-calls).
+- A **🚫 Killed for a 32-bit system call** note, when there is one, names the commands the sandbox
+  killed for making one; see [Refused system calls](#refused-system-calls).
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
 - **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
@@ -179,8 +177,8 @@ From the top:
   a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
-  read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
-  named in the **🚫 Refused system calls** note under the heading instead.
+  read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, shows
+  only in the details, as `syscall:unshare` with `!`.
 
 ### Flags
 
@@ -521,9 +519,11 @@ memfd's name, which is quoted already, and a refused system call.
 ### Refused system calls
 
 A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
-or `unshare`, which fails with `EPERM`. The note under the heading names the first 10, each with
-the first commands that made it, and counts the rest; the details, where they fit, show each once
-per program, as `syscall:io_uring_setup` with `!`.
+or `unshare`, which fails with `EPERM`. The details, where they fit, show each once per program, as
+`syscall:io_uring_setup` with `!`. Only a command killed for one is noted under the heading: many
+programs try a system call and carry on without it, as Node.js does with `io_uring_setup` each time
+it starts. When a step fails, look for a `syscall:` row in the details: a program that needs one,
+such as `bwrap` with `unshare`, cannot run without it.
 
 - One already recorded as a failed change to a path is not repeated.
 - One the profile allows only for some arguments, as `clone`, is not recorded even when refused,

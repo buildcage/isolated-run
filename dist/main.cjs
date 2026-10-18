@@ -70155,22 +70155,11 @@ function markdownRows(header, rows) {
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
-function refusedNote(rows) {
-	let byName = new Map(), cut = new Set(), killed = new Set(), anyKilled = !1;
-	for (let { syscall, comm } of inRecordingOrder(rows)) {
-		anyKilled ||= syscall.killed;
-		let comms = syscall.killed ? killed : byName.get(syscall.name) ?? new Set();
-		syscall.killed || byName.set(syscall.name, comms), syscall.cut && cut.add(comms), comm && comms.add(comm);
-	}
-	let list = (items, shown, more = !1) => {
-		let left = Math.max(items.length - shown, 0) + +!!more;
-		return items.slice(0, shown).join(", ") + (left > 0 ? ` and ${more ? "at least " : ""}${left} more` : "");
-	}, comms = (c) => list([...c].map(codeSpan), 3, cut.has(c)), names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : "")), parts = [];
-	if (names.length && parts.push(`Refused system calls: ${list(names, 10)}`), anyKilled) {
-		let by = killed.size ? `: ${comms(killed)}` : "";
-		parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
-	}
-	return `> 🚫 ${parts.join("; ")}.`;
+function killedNote(rows) {
+	let killed = inRecordingOrder(rows).filter((r) => r.syscall.killed);
+	if (!killed.length) return;
+	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan), left = comms.length - 3;
+	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${comms.slice(0, 3).join(", ")}${left > 0 ? ` and ${left} more` : ""}` : ""}.`;
 }
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
@@ -70265,11 +70254,11 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 	};
 }
 function renderAuditSummaryBlocks(summary, opts) {
-	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, top = [
+	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, killed = killedNote(refused), top = [
 		heading(opts.title),
 		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
 		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
-		...refused.length ? [refusedNote(refused)] : []
+		...killed ? [killed] : []
 	].join("\n\n"), frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -70758,7 +70747,7 @@ function createAuditSummary(prefixes) {
 	}, programOf = (pid, comm) => {
 		let r = programs.get(pid);
 		return r === void 0 && programs.set(pid, r = rank(comm, !0)), r;
-	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Map(), add = (r, counted = !0) => {
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
@@ -70769,11 +70758,7 @@ function createAuditSummary(prefixes) {
 			if (r.kind === "syscall") {
 				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					let first = r.killed ? void 0 : refusedFirst.get(name);
-					if (refused.size >= 200 && first) {
-						first.syscall.cut = !0;
-						return;
-					}
+					if (refused.size >= 200 && !r.killed && refusedFirst.has(name)) return;
 					row = {
 						agg: newAgg(),
 						flags: "!",
@@ -70783,7 +70768,7 @@ function createAuditSummary(prefixes) {
 							name,
 							killed: !!r.killed
 						}
-					}, refused.set(key, row), !r.killed && !first && refusedFirst.set(name, row);
+					}, refused.set(key, row), r.killed || refusedFirst.add(name);
 				}
 				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 				return;

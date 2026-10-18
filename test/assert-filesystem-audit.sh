@@ -63,11 +63,11 @@ assert_file_has "$f" "A failed read against a changed working directory shows un
 assert_file_has "$f" "A failed delete against a directory descriptor shows under it" -E ' d +python3 +\./sub/gone$'
 assert_file_has "$f" "A failed open against a directory descriptor shows under it" -E ' r +python3 +\./sub/absent$'
 
-# A refused syscall: noted under the heading, and a details row.
-assert_file_has "$f" "Refused syscalls are noted under the heading" -E '^> 🚫 Refused system calls: '
+# A refused syscall: a details row only, unless it killed the command.
+assert_file_lacks "$f" "Refused syscalls are not noted under the heading" 'Refused system calls'
 assert_file_has "$f" "The refused unshare has a details row" -E ' ! +python3 +syscall:unshare$'
 if [ "$(uname -m)" = x86_64 ]; then
-  assert_file_has "$f" "The killed 32-bit syscall is noted under the heading" -E '^> 🚫 .*illed for a 32-bit system call: .*`int80`'
+  assert_file_has "$f" "The killed 32-bit syscall is noted under the heading" -E '^> 🚫 Killed for a 32-bit system call: .*`int80`'
   assert_file_has "$f" "The killed 32-bit syscall has a details row" -E ' ! +int80 +syscall:32-bit getpid \(killed\)$'
 fi
 

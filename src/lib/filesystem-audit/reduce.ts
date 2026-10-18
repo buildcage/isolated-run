@@ -94,7 +94,7 @@ export interface PathRow extends Row {
  * whether some command refused it got no row.
  */
 export interface RefusedRow extends Row {
-  syscall: { name: string; killed: boolean; cut?: boolean };
+  syscall: { name: string; killed: boolean };
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -236,8 +236,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let seq = 0;
   const added = new Map<number | undefined, number>();
   const refused = new Map<string, RefusedRow>();
-  // Each refused syscall's first row, by name.
-  const refusedFirst = new Map<string, RefusedRow>();
+  // Each refused syscall with a row.
+  const refusedFirst = new Set<string>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -262,16 +262,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       let row = refused.get(key);
       if (!row) {
         // A kill explains a step's "Bad system call", and a syscall's first row
-        // keeps it in the note, so both are always kept. The profile bounds
+        // keeps it in the details, so both are always kept. The profile bounds
         // how many names there are.
-        const first = r.killed ? undefined : refusedFirst.get(name);
-        if (refused.size >= REFUSED_KEPT && first) {
-          first.syscall.cut = true;
-          return;
-        }
+        if (refused.size >= REFUSED_KEPT && !r.killed && refusedFirst.has(name)) return;
         row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
-        if (!r.killed && !first) refusedFirst.set(name, row);
+        if (!r.killed) refusedFirst.add(name);
       }
       if (!Number.isNaN(t)) {
         if (row.agg.seq === Infinity) row.agg.seq = seq++;
