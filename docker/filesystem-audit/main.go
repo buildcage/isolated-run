@@ -13,9 +13,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -60,6 +62,10 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	// stops the tracer meanwhile does not leave it recording.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// The startup lines: one log group once attached, or plain lines ahead of
+	// main's fatal line if it fails first.
+	var start bytes.Buffer
+	defer func() { os.Stderr.Write(start.Bytes()) }()
 	if watchPid > 0 {
 		err := stopOnExit(watchPid, sig)
 		if errors.Is(err, unix.ESRCH) {
@@ -67,7 +73,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		}
 		// Otherwise only a backstop for the action's own stop, so not worth failing over.
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
+			fmt.Fprintf(&start, "filesystem-audit: cannot watch pid %d: %v\n", watchPid, err)
 		}
 	}
 	// Written before loading so the post step can stop a tracer still loading.
@@ -77,7 +83,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		}
 	}
 
-	cg, created, err := prepareCgroup(cgPath)
+	cg, created, err := prepareCgroup(cgPath, &start)
 	if err != nil {
 		return err
 	}
@@ -88,7 +94,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		defer os.Remove(cg.Name())
 	}
 	if lsm, err := os.ReadFile("/sys/kernel/security/lsm"); err == nil {
-		fmt.Fprintf(os.Stderr, "filesystem-audit: active LSMs: %s\n", strings.TrimSpace(string(lsm)))
+		fmt.Fprintf(&start, "filesystem-audit: active LSMs: %s\n", strings.TrimSpace(string(lsm)))
 	}
 
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -105,7 +111,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	if err := requireLinux61(kspec); err != nil {
 		return err
 	}
-	dropAbsentPrograms(spec, kspec)
+	dropAbsentPrograms(spec, kspec, &start)
 	if err := setSyscallNumbers(spec); err != nil {
 		return err
 	}
@@ -133,7 +139,7 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	if stopRequested(sig) {
 		return errStoppedEarly
 	}
-	links, err := attachAll(coll)
+	links, err := attachAll(coll, &start)
 	for _, l := range links {
 		defer l.Close()
 	}
@@ -163,12 +169,15 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		return err
 	}
 	base, errBase := missedRuns(coll)
+	// Before the ready file, so the group is out before the step logs more.
+	fmt.Fprintln(&start, "filesystem-audit: attached")
+	logGroup(os.Stderr, "buildcage: starting filesystem audit", start.Bytes())
+	start.Reset()
 	if readyPath != "" {
 		if err := writeNew(readyPath, nil); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintln(os.Stderr, "filesystem-audit: attached")
 
 	// Read before the flush that ends readLoop, so it has the count by then.
 	missed := make(chan count, 1)
@@ -211,4 +220,11 @@ func readLoop(rd *ring, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock
 	l := readLoss(coll, <-missedRun)
 	l.errClock = clock.err()
 	return rec.finish(l)
+}
+
+// logGroup writes lines as one collapsed group of the step log, in a single
+// write so they arrive together.
+func logGroup(w io.Writer, title string, lines []byte) {
+	group := append([]byte("::group::"+title+"\n"), lines...)
+	w.Write(append(group, "::endgroup::\n"...))
 }

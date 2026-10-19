@@ -60,8 +60,24 @@ func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
 	if len(got) != 3 || got[0]["kind"] != "exec" || got[1]["path"] != "/etc/hosts" || got[2]["kind"] != "end" {
 		t.Fatalf("recording = %v, want the exec, the step's open and the end line", got)
 	}
-	if !strings.Contains(log.String(), "total=2 ") || !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
-		t.Fatalf("log = %q, want two written and two skipped", log)
+	if !strings.Contains(log.String(), "total=2 ") {
+		t.Fatalf("log = %q, want two written", log)
+	}
+}
+
+func TestRecorderLogsItsTotalsAsOneGroup(t *testing.T) {
+	r, _, log := newTestRecorder()
+	add(t, r, stepExec, stepOpen)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "::group::buildcage: filesystem audit totals\n" +
+		"filesystem-audit: exec          1\n" +
+		"filesystem-audit: open          1\n" +
+		"filesystem-audit: total=2 dropped=0 untracked=0 host-missed=0\n" +
+		"::endgroup::\n"
+	if log.String() != want {
+		t.Fatalf("log = %q, want %q", log, want)
 	}
 }
 
@@ -312,7 +328,7 @@ func TestRecorderWritesOpensStillWaitingAtTheEnd(t *testing.T) {
 }
 
 func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
-	r, out, log := newTestRecorder()
+	r, out, _ := newTestRecorder()
 	add(t, r, openName(11, "/etc/passwd"), waitingOpen(11, "/etc/passwd"), unlink(12, nrUnlink, "x"), stepExec,
 		openResult(11, 3), result(12, nrUnlink, resultWatched, 0))
 	if err := r.finish(loss{}); err != nil {
@@ -320,9 +336,6 @@ func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
 	}
 	if got := paths(t, out); got != "/bin/sh:0 :0" {
 		t.Fatalf("recording = %s, want the exec alone", got)
-	}
-	if !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
-		t.Fatalf("log = %q, want the open and the unlink skipped", log)
 	}
 }
 

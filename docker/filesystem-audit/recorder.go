@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // recorder writes the ring buffer's samples as the recording's lines, and
@@ -25,10 +26,9 @@ type recorder struct {
 	calls map[uint32]*call
 	// line is reused for each line written, and stamp keeps the second's
 	// text from line to line.
-	line    []byte
-	stamp   timeText
-	counts  map[tally]int
-	preExec int
+	line   []byte
+	stamp  timeText
+	counts map[tally]int
 	// unsettled counts calls whose result never arrived, and renamed opens
 	// whose caller's name differed from the kernel's copy.
 	unsettled, renamed int
@@ -94,7 +94,6 @@ func (r *recorder) add(raw []byte) error {
 	}
 	if !r.started {
 		if rec.Kind != "exec" {
-			r.preExec++
 			return nil
 		}
 		r.started = true
@@ -211,14 +210,12 @@ func (r *recorder) finish(l loss) error {
 		if k.failed {
 			name += " failed"
 		}
-		lines = append(lines, fmt.Sprintf("filesystem-audit: %-13s %d", name, n))
+		lines = append(lines, fmt.Sprintf("filesystem-audit: %-13s %d\n", name, n))
 	}
 	sort.Strings(lines)
-	for _, l := range lines {
-		fmt.Fprintln(r.log, l)
-	}
-	fmt.Fprintf(r.log, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		r.total, l.dropped, untracked, l.missed.n, l.internal, r.preExec)
+	lines = append(lines, fmt.Sprintf("filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d\n",
+		r.total, l.dropped, untracked, l.missed.n))
+	logGroup(r.log, "buildcage: filesystem audit totals", []byte(strings.Join(lines, "")))
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
 	if err := errors.Join(l.errDropped, l.errUntracked, l.missed.err); err != nil {

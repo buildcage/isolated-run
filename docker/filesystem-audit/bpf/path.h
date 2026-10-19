@@ -310,9 +310,9 @@ static __always_inline int step_path_of(struct file *file, struct dentry **d,
 }
 
 /**
- * Whether @p file is a layer's rather than the step's, counted as skipped if
- * so. Before 6.7 (no backing_file user_path), overlayfs opened a layer's file
- * under the step's path, so only its inode tells it apart.
+ * Whether @p file is a layer's rather than the step's. Before 6.7 (no
+ * backing_file user_path), overlayfs opened a layer's file under the step's
+ * path, so only its inode tells it apart.
  */
 static __always_inline int on_layer(struct file *file)
 {
@@ -320,7 +320,6 @@ static __always_inline int on_layer(struct file *file)
 	    (bpf_core_field_exists(struct backing_file, user_path) ||
 	     BPF_CORE_READ(file, f_inode) == BPF_CORE_READ(file, f_path.dentry, d_inode)))
 		return 0;
-	bump(&skipped_internal);
 	return 1;
 }
 

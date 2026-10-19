@@ -78,10 +78,8 @@ int BPF_PROG(on_mprotect, struct vm_area_struct *vma, unsigned long reqprot, uns
 	// recorded under, so making it executable later records it again.
 	struct dentry *d;
 	struct vfsmount *mnt;
-	if (!step_path_of(file, &d, &mnt)) {
-		bump(&skipped_internal);
+	if (!step_path_of(file, &d, &mnt))
 		return 0;
-	}
 	map_events(slot, file, d, mnt, reqprot, flags, 0);
 	return 0;
 }

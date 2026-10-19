@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -42,11 +42,11 @@ func requireLinux61(kspec *btf.Spec) error {
 
 // dropAbsentPrograms removes optional programs whose attach target the
 // running kernel does not expose, so loading does not fail on a missing one.
-func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
+func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec, log io.Writer) {
 	for prog, fn := range optionalProgs {
 		var f *btf.Func
 		if err := kspec.TypeByName(fn, &f); err != nil {
-			fmt.Fprintf(os.Stderr, "filesystem-audit: %s absent from kernel BTF, skipped\n", fn)
+			fmt.Fprintf(log, "filesystem-audit: %s absent from kernel BTF, skipped\n", fn)
 			delete(spec.Programs, prog)
 		}
 	}
@@ -93,14 +93,14 @@ func markRefusable(m *ebpf.Map, allowed string) error {
 // the kernel does not offer were dropped before load. The exception is one of
 // the two spellings of do_filp_open, of which at least one must attach or no
 // failed open would have a name.
-func attachAll(coll *ebpf.Collection) ([]link.Link, error) {
+func attachAll(coll *ebpf.Collection, log io.Writer) ([]link.Link, error) {
 	var links []link.Link
 	openNames := 0
 	for name, p := range coll.Programs {
 		l, err := link.AttachTracing(link.TracingOptions{Program: p})
 		if err != nil {
 			if openNameProgs[name] {
-				fmt.Fprintf(os.Stderr, "filesystem-audit: %s not attached: %v\n", name, err)
+				fmt.Fprintf(log, "filesystem-audit: %s not attached: %v\n", name, err)
 				continue
 			}
 			return links, fmt.Errorf("attach %s: %w", name, err)
