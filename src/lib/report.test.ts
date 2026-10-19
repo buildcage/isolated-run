@@ -133,7 +133,7 @@ describe("computeReportOutcomes", () => {
   });
 
   describe("the AWS key check's troubleshooting link", () => {
-    const DOC = "https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md";
+    const DOC = "https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md#troubleshooting";
     const blocked = (reason: string): TrafficEvent => ({
       time: 1,
       action: "block",
@@ -156,7 +156,7 @@ describe("computeReportOutcomes", () => {
         /### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For `aws-key-not-allowed`/,
       );
       expect(markdown).toContain(
-        `\n<sub>*For \`aws-key-not-allowed\`, see [what to do](${DOC}#aws-key-not-allowed).*</sub>\n`,
+        `\n<sub>*For \`aws-key-not-allowed\`, see [what to do](${DOC}).*</sub>\n`,
       );
     });
 
@@ -183,15 +183,14 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("names every reason, each linked to its own section", () => {
+    it("names every reason in one link", () => {
       const timeline = [blocked("aws-unreadable"), blocked("aws-key-not-allowed")];
       const r: InspectReportData = {
         ...report({ blockedCount: 2, blocked: annotateKnownBlocked(timeline, []), timeline }),
         engine: "inspect",
       };
       expect(markdownOf(r, options())).toContain(
-        `\n<sub>*What to do: [\`aws-unreadable\`](${DOC}#aws-unreadable), ` +
-          `[\`aws-key-not-allowed\`](${DOC}#aws-key-not-allowed).*</sub>\n`,
+        `\n<sub>*For \`aws-unreadable\`, \`aws-key-not-allowed\`, see [what to do](${DOC}).*</sub>\n`,
       );
     });
 
@@ -212,7 +211,7 @@ describe("computeReportOutcomes", () => {
       };
       const markdown = markdownOf(r, options());
       expect(markdown).toContain("For `aws-key-not-allowed`, see");
-      expect(markdown).not.toContain("#aws-no-credential");
+      expect(markdown).not.toContain("aws-no-credential`");
     });
 
     it("is left out when known_blocked_rules expects every such block", () => {

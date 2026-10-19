@@ -69527,7 +69527,7 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
 	let shown = new Set([...report.blocked.flatMap((r) => r.expected ? [] : [r.reason]), ...report.timeline.flatMap((e) => letThrough(e) ? [e.wouldBlock] : [])]), reasons = AWS_BLOCKED_VERDICTS.map((v) => `aws-${v}`).filter((r) => shown.has(r)), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
 	if (reasons.length === 0 || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md`, text = reasons.length === 1 ? `For \`${reasons[0]}\`, see [what to do](${url}#${reasons[0]}).` : `What to do: ${reasons.map((r) => `[\`${r}\`](${url}#${r})`).join(", ")}.`, link = trafficFrame(`\n<sub>*${text}*</sub>\n`);
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = reasons.map((r) => `\`${r}\``).join(", "), link = trafficFrame(`\n<sub>*For ${names}, see [what to do](${url}).*</sub>\n`);
 	return [
 		...blocks.slice(0, at + 1),
 		link,

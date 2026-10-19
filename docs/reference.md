@@ -682,8 +682,8 @@ each one's usual causes and what to do.
 
 Like `not-allowed`, these are 🚫 rows in **Blocked Hosts** and fail the step under
 `fail_on_blocked: true`. `known_blocked_rules` marks them as expected the same way, matching the
-host or URL whatever the reason, and in `restrict` the report links each reason no rule expects to
-its section of [Troubleshooting](./aws.md#troubleshooting). In `audit` mode nothing
+host or URL whatever the reason, and in `restrict` the report links to
+[Troubleshooting](./aws.md#troubleshooting) only while one is not expected. In `audit` mode nothing
 is blocked: a warning annotation counts the requests `restrict` would have blocked, and the report
 counts them under **⚠️ Restrict Would Block** for each host and reason, or for each key under
 `aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
