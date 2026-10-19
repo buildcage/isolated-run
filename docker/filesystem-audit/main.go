@@ -16,6 +16,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -60,6 +61,16 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 	// stops the tracer meanwhile does not leave it recording.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	// The startup lines form one log group, written as they come so a tracer
+	// killed while loading leaves them. Nothing else logs until it attaches.
+	fmt.Fprintln(os.Stderr, "::group::buildcage: starting filesystem audit")
+	attached := false
+	defer func() {
+		// Ahead of main's fatal line, so that stays in view.
+		if !attached {
+			fmt.Fprintln(os.Stderr, "::endgroup::")
+		}
+	}()
 	if watchPid > 0 {
 		err := stopOnExit(watchPid, sig)
 		if errors.Is(err, unix.ESRCH) {
@@ -163,12 +174,14 @@ func run(cgPath, outPath, readyPath, pidPath string, watchPid int, allowedSyscal
 		return err
 	}
 	base, errBase := missedRuns(coll)
+	// Before the ready file, so the group is closed before the step logs more.
+	fmt.Fprint(os.Stderr, "filesystem-audit: attached\n::endgroup::\n")
+	attached = true
 	if readyPath != "" {
 		if err := writeNew(readyPath, nil); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintln(os.Stderr, "filesystem-audit: attached")
 
 	// Read before the flush that ends readLoop, so it has the count by then.
 	missed := make(chan count, 1)
@@ -211,4 +224,11 @@ func readLoop(rd *ring, w *bufio.Writer, coll *ebpf.Collection, clock *bootClock
 	l := readLoss(coll, <-missedRun)
 	l.errClock = clock.err()
 	return rec.finish(l)
+}
+
+// logGroup writes lines as one collapsed group of the step log, in a single
+// write so they arrive together.
+func logGroup(w io.Writer, title string, lines []byte) {
+	group := append([]byte("::group::"+title+"\n"), lines...)
+	w.Write(append(group, "::endgroup::\n"...))
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // recorder writes the ring buffer's samples as the recording's lines, and
@@ -25,10 +26,9 @@ type recorder struct {
 	calls map[uint32]*call
 	// line is reused for each line written, and stamp keeps the second's
 	// text from line to line.
-	line    []byte
-	stamp   timeText
-	counts  map[tally]int
-	preExec int
+	line   []byte
+	stamp  timeText
+	counts map[tally]int
 	// unsettled counts calls whose result never arrived, and renamed opens
 	// whose caller's name differed from the kernel's copy.
 	unsettled, renamed int
@@ -94,7 +94,6 @@ func (r *recorder) add(raw []byte) error {
 	}
 	if !r.started {
 		if rec.Kind != "exec" {
-			r.preExec++
 			return nil
 		}
 		r.started = true
@@ -176,12 +175,13 @@ func (r *recorder) write(rec record) error {
 	return err
 }
 
-// finish reports a one-line tally to the log and writes the end line, then
-// flushes the recording.
+// finish logs the tallies as one group and writes the end line, then flushes
+// the recording.
 func (r *recorder) finish(l loss) error {
+	var notes []string
 	// Times are off only if the clock was set after it was lost.
 	if l.errClock != nil {
-		fmt.Fprintln(r.log, "filesystem-audit: lost track of the realtime clock:", l.errClock)
+		notes = append(notes, fmt.Sprintln("filesystem-audit: lost track of the realtime clock:", l.errClock))
 	}
 	// An open whose call never returned while the tracer ran reached its
 	// file, but whether it succeeded is unknown.
@@ -202,7 +202,7 @@ func (r *recorder) finish(l loss) error {
 	// attachAll refuses to start without do_filp_open or do_file_open, so
 	// this is a kernel whose open(2) no longer passes the one attached.
 	if !r.named && r.unnamed > 0 {
-		fmt.Fprintln(r.log, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded")
+		notes = append(notes, "filesystem-audit: no open passed do_filp_open; failed opens went unrecorded\n")
 		untracked += uint64(r.unnamed)
 	}
 	lines := make([]string, 0, len(r.counts))
@@ -211,18 +211,19 @@ func (r *recorder) finish(l loss) error {
 		if k.failed {
 			name += " failed"
 		}
-		lines = append(lines, fmt.Sprintf("filesystem-audit: %-13s %d", name, n))
+		lines = append(lines, fmt.Sprintf("filesystem-audit: %-13s %d\n", name, n))
 	}
 	sort.Strings(lines)
-	for _, l := range lines {
-		fmt.Fprintln(r.log, l)
+	lines = append(lines, fmt.Sprintf("filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d\n",
+		r.total, l.dropped, untracked, l.missed.n))
+	errLoss := errors.Join(l.errDropped, l.errUntracked, l.missed.err)
+	if errLoss != nil {
+		lines = append(lines, fmt.Sprintln("filesystem-audit: read loss counters:", errLoss))
 	}
-	fmt.Fprintf(r.log, "filesystem-audit: total=%d dropped=%d untracked=%d host-missed=%d internal-skipped=%d pre-exec-skipped=%d\n",
-		r.total, l.dropped, untracked, l.missed.n, l.internal, r.preExec)
+	logGroup(r.log, "buildcage: filesystem audit totals", []byte(strings.Join(append(notes, lines...), "")))
 	// Without every count the recording cannot claim to be complete, so it is
 	// left without its end line.
-	if err := errors.Join(l.errDropped, l.errUntracked, l.missed.err); err != nil {
-		fmt.Fprintln(r.log, "filesystem-audit: read loss counters:", err)
+	if errLoss != nil {
 		return r.w.Flush()
 	}
 	if err := json.NewEncoder(r.w).Encode(end{Kind: "end", Dropped: l.dropped, Untracked: untracked, HostMissed: l.missed.n}); err != nil {

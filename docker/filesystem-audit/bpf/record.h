@@ -42,7 +42,7 @@ struct {
 	__uint(max_entries, 1);
 	__type(key, u32);
 	__type(value, u64);
-} drops SEC(".maps"), untracked SEC(".maps"), skipped_internal SEC(".maps");
+} drops SEC(".maps"), untracked SEC(".maps");
 
 /**
  * Nonzero while the reader waits on the ring: it sets this before it last

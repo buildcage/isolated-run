@@ -60,8 +60,24 @@ func TestRecorderDropsWhatComesBeforeTheFirstExec(t *testing.T) {
 	if len(got) != 3 || got[0]["kind"] != "exec" || got[1]["path"] != "/etc/hosts" || got[2]["kind"] != "end" {
 		t.Fatalf("recording = %v, want the exec, the step's open and the end line", got)
 	}
-	if !strings.Contains(log.String(), "total=2 ") || !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
-		t.Fatalf("log = %q, want two written and two skipped", log)
+	if !strings.Contains(log.String(), "total=2 ") {
+		t.Fatalf("log = %q, want two written", log)
+	}
+}
+
+func TestRecorderLogsItsTotalsAsOneGroup(t *testing.T) {
+	r, _, log := newTestRecorder()
+	add(t, r, stepExec, stepOpen)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "::group::buildcage: filesystem audit totals\n" +
+		"filesystem-audit: exec          1\n" +
+		"filesystem-audit: open          1\n" +
+		"filesystem-audit: total=2 dropped=0 untracked=0 host-missed=0\n" +
+		"::endgroup::\n"
+	if log.String() != want {
+		t.Fatalf("log = %q, want %q", log, want)
 	}
 }
 
@@ -321,8 +337,8 @@ func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
 	if got := paths(t, out); got != "/bin/sh:0 :0" {
 		t.Fatalf("recording = %s, want the exec alone", got)
 	}
-	if !strings.Contains(log.String(), "pre-exec-skipped=2\n") {
-		t.Fatalf("log = %q, want the open and the unlink skipped", log)
+	if !strings.Contains(log.String(), "total=1 ") {
+		t.Fatalf("log = %q, want the exec alone counted", log)
 	}
 }
 
@@ -508,8 +524,8 @@ func TestRecorderLogsALostClock(t *testing.T) {
 	if got := lines(t, out); len(got) != 2 || got[1]["kind"] != "end" {
 		t.Fatalf("recording = %v, want the exec and the end line", got)
 	}
-	if !strings.Contains(log.String(), "lost track of the realtime clock") {
-		t.Fatalf("log = %q", log)
+	if !strings.HasPrefix(log.String(), "::group::buildcage: filesystem audit totals\nfilesystem-audit: lost track of the realtime clock: x\n") {
+		t.Fatalf("log = %q, want the lost clock first in the totals group", log)
 	}
 }
 
@@ -528,8 +544,8 @@ func TestRecorderLeavesOutTheEndLineWithoutEveryCount(t *testing.T) {
 			if got := lines(t, out); len(got) != 1 || got[0]["kind"] != "exec" {
 				t.Fatalf("recording = %v, want the exec alone", got)
 			}
-			if !strings.Contains(log.String(), "read loss counters") {
-				t.Fatalf("log = %q, want the counter that could not be read", log)
+			if !strings.HasSuffix(log.String(), "read loss counters: x\n::endgroup::\n") {
+				t.Fatalf("log = %q, want the counter that could not be read last in the totals group", log)
 			}
 		})
 	}

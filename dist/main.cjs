@@ -73221,15 +73221,19 @@ const END_LINE = /"kind":"end"[^\n]*\n$/;
 function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
 }
-function exitReason() {
-	let partial = "", fatal = "", last = "";
+function followStderr() {
+	let partial = "", fatal = "", last = "", inTotals = !1, totalsDone;
 	return {
 		push(chunk) {
 			let lines = (partial + chunk).split("\n");
 			partial = lines.pop();
-			for (let line of lines) line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line);
+			for (let line of lines) {
+				let text = line.trimEnd();
+				text === "::group::buildcage: filesystem audit totals" ? inTotals = !0 : text === "::endgroup::" && inTotals && totalsDone(), !text.startsWith("::") && (line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line));
+			}
 		},
-		value: () => fatal || last || partial.trim()
+		value: () => fatal || last || partial.trim(),
+		totalsLogged: new Promise((resolve) => totalsDone = resolve)
 	};
 }
 function recordComplete(readTail, path) {
@@ -73253,9 +73257,9 @@ function defaultSpawn$1(command, args) {
 			"pipe"
 		],
 		env: hostCommandEnv(command)
-	}), reason = exitReason();
+	}), reason = followStderr();
 	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
-		process.stderr.write(chunk), reason.push(chunk);
+		process.stdout.write(chunk), reason.push(chunk);
 	}), {
 		exited: new Promise((resolve) => {
 			child.on("error", (e) => {
@@ -73263,7 +73267,8 @@ function defaultSpawn$1(command, args) {
 			}), child.on("close", () => resolve());
 		}),
 		kill: (signal) => child.kill(signal),
-		reason: reason.value
+		reason: reason.value,
+		totalsLogged: reason.totalsLogged
 	};
 }
 function defaultSleep(ms, detached = !1) {
@@ -73313,7 +73318,7 @@ async function haltTracer({ child, exited }, untilRecorded, { outPath, pidFilePa
 	let grace = () => untilRecorded && !cancel?.aborted ? 3e4 : 2e3;
 	for (let waited = 0; !exited(); waited += 100) {
 		if (untilRecorded && recordComplete(readTail, outPath)) {
-			Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited() || signalTracer(pidFilePath, "KILL", deps), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
+			child.totalsLogged && await Promise.race([child.totalsLogged, sleep(2e3, !0)]), Promise.race([child.exited, sleep(1e4, !0)]).then(() => (exited() || signalTracer(pidFilePath, "KILL", deps), child.exited)).then(() => remove(pidFilePath)).catch(() => {});
 			return;
 		}
 		if (waited >= grace()) break;

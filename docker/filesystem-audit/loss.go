@@ -5,9 +5,9 @@ import "github.com/cilium/ebpf"
 // loss is what the BPF side counted, read once the ring buffer is drained,
 // each counter with its own read error.
 type loss struct {
-	dropped, untracked, internal uint64
-	errDropped, errUntracked     error
-	missed                       count
+	dropped, untracked       uint64
+	errDropped, errUntracked error
+	missed                   count
 	// errClock is why the realtime clock's sets stopped being followed.
 	errClock error
 }
@@ -37,7 +37,6 @@ func readLoss(coll *ebpf.Collection, missed count) loss {
 	var l loss
 	l.dropped, l.errDropped = sumPerCPU(coll.Maps["drops"])
 	l.untracked, l.errUntracked = sumPerCPU(coll.Maps["untracked"])
-	l.internal, _ = sumPerCPU(coll.Maps["skipped_internal"])
 	l.missed = missed
 	return l
 }
