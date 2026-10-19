@@ -357,31 +357,31 @@ Unlike the summary, it also lists a directory that was made and then written und
 
 ### Fields
 
-| Field      | On                                             | Notes                                                                                                                                                    |
-| ---------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `t`        | every line but `end`                           | ISO 8601 UTC, to the millisecond                                                                                                                         |
-| `kind`     | every line                                     | what happened; see [Kinds](#kinds)                                                                                                                       |
-| `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                               |
-| `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                              |
-| `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                         |
-| `program`  | every line but `end`, where known              | the program the process runs, as [Which program](#how-rows-are-grouped) names it; absent for the step's shell and what it forks without running anything |
-| `path`     | all but `fork`, `syscall`, `end`               | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path     |
-| `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                       |
-| `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                           |
-| `to_name`  | where it differs from `to`                     | as `name`, for `to`                                                                                                                                      |
-| `access`   | `open`, `mmap`                                 | what was asked for; see [Access letters](#access-letters)                                                                                                |
-| `flags`    | `open`                                         | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                     |
-| `mode`     | `chmod`                                        | the new mode in octal, such as `"0755"`                                                                                                                  |
-| `owner`    | `chown`                                        | the new `uid:gid`, with `-1` for a side left as it was                                                                                                   |
-| `failed`   | a failed operation                             | `true`                                                                                                                                                   |
-| `err`      | a failed operation                             | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                    |
-| `image`    | `mmap`                                         | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                           |
-| `memfd`    | a file in memory only                          | `path` is `memfd:` and the name its creator chose                                                                                                        |
-| `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                          |
-| `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                              |
-| `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                                |
-| `compat`   | `syscall`                                      | a 32-bit or x32 system call                                                                                                                              |
-| `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                        |
+| Field      | On                                             | Notes                                                                                                                                                |
+| ---------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t`        | every line but `end`                           | ISO 8601 UTC, to the millisecond                                                                                                                     |
+| `kind`     | every line                                     | what happened; see [Kinds](#kinds)                                                                                                                   |
+| `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                           |
+| `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                          |
+| `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                     |
+| `program`  | every line but `end`, where known              | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything    |
+| `path`     | all but `fork`, `syscall`, `end`               | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
+| `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                   |
+| `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                       |
+| `to_name`  | where it differs from `to`                     | as `name`, for `to`                                                                                                                                  |
+| `access`   | `open`, `mmap`                                 | what was asked for; see [Access letters](#access-letters)                                                                                            |
+| `flags`    | `open`                                         | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                 |
+| `mode`     | `chmod`                                        | the new mode in octal, such as `"0755"`                                                                                                              |
+| `owner`    | `chown`                                        | the new `uid:gid`, with `-1` for a side left as it was                                                                                               |
+| `failed`   | a failed operation                             | `true`                                                                                                                                               |
+| `err`      | a failed operation                             | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                |
+| `image`    | `mmap`                                         | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                       |
+| `memfd`    | a file in memory only                          | `path` is `memfd:` and the name its creator chose                                                                                                    |
+| `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                      |
+| `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
+| `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                            |
+| `compat`   | `syscall`                                      | a 32-bit or x32 system call                                                                                                                          |
+| `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                    |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
 are absent rather than `false`.
@@ -515,9 +515,9 @@ That changes once a table or the details would pass 300 KB, more rows than anyon
   command's in the details.
 - A program run, `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` still never fold.
 
-**Quoting.** A program's file name or a path holding a space is quoted in the details, as `"a b"`,
-except a memfd's name, which is quoted already, and a refused system call. The name a process gave
-itself is not, as its brackets mark where it ends.
+**Quoting.** A command or path holding a space is quoted in the details, as `"a b"`, except a
+memfd's name, which is quoted already, and a refused system call. The name a process gave itself is
+not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
 

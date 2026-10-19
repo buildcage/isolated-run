@@ -150,6 +150,26 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("keeps a re-exec's own name and program only from its exec on", () => {
+    const P = { program: RUN_SCRIPT };
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT, ...P },
+        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh", ...P },
+        { pid: 12, ppid: 11, kind: "write", comm: "run-script.sh", path: "/work/a", ...P },
+        { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT, ...P },
+        { pid: 12, ppid: 11, kind: "write", comm: "run-script.sh", path: "/work/b", ...P },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
+      { pid: 12, ppid: 11, kind: "write", comm: "bash", path: "/work/a" },
+      { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT, ...P },
+      { pid: 12, ppid: 11, kind: "write", comm: "run-script.sh", path: "/work/b", ...P },
+    ]);
+  });
+
   it("keeps a process the step detaches, whatever parent it names", () => {
     // By CLONE_PARENT, or once its parent exits, a step process can name the
     // init as its parent.

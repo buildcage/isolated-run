@@ -1,5 +1,5 @@
 import { escapeForDisplay, field, RAW_BYTE_FIRST, RAW_BYTE_LAST } from "./escape.ts";
-import { MEMFD, MEMFD_PREFIX, unmarked } from "./paths.ts";
+import { leaf, MEMFD, MEMFD_PREFIX, unmarked } from "./paths.ts";
 
 /** How a details row names its command: as text, and as its line's field. */
 export interface Command {
@@ -23,8 +23,6 @@ function bytesOf(s: string): number[] {
   }
   return out;
 }
-
-const leaf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
 /** Whether `comm` is the name an exec of `name` gives a process. */
 export function isExecName(comm: string, name: string): boolean {

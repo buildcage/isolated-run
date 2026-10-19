@@ -70086,7 +70086,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -70422,7 +70422,6 @@ function bytesOf(s) {
 	}
 	return out;
 }
-const leaf = (path) => path.slice(path.lastIndexOf("/") + 1);
 function isExecName(comm, name) {
 	let a = bytesOf(comm), b = bytesOf(leaf(name)).slice(0, 15);
 	return a.length === b.length && a.every((x, i) => x === b[i]);
@@ -70678,16 +70677,16 @@ var Lines = class {
 //#region src/lib/filesystem-audit/strip.ts
 const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
 function createStripper(scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), isShellExec = (r) => r.kind === "exec" && r.pid !== void 0 && typeof r.path == "string" && leaf(r.path) === SHELL_COMM, asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
 	return {
 		observe: (rec) => {
 			let i = observed++, r = asRecord(rec);
-			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+			r && shell === void 0 && isShellExec(r) && under(r.path) && ([shell, script, boundary, init] = [
 				r.pid,
 				r.path,
 				i,
 				r.ppid
-			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+			]);
 		},
 		filter: (line, rec) => {
 			let i = filtered++, r = asRecord(rec);
@@ -70695,7 +70694,7 @@ function createStripper(scratchBase) {
 				line,
 				record: rec
 			};
-			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			isShellExec(r) && (!under(r.path) || r.pid !== shell) && ownShellPids.add(r.pid), r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
 			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
 			if (shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript)) return;
 			let ours = shell !== void 0 && r.pid !== void 0 && !ownShellPids.has(r.pid), relabel = ours && r.comm === SHELL_COMM, unnamed = ours && r.program === script;

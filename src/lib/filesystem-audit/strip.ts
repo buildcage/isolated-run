@@ -1,3 +1,5 @@
+import { leaf } from "./paths.ts";
+
 /**
  * Removes buildcage's own sandbox machinery from a recording, so both the
  * summary and the uploaded artifact show only the step's accesses.
@@ -59,11 +61,15 @@ export function createStripper(scratchBase: string): {
 } {
   const under = (p: unknown): boolean =>
     typeof p === "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`));
-  const leaf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
+  const isShellExec = (r: Record_): r is Record_ & { pid: number; path: string } =>
+    r.kind === "exec" &&
+    r.pid !== undefined &&
+    typeof r.path === "string" &&
+    leaf(r.path) === SHELL_COMM;
   const asRecord = (r: unknown): (Record_ & Record<string, unknown>) | undefined =>
     typeof r === "object" && r !== null ? (r as Record_ & Record<string, unknown>) : undefined;
 
-  const ownShellPids = new Set<number>(); // runs a run-script.sh as other than buildcage's shell
+  const ownShellPids = new Set<number>(); // has run a run-script.sh as other than buildcage's shell
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
   let script: string | undefined; // that run-script.sh
   let init: number | undefined; // the shell's parent at that exec
@@ -74,18 +80,17 @@ export function createStripper(scratchBase: string): {
   const observe = (rec: unknown): void => {
     const i = observed++;
     const r = asRecord(rec);
-    if (!r || r.pid === undefined) return;
-    if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
-      if (!under(r.path)) ownShellPids.add(r.pid);
-      else if (shell === undefined) [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
-      else if (r.pid !== shell) ownShellPids.add(r.pid);
-    }
+    if (r && shell === undefined && isShellExec(r) && under(r.path))
+      [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
   };
 
   const filter = (line: string, rec: unknown): { line: string; record: unknown } | undefined => {
     const i = filtered++;
     const r = asRecord(rec);
     if (r === undefined) return line === "" ? undefined : { line, record: rec };
+    // Taken in order, so a process's lines before it runs a run-script.sh of
+    // its own still count as the shell's.
+    if (isShellExec(r) && (!under(r.path) || r.pid !== shell)) ownShellPids.add(r.pid);
     // A child of an ownShellPids process inherits its run-script.sh name, so it keeps it too.
     if (
       r.kind === "fork" &&
