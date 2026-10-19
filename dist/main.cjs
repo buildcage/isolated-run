@@ -70086,7 +70086,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 function normalize$2(path) {
 	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
 }
@@ -70122,15 +70122,23 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
 	"\\": "\\\\",
-	"\"": "\\\""
+	"\"": "\\\"",
+	"[": "\\[",
+	"]": "\\]"
 };
 function escapeForDisplay(name) {
-	return name.replace(UNSAFE_CHARS, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+	return escapeWith(UNSAFE_CHARS, name);
+}
+function escapeCommandName(name) {
+	return escapeWith(UNSAFE_COMMAND_CHARS, name);
+}
+function escapeWith(unsafe, name) {
+	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
 }
 function escapeChar(c) {
 	let named = NAMED_ESCAPES[c];
@@ -70241,7 +70249,7 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		cut: "atomic",
 		text: cutNote(detailsCut)
 	};
-	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => field(r.comm)), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
@@ -70410,6 +70418,39 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+}
+//#endregion
+//#region src/lib/filesystem-audit/command.ts
+const utf8 = new TextEncoder();
+function bytesOf(s) {
+	let out = [];
+	for (let c of s) {
+		let cp = Number(c.codePointAt(0));
+		cp >= 56448 && cp <= 56575 ? out.push(cp & 255) : out.push(...utf8.encode(c));
+	}
+	return out;
+}
+function isExecName(comm, name) {
+	return isCutFrom(comm, leaf(name));
+}
+function isCutFrom(comm, name) {
+	let a = bytesOf(comm), b = bytesOf(name).slice(0, 15);
+	return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+function commandOf(program, runName, comm) {
+	let own = escapeCommandName(comm);
+	if (program === void 0) return {
+		text: own,
+		field: field(own)
+	};
+	let memfd = program.startsWith(MEMFD), file = memfd ? MEMFD_PREFIX + program.slice(MEMFD.length) : unmarked(program), base = memfd ? `${MEMFD_PREFIX}"${escapeCommandName(program.slice(MEMFD.length))}"` : escapeCommandName(leaf(file)), baseField = memfd ? base : field(base);
+	return (memfd ? isCutFrom(comm, file) : isExecName(comm, file)) || runName !== void 0 && isExecName(comm, runName) ? {
+		text: base,
+		field: baseField
+	} : {
+		text: `${base}[${own}]`,
+		field: `${baseField}[${own}]`
+	};
 }
 //#endregion
 //#region src/lib/filesystem-audit/fold-tree.ts
@@ -70646,16 +70687,16 @@ var Lines = class {
 //#region src/lib/filesystem-audit/strip.ts
 const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
 function createStripper(scratchBase) {
-	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), leaf = (p) => p.slice(p.lastIndexOf("/") + 1), asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
+	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), isShellExec = (r) => r.kind === "exec" && r.pid !== void 0 && typeof r.path == "string" && leaf(r.path) === SHELL_COMM, asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
 	return {
 		observe: (rec) => {
 			let i = observed++, r = asRecord(rec);
-			r && r.pid !== void 0 && r.kind === "exec" && typeof r.path == "string" && leaf(r.path) === SHELL_COMM && (under(r.path) ? shell === void 0 ? [shell, script, boundary, init] = [
+			r && shell === void 0 && isShellExec(r) && under(r.path) && ([shell, script, boundary, init] = [
 				r.pid,
 				r.path,
 				i,
 				r.ppid
-			] : r.pid !== shell && ownShellPids.add(r.pid) : ownShellPids.add(r.pid));
+			]);
 		},
 		filter: (line, rec) => {
 			let i = filtered++, r = asRecord(rec);
@@ -70663,24 +70704,21 @@ function createStripper(scratchBase) {
 				line,
 				record: rec
 			};
-			r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			isShellExec(r) && (!under(r.path) || r.pid !== shell) && ownShellPids.add(r.pid), r.kind === "fork" && r.pid !== void 0 && (r.ppid !== void 0 && ownShellPids.has(r.ppid) ? ownShellPids.add(r.pid) : ownShellPids.delete(r.pid));
 			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
-			if (!(shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript))) {
-				if (shell !== void 0 && r.comm === SHELL_COMM && r.pid !== void 0 && !ownShellPids.has(r.pid)) {
-					let record = {
-						...r,
-						comm: "bash"
-					};
-					return {
-						line: JSON.stringify(record),
-						record
-					};
-				}
-				return {
-					line,
-					record: rec
+			if (shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript)) return;
+			let ours = shell !== void 0 && r.pid !== void 0 && !ownShellPids.has(r.pid), relabel = ours && r.comm === SHELL_COMM, unnamed = ours && r.program === script;
+			if (relabel || unnamed) {
+				let record = { ...r };
+				return relabel && (record.comm = "bash"), unnamed && delete record.program, {
+					line: JSON.stringify(record),
+					record
 				};
 			}
+			return {
+				line,
+				record: rec
+			};
 		}
 	};
 }
@@ -70732,37 +70770,52 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, comm) => relLength(p) + comm.length + 3
+		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
 	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], rankOf = new Map(), rank = (key, name) => {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {
 			r = ranks.length, rankOf.set(id, r);
-			let s = name ? { path: escapeForDisplay(key) } : shown(key);
+			let s = name ? { path: escapeForDisplay(key) } : shown(key), bytes = s.path.length + (s.deleted ? 10 : 0);
 			ranks.push({
 				shown: s,
-				bytes: s.path.length + (s.deleted ? 10 : 0)
+				bytes,
+				...name ? {} : { program: key }
 			});
 		}
 		return r;
 	}, programOf = (pid, comm) => {
 		let r = programs.get(pid);
 		return r === void 0 && programs.set(pid, r = rank(comm, !0)), r;
+	}, runNames = new Map(), commands = new Map(), commandKeys = new Map(), commandKey = (pid, comm) => {
+		let r = programOf(pid, comm), runName = runNames.get(pid), memo = `${r}\0${runName ?? ""}\0${comm}`, key = commandKeys.get(memo);
+		if (key === void 0) {
+			let c = commandOf(ranks[r].program, runName, comm);
+			key = `${r}/${c.text}`, commands.has(key) || commands.set(key, c), commandKeys.set(memo, key);
+		}
+		return key;
 	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
-			if (r.kind === "fork" && programs.set(r.pid, programOf(r.ppid, r.comm ?? "")), r.kind === "end") {
+			if (r.kind === "fork") {
+				programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+				let runName = runNames.get(r.ppid);
+				runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
+			}
+			if (r.kind === "end") {
 				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
 				return;
 			}
 			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
 					if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
+					let { text, field } = commands.get(comm);
 					row = {
 						agg: newAgg(),
 						flags: "!",
-						comm,
+						comm: text,
+						commField: field,
 						path,
 						syscall: {
 							name,
@@ -70775,15 +70828,15 @@ function createAuditSummary(prefixes) {
 			}
 			if (r.kind === "exec" && r.path) {
 				let p = normalize$2(marked(r, canonical(r.path, prefixes)));
-				programs.set(r.pid, rank(p, !1));
+				programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 				let runs = executed.get(p);
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
-			}
+			} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
 				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
-					comm: r.comm ?? "",
+					comm: commandKey(r.pid, r.comm ?? ""),
 					path: normalize$2(path),
 					bit: bitsOf(c.letter),
 					failed: c.failed,
@@ -70792,7 +70845,7 @@ function createAuditSummary(prefixes) {
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path);
 				details.add(x, parts);
-				let program = programOf(r.pid, x.comm);
+				let program = programOf(r.pid, r.comm ?? "");
 				paths.add({
 					...x,
 					comm: String(program),
@@ -70813,12 +70866,16 @@ function createAuditSummary(prefixes) {
 			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
 			deleted: !0
 		} : { path: escapeForDisplay(relativize(path, prefixes)) };
-	}, rows = (lines) => lines?.map(({ comm, path, agg }) => ({
-		agg,
-		flags: fmtFlags(agg),
-		comm: escapeForDisplay(comm),
-		...shown(path)
-	})), kept = (part) => {
+	}, rows = (lines) => lines?.map(({ comm, path, agg }) => {
+		let { text, field } = commands.get(comm);
+		return {
+			agg,
+			flags: fmtFlags(agg),
+			comm: text,
+			commField: field,
+			...shown(path)
+		};
+	}), kept = (part) => {
 		let lines = part.finish();
 		return lines?.length || !part.cut ? lines : void 0;
 	};
@@ -70830,6 +70887,7 @@ function createAuditSummary(prefixes) {
 				agg,
 				flags: fmtFlags(agg),
 				comm: "",
+				commField: "",
 				...shown(path),
 				program: {
 					...ranks[Number(comm)].shown,

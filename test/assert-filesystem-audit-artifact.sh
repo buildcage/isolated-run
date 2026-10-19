@@ -67,6 +67,10 @@ holds "A chown through a descriptor the read-only root refused is recorded" \
   'any(.[]; .kind == "chown" and .err == 30 and .owner == "1:2" and .comm == "python3" and (.path | startswith("/usr/")))'
 holds "A chown through an empty name and AT_EMPTY_PATH is recorded under the descriptor's file" \
   'any(.[]; .kind == "chown" and .err == 30 and .owner == "3:4" and .comm == "python3" and (.path | startswith("/usr/")))'
+holds "A line carries the program its process runs" \
+  'any(.[]; .kind == "chmod" and .comm == "python3" and (.program // "" | test("^/usr/bin/python3\\.[0-9]+$")))'
+holds "The step's shell has no program" \
+  'any(.[]; .comm == "bash" and (has("program") | not))'
 holds "A truncate through a descriptor not open for writing is recorded" \
   'any(.[]; .kind == "truncate" and .err == 22 and (.path | endswith("/fd-truncate.txt")))'
 holds_not "A truncate through a descriptor on /dev/null is not recorded" \

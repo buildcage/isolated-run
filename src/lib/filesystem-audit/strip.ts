@@ -1,3 +1,5 @@
+import { leaf } from "./paths.ts";
+
 /**
  * Removes buildcage's own sandbox machinery from a recording, so both the
  * summary and the uploaded artifact show only the step's accesses.
@@ -11,7 +13,8 @@
  * reads of run-script.sh, and the init's records are machinery. Any other
  * record naming the scratch base is the step's: a prefix match would let a
  * name like <base>/../../home/... hide an access. The step's shell is relabeled
- * bash.
+ * bash, and its program, buildcage's run-script.sh, is dropped from its lines
+ * and its forks', so it shows as a process with none.
  *
  * The shell is found by the exec of run-script.sh under the scratch base, never
  * by command name, so a step command named setpriv or run-script.sh (run from
@@ -39,6 +42,7 @@ interface Record_ {
   ppid?: number;
   kind?: string;
   comm?: string;
+  program?: string;
   path?: string;
   access?: string;
   failed?: boolean;
@@ -57,11 +61,15 @@ export function createStripper(scratchBase: string): {
 } {
   const under = (p: unknown): boolean =>
     typeof p === "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`));
-  const leaf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
+  const isShellExec = (r: Record_): r is Record_ & { pid: number; path: string } =>
+    r.kind === "exec" &&
+    r.pid !== undefined &&
+    typeof r.path === "string" &&
+    leaf(r.path) === SHELL_COMM;
   const asRecord = (r: unknown): (Record_ & Record<string, unknown>) | undefined =>
     typeof r === "object" && r !== null ? (r as Record_ & Record<string, unknown>) : undefined;
 
-  const ownShellPids = new Set<number>(); // runs a run-script.sh as other than buildcage's shell
+  const ownShellPids = new Set<number>(); // has run a run-script.sh as other than buildcage's shell
   let shell: number | undefined; // the pid that first execs buildcage's run-script.sh
   let script: string | undefined; // that run-script.sh
   let init: number | undefined; // the shell's parent at that exec
@@ -72,26 +80,23 @@ export function createStripper(scratchBase: string): {
   const observe = (rec: unknown): void => {
     const i = observed++;
     const r = asRecord(rec);
-    if (!r || r.pid === undefined) return;
-    if (r.kind === "exec" && typeof r.path === "string" && leaf(r.path) === SHELL_COMM) {
-      if (!under(r.path)) ownShellPids.add(r.pid);
-      else if (shell === undefined) [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
-      else if (r.pid !== shell) ownShellPids.add(r.pid);
-    }
+    if (r && shell === undefined && isShellExec(r) && under(r.path))
+      [shell, script, boundary, init] = [r.pid, r.path, i, r.ppid];
   };
 
   const filter = (line: string, rec: unknown): { line: string; record: unknown } | undefined => {
     const i = filtered++;
     const r = asRecord(rec);
     if (r === undefined) return line === "" ? undefined : { line, record: rec };
-    // A child of an ownShellPids process inherits its run-script.sh name, so it keeps it too.
-    if (
-      r.kind === "fork" &&
-      r.pid !== undefined &&
-      r.ppid !== undefined &&
-      ownShellPids.has(r.ppid)
-    )
-      ownShellPids.add(r.pid);
+    // Taken in order, so a process's lines before it runs a run-script.sh of
+    // its own still count as the shell's.
+    if (isShellExec(r) && (!under(r.path) || r.pid !== shell)) ownShellPids.add(r.pid);
+    // A child of an ownShellPids process inherits its run-script.sh name, so it
+    // keeps it too; any other child, a reused pid included, does not.
+    if (r.kind === "fork" && r.pid !== undefined) {
+      if (r.ppid !== undefined && ownShellPids.has(r.ppid)) ownShellPids.add(r.pid);
+      else ownShellPids.delete(r.pid);
+    }
     // setpriv, the init, or the shell before and at its exec; after it, the
     // init and the shell reading its script.
     const readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
@@ -101,13 +106,13 @@ export function createStripper(scratchBase: string): {
       (i <= boundary || r.pid === init || readsScript)
     )
       return undefined;
-    if (
-      shell !== undefined &&
-      r.comm === SHELL_COMM &&
-      r.pid !== undefined &&
-      !ownShellPids.has(r.pid)
-    ) {
-      const record = { ...r, comm: SHELL_LABEL }; // the step's shell
+    const ours = shell !== undefined && r.pid !== undefined && !ownShellPids.has(r.pid);
+    const relabel = ours && r.comm === SHELL_COMM;
+    const unnamed = ours && r.program === script;
+    if (relabel || unnamed) {
+      const record = { ...r };
+      if (relabel) record.comm = SHELL_LABEL;
+      if (unnamed) delete record.program;
       return { line: JSON.stringify(record), record };
     }
     return { line, record: rec }; // a step process, verbatim

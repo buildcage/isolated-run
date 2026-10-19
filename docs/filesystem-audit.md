@@ -130,7 +130,7 @@ first-last access since the proxy started · flags · command · path
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.530-00:41.207: RWD node ./node_modules/**
-00:00.531-00:40.982: X   sh   /usr/bin/dash
+00:00.531-00:40.982: X   dash /usr/bin/dash
 
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
 buildcage-filesystem-audit-<id> artifact · how to read this
@@ -151,10 +151,13 @@ From the top:
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
   directory; see [Paths](#paths).
 - **🔍 Process details**, folded, has one row per command and path, in the order the rows were
-  first touched. The command is the name the process gave itself, as `ps` shows it. The time is when
-  that command first and last touched the path. It counts from the start of the step's proxy, about
-  when the step starts, on the same clock as the traffic report's Communication details, so a file
-  access can be matched to a request. Where that start is unknown, it counts from the first access.
+  first touched. The command is the file name of the program the process runs, followed in brackets
+  by the name the process gave itself, as `ps` shows it, where that differs: npm renames its node
+  process, which shows as `node[npm ls]`; see [How rows are grouped](#how-rows-are-grouped). The
+  time is when that command first and last touched the path. It counts from the start of the step's
+  proxy, about when the step starts, on the same clock as the traffic report's Communication
+  details, so a file access can be matched to a request. Where that start is unknown, it counts from
+  the first access.
 - The closing line explains the `./`, `~/` and `dir/**` notations, names the artifact that holds the
   full record and links to this section.
 
@@ -328,8 +331,8 @@ With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-fil
 holds one file, `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the
 tracer caught the accesses. Opens and path changes are written when their call returns, so lines
 from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
-the summary does: the sandbox's setup is left out, and the step's shell is named `bash`. A record
-marked incomplete can hold the setup too. A few examples:
+the summary does: the sandbox's setup is left out, and the step's shell is named `bash`, with no
+`program`. A record marked incomplete can hold the setup too. A few examples:
 
 ```sh
 # Every path written, made or moved to
@@ -361,6 +364,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                           |
 | `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                          |
 | `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                     |
+| `program`  | every line but `end`, where known              | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything    |
 | `path`     | all but `fork`, `syscall`, `end`               | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
 | `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                   |
 | `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                       |
@@ -469,6 +473,16 @@ under `node`. A process that forks without running anything counts as its parent
 step's own shell, which runs the `run` script, shows as `bash`. Running a program is left to the
 executed table.
 
+**Which command.** A details row names its program by file name, and adds the name the process gave
+itself in brackets unless that is a name its exec gave it: the program's file name or the name it
+was run by, cut to 15 bytes as the kernel keeps it. So `/usr/bin/dash` run as `sh` shows as `dash`.
+A process with no program in the record, the step's shell and what it forks without running
+anything, shows its own name alone. A `[` or `]` in either name is escaped with `\`.
+
+Any process can give itself any name, and a file name says nothing about where the file is: a file
+named `node` anywhere shows as `node`. Tell programs apart by their path in the executed table or the
+accessed paths table, where each has rows of its own.
+
 **Which path.**
 
 - A program is shown under the file it ran, with symlinks followed.
@@ -501,8 +515,9 @@ That changes once a table or the details would pass 300 KB, more rows than anyon
   command's in the details.
 - A program run, `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` still never fold.
 
-**Quoting.** A command or path holding a space is quoted in the details, as `"VM Thread"`, except a
-memfd's name, which is quoted already, and a refused system call.
+**Quoting.** A command or path holding a space is quoted in the details, as `"a b"`, except a
+memfd's name, which is quoted already, and a refused system call. The name a process gave itself is
+not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
 

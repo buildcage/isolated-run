@@ -101,6 +101,35 @@ func TestRecorderGivesAnExecTheFileItResolvedTo(t *testing.T) {
 	}
 }
 
+func TestRecorderGivesEachLineItsProcesssProgram(t *testing.T) {
+	r, out, _ := newTestRecorder()
+	add(t, r,
+		stepExec,
+		event{kind: filesystemAuditKindK_FORK, pid: 10, ppid: 9, comm: "sh"},
+		event{kind: filesystemAuditKindK_OPEN, pid: 10, comm: "sh", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")},
+		event{kind: filesystemAuditKindK_EXEC, pid: 10, comm: "cat", data: []byte("/usr/bin/cat\x00")},
+		event{kind: filesystemAuditKindK_OPEN, pid: 10, comm: "npm ls", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")},
+		// A fork of a process that ran nothing since the recording started.
+		event{kind: filesystemAuditKindK_FORK, pid: 9, ppid: 1, comm: "init"},
+		event{kind: filesystemAuditKindK_OPEN, pid: 9, comm: "init", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")},
+	)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, l := range lines(t, out) {
+		p, has := l["program"].(string)
+		if !has {
+			p = "-"
+		}
+		got = append(got, fmt.Sprintf("%s:%s", l["kind"], p))
+	}
+	want := "exec:/bin/sh fork:/bin/sh open:/bin/sh exec:/usr/bin/cat open:/usr/bin/cat fork:- open:- end:-"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("programs = %s, want %s", strings.Join(got, " "), want)
+	}
+}
+
 // The tracer reads each sample into the same buffer, so nothing a line keeps
 // may point into it.
 func TestRecorderKeepsNothingOfASample(t *testing.T) {

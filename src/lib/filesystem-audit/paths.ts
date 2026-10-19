@@ -20,6 +20,8 @@ export function marked(r: AuditRecord, path: string): string {
 export const unmarked = (path: string): string =>
   path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path;
 
+export const leaf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
 export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FILE);
 
 // Never folded, nor credited to the directories it names: a path with "..",

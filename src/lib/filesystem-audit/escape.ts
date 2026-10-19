@@ -11,21 +11,34 @@ import { DELETED_MARK, type Shown } from "./paths.ts";
 // and one in the details are.
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`;
 const UNSAFE_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu");
+// A bracket opens or closes the name a process gave itself in a command.
+const UNSAFE_COMMAND_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu");
 const NAMED_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
   "\t": "\\t",
   "\\": "\\\\",
   '"': '\\"',
+  "[": "\\[",
+  "]": "\\]",
 };
 
 // The tracer writes a byte 0xNN that is not UTF-8 as a lone surrogate U+DCNN
 // (see its json.go).
-const RAW_BYTE_FIRST = 0xdc80;
-const RAW_BYTE_LAST = 0xdcff;
+export const RAW_BYTE_FIRST = 0xdc80;
+export const RAW_BYTE_LAST = 0xdcff;
 
 export function escapeForDisplay(name: string): string {
-  return name.replace(UNSAFE_CHARS, (m) =>
+  return escapeWith(UNSAFE_CHARS, name);
+}
+
+/** As escapeForDisplay, for a name in a command, brackets included. */
+export function escapeCommandName(name: string): string {
+  return escapeWith(UNSAFE_COMMAND_CHARS, name);
+}
+
+function escapeWith(unsafe: RegExp, name: string): string {
+  return name.replace(unsafe, (m) =>
     m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m),
   );
 }
