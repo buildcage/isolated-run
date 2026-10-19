@@ -95,7 +95,7 @@ assert_file_lacks "$f" "A refused mapping is not a write" -E ' [A-Za-z!]*[Ww][A-
 assert_file_has "$f" "A shared mapping made writable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected\.bin$'
 assert_file_has "$f" "A shared mapping made writable and executable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected-rwx\.bin$'
 assert_file_lacks "$f" "Shared anonymous memory names no file" '/dev/zero'
-assert_file_lacks "$f" "run.sh's interpreter, mapped by its exec, is not a read" -E ' [A-Z]*R[A-Z!]* +\S+ +/usr/bin/dash$'
+assert_file_lacks "$f" "run.sh's interpreter, mapped by its exec, is not a read" -E ' [A-Z]*R[A-Z!]* +.+ +/usr/bin/dash$'
 
 # Run without a path: a memfd by its quoted name, a deleted file marked.
 assert_file_has "$sections/executed.md" "A memfd runs under its quoted name" -F '| `memfd:"probe-memfd"` |'

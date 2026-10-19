@@ -70431,7 +70431,10 @@ function bytesOf(s) {
 	return out;
 }
 function isExecName(comm, name) {
-	let a = bytesOf(comm), b = bytesOf(leaf(name)).slice(0, 15);
+	return isCutFrom(comm, leaf(name));
+}
+function isCutFrom(comm, name) {
+	let a = bytesOf(comm), b = bytesOf(name).slice(0, 15);
 	return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 function commandOf(program, runName, comm) {
@@ -70441,7 +70444,7 @@ function commandOf(program, runName, comm) {
 		field: field(own)
 	};
 	let memfd = program.startsWith(MEMFD), file = memfd ? MEMFD_PREFIX + program.slice(MEMFD.length) : unmarked(program), base = memfd ? `${MEMFD_PREFIX}"${escapeCommandName(program.slice(MEMFD.length))}"` : escapeCommandName(leaf(file)), baseField = memfd ? base : field(base);
-	return isExecName(comm, file) || runName !== void 0 && isExecName(comm, runName) ? {
+	return (memfd ? isCutFrom(comm, file) : isExecName(comm, file)) || runName !== void 0 && isExecName(comm, runName) ? {
 		text: base,
 		field: baseField
 	} : {
@@ -70701,7 +70704,7 @@ function createStripper(scratchBase) {
 				line,
 				record: rec
 			};
-			isShellExec(r) && (!under(r.path) || r.pid !== shell) && ownShellPids.add(r.pid), r.kind === "fork" && r.pid !== void 0 && r.ppid !== void 0 && ownShellPids.has(r.ppid) && ownShellPids.add(r.pid);
+			isShellExec(r) && (!under(r.path) || r.pid !== shell) && ownShellPids.add(r.pid), r.kind === "fork" && r.pid !== void 0 && (r.ppid !== void 0 && ownShellPids.has(r.ppid) ? ownShellPids.add(r.pid) : ownShellPids.delete(r.pid));
 			let readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
 			if (shell !== void 0 && r.pid !== void 0 && (i <= boundary || r.pid === init || readsScript)) return;
 			let ours = shell !== void 0 && r.pid !== void 0 && !ownShellPids.has(r.pid), relabel = ours && r.comm === SHELL_COMM, unnamed = ours && r.program === script;
@@ -70828,7 +70831,7 @@ function createAuditSummary(prefixes) {
 				programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 				let runs = executed.get(p);
 				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
-			}
+			} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 			if (!isLibraryMap(r)) for (let c of classify(r)) {
 				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;

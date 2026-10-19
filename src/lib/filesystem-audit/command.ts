@@ -26,8 +26,12 @@ function bytesOf(s: string): number[] {
 
 /** Whether `comm` is the name an exec of `name` gives a process. */
 export function isExecName(comm: string, name: string): boolean {
+  return isCutFrom(comm, leaf(name));
+}
+
+function isCutFrom(comm: string, name: string): boolean {
   const a = bytesOf(comm);
-  const b = bytesOf(leaf(name)).slice(0, COMM_BYTES);
+  const b = bytesOf(name).slice(0, COMM_BYTES);
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
@@ -52,7 +56,9 @@ export function commandOf(
     ? `${MEMFD_PREFIX}"${escapeCommandName(program.slice(MEMFD.length))}"`
     : escapeCommandName(leaf(file));
   const baseField = memfd ? base : field(base);
-  if (isExecName(comm, file) || (runName !== undefined && isExecName(comm, runName)))
+  // A memfd's name may hold a slash, and an exec names the process after all of it.
+  const named = memfd ? isCutFrom(comm, file) : isExecName(comm, file);
+  if (named || (runName !== undefined && isExecName(comm, runName)))
     return { text: base, field: baseField };
   return { text: `${base}[${own}]`, field: `${baseField}[${own}]` };
 }

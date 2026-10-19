@@ -170,6 +170,22 @@ describe("stripSandboxMachinery", () => {
     ]);
   });
 
+  it("names a reused pid by its new parent", () => {
+    const out = stripSandboxMachinery(
+      jsonl(
+        { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
+        { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: "/work/run-script.sh" },
+        // pid 12 exits, and the shell forks a subshell that gets its pid.
+        { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
+      ),
+      BASE,
+    );
+    expect(records(out)).toEqual([
+      { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: "/work/run-script.sh" },
+      { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
+    ]);
+  });
+
   it("keeps a process the step detaches, whatever parent it names", () => {
     // By CLONE_PARENT, or once its parent exits, a step process can name the
     // init as its parent.

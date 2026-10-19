@@ -1177,6 +1177,27 @@ describe("createAuditSummary: commands", () => {
     expect(lines(md)).toEqual(["X gone ./gone (deleted)", 'X memfd:"x" memfd:"x"']);
   });
 
+  it("takes a memfd's whole name, a slash included, as the program's", () => {
+    const md = render({
+      kind: "exec",
+      pid: 2,
+      comm: "memfd:a/b",
+      path: "memfd:a/b",
+      memfd: true,
+      name: "/dev/fd/3",
+    });
+    expect(lines(md)).toEqual(['X memfd:"a/b" memfd:"a/b"']);
+  });
+
+  it("forgets a program once an exec's file is unknown", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "node", path: "/usr/bin/node" },
+      { kind: "exec", pid: 2, comm: "x" },
+      { kind: "read", pid: 2, comm: "x", path: "/work/a" },
+    );
+    expect(lines(md)).toContain("R x ./a");
+  });
+
   it("keeps a row apart for each program of one name", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "node", path: "/usr/bin/node" },

@@ -318,6 +318,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         executed.set(p, 1);
         executedBytes += relLength(p) + 11;
       }
+    } else if (r.kind === "exec") {
+      // What it runs now is unknown, as the artifact has it.
+      programs.delete(r.pid);
+      runNames.delete(r.pid);
     }
     if (isLibraryMap(r)) return;
     for (const c of classify(r)) {

@@ -91,14 +91,12 @@ export function createStripper(scratchBase: string): {
     // Taken in order, so a process's lines before it runs a run-script.sh of
     // its own still count as the shell's.
     if (isShellExec(r) && (!under(r.path) || r.pid !== shell)) ownShellPids.add(r.pid);
-    // A child of an ownShellPids process inherits its run-script.sh name, so it keeps it too.
-    if (
-      r.kind === "fork" &&
-      r.pid !== undefined &&
-      r.ppid !== undefined &&
-      ownShellPids.has(r.ppid)
-    )
-      ownShellPids.add(r.pid);
+    // A child of an ownShellPids process inherits its run-script.sh name, so it
+    // keeps it too; any other child, a reused pid included, does not.
+    if (r.kind === "fork" && r.pid !== undefined) {
+      if (r.ppid !== undefined && ownShellPids.has(r.ppid)) ownShellPids.add(r.pid);
+      else ownShellPids.delete(r.pid);
+    }
     // setpriv, the init, or the shell before and at its exec; after it, the
     // init and the shell reading its script.
     const readsScript = r.pid === shell && r.path === script && !r.failed && readsOnly(r);
