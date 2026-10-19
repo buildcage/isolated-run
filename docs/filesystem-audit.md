@@ -142,8 +142,8 @@ that only ran programs has no accessed paths table, and the flag legend opens th
 
 From the top:
 
-- A **🚫 Killed for a 32-bit system call** note, when there is one, names the commands the sandbox
-  killed for making one; see [Refused system calls](#refused-system-calls).
+- A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
+  any; see [Refused system calls](#refused-system-calls).
 - **Executed Programs** lists each program once, in the order it first ran, with how many times it
   ran.
 - **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
@@ -520,16 +520,16 @@ memfd's name, which is quoted already, and a refused system call.
 
 A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
 or `unshare`, which fails with `EPERM`. The details, where they fit, show each once per program, as
-`syscall:io_uring_setup` with `!`. Only a command killed for one is noted under the heading: many
-programs try a system call and carry on without it, as Node.js does with `io_uring_setup` each time
-it starts. When a step fails, look for a `syscall:` row in the details: a program that needs one,
-such as `bwrap` with `unshare`, cannot run without it.
+`syscall:io_uring_setup` with `!`. Nothing is noted under the heading, since many programs try a
+system call and carry on without it, as Node.js does with `io_uring_setup` each time it starts. A
+program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step fails, look
+for a `syscall:` row in the details.
 
 - One already recorded as a failed change to a path is not repeated.
 - One the profile allows only for some arguments, as `clone`, is not recorded even when refused,
   since the kernel's own `EPERM` for it would read the same.
-- A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)`; a thread
-  killed while others run on is not recorded.
+- A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)` and is noted
+  under the heading; a thread killed while others run on is not recorded.
 - Past 200 command and system call pairs, the details add a row only for each system call's first
   refusal that did not kill the command, and for every kill; the artifact, if uploaded, has the
   rest.

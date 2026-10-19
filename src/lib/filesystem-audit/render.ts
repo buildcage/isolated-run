@@ -19,9 +19,9 @@ const INCOMPLETE_NOTE =
 // The note names this many commands; the details, where they fit, show the rest.
 const KILLED_COMMS_SHOWN = 3;
 
-// Each command killed for a 32-bit syscall, in the order killed. A refusal
-// that did not kill shows only in the details: a program probing for a
-// syscall, as libuv does for io_uring, carries on without it.
+// Each command killed for a 32-bit syscall, in the order killed. Other
+// refusals show only in the details, since a program probing for a syscall,
+// as libuv does for io_uring, carries on without it.
 function killedNote(rows: RefusedRow[]): string | undefined {
   const killed = inRecordingOrder(rows).filter((r) => r.syscall.killed);
   if (!killed.length) return undefined;
