@@ -69515,9 +69515,12 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 //#endregion
 //#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let blockedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!blockedByAwsCheck || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
+	let reasons = new Set();
+	for (let r of report.blocked) !r.expected && r.reason.startsWith("aws-") && reasons.add(r.reason);
+	for (let e of report.timeline) letThrough(e) && e.wouldBlock.startsWith("aws-") && reasons.add(e.wouldBlock);
+	let tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (reasons.size === 0 || at === -1) return blocks;
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = new Intl.ListFormat("en", { type: "disjunction" }).format([...reasons].map((r) => `\`${r}\``)), link = trafficFrame(`\n<sub>*For ${names}, see [what to do](${url}).*</sub>\n`);
 	return [
 		...blocks.slice(0, at + 1),
 		link,
