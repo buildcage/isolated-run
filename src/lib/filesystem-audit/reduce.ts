@@ -89,10 +89,7 @@ export interface PathRow extends Row {
   program: Shown & { rank: number };
 }
 
-/**
- * A refused syscall's row: its name, whether it killed the program, and
- * whether some command refused it got no row.
- */
+/** A refused syscall's row: its name and whether it killed the program. */
 export interface RefusedRow extends Row {
   syscall: { name: string; killed: boolean };
 }

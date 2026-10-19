@@ -70156,7 +70156,7 @@ function markdownRows(header, rows) {
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function killedNote(rows) {
-	let killed = inRecordingOrder(rows).filter((r) => r.syscall.killed);
+	let killed = inRecordingOrder(rows.filter((r) => r.syscall.killed));
 	if (!killed.length) return;
 	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan), left = comms.length - 3;
 	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${comms.slice(0, 3).join(", ")}${left > 0 ? ` and ${left} more` : ""}` : ""}.`;

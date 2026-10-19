@@ -23,7 +23,7 @@ const KILLED_COMMS_SHOWN = 3;
 // refusals show only in the details, since a program probing for a syscall,
 // as libuv does for io_uring, carries on without it.
 function killedNote(rows: RefusedRow[]): string | undefined {
-  const killed = inRecordingOrder(rows).filter((r) => r.syscall.killed);
+  const killed = inRecordingOrder(rows.filter((r) => r.syscall.killed));
   if (!killed.length) return undefined;
   const comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
   const left = comms.length - KILLED_COMMS_SHOWN;
