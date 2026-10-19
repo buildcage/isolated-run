@@ -133,8 +133,7 @@ describe("computeReportOutcomes", () => {
   });
 
   describe("the AWS key check's troubleshooting link", () => {
-    const LINK =
-      "\n<sub>*For an `aws-` reason, see [what to do](https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md#troubleshooting).*</sub>\n";
+    const DOC = "https://github.com/buildcage/isolated-run/blob/v1/docs/aws.md";
     const blocked = (reason: string): TrafficEvent => ({
       time: 1,
       action: "block",
@@ -153,8 +152,12 @@ describe("computeReportOutcomes", () => {
 
     it("follows the Blocked Hosts table when the check blocked a request", () => {
       const markdown = markdownOf(restrict("aws-key-not-allowed"), options());
-      expect(markdown).toMatch(/### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For an `aws-` reason/);
-      expect(markdown).toContain(LINK);
+      expect(markdown).toMatch(
+        /### 🚫 Blocked Hosts\n\n(\|.*\n)+\n<sub>\*For `aws-key-not-allowed`/,
+      );
+      expect(markdown).toContain(
+        `\n<sub>*For \`aws-key-not-allowed\`, see [what to do](${DOC}#aws-key-not-allowed).*</sub>\n`,
+      );
     });
 
     it("follows Restrict Would Block in audit", () => {
@@ -175,7 +178,41 @@ describe("computeReportOutcomes", () => {
         ],
       };
       const markdown = markdownOf(r, options());
-      expect(markdown).toMatch(/### ⚠️ Restrict Would Block\n\n(\|.*\n)+\n<sub>\*For an `aws-`/);
+      expect(markdown).toMatch(
+        /### ⚠️ Restrict Would Block\n\n(\|.*\n)+\n<sub>\*For `aws-no-credential`, /,
+      );
+    });
+
+    it("names every reason, each linked to its own section", () => {
+      const timeline = [blocked("aws-unreadable"), blocked("aws-key-not-allowed")];
+      const r: InspectReportData = {
+        ...report({ blockedCount: 2, blocked: annotateKnownBlocked(timeline, []), timeline }),
+        engine: "inspect",
+      };
+      expect(markdownOf(r, options())).toContain(
+        `\n<sub>*What to do: [\`aws-unreadable\`](${DOC}#aws-unreadable), ` +
+          `[\`aws-key-not-allowed\`](${DOC}#aws-key-not-allowed).*</sub>\n`,
+      );
+    });
+
+    it("leaves out a reason known_blocked_rules expects", () => {
+      const knownBlockedRules = ["s3.amazonaws.com"];
+      const timeline = [
+        blocked("aws-key-not-allowed"),
+        { ...blocked("aws-no-credential"), host: "s3.amazonaws.com" },
+      ];
+      const r: InspectReportData = {
+        ...report({
+          parameters: reportParams({ knownBlockedRules }),
+          blockedCount: 2,
+          blocked: annotateKnownBlocked(timeline, knownBlockedRules),
+          timeline,
+        }),
+        engine: "inspect",
+      };
+      const markdown = markdownOf(r, options());
+      expect(markdown).toContain("For `aws-key-not-allowed`, see");
+      expect(markdown).not.toContain("#aws-no-credential");
     });
 
     it("is left out when known_blocked_rules expects every such block", () => {

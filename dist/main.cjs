@@ -69271,6 +69271,16 @@ function reportHeading(title, isAudit) {
 function reportFooter(actionRepo) {
 	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
 }
+//#endregion
+//#region src/proxy/aws-log.ts
+const AWS_BLOCKED_VERDICTS = [
+	"no-credential",
+	"ambiguous-credential",
+	"unsupported-credential",
+	"unreadable",
+	"key-not-allowed",
+	"role-not-allowed"
+];
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
 }
@@ -69515,9 +69525,9 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 //#endregion
 //#region src/lib/aws-report.ts
 function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
-	let blockedByAwsCheck = report.blocked.some((r) => !r.expected && r.reason.startsWith("aws-")) || report.timeline.some((e) => letThrough(e) && e.wouldBlock.startsWith("aws-")), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (!blockedByAwsCheck || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, link = trafficFrame(`\n<sub>*For an \`aws-\` reason, see [what to do](${url}).*</sub>\n`);
+	let shown = new Set([...report.blocked.flatMap((r) => r.expected ? [] : [r.reason]), ...report.timeline.flatMap((e) => letThrough(e) ? [e.wouldBlock] : [])]), reasons = AWS_BLOCKED_VERDICTS.map((v) => `aws-${v}`).filter((r) => shown.has(r)), tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
+	if (reasons.length === 0 || at === -1) return blocks;
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md`, text = reasons.length === 1 ? `For \`${reasons[0]}\`, see [what to do](${url}#${reasons[0]}).` : `What to do: ${reasons.map((r) => `[\`${r}\`](${url}#${r})`).join(", ")}.`, link = trafficFrame(`\n<sub>*${text}*</sub>\n`);
 	return [
 		...blocks.slice(0, at + 1),
 		link,
