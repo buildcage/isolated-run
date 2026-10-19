@@ -186,7 +186,7 @@ describe("runSandboxStep", () => {
   it("applies config_file to the step's env before reading any input, and logs it", async () => {
     mocks.applyConfigFile.mockReturnValue({
       path: "/home/runner/work/repo/repo/c.yml",
-      summary: ["Inputs read from config_file c.yml:", "  proxy_mode"],
+      summary: ["Ignored from config_file c.yml, set by the workflow: proxy_mode"],
     });
 
     await runSandboxStep(ENV, deps);
@@ -196,8 +196,9 @@ describe("runSandboxStep", () => {
       expect.objectContaining({ known: expect.arrayContaining(["proxy_mode"]) }),
     );
     expect(orderOf(mocks.applyConfigFile)).toBeLessThan(orderOf(mocks.readRunCommand));
-    expect(mocks.log).toHaveBeenCalledWith("Inputs read from config_file c.yml:");
-    expect(mocks.log).toHaveBeenCalledWith("  proxy_mode");
+    expect(mocks.log).toHaveBeenCalledWith(
+      "Ignored from config_file c.yml, set by the workflow: proxy_mode",
+    );
   });
 
   it("saves the merged write_through for the post step when config_file was read", async () => {
