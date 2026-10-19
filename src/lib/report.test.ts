@@ -190,7 +190,7 @@ describe("computeReportOutcomes", () => {
         engine: "inspect",
       };
       expect(markdownOf(r, options())).toContain(
-        `\n<sub>*For \`aws-unreadable\`, \`aws-key-not-allowed\`, see [what to do](${DOC}).*</sub>\n`,
+        `\n<sub>*For \`aws-unreadable\` or \`aws-key-not-allowed\`, see [what to do](${DOC}).*</sub>\n`,
       );
     });
 
@@ -210,8 +210,9 @@ describe("computeReportOutcomes", () => {
         engine: "inspect",
       };
       const markdown = markdownOf(r, options());
-      expect(markdown).toContain("For `aws-key-not-allowed`, see");
-      expect(markdown).not.toContain("aws-no-credential`");
+      expect(markdown).toContain(
+        `\n<sub>*For \`aws-key-not-allowed\`, see [what to do](${DOC}).*</sub>\n`,
+      );
     });
 
     it("is left out when known_blocked_rules expects every such block", () => {
