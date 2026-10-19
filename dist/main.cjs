@@ -15564,15 +15564,15 @@ function applyConfigFile(env, { known, lists }) {
 	} catch (e) {
 		throw new ConfigFileError(`config_file ${JSON.stringify(path)} could not be read: ${errorMessage(e)}`, "CONFIG_FILE_PATH");
 	}
-	let values = parseConfig(text, path, known), summary = [`Inputs read from config_file ${path}:`];
+	let values = parseConfig(text, path, known), ignored = [];
 	for (let [name, value] of values) {
 		let envName = inputEnvName(name), inline = env[envName] ?? "";
-		lists.includes(name) ? (env[envName] = [inline, value].filter((v) => v.trim()).join("\n"), summary.push(`  ${name}${inline.trim() ? " (added to the workflow's)" : ""}`)) : inline.trim() ? summary.push(`  ${name} (ignored: the workflow sets it)`) : (env[envName] = value, summary.push(`  ${name}`));
+		lists.includes(name) ? env[envName] = [inline, value].filter((v) => v.trim()).join("\n") : inline.trim() ? value.trim() && value.trim() !== inline.trim() && ignored.push(name) : env[envName] = value;
 	}
-	return {
+	return ignored.length ? {
 		path: full,
-		summary
-	};
+		warning: `Ignored from config_file ${path}, set by the workflow: ${ignored.join(", ")}`
+	} : { path: full };
 }
 //#endregion
 //#region src/core/lib/actions/inputs.ts
@@ -74660,7 +74660,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 }
 function readStepInputs(env, deps) {
 	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
-	for (let line of configFile?.summary ?? []) log(line);
+	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();

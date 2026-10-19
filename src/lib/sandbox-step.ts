@@ -275,7 +275,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
 
   // Before any input is read: it rewrites what they all read.
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
-  for (const line of configFile?.summary ?? []) log(line);
+  if (configFile?.warning) deps.warn(configFile.warning);
 
   const runInput = deps.readRunCommand();
 
