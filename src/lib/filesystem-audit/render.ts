@@ -16,43 +16,21 @@ const heading = (title: string): string => `\n${reportHeading(title, false).trim
 const INCOMPLETE_NOTE =
   "> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
-// The note names this many syscalls, and this many commands for each; the
-// details, where they fit, show the rest.
-const REFUSED_SHOWN = 10;
-const REFUSED_COMMS_SHOWN = 3;
+// The note names this many commands; the details, where they fit, show the rest.
+const KILLED_COMMS_SHOWN = 3;
 
-// Each refused syscall with the commands it was refused to, in the order
-// first refused, then each command killed for a 32-bit one. Commands left
-// without a row count as at least one more.
-function refusedNote(rows: RefusedRow[]): string {
-  const byName = new Map<string, Set<string>>();
-  const cut = new Set<Set<string>>();
-  const killed = new Set<string>();
-  let anyKilled = false;
-  for (const { syscall, comm } of inRecordingOrder(rows)) {
-    anyKilled ||= syscall.killed;
-    const comms = syscall.killed ? killed : (byName.get(syscall.name) ?? new Set<string>());
-    if (!syscall.killed) byName.set(syscall.name, comms);
-    if (syscall.cut) cut.add(comms);
-    if (comm) comms.add(comm);
-  }
-  const list = (items: string[], shown: number, more = false): string => {
-    const left = Math.max(items.length - shown, 0) + (more ? 1 : 0);
-    return (
-      items.slice(0, shown).join(", ") +
-      (left > 0 ? ` and ${more ? "at least " : ""}${left} more` : "")
-    );
-  };
-  const comms = (c: Set<string>): string =>
-    list([...c].map(codeSpan), REFUSED_COMMS_SHOWN, cut.has(c));
-  const names = [...byName].map(([name, c]) => codeSpan(name) + (c.size ? ` (${comms(c)})` : ""));
-  const parts = [];
-  if (names.length) parts.push(`Refused system calls: ${list(names, REFUSED_SHOWN)}`);
-  if (anyKilled) {
-    const by = killed.size ? `: ${comms(killed)}` : "";
-    parts.push(`${parts.length ? "k" : "K"}illed for a 32-bit system call${by}`);
-  }
-  return `> 🚫 ${parts.join("; ")}.`;
+// Each command killed for a 32-bit syscall, in the order killed. Other
+// refusals show only in the details, since a program probing for a syscall,
+// as libuv does for io_uring, carries on without it.
+function killedNote(rows: RefusedRow[]): string | undefined {
+  const killed = inRecordingOrder(rows.filter((r) => r.syscall.killed));
+  if (!killed.length) return undefined;
+  const comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
+  const left = comms.length - KILLED_COMMS_SHOWN;
+  const by = comms.length
+    ? `: ${comms.slice(0, KILLED_COMMS_SHOWN).join(", ")}${left > 0 ? ` and ${left} more` : ""}`
+    : "";
+  return `> 🚫 Killed for a 32-bit system call${by}.`;
 }
 
 // A skip may have been any process's on the host, so unlike INCOMPLETE_NOTE
@@ -256,11 +234,12 @@ export function renderAuditSummaryBlocks(
   opts: RenderOptions,
 ): SummaryBlock[] {
   const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary;
+  const killed = killedNote(refused);
   const top = [
     heading(opts.title),
     ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
     ...(hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : []),
-    ...(refused.length ? [refusedNote(refused)] : []),
+    ...(killed ? [killed] : []),
   ].join("\n\n");
   const frame = (text: string): SummaryBlock => ({
     priority: 0,

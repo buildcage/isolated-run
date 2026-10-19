@@ -174,7 +174,7 @@ describe("createAuditSummary", () => {
     );
   });
 
-  it("notes refused syscalls under the heading and lists each command's in the details", () => {
+  it("lists each command's refused syscalls in the details and notes only a kill under the heading", () => {
     const refused = (comm: string, syscall: string, t: string): object => ({
       t,
       kind: "syscall",
@@ -200,10 +200,8 @@ describe("createAuditSummary", () => {
       },
       { kind: "end", dropped: 0, untracked: 0 },
     );
-    expect(md).toContain(
-      "> 🚫 Refused system calls: `io_uring_setup` (`node`, `npm`), `unshare` (`bwrap`); " +
-        "killed for a 32-bit system call: `a.out`.",
-    );
+    expect(md).toContain("> 🚫 Killed for a 32-bit system call: `a.out`.");
+    expect(md).not.toContain("Refused system calls");
     expect(tableRows(md)).toEqual(["| `/etc/hostname` | R |"]); // a syscall is no path
     expect(lines(md)).toEqual([
       "00:00.000-00:04.000: ! node syscall:io_uring_setup",
@@ -223,11 +221,16 @@ describe("createAuditSummary", () => {
     expect(md).toContain("> 🚫 Killed for a 32-bit system call: `a.out`.");
     expect(
       render({ kind: "syscall", killed: true }, { kind: "syscall", syscall: "mount" }),
-    ).toContain("> 🚫 Refused system calls: `mount`; killed for a 32-bit system call.");
+    ).toContain("> 🚫 Killed for a 32-bit system call.\n");
+    const many = render(
+      ...["a", "b", "c", "d", "e"].map((comm) => ({ kind: "syscall", comm, killed: true })),
+    );
+    expect(many).toContain("> 🚫 Killed for a 32-bit system call: `a`, `b`, `c` and 2 more.");
+    expect(render({ kind: "syscall", comm: "x", syscall: "mount" })).not.toContain("🚫");
     expect(lines(md)).toEqual(["! syscall:32-bit ? (killed)", "! a.out syscall:32-bit ? (killed)"]);
   });
 
-  it("names the first commands of a refused syscall, and keeps the first 200 pairs, each syscall's first and every kill", () => {
+  it("keeps the first 200 refused pairs, each syscall's first and every kill", () => {
     const refused = (comm: string, t?: string): object => ({
       ...(t && { t }),
       kind: "syscall",
@@ -244,7 +247,6 @@ describe("createAuditSummary", () => {
       refused("d", "2026-01-01T00:00:04.000Z"),
       { kind: "end", dropped: 0, untracked: 0 },
     );
-    expect(md).toContain("> 🚫 Refused system calls: `unshare` (`a`, `b`, `c` and 1 more).");
     // Placed by its first time, though its first record had none.
     expect(lines(md)[0]).toBe("00:00.000: ! a syscall:unshare");
 
@@ -254,7 +256,6 @@ describe("createAuditSummary", () => {
       syscall: "socketcall",
       killed: true,
     });
-    expect(many).toContain("`p10` and at least 198 more)");
     expect(lines(many)).toContain("! p199 syscall:unshare");
     expect(many).not.toContain("p200");
     expect(lines(many)).toContain("! old syscall:32-bit socketcall (killed)");
@@ -264,17 +265,12 @@ describe("createAuditSummary", () => {
       late("late"),
       late("later"),
     );
-    expect(hidden).toContain(
-      "`bpf` (`late` and at least 1 more), `unshare` (`p0`, `p1`, `p10` and 197 more).",
-    );
     expect(lines(hidden)).toContain("! late syscall:bpf");
     expect(hidden).not.toContain("later");
-    expect(render({ kind: "syscall", comm: "x" })).toContain(
-      "> 🚫 Refused system calls: `?` (`x`).",
-    );
+    expect(lines(render({ kind: "syscall", comm: "x" }))).toEqual(["! x syscall:?"]);
   });
 
-  it("lists the first refused syscalls in the note and leaves the rest to the details", () => {
+  it("shows a step that only made refused syscalls in the details", () => {
     const records = Array.from({ length: 12 }, (_, i) => ({
       t: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
       kind: "syscall",
@@ -284,8 +280,7 @@ describe("createAuditSummary", () => {
       failed: true,
     }));
     const md = render(...records, { kind: "end", dropped: 0, untracked: 0 });
-    expect(md).toContain("`s9` (`x`) and 2 more.");
-    expect(md).not.toContain("`s10` (");
+    expect(lines(md)).toHaveLength(12);
     expect(md).toContain("! x syscall:s11\n");
     expect(md).not.toContain("No file access was recorded.");
   });
