@@ -70747,7 +70747,7 @@ function createAuditSummary(prefixes) {
 	}, programOf = (pid, comm) => {
 		let r = programs.get(pid);
 		return r === void 0 && programs.set(pid, r = rank(comm, !0)), r;
-	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedFirst = new Set(), add = (r, counted = !0) => {
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (counted) {
@@ -70758,7 +70758,7 @@ function createAuditSummary(prefixes) {
 			if (r.kind === "syscall") {
 				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = escapeForDisplay(r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
 				if (!row) {
-					if (refused.size >= 200 && !r.killed && refusedFirst.has(name)) return;
+					if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
 					row = {
 						agg: newAgg(),
 						flags: "!",
@@ -70768,7 +70768,7 @@ function createAuditSummary(prefixes) {
 							name,
 							killed: !!r.killed
 						}
-					}, refused.set(key, row), r.killed || refusedFirst.add(name);
+					}, refused.set(key, row), r.killed || refusedNames.add(name);
 				}
 				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 				return;

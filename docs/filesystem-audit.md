@@ -523,8 +523,8 @@ or `unshare`, which fails with `EPERM`. The details, where they fit, show each o
 `syscall:io_uring_setup` with `!`. One that did not kill the program is not noted under the heading,
 since many programs try a system call and carry on without it, as Node.js does with `io_uring_setup`
 each time it starts. A program that needs one, such as `bwrap` with `unshare`, fails instead, so
-when a step fails, look for a `syscall:` row in the details, or in the artifact if the details were
-cut short.
+when a step fails, look for a `syscall:` row in the details, or, if the details were cut short, in
+the artifact when one was uploaded.
 
 - One already recorded as a failed change to a path is not repeated.
 - One the profile allows only for some arguments, as `clone`, is not recorded even when refused,

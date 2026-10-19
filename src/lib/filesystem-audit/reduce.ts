@@ -234,7 +234,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const added = new Map<number | undefined, number>();
   const refused = new Map<string, RefusedRow>();
   // Names of the refused syscalls that have a row.
-  const refusedFirst = new Set<string>();
+  const refusedNames = new Set<string>();
 
   const add = (r: unknown, counted = true): void => {
     if (!isRecord(r)) return;
@@ -261,10 +261,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         // A kill explains a step's "Bad system call", and a syscall's first row
         // makes sure the details name it, so both are always kept. The profile
         // bounds how many names there are.
-        if (refused.size >= REFUSED_KEPT && !r.killed && refusedFirst.has(name)) return;
+        if (refused.size >= REFUSED_KEPT && !r.killed && refusedNames.has(name)) return;
         row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
         refused.set(key, row);
-        if (!r.killed) refusedFirst.add(name);
+        if (!r.killed) refusedNames.add(name);
       }
       if (!Number.isNaN(t)) {
         if (row.agg.seq === Infinity) row.agg.seq = seq++;
