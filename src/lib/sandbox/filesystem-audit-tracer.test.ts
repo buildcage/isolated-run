@@ -4,7 +4,7 @@ import { SandboxError } from "../errors.ts";
 import { auditUnavailable, hostCannotAudit } from "./filesystem-audit-host.ts";
 import {
   cgroupFsPath,
-  exitReason,
+  followStderr,
   extractTracer,
   haltTracer,
   startFilesystemAudit,
@@ -26,9 +26,9 @@ describe("cgroupFsPath", () => {
   });
 });
 
-describe("exitReason", () => {
+describe("followStderr", () => {
   it("prefers the tracer's own fatal line, joined across chunks", () => {
-    const reason = exitReason();
+    const reason = followStderr();
     reason.push("filesystem-audit: cgroup /sys/fs/cgroup/x id=1\nfilesystem-audit: fat");
     reason.push("al: attach on_sys_exit: permission denied\nfilesystem-audit: total=0\n");
 
@@ -36,12 +36,33 @@ describe("exitReason", () => {
   });
 
   it("falls back to the last line written, then to an unterminated one", () => {
-    const reason = exitReason();
+    const reason = followStderr();
     expect(reason.value()).toBe("");
     reason.push("sudo: a pass");
     expect(reason.value()).toBe("sudo: a pass");
     reason.push("word is required\n\n");
     expect(reason.value()).toBe("sudo: a password is required");
+  });
+
+  it("takes no workflow command as the reason", () => {
+    const reason = followStderr();
+    reason.push(
+      "::group::buildcage: starting filesystem audit\nfilesystem-audit: attached\n::endgroup::\n",
+    );
+    expect(reason.value()).toBe("filesystem-audit: attached");
+  });
+
+  it("notes the end of the totals group alone, through a pty's carriage returns", async () => {
+    const reason = followStderr();
+    let logged = false;
+    void reason.totalsLogged.then(() => (logged = true));
+    reason.push("::group::buildcage: starting filesystem audit\r\n::endgroup::\r\n");
+    await Promise.resolve();
+    expect(logged).toBe(false);
+    reason.push(
+      "::group::buildcage: filesystem audit totals\r\nfilesystem-audit: total=0\r\n::endgroup::\r\n",
+    );
+    await expect(reason.totalsLogged).resolves.toBeUndefined();
   });
 });
 
@@ -484,6 +505,27 @@ describe("haltTracer", () => {
     await vi.waitFor(() => expect(d.remove).toHaveBeenCalledWith(OPTIONS.pidFilePath));
     parked();
     expect(d.exec.mock.calls).toStrictEqual([["sudo", ["-n", "kill", "-TERM", "777"]]]);
+  });
+
+  it("waits for the totals group to be logged once the record is whole", async () => {
+    const s = stubborn();
+    const d = deps(s, () => END);
+    let logTotals!: () => void;
+    const tracer = {
+      ...s.tracer,
+      child: { ...s.tracer.child, totalsLogged: new Promise<void>((r) => (logTotals = r)) },
+    };
+    d.sleep.mockImplementation((_ms: number, detached?: boolean) =>
+      detached ? new Promise<void>(() => {}) : Promise.resolve(),
+    );
+    let returned = false;
+    const halted = haltTracer(tracer, true, OPTIONS, d).then(() => (returned = true));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(returned).toBe(false);
+    expect(d.sleep).toHaveBeenCalledWith(2_000, true);
+    logTotals();
+    await halted;
+    s.exit();
   });
 
   it("sends SIGTERM to the tracer itself, which an older sudo would not pass on", async () => {

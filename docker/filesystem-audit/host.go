@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -72,7 +71,7 @@ func stopOnExit(pid int, sig chan<- os.Signal) error {
 // prepareCgroup verifies the host is cgroup v2, creates the watched cgroup
 // if missing, and opens it for the programs' cgroup array. created says
 // whether it made the cgroup itself.
-func prepareCgroup(cgPath string, log io.Writer) (f *os.File, created bool, err error) {
+func prepareCgroup(cgPath string) (f *os.File, created bool, err error) {
 	var sfs unix.Statfs_t
 	if err := unix.Statfs(cgroupRoot, &sfs); err != nil {
 		return nil, false, err
@@ -101,6 +100,6 @@ func prepareCgroup(cgPath string, log io.Writer) (f *os.File, created bool, err 
 		}
 		return nil, false, err
 	}
-	fmt.Fprintf(log, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
+	fmt.Fprintf(os.Stderr, "filesystem-audit: cgroup %s id=%d\n", abs, st.Ino)
 	return f, created, nil
 }

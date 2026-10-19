@@ -328,7 +328,7 @@ func TestRecorderWritesOpensStillWaitingAtTheEnd(t *testing.T) {
 }
 
 func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
-	r, out, _ := newTestRecorder()
+	r, out, log := newTestRecorder()
 	add(t, r, openName(11, "/etc/passwd"), waitingOpen(11, "/etc/passwd"), unlink(12, nrUnlink, "x"), stepExec,
 		openResult(11, 3), result(12, nrUnlink, resultWatched, 0))
 	if err := r.finish(loss{}); err != nil {
@@ -336,6 +336,9 @@ func TestRecorderDropsAnOpenWaitingBeforeTheFirstExec(t *testing.T) {
 	}
 	if got := paths(t, out); got != "/bin/sh:0 :0" {
 		t.Fatalf("recording = %s, want the exec alone", got)
+	}
+	if !strings.Contains(log.String(), "total=1 ") {
+		t.Fatalf("log = %q, want the exec alone counted", log)
 	}
 }
 
@@ -521,8 +524,8 @@ func TestRecorderLogsALostClock(t *testing.T) {
 	if got := lines(t, out); len(got) != 2 || got[1]["kind"] != "end" {
 		t.Fatalf("recording = %v, want the exec and the end line", got)
 	}
-	if !strings.Contains(log.String(), "lost track of the realtime clock") {
-		t.Fatalf("log = %q", log)
+	if !strings.HasPrefix(log.String(), "::group::buildcage: filesystem audit totals\nfilesystem-audit: lost track of the realtime clock: x\n") {
+		t.Fatalf("log = %q, want the lost clock first in the totals group", log)
 	}
 }
 
@@ -541,8 +544,8 @@ func TestRecorderLeavesOutTheEndLineWithoutEveryCount(t *testing.T) {
 			if got := lines(t, out); len(got) != 1 || got[0]["kind"] != "exec" {
 				t.Fatalf("recording = %v, want the exec alone", got)
 			}
-			if !strings.Contains(log.String(), "read loss counters") {
-				t.Fatalf("log = %q, want the counter that could not be read", log)
+			if !strings.HasSuffix(log.String(), "read loss counters: x\n::endgroup::\n") {
+				t.Fatalf("log = %q, want the counter that could not be read last in the totals group", log)
 			}
 		})
 	}

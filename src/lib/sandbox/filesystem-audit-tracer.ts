@@ -39,6 +39,11 @@ const DETACH_GRACE_MS = 10_000;
 const END_LINE = /"kind":"end"[^\n]*\n$/;
 /** How the tracer starts the line naming why it exited (see its main.go). */
 const FATAL = "filesystem-audit: fatal: ";
+/** The group the tracer logs its totals in, just before its end line. */
+const TOTALS_GROUP = "::group::buildcage: filesystem audit totals";
+/** How long the action waits for that group to reach the log once the record
+ *  is whole, so its own next group does not open first. */
+const TOTALS_GRACE_MS = 2_000;
 
 /** The sandbox cgroup's absolute path, from the cgroupsPath config.json gives
  *  runc (which is relative to the cgroup root). The tracer watches this
@@ -53,28 +58,43 @@ export type SpawnAudit = (command: string, args: string[]) => AuditChild;
 export interface AuditChild {
   exited: Promise<void>;
   kill: (signal: NodeJS.Signals) => void;
-  /** Why it exited, as far as its stderr says (see exitReason). */
+  /** Why it exited, as far as its stderr says (see followStderr). */
   reason: () => string;
+  /** Resolves once the totals group has been relayed to the log. */
+  totalsLogged?: Promise<void>;
 }
 
 /**
  * Follows the tracer's stderr for why it exited: its own fatal line, else the
- * last line anything wrote there, such as sudo refusing to run it.
+ * last line anything wrote there, such as sudo refusing to run it. Workflow
+ * commands are not reasons, but the end of the totals group is noted.
  */
-export function exitReason(): { push: (chunk: string) => void; value: () => string } {
+export function followStderr(): {
+  push: (chunk: string) => void;
+  value: () => string;
+  totalsLogged: Promise<void>;
+} {
   let partial = "";
   let fatal = "";
   let last = "";
+  let inTotals = false;
+  let totalsDone!: () => void;
+  const totalsLogged = new Promise<void>((resolve) => (totalsDone = resolve));
   return {
     push(chunk) {
       const lines = (partial + chunk).split("\n");
       partial = lines.pop()!;
       for (const line of lines) {
+        const text = line.trimEnd();
+        if (text === TOTALS_GROUP) inTotals = true;
+        else if (text === "::endgroup::" && inTotals) totalsDone();
+        if (text.startsWith("::")) continue;
         if (line.startsWith(FATAL)) fatal = line.slice(FATAL.length);
         else if (line.trim()) last = line;
       }
     },
     value: () => fatal || last || partial.trim(),
+    totalsLogged,
   };
 }
 
@@ -115,7 +135,7 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
     stdio: ["ignore", "inherit", "pipe"],
     env: hostCommandEnv(command),
   });
-  const reason = exitReason();
+  const reason = followStderr();
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
     process.stderr.write(chunk);
@@ -128,7 +148,12 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
     });
     child.on("close", () => resolve());
   });
-  return { exited, kill: (signal) => child.kill(signal), reason: reason.value };
+  return {
+    exited,
+    kill: (signal) => child.kill(signal),
+    reason: reason.value,
+    totalsLogged: reason.totalsLogged,
+  };
 }
 
 function defaultSleep(ms: number, detached = false): Promise<void> {
@@ -252,6 +277,9 @@ export async function haltTracer(
   const grace = () => (untilRecorded && !cancel?.aborted ? STOP_GRACE_MS : SHORT_STOP_GRACE_MS);
   for (let waited = 0; !exited(); waited += READY_POLL_MS) {
     if (untilRecorded && recordComplete(readTail, outPath)) {
+      // Written before the end line, but relayed apart from the record.
+      if (child.totalsLogged)
+        await Promise.race([child.totalsLogged, sleep(TOTALS_GRACE_MS, true)]);
       void Promise.race([child.exited, sleep(DETACH_GRACE_MS, true)])
         .then(() => {
           if (!exited()) signalTracer(pidFilePath, "KILL", deps);
