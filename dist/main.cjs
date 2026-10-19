@@ -73256,7 +73256,7 @@ function defaultSpawn$1(command, args) {
 		env: hostCommandEnv(command)
 	}), reason = followStderr();
 	return child.stderr.setEncoding("utf8"), child.stderr.on("data", (chunk) => {
-		process.stderr.write(chunk), reason.push(chunk);
+		process.stdout.write(chunk), reason.push(chunk);
 	}), {
 		exited: new Promise((resolve) => {
 			child.on("error", (e) => {

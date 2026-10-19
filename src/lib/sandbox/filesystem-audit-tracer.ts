@@ -138,7 +138,9 @@ function defaultSpawn(command: string, args: string[]): AuditChild {
   const reason = followStderr();
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
-    process.stderr.write(chunk);
+    // To stdout, the action's own log: the runner interleaves the two streams
+    // line by line, which would split the tracer's groups.
+    process.stdout.write(chunk);
     reason.push(chunk);
   });
   const exited = new Promise<void>((resolve) => {
