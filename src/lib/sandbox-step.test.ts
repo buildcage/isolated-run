@@ -183,10 +183,10 @@ function orderOf(mock: { mock: { invocationCallOrder: number[] } }): number {
 }
 
 describe("runSandboxStep", () => {
-  it("applies config_file to the step's env before reading any input, and logs it", async () => {
+  it("applies config_file to the step's env before reading any input, and warns of what it ignored", async () => {
     mocks.applyConfigFile.mockReturnValue({
       path: "/home/runner/work/repo/repo/c.yml",
-      summary: ["Ignored from config_file c.yml, set by the workflow: proxy_mode"],
+      warning: "Ignored from config_file c.yml, set by the workflow: proxy_mode",
     });
 
     await runSandboxStep(ENV, deps);
@@ -196,13 +196,13 @@ describe("runSandboxStep", () => {
       expect.objectContaining({ known: expect.arrayContaining(["proxy_mode"]) }),
     );
     expect(orderOf(mocks.applyConfigFile)).toBeLessThan(orderOf(mocks.readRunCommand));
-    expect(mocks.log).toHaveBeenCalledWith(
+    expect(mocks.warn).toHaveBeenCalledWith(
       "Ignored from config_file c.yml, set by the workflow: proxy_mode",
     );
   });
 
   it("saves the merged write_through for the post step when config_file was read", async () => {
-    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", summary: [] });
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml" });
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
       writeThroughInput: "/opt/cache",
@@ -391,7 +391,7 @@ describe("runSandboxStep", () => {
   });
 
   it("refuses a symlinked /var/tmp before writing anything under it", async () => {
-    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", summary: [] });
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml" });
     mocks.checkScratchBaseParent.mockImplementation(() => {
       throw new SandboxError("/var/tmp resolves to /tmp", "SCRATCH_BASE_SYMLINKED");
     });
