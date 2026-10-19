@@ -48,8 +48,8 @@ assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `b
 assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
 assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
 assert_file_has "$f" "The summary has the process details" '<summary>🔍 Process details</summary>'
-assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3 +\./futimens\.txt$'
-assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3 +\./empty-name\.txt$'
+assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3\.[0-9]+ +\./futimens\.txt$'
+assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3\.[0-9]+ +\./empty-name\.txt$'
 
 # A subshell's command still counts as the step's. GNU touch then sets the
 # new file's times through the descriptor; uutils' does not.
@@ -60,12 +60,12 @@ assert_file_has "$f" "A subshell's write has a details row" -E " W$a +touch +\./
 
 # Relative names show under the directory they resolved against.
 assert_file_has "$f" "A failed read against a changed working directory shows under it" -E ' r +bash +\./sub/missing\.txt$'
-assert_file_has "$f" "A failed delete against a directory descriptor shows under it" -E ' d +python3 +\./sub/gone$'
-assert_file_has "$f" "A failed open against a directory descriptor shows under it" -E ' r +python3 +\./sub/absent$'
+assert_file_has "$f" "A failed delete against a directory descriptor shows under it" -E ' d +python3\.[0-9]+ +\./sub/gone$'
+assert_file_has "$f" "A failed open against a directory descriptor shows under it" -E ' r +python3\.[0-9]+ +\./sub/absent$'
 
 # A refused syscall: a details row only, unless it killed the command.
 assert_file_lacks "$f" "Refused syscalls are not noted under the heading" 'Refused system calls'
-assert_file_has "$f" "The refused unshare has a details row" -E ' ! +python3 +syscall:unshare$'
+assert_file_has "$f" "The refused unshare has a details row" -E ' ! +python3\.[0-9]+ +syscall:unshare$'
 if [ "$(uname -m)" = x86_64 ]; then
   assert_file_has "$f" "The killed 32-bit syscall is noted under the heading" -E '^> 🚫 Killed for a 32-bit system call: .*`int80`'
   assert_file_has "$f" "The killed 32-bit syscall has a details row" -E ' ! +int80 +syscall:32-bit getpid \(killed\)$'
@@ -75,11 +75,11 @@ fi
 assert_file_has "$f" "A refused chmod shows as failed" -E ' a!? +chmod +\./root-owned\.txt$'
 # Each program sharing a descriptor gets its own row.
 assert_file_has "$f" "bash's write through a shared descriptor has its row" -E ' W +bash +\./shared\.txt$'
-assert_file_has "$f" "sh's write through a shared descriptor has its row" -E ' W +sh +\./shared\.txt$'
+assert_file_has "$f" "sh's write through a shared descriptor has its row, under dash, which it runs" -E ' W +dash +\./shared\.txt$'
 assert_file_has "$f" "bash's write before exec has its row" -E ' W +bash +\./execd\.txt$'
 assert_file_has "$f" "cat's write after exec has its row" -E ' W +cat +\./execd\.txt$'
-assert_file_has "$f" "A refused truncate through a descriptor shows as failed" -E ' [A-Za-z]*w[A-Za-z!]* +python3 +\./fd-truncate\.txt$'
-assert_file_has "$f" "An xattr set through a descriptor shows as an attribute change" -Ei ' [A-Za-z]*a[A-Za-z!]* +python3 +\./fd-xattr\.txt$'
+assert_file_has "$f" "A refused truncate through a descriptor shows as failed" -E ' [A-Za-z]*w[A-Za-z!]* +python3\.[0-9]+ +\./fd-truncate\.txt$'
+assert_file_has "$f" "An xattr set through a descriptor shows as an attribute change" -Ei ' [A-Za-z]*a[A-Za-z!]* +python3\.[0-9]+ +\./fd-xattr\.txt$'
 assert_file_has "$f" "A refused mkdir shows as failed" -E ' w!? +mkdir +\./root-owned/x$'
 assert_file_has "$f" "A hard link's new name shows as written" -E ' W +ln +\./link-dst\.txt$'
 assert_file_has "$f" "A hard link's source shows as linked" -E ' L +ln +\./link-src\.txt$'
@@ -87,12 +87,12 @@ assert_file_has "$f" "A hard link across mounts shows as failed" -E ' l +ln +/et
 
 # A file mapped executable shows as read unless it is a library or an exec
 # mapped it, as it does run.sh's interpreter.
-assert_file_has "$f" "A file mapped executable shows as read" -E ' R +python3 +\./mapped\.bin$'
+assert_file_has "$f" "A file mapped executable shows as read" -E ' R +python3\.[0-9]+ +\./mapped\.bin$'
 # A mapping the kernel refused after the tracer's hook is not a write.
-assert_file_lacks "$f" "A refused mapping is not a write" -E ' [A-Za-z!]*[Ww][A-Za-z!]* +python3 +\./ro-mapped\.bin$'
+assert_file_lacks "$f" "A refused mapping is not a write" -E ' [A-Za-z!]*[Ww][A-Za-z!]* +python3\.[0-9]+ +\./ro-mapped\.bin$'
 # Shared anonymous memory names no file.
-assert_file_has "$f" "A shared mapping made writable shows as read and written" -E ' RW +python3 +\./mprotected\.bin$'
-assert_file_has "$f" "A shared mapping made writable and executable shows as read and written" -E ' RW +python3 +\./mprotected-rwx\.bin$'
+assert_file_has "$f" "A shared mapping made writable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected\.bin$'
+assert_file_has "$f" "A shared mapping made writable and executable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected-rwx\.bin$'
 assert_file_lacks "$f" "Shared anonymous memory names no file" '/dev/zero'
 assert_file_lacks "$f" "run.sh's interpreter, mapped by its exec, is not a read" -E ' [A-Z]*R[A-Z!]* +\S+ +/usr/bin/dash$'
 

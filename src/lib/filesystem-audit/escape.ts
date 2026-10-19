@@ -21,8 +21,8 @@ const NAMED_ESCAPES: Record<string, string> = {
 
 // The tracer writes a byte 0xNN that is not UTF-8 as a lone surrogate U+DCNN
 // (see its json.go).
-const RAW_BYTE_FIRST = 0xdc80;
-const RAW_BYTE_LAST = 0xdcff;
+export const RAW_BYTE_FIRST = 0xdc80;
+export const RAW_BYTE_LAST = 0xdcff;
 
 export function escapeForDisplay(name: string): string {
   return name.replace(UNSAFE_CHARS, (m) =>

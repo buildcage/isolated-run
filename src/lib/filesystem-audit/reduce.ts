@@ -9,6 +9,7 @@
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
+import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
 import {
@@ -81,6 +82,8 @@ export interface Row extends Shown {
   agg: Agg;
   flags: string;
   comm: string;
+  /** The command as its details line spells it. */
+  commField: string;
 }
 
 /** An accessed path's row, with the program that made the accesses and its
@@ -198,7 +201,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     limit,
     loose,
     nodes: limits.nodes,
-    rowBytes: (p, comm) => relLength(p) + comm.length + 3,
+    rowBytes: (p, key) => relLength(p) + commands.get(key)!.field.length + 3,
   });
   // Each program run, with how many times it ran.
   const executed = new Map<string, number>();
@@ -209,7 +212,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // the step's shell, goes by its command name. The paths are keyed by rank, as a marked
   // path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
-  const ranks: { shown: Shown; bytes: number }[] = [];
+  // A program's rank holds its path, a command name's none.
+  const ranks: { shown: Shown; bytes: number; program?: string }[] = [];
   const rankOf = new Map<string, number>();
   const rank = (key: string, name: boolean): number => {
     const id = `${name ? "n" : "p"}${key}`;
@@ -218,7 +222,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       r = ranks.length;
       rankOf.set(id, r);
       const s = name ? { path: escapeForDisplay(key) } : shown(key);
-      ranks.push({ shown: s, bytes: s.path.length + (s.deleted ? DELETED_MARK.length : 0) });
+      const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
+      ranks.push({ shown: s, bytes, ...(name ? {} : { program: key }) });
     }
     return r;
   };
@@ -226,6 +231,25 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     let r = programs.get(pid);
     if (r === undefined) programs.set(pid, (r = rank(comm, true)));
     return r;
+  };
+  // Each pid's name its exec was run by, which a fork hands on too.
+  const runNames = new Map<number | undefined, string>();
+  // A details row's command: its program's rank and how the row names it,
+  // keyed to how that is shown.
+  const commands = new Map<string, Command>();
+  const commandKeys = new Map<string, string>();
+  const commandKey = (pid: number | undefined, comm: string): string => {
+    const r = programOf(pid, comm);
+    const runName = runNames.get(pid);
+    const memo = `${r}\0${runName ?? ""}\0${comm}`;
+    let key = commandKeys.get(memo);
+    if (key === undefined) {
+      const c = commandOf(ranks[r].program, runName, comm);
+      key = `${r}/${c.text}`;
+      if (!commands.has(key)) commands.set(key, c);
+      commandKeys.set(memo, key);
+    }
+    return key;
   };
   let ended = false;
   let lost = false;
@@ -243,6 +267,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
       programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+      const runName = runNames.get(r.ppid);
+      if (runName === undefined) runNames.delete(r.pid);
+      else runNames.set(r.pid, runName);
     }
     if (r.kind === "end") {
       ended = true;
@@ -253,7 +280,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "syscall") {
       const name = escapeForDisplay(r.syscall || "?");
       const path = SYSCALL_PREFIX + (r.killed ? `32-bit ${name} (killed)` : name);
-      const comm = escapeForDisplay(r.comm ?? "");
+      const comm = commandKey(r.pid, r.comm ?? "");
       const key = keyOf(comm, path);
       const t = Date.parse(r.t ?? "");
       let row = refused.get(key);
@@ -262,7 +289,15 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         // makes sure the details name it, so both are always kept. The profile
         // bounds how many names there are.
         if (refused.size >= REFUSED_KEPT && !r.killed && refusedNames.has(name)) return;
-        row = { agg: newAgg(), flags: "!", comm, path, syscall: { name, killed: !!r.killed } };
+        const { text, field } = commands.get(comm)!;
+        row = {
+          agg: newAgg(),
+          flags: "!",
+          comm: text,
+          commField: field,
+          path,
+          syscall: { name, killed: !!r.killed },
+        };
         refused.set(key, row);
         if (!r.killed) refusedNames.add(name);
       }
@@ -276,6 +311,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
+      runNames.set(r.pid, r.name ?? r.path);
       const runs = executed.get(p);
       if (runs !== undefined) executed.set(p, runs + 1);
       else if (executedBytes <= limit) {
@@ -304,7 +340,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
       const t = Date.parse(r.t ?? "");
       const x: Access = {
-        comm: r.comm ?? "",
+        comm: commandKey(r.pid, r.comm ?? ""),
         path: normalize(path),
         bit: bitsOf(c.letter),
         failed: c.failed,
@@ -315,7 +351,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       details.add(x, parts);
       // The executed table lists what ran, so this one leaves it out.
-      const program = programOf(r.pid, x.comm);
+      const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
     }
   };
@@ -335,12 +371,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
 
   type Line = { comm: string; path: string; agg: Agg };
   const rows = (lines: Line[] | undefined): Row[] | undefined =>
-    lines?.map(({ comm, path, agg }) => ({
-      agg,
-      flags: fmtFlags(agg),
-      comm: escapeForDisplay(comm),
-      ...shown(path),
-    }));
+    lines?.map(({ comm, path, agg }) => {
+      const { text, field } = commands.get(comm)!;
+      return { agg, flags: fmtFlags(agg), comm: text, commField: field, ...shown(path) };
+    });
 
   // A part cut short with no line left is given up, its note standing alone.
   const kept = (part: Lines): Line[] | undefined => {
@@ -353,6 +387,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       agg,
       flags: fmtFlags(agg),
       comm: "",
+      commField: "",
       ...shown(path),
       program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
     }));

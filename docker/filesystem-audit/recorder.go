@@ -18,6 +18,8 @@ type recorder struct {
 	// timestamp (see bootClock).
 	offset func(boot uint64) int64
 	files  execFiles
+	// programs holds each process's program (see record.Program).
+	programs map[uint32]string
 	// calls holds, per thread, what it sent while in a syscall, until the
 	// call's result arrives.
 	calls map[uint32]*call
@@ -49,12 +51,13 @@ type tally struct {
 
 func newRecorder(w *bufio.Writer, log io.Writer, offset func(boot uint64) int64) *recorder {
 	return &recorder{
-		w:      w,
-		log:    log,
-		offset: offset,
-		files:  execFiles{},
-		calls:  map[uint32]*call{},
-		counts: map[tally]int{},
+		w:        w,
+		log:      log,
+		offset:   offset,
+		files:    execFiles{},
+		programs: map[uint32]string{},
+		calls:    map[uint32]*call{},
+		counts:   map[tally]int{},
 	}
 }
 
@@ -96,6 +99,7 @@ func (r *recorder) add(raw []byte) error {
 		}
 		r.started = true
 	}
+	r.setProgram(&rec)
 	if rec.tid == 0 {
 		return r.write(rec)
 	}
@@ -141,6 +145,23 @@ func (r *recorder) add(raw []byte) error {
 	}
 	c.op, c.hasOp = rec, true
 	return nil
+}
+
+// setProgram gives rec its process's program, after an exec the file it ran.
+// Set before a line is held for its call's result, so it is the program at
+// the event.
+func (r *recorder) setProgram(rec *record) {
+	switch rec.Kind {
+	case "exec":
+		r.programs[rec.PID] = rec.Path
+	case "fork":
+		if p, ok := r.programs[rec.PPID]; ok {
+			r.programs[rec.PID] = p
+		} else {
+			delete(r.programs, rec.PID)
+		}
+	}
+	rec.Program = r.programs[rec.PID]
 }
 
 // write writes rec as the recording's next line.

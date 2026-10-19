@@ -10,7 +10,10 @@ type record struct {
 	PID  uint32 `json:"pid"`
 	PPID uint32 `json:"ppid"`
 	Comm string `json:"comm"`
-	Path string `json:"path,omitempty"`
+	// Program is the file the process last ran, which a fork hands its child;
+	// empty for one that ran nothing since the recording started.
+	Program string `json:"program,omitempty"`
+	Path    string `json:"path,omitempty"`
 	// Name is the name the command passed, where Path is not that name as
 	// written: the file an exec resolved to, or a passed name joined to its
 	// directory. ToName is the same for To.

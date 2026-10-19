@@ -27,7 +27,7 @@ assert_one_row "An append to a lower-layer file has one row" ' W +bash +\./READM
 assert_one_row "A chmod of a lower-layer file has one row" ' A +chmod +\./LICENSE$'
 assert_one_row "A move of a lower-layer file has one row" ' M +mv +\./SECURITY\.md$'
 assert_one_row "A delete of a lower-layer file has one row" ' D +rm +\./MAINTAINERS\.md$'
-assert_one_row "A lower-layer file mapped shared and made writable has one row" ' RW +python3 +\./renovate\.json$'
+assert_one_row "A lower-layer file mapped shared and made writable has one row" ' RW +python3\.[0-9]+ +\./renovate\.json$'
 
 assert_one_row "A discarded write has one row" ' W +bash +\./discarded\.txt$'
 assert_one_row "A write under write_through has one row" ' W +bash +\./kept/written\.txt$'

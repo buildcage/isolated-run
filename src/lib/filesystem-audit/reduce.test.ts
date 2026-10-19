@@ -493,7 +493,9 @@ describe("createAuditSummary", () => {
   });
 
   it("keeps one row for a command that writes a file and then runs it", () => {
+    // As rustup updating itself does.
     const md = render(
+      { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
@@ -503,14 +505,20 @@ describe("createAuditSummary", () => {
 
   it("never folds a program run, nor lets one fold its directory", () => {
     const md = render(
-      ...["a", "b", "c"].map((p) => ({ kind: "exec", comm: "sh", path: `/usr/bin/${p}` })),
-      { kind: "mkdir", failed: true, err: 30, comm: "sh", path: "/usr/local/x" },
-      { kind: "read", comm: "sh", path: "/usr/share/y" },
+      ...["a", "b", "c"].map((p, i) => ({
+        kind: "exec",
+        pid: i + 1,
+        comm: "sh",
+        path: `/usr/bin/${p}`,
+        name: "sh",
+      })),
+      { kind: "mkdir", pid: 9, failed: true, err: 30, comm: "sh", path: "/usr/local/x" },
+      { kind: "read", pid: 9, comm: "sh", path: "/usr/share/y" },
     );
     expect(lines(md)).toEqual([
-      "X sh /usr/bin/a",
-      "X sh /usr/bin/b",
-      "X sh /usr/bin/c",
+      "X a /usr/bin/a",
+      "X b /usr/bin/b",
+      "X c /usr/bin/c",
       "w! sh /usr/local/x",
       "R sh /usr/share/y",
     ]);
@@ -781,9 +789,9 @@ describe("createAuditSummary", () => {
   it("maps an executable mmap to X via exec and a shared-write mmap to W", () => {
     const md = render(
       { kind: "mmap", comm: "node", path: "/work/shared", access: "w" },
-      { kind: "exec", comm: "node", path: "/work/tool" },
+      { kind: "exec", comm: "tool", path: "/work/tool" },
     );
-    expect(lines(md)).toEqual(["W node ./shared", "X node ./tool"]);
+    expect(lines(md)).toEqual(["W node ./shared", "X tool ./tool"]);
   });
 
   it("collapses a directory past the fanout and folds its bare parents", () => {
@@ -1088,6 +1096,108 @@ describe("createAuditSummary", () => {
         ),
       ),
     ).toEqual(["RW c ./../x"]);
+  });
+});
+
+describe("createAuditSummary: commands", () => {
+  const byte = (b: number): string => String.fromCharCode(0xdc00 + b);
+
+  it("names a command by its program, and the name it gave itself where that differs", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "npm", path: "/usr/bin/node", name: "/usr/bin/node" },
+      { kind: "read", pid: 2, comm: "npm", path: "/work/package.json" },
+      { kind: "read", pid: 2, comm: "npm ls", path: "/work/package-lock.json" },
+      { kind: "fork", pid: 3, ppid: 2, comm: "npm ls" },
+      { kind: "read", pid: 3, comm: "npm ls", path: "/work/.npmrc" },
+    );
+    expect(lines(md)).toEqual([
+      "R node[npm ls] ./.npmrc",
+      "R node[npm ls] ./package-lock.json",
+      "R node[npm] ./package.json",
+      "X node[npm] /usr/bin/node",
+    ]);
+  });
+
+  it("takes a name cut to 15 bytes, or the one an exec was run by, as the program's", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "unattended-upgr", path: "/usr/bin/unattended-upgrade" },
+      { kind: "exec", pid: 3, comm: "sh", path: "/usr/bin/dash", name: "sh" },
+      { kind: "exec", pid: 4, comm: "unattended-upg", path: "/usr/bin/unattended-upgrade" },
+    );
+    expect(lines(md)).toEqual([
+      "X dash /usr/bin/dash",
+      "X unattended-upgrade /usr/bin/unattended-upgrade",
+      "X unattended-upgrade[unattended-upg] /usr/bin/unattended-upgrade",
+    ]);
+  });
+
+  it("cuts a name at 15 bytes, mid-character and through a byte that is not UTF-8", () => {
+    const md = render(
+      // An exec cuts the 3-byte "あ" short, which the tracer reads as two bytes.
+      {
+        kind: "exec",
+        pid: 2,
+        comm: `abcdefghijklm${byte(0xe3)}${byte(0x81)}`,
+        path: "/x/abcdefghijklmあ",
+      },
+      { kind: "exec", pid: 3, comm: `p${byte(0xff)}`, path: `/x/p${byte(0xff)}` },
+    );
+    expect(lines(md)).toEqual(["X abcdefghijklmあ /x/abcdefghijklmあ", "X p\\xff /x/p\\xff"]);
+  });
+
+  it("escapes brackets in either name, so neither passes for the other, quoting a name with a space", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "node[npm ls]", path: "/tmp/node[npm ls]" },
+      { kind: "exec", pid: 3, comm: "x", path: "/tmp/node[npm ls]" },
+      { kind: "exec", pid: 4, comm: "a] /etc/passwd", path: "/usr/bin/node" },
+      // A shell's subshell renames itself without running anything.
+      { kind: "read", pid: 5, comm: "node[npm ls]", path: "/work/a" },
+    );
+    expect(lines(md)).toEqual([
+      'R "node\\[npm ls\\]" ./a',
+      'X "node\\[npm ls\\]" "/tmp/node[npm ls]"',
+      'X "node\\[npm ls\\]"[x] "/tmp/node[npm ls]"',
+      "X node[a\\] /etc/passwd] /usr/bin/node",
+    ]);
+  });
+
+  it("quotes a program's name holding a space, but not the name it gave itself", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "a b", path: "/work/a b" },
+      { kind: "exec", pid: 3, comm: "c d", path: "/work/a b" },
+    );
+    expect(lines(md)).toEqual(['X "a b" "./a b"', 'X "a b"[c d] "./a b"']);
+  });
+
+  it("names a memfd or deleted program by its file", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "3", path: "memfd:x", memfd: true, name: "/dev/fd/3" },
+      { kind: "exec", pid: 3, comm: "gone", path: "/work/gone", deleted: true },
+    );
+    expect(lines(md)).toEqual(["X gone ./gone (deleted)", 'X memfd:"x" memfd:"x"']);
+  });
+
+  it("keeps a row apart for each program of one name", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "node", path: "/usr/bin/node" },
+      { kind: "read", pid: 2, comm: "node", path: "/work/a" },
+      { kind: "exec", pid: 3, comm: "node", path: "/tmp/x/node" },
+      { kind: "read", pid: 3, comm: "node", path: "/work/a" },
+    );
+    expect(lines(md)).toEqual([
+      "R node ./a",
+      "R node ./a",
+      "X node /tmp/x/node",
+      "X node /usr/bin/node",
+    ]);
+  });
+
+  it("names a refused syscall's command as a path's", () => {
+    const md = render(
+      { kind: "exec", pid: 2, comm: "node", path: "/usr/bin/node" },
+      { kind: "syscall", pid: 2, comm: "npm ls", syscall: "io_uring_setup", err: 1 },
+    );
+    expect(lines(md)).toContain("! node[npm ls] syscall:io_uring_setup");
   });
 });
 

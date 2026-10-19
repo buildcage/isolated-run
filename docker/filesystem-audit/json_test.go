@@ -55,8 +55,8 @@ type legacy struct {
 
 func (l legacy) MarshalJSON() ([]byte, error) {
 	r := l.r
-	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Path) && utf8.ValidString(r.Name) &&
-		utf8.ValidString(r.To) && utf8.ValidString(r.ToName) {
+	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Program) && utf8.ValidString(r.Path) &&
+		utf8.ValidString(r.Name) && utf8.ValidString(r.To) && utf8.ValidString(r.ToName) {
 		return json.Marshal(struct {
 			Time string `json:"t"`
 			plain
@@ -68,6 +68,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		PID      uint32  `json:"pid"`
 		PPID     uint32  `json:"ppid"`
 		Comm     rawName `json:"comm"`
+		Program  rawName `json:"program,omitempty"`
 		Path     rawName `json:"path,omitempty"`
 		Name     rawName `json:"name,omitempty"`
 		To       rawName `json:"to,omitempty"`
@@ -85,7 +86,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		Syscall  string  `json:"syscall,omitempty"`
 		Compat   bool    `json:"compat,omitempty"`
 		Killed   bool    `json:"killed,omitempty"`
-	}{l.t, r.Kind, r.PID, r.PPID, rawName(r.Comm), rawName(r.Path), rawName(r.Name),
+	}{l.t, r.Kind, r.PID, r.PPID, rawName(r.Comm), rawName(r.Program), rawName(r.Path), rawName(r.Name),
 		rawName(r.To), rawName(r.ToName), r.Access, r.Flags, r.Mode, r.Owner, r.Err,
 		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange, r.Syscall, r.Compat, r.Killed})
 }
@@ -173,13 +174,13 @@ func TestAppendRecordWritesEveryField(t *testing.T) {
 }
 
 func FuzzAppendRecord(f *testing.F) {
-	f.Add("open", "sh", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
-	f.Add("open", "c", "a\fb\nc\rd\te", "", "", "", "r", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
-	f.Add("exec", "c\xff<", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
-	f.Fuzz(func(t *testing.T, kind, comm, path, name, to, toName, access, mode, owner, syscall string,
+	f.Add("open", "sh", "", "/tmp/x", "", "", "", "w", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
+	f.Add("open", "c", "/bin/c", "a\fb\nc\rd\te", "", "", "", "r", "", "", "", uint32(1), uint32(2), uint32(0), int32(0), uint16(0), int64(0))
+	f.Add("exec", "c\xff<", "/x\xfe", "a\u2028\x7f\b", "\xed\xb3\xbf", "\"\\", "\x00\x1f", "r&", "0644", "-1:0", "x>\xe1", uint32(1<<31), uint32(0), uint32(7), int32(-13), uint16(0x1ff), int64(-1))
+	f.Fuzz(func(t *testing.T, kind, comm, program, path, name, to, toName, access, mode, owner, syscall string,
 		pid, ppid, flags uint32, errno int32, bits uint16, ns int64) {
 		r := record{
-			Kind: kind, PID: pid, PPID: ppid, Comm: comm, Path: path, Name: name, To: to, ToName: toName,
+			Kind: kind, PID: pid, PPID: ppid, Comm: comm, Program: program, Path: path, Name: name, To: to, ToName: toName,
 			Access: access, Flags: flags, Mode: mode, Owner: owner, Err: errno, Syscall: syscall,
 			Failed: bits&1 != 0, Image: bits&2 != 0, Memfd: bits&4 != 0, Deleted: bits&8 != 0,
 			Exchange: bits&16 != 0, Compat: bits&32 != 0, Killed: bits&64 != 0,

@@ -11,7 +11,8 @@
  * reads of run-script.sh, and the init's records are machinery. Any other
  * record naming the scratch base is the step's: a prefix match would let a
  * name like <base>/../../home/... hide an access. The step's shell is relabeled
- * bash.
+ * bash, and its program, buildcage's run-script.sh, is dropped from its lines
+ * and its forks', so it shows as a process with none.
  *
  * The shell is found by the exec of run-script.sh under the scratch base, never
  * by command name, so a step command named setpriv or run-script.sh (run from
@@ -39,6 +40,7 @@ interface Record_ {
   ppid?: number;
   kind?: string;
   comm?: string;
+  program?: string;
   path?: string;
   access?: string;
   failed?: boolean;
@@ -101,13 +103,13 @@ export function createStripper(scratchBase: string): {
       (i <= boundary || r.pid === init || readsScript)
     )
       return undefined;
-    if (
-      shell !== undefined &&
-      r.comm === SHELL_COMM &&
-      r.pid !== undefined &&
-      !ownShellPids.has(r.pid)
-    ) {
-      const record = { ...r, comm: SHELL_LABEL }; // the step's shell
+    const ours = shell !== undefined && r.pid !== undefined && !ownShellPids.has(r.pid);
+    const relabel = ours && r.comm === SHELL_COMM;
+    const unnamed = ours && r.program === script;
+    if (relabel || unnamed) {
+      const record = { ...r };
+      if (relabel) record.comm = SHELL_LABEL;
+      if (unnamed) delete record.program;
       return { line: JSON.stringify(record), record };
     }
     return { line, record: rec }; // a step process, verbatim

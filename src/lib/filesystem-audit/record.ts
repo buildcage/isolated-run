@@ -4,7 +4,9 @@ export interface AuditRecord {
   pid?: number;
   ppid?: number;
   comm?: string;
+  program?: string;
   path?: string;
+  name?: string;
   to?: string;
   access?: string;
   err?: number;

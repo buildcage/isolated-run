@@ -197,7 +197,7 @@ function detailsBlock(
   // communication details.
   const timeW = times.reduce((m, t) => Math.max(m, t.length), 0);
   const flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0);
-  const comms = rows.map((r) => field(r.comm));
+  const comms = rows.map((r) => r.commField);
   const commW = comms.reduce((m, c) => Math.max(m, c.length), 0);
   const columns = [
     timeW &&
