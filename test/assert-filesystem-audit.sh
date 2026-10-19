@@ -27,10 +27,11 @@ assert_file_lacks "$f" "The record is not marked incomplete" "This record is inc
 t='[0-9]{2}:[0-9]{2}\.[0-9]{3}'
 assert_file_has "$f" "A probe line is led by its elapsed time" -E "^$t(-$t)?: +[RWXMLDArwxmlda!]+ +\S+ +\./probe"
 
-# Rows run in the order they were first touched: write, move, delete.
+# Rows run in the order they were first touched: write, move, delete. A row
+# names the file run, which is gnumv or gnurm where mv and rm link to them.
 w=$(line_of ' W +bash +\./probe\.txt$')
-m=$(line_of ' M +mv +\./probe\.txt$')
-d=$(line_of ' D +rm +\./probe2\.txt$')
+m=$(line_of ' M +(gnu)?mv +\./probe\.txt$')
+d=$(line_of ' D +(gnu)?rm +\./probe2\.txt$')
 if [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt "$d" ]; then
   pass "The probe's write, move and delete rows run in that order"
 else

@@ -70122,15 +70122,23 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
 	"\\": "\\\\",
-	"\"": "\\\""
+	"\"": "\\\"",
+	"[": "\\[",
+	"]": "\\]"
 };
 function escapeForDisplay(name) {
-	return name.replace(UNSAFE_CHARS, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+	return escapeWith(UNSAFE_CHARS, name);
+}
+function escapeCommandName(name) {
+	return escapeWith(UNSAFE_COMMAND_CHARS, name);
+}
+function escapeWith(unsafe, name) {
+	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
 }
 function escapeChar(c) {
 	let named = NAMED_ESCAPES[c];
@@ -70426,14 +70434,13 @@ function isExecName(comm, name) {
 	let a = bytesOf(comm), b = bytesOf(leaf(name)).slice(0, 15);
 	return a.length === b.length && a.every((x, i) => x === b[i]);
 }
-const brackets = (s) => s.replace(/[[\]]/g, "\\$&");
 function commandOf(program, runName, comm) {
-	let own = brackets(escapeForDisplay(comm));
+	let own = escapeCommandName(comm);
 	if (program === void 0) return {
 		text: own,
 		field: field(own)
 	};
-	let memfd = program.startsWith(MEMFD), file = memfd ? MEMFD_PREFIX + program.slice(MEMFD.length) : unmarked(program), base = brackets(memfd ? `${MEMFD_PREFIX}"${escapeForDisplay(program.slice(MEMFD.length))}"` : escapeForDisplay(leaf(file))), baseField = memfd ? base : field(base);
+	let memfd = program.startsWith(MEMFD), file = memfd ? MEMFD_PREFIX + program.slice(MEMFD.length) : unmarked(program), base = memfd ? `${MEMFD_PREFIX}"${escapeCommandName(program.slice(MEMFD.length))}"` : escapeCommandName(leaf(file)), baseField = memfd ? base : field(base);
 	return isExecName(comm, file) || runName !== void 0 && isExecName(comm, runName) ? {
 		text: base,
 		field: baseField

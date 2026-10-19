@@ -1,4 +1,4 @@
-import { escapeForDisplay, field, RAW_BYTE_FIRST, RAW_BYTE_LAST } from "./escape.ts";
+import { escapeCommandName, field, RAW_BYTE_FIRST, RAW_BYTE_LAST } from "./escape.ts";
 import { leaf, MEMFD, MEMFD_PREFIX, unmarked } from "./paths.ts";
 
 /** How a details row names its command: as text, and as its line's field. */
@@ -31,10 +31,6 @@ export function isExecName(comm: string, name: string): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
-// A bracket opens or closes the name a process gave itself, so one in either
-// name is escaped; a backslash is escaped already.
-const brackets = (s: string): string => s.replace(/[[\]]/g, "\\$&");
-
 /**
  * A command as a details row names it: the file name of the program it runs,
  * then the name it gave itself in brackets where that is not the one its exec
@@ -47,16 +43,14 @@ export function commandOf(
   runName: string | undefined,
   comm: string,
 ): Command {
-  const own = brackets(escapeForDisplay(comm));
+  const own = escapeCommandName(comm);
   if (program === undefined) return { text: own, field: field(own) };
   // A memfd's name is quoted already.
   const memfd = program.startsWith(MEMFD);
   const file = memfd ? MEMFD_PREFIX + program.slice(MEMFD.length) : unmarked(program);
-  const base = brackets(
-    memfd
-      ? `${MEMFD_PREFIX}"${escapeForDisplay(program.slice(MEMFD.length))}"`
-      : escapeForDisplay(leaf(file)),
-  );
+  const base = memfd
+    ? `${MEMFD_PREFIX}"${escapeCommandName(program.slice(MEMFD.length))}"`
+    : escapeCommandName(leaf(file));
   const baseField = memfd ? base : field(base);
   if (isExecName(comm, file) || (runName !== undefined && isExecName(comm, runName)))
     return { text: base, field: baseField };
