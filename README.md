@@ -89,7 +89,8 @@ The step writes every destination the command contacted to the Job Summary:
 
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
 command actually did. A request whose method, host or path a rule would read as a wildcard is listed
-under it rather than written in, since copying it would permit more than was sent.
+under it rather than written in, since copying it would permit more than was sent. The step it
+writes also keeps `filesystem_mode`, `write_through` and `filesystem_audit` when the run set them.
 
 ### 2. Enforce the allowlist
 

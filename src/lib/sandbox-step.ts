@@ -76,7 +76,7 @@ import {
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
-import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
+import { splitWriteThroughInput, WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -402,6 +402,21 @@ async function resolveProxyImage(
   return { imageRef, pullPolicy, composeFile: resolveComposeFile(localOverride) };
 }
 
+/** The filesystem inputs for the report's restrict example, each only when it
+ *  is not its default, so pasting the example keeps them. */
+export function filesystemExampleInputs({
+  filesystemMode,
+  writeThroughInput,
+  filesystemAudit,
+}: Pick<StepInputs, "filesystemMode" | "writeThroughInput" | "filesystemAudit">): string[] {
+  const lines: string[] = [];
+  if (filesystemMode !== "persistent") lines.push(`filesystem_mode: ${filesystemMode}`);
+  const paths = splitWriteThroughInput(writeThroughInput);
+  if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
+  if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
+  return lines;
+}
+
 function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
   deps.withLogGroup("buildcage: Configured ACL Rules", () => {
     deps.logRules("HTTPS", rules.httpsRules);
@@ -499,7 +514,10 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     actionRepo,
     actionRef: reportActionRef,
     runCommand: inputs.runInput,
-    extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+    extraInputs: (report) => [
+      ...awsExampleInputs(inputs.aws, report.timeline),
+      ...filesystemExampleInputs(inputs),
+    ],
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,

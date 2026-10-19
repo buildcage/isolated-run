@@ -7,6 +7,7 @@ import { SandboxError } from "./errors.ts";
 import type { RecordArtifact } from "./filesystem-audit/render.ts";
 import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import {
+  filesystemExampleInputs,
   finalizeStep,
   preflight,
   readStepInputs,
@@ -526,6 +527,18 @@ describe("runSandboxStep", () => {
     expect(log.mock.calls.flat().join("\n").includes(`${ASIA}AAAAAAAAAAAAAAAA`)).toBe(false);
   });
 
+  it("carries the filesystem inputs into the restrict example after the AWS ones", async () => {
+    mocks.readAwsKeyInputs.mockReturnValue({ key: `${ASIA}AAAAAAAAAAAAAAAA`, roleAccounts: [] });
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] })).toStrictEqual([
+      "aws_key_check: true",
+      "filesystem_audit: record",
+    ]);
+  });
+
   it("pulls the image by verified digest, under the action's own repository", async () => {
     await runSandboxStep(ENV, deps);
 
@@ -1032,6 +1045,45 @@ describe("runSandboxStep", () => {
       expect(orderOf(mocks.reportStepTraffic)).toBeLessThan(orderOf(read.upload));
       expect(orderOf(read.upload)).toBeLessThan(orderOf(mocks.stopSandboxProxy));
     });
+  });
+});
+
+describe("filesystemExampleInputs", () => {
+  it("leaves out every input at its default", () => {
+    expect(
+      filesystemExampleInputs({
+        filesystemMode: "persistent",
+        writeThroughInput: "",
+        filesystemAudit: "off",
+      }),
+    ).toStrictEqual([]);
+  });
+
+  it("writes each input that is not its default, and write_through as a block of its paths", () => {
+    expect(
+      filesystemExampleInputs({
+        filesystemMode: "ephemeral",
+        writeThroughInput: "# caches\n  ~/.cache  \n\n./dist\n/opt/a # b",
+        filesystemAudit: "record",
+      }),
+    ).toStrictEqual([
+      "filesystem_mode: ephemeral",
+      "write_through: |",
+      "  ~/.cache",
+      "  ./dist",
+      "  /opt/a # b",
+      "filesystem_audit: record",
+    ]);
+  });
+
+  it("leaves out a write_through holding only comments and blank lines", () => {
+    expect(
+      filesystemExampleInputs({
+        filesystemMode: "persistent",
+        writeThroughInput: "# none yet\n\n",
+        filesystemAudit: "off",
+      }),
+    ).toStrictEqual([]);
   });
 });
 
