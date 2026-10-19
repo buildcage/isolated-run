@@ -74708,6 +74708,12 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 		composeFile: resolveComposeFile(localOverride)
 	};
 }
+function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit }) {
+	let lines = [];
+	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
+	let paths = splitWriteThroughInput(writeThroughInput);
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), lines;
+}
 function logConfiguredRules({ rules, aws }, deps) {
 	deps.withLogGroup("buildcage: Configured ACL Rules", () => {
 		deps.logRules("HTTPS", rules.httpsRules), deps.logRules("HTTP", rules.httpRules), deps.logRules("IP", rules.ipRules), deps.logRules("URL", rules.urlRules), deps.logRules("TLS", rules.tlsRules), deps.logRules("Known-blocked (informational only, not sent to proxy ACL)", rules.knownBlockedRules), aws.key && deps.log("AWS access key check: on"), aws.roleAccounts.length > 0 && deps.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
@@ -74759,7 +74765,7 @@ async function finalizeStep(run, deps) {
 		actionRepo,
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
-		extraInputs: (report) => awsExampleInputs(inputs.aws, report.timeline),
+		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs)],
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
