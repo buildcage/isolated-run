@@ -75,7 +75,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 
 ```yaml
 - name: Discover what the command reaches
-  uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+  uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     proxy_mode: audit # Log every destination, block nothing
     run: |
@@ -97,7 +97,7 @@ Paste that allowlist into the step and switch the mode:
 
 ```yaml
 - name: Run tests with outbound network isolation
-  uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+  uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     proxy_mode: restrict
     allowed_url_rules: |
@@ -313,7 +313,7 @@ name:
   with:
     role-to-assume: arn:aws:iam::111111111111:role/deploy
     aws-region: us-east-1
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     proxy_mode: audit # shows what restrict would block
     aws_key_check: true
@@ -333,7 +333,7 @@ interpreter, start `run` with a shebang line; the script is then run as written,
 added:
 
 ```yaml
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     run: |
       #!/usr/bin/env python3
@@ -350,7 +350,7 @@ Use the step's own `env:` (not a `with:` input) to pass values into `run`, exact
 via `env:` is available there too:
 
 ```yaml
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   env:
     PR_TITLE: ${{ github.event.pull_request.title }}
   with:
@@ -437,7 +437,7 @@ something a later, non-isolated step in the same job would pick up: a rewritten 
 is gone.
 
 ```yaml
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     filesystem_mode: ephemeral
     filesystem_audit: record # record what the command touches while discarding its writes
@@ -470,7 +470,7 @@ If `run` needs to write somewhere else in `persistent` mode, a build output or a
 directory for example, list it under `write_through:`:
 
 ```yaml
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     write_through: |
       /opt/some-tool/cache
@@ -496,7 +496,7 @@ command and path.
 `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
 ```yaml
-- uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+- uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
   with:
     filesystem_audit: record
     run: npm ci
@@ -701,7 +701,7 @@ reported as blocked; see
   system CA store the command sees holds the CA already, so have Node read that store:
 
   ```yaml
-  - uses: buildcage/isolated-run@1a78a9c9fcc29a301c1e6697ec39959786d89cfb # v2.2.1
+  - uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
     env:
       NODE_OPTIONS: --use-system-ca # Node 22.15+ (23.9+ on 23.x); older Node refuses to start
     with:
