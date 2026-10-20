@@ -2,11 +2,15 @@ import { aggregate } from "#core/lib/log/aggregate.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { toHostRow } from "#core/lib/report/build/aggregate.ts";
 import type { OutcomeEmission } from "#core/lib/report/outcome/annotate.ts";
+import type { BlockLabel } from "#core/lib/report/render/communication-details.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
-import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
 import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
-import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
+import {
+  TRAFFIC_LEVEL,
+  trafficTableBlock,
+  type PartFit,
+} from "#core/lib/report/render/traffic-parts.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
@@ -99,7 +103,7 @@ export function wouldBlockTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run has every one"
     : "set upload_traffic_artifact: true to get every one as a downloadable artifact";
-  return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
+  return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${rest}._\n`;
 }
 
 /** The verdict line's count of the requests restrict would block, if any. */
@@ -130,17 +134,15 @@ export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | 
  * key check would block in restrict. aws-key-not-allowed gets a table of its
  * own, one row per key whatever the host: every request a key not allowed
  * signs is blocked, and a row for each host would bury the other blocked
- * requests. The rest are counted by host and reason, as in Blocked Hosts. The
- * first block opens with `gap`, the blank line renderReportBlocks owes a block
- * before it.
+ * requests. The rest are counted by host and reason, as in Blocked Hosts.
  */
 export function wouldBlockTables(
   timeline: TrafficEvent[],
   keys: Map<string, BlockedKey>,
-  priority: number,
-  gap: string,
+  fit: PartFit,
 ): SummaryBlock[] {
-  const heading = `${gap}### ⚠️ Restrict Would Block\n\n`;
+  const notice = wouldBlockTruncationNote(fit.artifactAvailable);
+  const heading = "### ⚠️ Restrict Would Block\n\n";
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {
@@ -158,7 +160,7 @@ export function wouldBlockTables(
         return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
       }),
     );
-    blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
+    blocks.push(trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, heading, table, "\n"));
   }
   const rows = aggregate(
     timeline.flatMap((e) =>
@@ -168,13 +170,13 @@ export function wouldBlockTables(
   if (rows.length > 0) {
     const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    const host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
+    const host = trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, before, table, "\n");
     // Nest the host table under the key table when both print: once a block is
     // cut, fitStepSummary skips the deeper ones of its section, so the section's
     // truncation notice appears once rather than on each table in turn. They
     // share one priority, so the key table, pushed first, is given room first,
     // and its cut is the one that skips the other.
-    blocks.push(blocks.length > 0 ? { ...host, level: host.level + 1 } : host);
+    blocks.push(blocks.length > 0 ? { ...host, level: TRAFFIC_LEVEL.nested } : host);
   }
   return blocks;
 }

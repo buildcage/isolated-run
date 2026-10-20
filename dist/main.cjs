@@ -23186,7 +23186,7 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, wholeBlock = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function withNotices(blocks, noticeFor) {
 	return blocks.map((b) => b.cut === "keep" ? b : {
 		...b,
@@ -23194,7 +23194,7 @@ function withNotices(blocks, noticeFor) {
 	});
 }
 function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
-	let full = blocks.map(whole), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	let full = blocks.map(wholeBlock), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
 	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
 	for (let i of order) {
@@ -23204,7 +23204,7 @@ function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT
 	return out.join("");
 }
 function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (b.text.startsWith("\n") ? "\n" : "") + notice;
+	let notice = b.notice ?? "", alone = ((b.open || b.text).startsWith("\n") ? "\n" : "") + notice;
 	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
 	for (let pos = 0;;) {
@@ -68799,54 +68799,95 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule blocked them and none can change the outcome, so none of them fails the step.`
 	};
 }
-function usesLine(actionRepo, actionRef, actionVersion) {
-	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
-}
-function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion } = {}) {
-	let yaml = `- name: ${stepName}\n`;
-	return yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", yaml;
-}
-function exampleStepTail({ extraInputs = [], runCommand }) {
-	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
-	if (runCommand) {
-		let lines = runCommand.replace(/\r?\n$/, "").split(/\r?\n/), indicator = lines.find((line) => line !== "")?.startsWith(" ") ? "|2" : "|";
-		yaml += `    run: ${indicator}\n`;
-		for (let line of lines) yaml += `      ${line}\n`;
-	}
-	return yaml;
-}
-function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
-	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
-}
-function restrictExampleTruncationNote(artifactAvailable) {
-	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n\n`;
-}
 //#endregion
-//#region src/core/lib/report/render/build-example.ts
-const ruleTypeToParam = {
-	HTTPS: "allowed_https_rules",
-	HTTP: "allowed_http_rules",
-	IP: "allowed_ip_rules"
-};
-function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
-	if (!auditedRows || auditedRows.length === 0) return "";
-	let groups = new Map();
-	for (let r of auditedRows) {
-		let param = ruleTypeToParam[r.ruleType];
-		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
-	}
-	if (groups.size === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
-	for (let [param, rules] of groups) {
-		yaml += `    ${param}: >-\n`;
-		for (let rule of rules) yaml += `      ${rule}\n`;
-	}
-	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+function formatElapsedFixed(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 function communicationTruncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+function renderCommunicationDetailsBody(timeline, startedAt, blockLabel = () => void 0, lineNote = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel, lineNote)).join("\n")}\n\`\`\`\n\n`;
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt, blockLabel, lineNote) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}${tail}`;
+}
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+function credentialName(name) {
+	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
+}
+function withoutIndexes(name) {
+	let end = name.length;
+	for (; name[end - 1] === "]";) {
+		let open = name.lastIndexOf("[", end - 1);
+		if (open < 0) break;
+		end = open;
+	}
+	return name.slice(0, end);
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
+}
+function redactCredentialQuery(url) {
+	let start = url.indexOf("?");
+	if (start === -1) return url;
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
+	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function subject(event) {
+	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
+	if (event.protocol === "dns") return `DNS ${event.host}`;
+	if (event.url === void 0) {
+		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
+		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
+	}
+	return `${event.method} ${redactCredentialQuery(event.url)}`;
+}
+function outcome(event, label) {
+	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
+	if (event.action === "incomplete") return event.reason ?? "no request";
+	if (event.action === "failed") return event.reason ?? "failed";
+	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
 }
 //#endregion
 //#region src/core/lib/report/render/fold-expected-blocked.ts
@@ -68939,96 +68980,30 @@ function renderHostTable(rows, { showReason = !1 } = {}) {
 	})));
 }
 function hostTableTruncationNote(artifactAvailable) {
-	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n`;
 }
-//#endregion
-//#region src/core/lib/report/elapsed-time.ts
-function toParts(elapsedSeconds) {
-	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
-	return {
-		hours: Math.floor(totalMinutes / 60),
-		minutes,
-		seconds,
-		ms
-	};
+function usesLine(actionRepo, actionRef, actionVersion) {
+	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
-function pad(n, width = 2) {
-	return String(n).padStart(width, "0");
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion } = {}) {
+	let yaml = `- name: ${stepName}\n`;
+	return yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", yaml;
 }
-function formatElapsedVariable(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-function formatElapsedFixed(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt, blockLabel = () => void 0) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel)).join("\n")}\n\`\`\`\n\n`;
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt, blockLabel) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`;
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}`;
-}
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
-function credentialName(name) {
-	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
-}
-function withoutIndexes(name) {
-	let end = name.length;
-	for (; name[end - 1] === "]";) {
-		let open = name.lastIndexOf("[", end - 1);
-		if (open < 0) break;
-		end = open;
+function exampleStepTail({ extraInputs = [], runCommand }) {
+	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
+	if (runCommand) {
+		let lines = runCommand.replace(/\r?\n$/, "").split(/\r?\n/), indicator = lines.find((line) => line !== "")?.startsWith(" ") ? "|2" : "|";
+		yaml += `    run: ${indicator}\n`;
+		for (let line of lines) yaml += `      ${line}\n`;
 	}
-	return name.slice(0, end);
+	return yaml;
 }
-const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
-function redactPart(part) {
-	for (let match of part.matchAll(PARAM_NAME)) {
-		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
-		let value = match.index + match[0].length;
-		return value === part.length ? part : `${part.slice(0, value)}***`;
-	}
-	return part;
+function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
+	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
 }
-function redactCredentialQuery(url) {
-	let start = url.indexOf("?");
-	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
-	return url.slice(0, start + 1) + query + url.slice(end);
-}
-function subject(event) {
-	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
-	if (event.protocol === "dns") return `DNS ${event.host}`;
-	if (event.url === void 0) {
-		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
-		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
-	}
-	return `${event.method} ${redactCredentialQuery(event.url)}`;
-}
-function outcome(event, label) {
-	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
-	if (event.action === "incomplete") return event.reason ?? "no request";
-	if (event.action === "failed") return event.reason ?? "failed";
-	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
-	let parts = [];
-	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
-}
-function formatTime(epochSeconds, startedAt) {
-	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
-}
-function formatBytes(bytes) {
-	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+function restrictExampleTruncationNote(artifactAvailable) {
+	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-example.ts
@@ -69156,6 +69131,29 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 	});
 }
 //#endregion
+//#region src/core/lib/report/render/universal-example.ts
+const ruleTypeToParam = {
+	HTTPS: "allowed_https_rules",
+	HTTP: "allowed_http_rules",
+	IP: "allowed_ip_rules"
+};
+function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
+	if (!auditedRows || auditedRows.length === 0) return "";
+	let groups = new Map();
+	for (let r of auditedRows) {
+		let param = ruleTypeToParam[r.ruleType];
+		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
+	}
+	if (groups.size === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
+	for (let [param, rules] of groups) {
+		yaml += `    ${param}: >-\n`;
+		for (let rule of rules) yaml += `      ${rule}\n`;
+	}
+	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
+}
+//#endregion
 //#region src/core/lib/report/render/verdict.ts
 function renderVerdict(report, extraItems = []) {
 	let unexpected = 0, expected = 0;
@@ -69175,102 +69173,142 @@ function renderVerdict(report, extraItems = []) {
 	return `> [!${caution.length ? "CAUTION" : "WARNING"}]\n> ${items}\n\n`;
 }
 //#endregion
-//#region src/core/lib/report/render/render-report-markdown.ts
+//#region src/core/lib/report/render/traffic-parts.ts
 const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
 	passed: "traffic-passed",
 	known: "traffic-known",
 	log: "traffic-log"
+}, TRAFFIC_LEVEL = {
+	frame: 1,
+	table: 2,
+	nested: 3
 };
-function trafficNotice(block, artifactAvailable) {
-	switch (block.id) {
-		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.blocked:
-		case TRAFFIC_BLOCK.passed:
-		case TRAFFIC_BLOCK.known: return hostTableTruncationNote(artifactAvailable);
-		default: return;
-	}
+function partFits(priorities, artifactAvailable) {
+	return (id) => ({
+		priority: priorities[id],
+		artifactAvailable
+	});
 }
-function trafficTableBlock(id, priority, before, table, after) {
+function trafficTableBlock(id, priority, notice, before, table, after) {
 	return {
 		id,
 		priority,
-		level: 2,
+		level: TRAFFIC_LEVEL.table,
 		section: SECTION$1,
 		text: before + table + after,
 		cut: "lines",
-		head: before.split("\n").length + 1
+		head: before.split("\n").length + 1,
+		notice
 	};
 }
 const trafficFrame = (text) => ({
 	priority: 0,
-	level: 1,
+	level: TRAFFIC_LEVEL.frame,
 	section: SECTION$1,
 	text,
 	cut: "keep"
 });
-function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", blockLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
-	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(trafficFrame(top));
-	let wrote = !1, gap = () => wrote ? "\n" : "", expected = report.blocked.filter((r) => r.expected), blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
+function trafficHeadingBlock(report, title, verdictItems) {
+	let top = reportHeading(title, report.parameters.mode === "audit");
+	return top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), trafficFrame(top);
+}
+function blockedHostsBlocks(report, fit) {
+	let blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
 		...r,
 		outcome: "blocked"
 	}));
-	if (blocked.length > 0 || report.failed.length > 0) {
-		let failed = report.failed.map((r) => ({
-			...r,
-			outcome: "failed"
-		})), tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
-		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)), wrote = !0;
-	}
-	let extra = extraBlocks(gap());
-	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${gap()}### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), expected.length > 0) {
-		let hosts = new Set(expected.map((r) => r.host)).size;
-		blocks.push({
-			id: TRAFFIC_BLOCK.known,
-			priority: priorities[TRAFFIC_BLOCK.known],
-			level: 3,
-			section: SECTION$1,
-			cut: "atomic",
-			text: `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
-		}), wrote = !0;
-	}
-	if (isAudit) {
-		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
-			...step,
-			allowedIpRules: report.parameters.allowedIpRules,
-			allowedTlsRules: report.parameters.allowedTlsRules
-		}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
-		blocks.push({
-			id: TRAFFIC_BLOCK.example,
-			priority: priorities[TRAFFIC_BLOCK.example],
-			level: 2,
-			section: `${SECTION$1}-example`,
-			cut: "atomic",
-			text: example
-		}), wrote ||= example !== "";
-	}
-	let bottom = "";
-	report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 && blocks.push(trafficFrame(`${gap()}_(no communication)_\n\n`));
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt, blockLabel);
-	return details && blocks.push({
+	if (blocked.length === 0 && report.failed.length === 0) return [];
+	let failed = report.failed.map((r) => ({
+		...r,
+		outcome: "failed"
+	})), tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
+	return [trafficTableBlock(TRAFFIC_BLOCK.blocked, fit.priority, hostTableTruncationNote(fit.artifactAvailable), `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)];
+}
+function passedHostsBlocks(report, fit) {
+	if (report.passed.length === 0) return [];
+	let heading = report.parameters.mode === "audit" ? "📋 Audited Hosts" : "✅ Allowed Hosts";
+	return [trafficTableBlock(TRAFFIC_BLOCK.passed, fit.priority, hostTableTruncationNote(fit.artifactAvailable), `### ${heading}\n\n`, renderHostTable(report.passed), "\n")];
+}
+function knownBlockedBlocks(report, fit) {
+	let expected = report.blocked.filter((r) => r.expected);
+	if (expected.length === 0) return [];
+	let hosts = new Set(expected.map((r) => r.host)).size;
+	return [{
+		id: TRAFFIC_BLOCK.known,
+		priority: fit.priority,
+		level: TRAFFIC_LEVEL.nested,
+		section: SECTION$1,
+		cut: "atomic",
+		notice: hostTableTruncationNote(fit.artifactAvailable),
+		text: `<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
+	}];
+}
+function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
+	if (report.parameters.mode !== "audit") return [];
+	let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
+		...step,
+		allowedIpRules: report.parameters.allowedIpRules,
+		allowedTlsRules: report.parameters.allowedTlsRules
+	}) : buildUniversalRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
+	return example === "" ? [] : [{
+		id: TRAFFIC_BLOCK.example,
+		priority: fit.priority,
+		level: TRAFFIC_LEVEL.table,
+		section: `${SECTION$1}-example`,
+		cut: "atomic",
+		text: example,
+		notice: restrictExampleTruncationNote(fit.artifactAvailable)
+	}];
+}
+function noCommunicationBlocks(report) {
+	return report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 ? [trafficFrame("_(no communication)_\n\n")] : [];
+}
+function communicationDetailsBlocks(report, fit, blockLabel, lineNote) {
+	let details = renderCommunicationDetailsBody(report.timeline, report.startedAt, blockLabel, lineNote);
+	return details ? [{
 		id: TRAFFIC_BLOCK.log,
-		priority: priorities[TRAFFIC_BLOCK.log],
-		level: 3,
+		priority: fit.priority,
+		level: TRAFFIC_LEVEL.nested,
 		section: SECTION$1,
 		cut: "lines",
-		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
+		open: "<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
-		close: "</details>\n"
-	}), report.engine === "universal" && (bottom += "\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n"), footer && (bottom += reportFooter(actionRepo)), bottom && blocks.push(trafficFrame(bottom)), blocks;
+		close: "</details>\n",
+		notice: communicationTruncationNote(fit.artifactAvailable)
+	}] : [];
+}
+function engineNoteBlocks(report) {
+	return report.engine === "universal" ? [trafficFrame("<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n")] : [];
 }
 function reportHeading(title, isAudit) {
 	return `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 }
 function reportFooter(actionRepo) {
-	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
+	return `*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
+}
+//#endregion
+//#region src/core/lib/report/render/traffic-report.ts
+function stackTrafficBlocks(heading, parts) {
+	let blocks = [heading], wrote = !1;
+	for (let part of parts) {
+		let first = part.findIndex((b) => wholeBlock(b) !== "");
+		if (first === -1) {
+			blocks.push(...part);
+			continue;
+		}
+		let b = part[first], gapped = wrote ? b.open === void 0 ? {
+			...b,
+			text: `\n${b.text}`,
+			head: b.head === void 0 ? void 0 : b.head + 1
+		} : {
+			...b,
+			open: `\n${b.open}`
+		} : b;
+		blocks.push(...part.slice(0, first), gapped, ...part.slice(first + 1)), wrote = !0;
+	}
+	return blocks;
 }
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
@@ -69458,7 +69496,7 @@ function keyBlockLabel(keys) {
 }
 const WOULD_BLOCK_ID = "traffic-would-block";
 function wouldBlockTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n`;
 }
 function wouldBlockVerdictItems(timeline) {
 	let count = timeline.filter(letThrough).length;
@@ -69472,8 +69510,8 @@ function describeWouldBlock(timeline) {
 		message: `${count} request(s) restrict mode would block. The ⚠️ Restrict Would Block section counts them by key or by host and reason.`
 	};
 }
-function wouldBlockTables(timeline, keys, priority, gap) {
-	let heading = `${gap}### ⚠️ Restrict Would Block\n\n`, blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+function wouldBlockTables(timeline, keys, fit) {
+	let notice = wouldBlockTruncationNote(fit.artifactAvailable), heading = "### ⚠️ Restrict Would Block\n\n", blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
 			{
@@ -69498,35 +69536,30 @@ function wouldBlockTables(timeline, keys, priority, gap) {
 				count
 			};
 		}));
-		blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
+		blocks.push(trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, heading, table, "\n"));
 	}
 	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
 		...toHostRow(e),
 		reason: e.wouldBlock
 	}]));
 	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, before, table, "\n");
 		blocks.push(blocks.length > 0 ? {
 			...host,
-			level: host.level + 1
+			level: TRAFFIC_LEVEL.nested
 		} : host);
 	}
 	return blocks;
 }
 //#endregion
 //#region src/lib/aws-report.ts
-function withAwsTroubleshootingLink(blocks, report, actionRepo, actionRef) {
+function awsTroubleshootingBlocks(report, actionRepo, actionRef) {
 	let reasons = new Set();
 	for (let r of report.blocked) !r.expected && r.reason.startsWith("aws-") && reasons.add(r.reason);
 	for (let e of report.timeline) letThrough(e) && e.wouldBlock.startsWith("aws-") && reasons.add(e.wouldBlock);
-	let tables = new Set([TRAFFIC_BLOCK.blocked, WOULD_BLOCK_ID]), at = blocks.findLastIndex((b) => b.id !== void 0 && tables.has(b.id));
-	if (reasons.size === 0 || at === -1) return blocks;
-	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = new Intl.ListFormat("en", { type: "disjunction" }).format([...reasons].map((r) => `\`${r}\``)), link = trafficFrame(`\n<sub>*For ${names}, see [what to do](${url}).*</sub>\n`);
-	return [
-		...blocks.slice(0, at + 1),
-		link,
-		...blocks.slice(at + 1)
-	];
+	if (reasons.size === 0) return [];
+	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = new Intl.ListFormat("en", { type: "disjunction" }).format([...reasons].map((r) => `\`${r}\``));
+	return [trafficFrame(`<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
 }
 //#endregion
 //#region src/lib/step-output-file.ts
@@ -70320,30 +70353,38 @@ function reportTitle(label, title = "Outbound Traffic Report") {
 	return label ? `${title} — ${label}` : title;
 }
 function summaryFooter(actionRepo) {
-	return trafficFrame(reportFooter(actionRepo));
+	return trafficFrame(`\n${reportFooter(actionRepo)}`);
 }
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
 	}), wouldBlock = describeWouldBlock(report.timeline);
 	wouldBlock && emissions.push(wouldBlock);
-	let keys = blockedKeys(report.timeline);
+	let keys = blockedKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
 	return {
-		blocks: withAwsTroubleshootingLink(renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-			title: reportTitle(stepLabel),
-			footer: !1,
-			verdictItems: wouldBlockVerdictItems(report.timeline),
-			stepName: "Start isolated-run",
-			runCommand,
-			extraInputs,
-			actionVersion,
-			blockLabel: keyBlockLabel(keys),
-			extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, 2, gap)
-		}), report, actionRepo, actionRef),
+		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), wouldBlockVerdictItems(report.timeline)), [
+			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
+			wouldBlockTables(report.timeline, keys, {
+				priority: 2,
+				artifactAvailable
+			}),
+			awsTroubleshootingBlocks(report, actionRepo, actionRef),
+			passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+			knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
+			restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
+				stepName: "Start isolated-run",
+				runCommand,
+				extraInputs,
+				actionVersion
+			}),
+			noCommunicationBlocks(report),
+			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), keyBlockLabel(keys)),
+			engineNoteBlocks(report)
+		]),
 		emissions
 	};
 }
@@ -70414,9 +70455,12 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	let { appendFile, fileSize, writeSummary } = {
 		...realDeps$4,
 		...overrides
-	}, outcomes = computeReportOutcomes(report, options);
+	}, outcomes = computeReportOutcomes(report, {
+		...options,
+		artifactAvailable
+	});
 	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-block" ? wouldBlockTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+	let { cutIds, wrote } = await writeSummaryBlocks([...outcomes.blocks, ...extraBlocks], env, {
 		fileSize,
 		writeSummary,
 		commandBytes,

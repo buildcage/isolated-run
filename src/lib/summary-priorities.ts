@@ -7,10 +7,7 @@
  * footers) are always kept.
  */
 
-import {
-  TRAFFIC_BLOCK,
-  type TrafficPriorities,
-} from "#core/lib/report/render/render-report-markdown.ts";
+import { TRAFFIC_BLOCK, type TrafficPriorities } from "#core/lib/report/render/traffic-parts.ts";
 
 import { FILESYSTEM_BLOCK, type FilesystemPriorities } from "./filesystem-audit/render.ts";
 
