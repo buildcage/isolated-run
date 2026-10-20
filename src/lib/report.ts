@@ -265,8 +265,9 @@ export interface SummaryWriteResult {
  * it overruns the budget, and GitHub answers a summary over its 1 MiB limit by
  * dropping the whole step's upload, the command's own output included. So
  * buildcage writes its part only when its frames fit the budget, and otherwise
- * gives way to `fallbackLine` or to nothing. The notices of what the fit cut
- * may run past the budget into the headroom, which is kept for them.
+ * gives way to `fallbackLine` or to nothing. What the fit prints for a block it
+ * cut (the notice, with the block's tags around it) may run past the budget
+ * into the headroom kept for it, as long as the file stays under the limit.
  */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
@@ -282,8 +283,7 @@ export async function writeSummaryBlocks(
       if (b.id !== undefined) cutIds.add(b.id);
     },
   });
-  // The same headroom fitStepSummary keeps, so buildcage's part never lands the
-  // file at the edge GitHub drops it at.
+  // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
   const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
   const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);
   let content = "";

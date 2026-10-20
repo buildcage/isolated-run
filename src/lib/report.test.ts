@@ -16,7 +16,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
-import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import {
+  bytes,
+  joinSummaryBlocks,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
@@ -702,34 +706,53 @@ describe("writeSummaryBlocks", () => {
     expect(wrote).toBe("fallback");
   });
 
-  it("writes the blocks when only the notices of what the fit cut run past its budget", async () => {
-    // Two tables too large for the room left: the first takes it all, so the
-    // second is cut to its notice alone, which overruns the budget into the
-    // headroom kept for it.
-    const table = (id: string, priority: number): SummaryBlock => ({
+  describe("when the frame fills the budget and the fit cuts the rest", () => {
+    // The frame takes all of the budget, so each table is cut to its notice
+    // alone, which runs past the budget into the headroom.
+    const budget = 1024 * 1024 - 8 * 1024;
+    const frame: SummaryBlock = {
+      id: "frame",
+      priority: 1,
+      level: 1,
+      section: "frame",
+      cut: "keep",
+      text: `${"f".repeat(99)}\n`,
+    };
+    const table = (id: string, notice: number): SummaryBlock => ({
       id,
-      priority,
+      priority: 2,
       level: 1,
       section: id,
       cut: "lines",
       head: 4,
-      text: `### ${id}\n\n| h |\n| - |\n${`| ${"x".repeat(217)} |\n`.repeat(5000)}\n`,
-      notice: `_…truncated: ${"n".repeat(150)}._\n`,
+      text: `### ${id}\n\n| h |\n| - |\n| row |\n\n`,
+      notice: `${"n".repeat(notice - 1)}\n`,
     });
-    const budget = 1024 * 1024 - 8 * 1024;
-    let overran = 0;
-    // Each row is 222 bytes, so one of these offsets leaves less than a notice.
-    for (let used = 0; used < 222; used++) {
+    const write = async (blocks: SummaryBlock[]) => {
       const written: string[] = [];
-      const { wrote } = await writeSummaryBlocks(
-        [table("a", 1), table("b", 2)],
+      const result = await writeSummaryBlocks(
+        [frame, ...blocks],
         { GITHUB_STEP_SUMMARY: "/summary.md" },
-        { fileSize: () => used, writeSummary: async (m) => void written.push(m) },
+        {
+          fileSize: () => budget - bytes(frame.text),
+          writeSummary: async (m) => void written.push(m),
+          fallbackLine: "fallback\n",
+        },
       );
+      return { ...result, written };
+    };
+
+    it("writes the blocks when the notices stay in the headroom", async () => {
+      const { wrote, written } = await write([table("a", 100), table("b", 100)]);
       expect(wrote).toBe("blocks");
-      if (used + Buffer.byteLength(written[0]) > budget) overran++;
-    }
-    expect(overran).toBeGreaterThan(0);
+      expect(bytes(written[0])).toBe(bytes(frame.text) + 200);
+    });
+
+    it("gives way to the fallback when the notices would take the file past the limit", async () => {
+      const { wrote, written } = await write([table("a", 5 * 1024), table("b", 5 * 1024)]);
+      expect(wrote).toBe("fallback");
+      expect(written).toStrictEqual(["fallback\n"]);
+    });
   });
 
   it("does not count the command's own summary against the blocks' room", async () => {
