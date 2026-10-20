@@ -69182,12 +69182,16 @@ const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	passed: "traffic-passed",
 	known: "traffic-known",
 	log: "traffic-log"
+}, TRAFFIC_LEVEL = {
+	frame: 1,
+	table: 2,
+	nested: 3
 };
 function trafficTableBlock(id, priority, notice, before, table, after) {
 	return {
 		id,
 		priority,
-		level: 2,
+		level: TRAFFIC_LEVEL.table,
 		section: SECTION$1,
 		text: before + table + after,
 		cut: "lines",
@@ -69197,7 +69201,7 @@ function trafficTableBlock(id, priority, notice, before, table, after) {
 }
 const trafficFrame = (text) => ({
 	priority: 0,
-	level: 1,
+	level: TRAFFIC_LEVEL.frame,
 	section: SECTION$1,
 	text,
 	cut: "keep"
@@ -69251,7 +69255,7 @@ function knownBlockedBlocks(report, fit) {
 	return [{
 		id: TRAFFIC_BLOCK.known,
 		priority: fit.priority,
-		level: 3,
+		level: TRAFFIC_LEVEL.nested,
 		section: SECTION$1,
 		cut: "atomic",
 		notice: hostTableTruncationNote(fit.artifactAvailable),
@@ -69268,7 +69272,7 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 	return [{
 		id: TRAFFIC_BLOCK.example,
 		priority: fit.priority,
-		level: 2,
+		level: TRAFFIC_LEVEL.table,
 		section: `${SECTION$1}-example`,
 		cut: "atomic",
 		text: example,
@@ -69283,7 +69287,7 @@ function communicationDetailsBlocks(report, fit, blockLabel, lineNote) {
 	return details ? [{
 		id: TRAFFIC_BLOCK.log,
 		priority: fit.priority,
-		level: 3,
+		level: TRAFFIC_LEVEL.nested,
 		section: SECTION$1,
 		cut: "lines",
 		open: "<details>\n<summary>💬 Communication details</summary>\n\n",
@@ -69537,7 +69541,7 @@ function wouldBlockTables(timeline, keys, fit) {
 		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, before, table, "\n");
 		blocks.push(blocks.length > 0 ? {
 			...host,
-			level: host.level + 1
+			level: TRAFFIC_LEVEL.nested
 		} : host);
 	}
 	return blocks;

@@ -6,7 +6,11 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
 import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
 import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
-import { trafficTableBlock, type PartFit } from "#core/lib/report/render/render-report-markdown.ts";
+import {
+  TRAFFIC_LEVEL,
+  trafficTableBlock,
+  type PartFit,
+} from "#core/lib/report/render/render-report-markdown.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
@@ -172,7 +176,7 @@ export function wouldBlockTables(
     // truncation notice appears once rather than on each table in turn. They
     // share one priority, so the key table, pushed first, is given room first,
     // and its cut is the one that skips the other.
-    blocks.push(blocks.length > 0 ? { ...host, level: host.level + 1 } : host);
+    blocks.push(blocks.length > 0 ? { ...host, level: TRAFFIC_LEVEL.nested } : host);
   }
   return blocks;
 }
