@@ -442,13 +442,12 @@ refused with an error naming what to write instead.
 
 Matching is per request, so a row that counts several requests to one host counts as expected only
 when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's
-other blocked requests to fail the step. The matched rows leave Blocked Hosts for **Known Blocked
-Hosts**, collapsed below the allowed hosts, so the tables at the top of the report hold only what
-needs a look. Those rows are also folded into one row per rule, named after the rule and counting
-the hosts behind it (`*.example.com:* (12 hosts)`). A rule covering noisy traffic then costs the
-table one line however many hosts it names, which matters most when the noise puts its payload in
-the name itself and every request brings a new long hostname. The individual hosts stay in
-**Communication details**.
+other blocked requests to fail the step. The matched rows go under **Known Blocked Hosts**,
+collapsed below the allowed hosts, instead of Blocked Hosts. Those rows are also folded into one row
+per rule, named after the rule and counting the hosts behind it (`*.example.com:* (12 hosts)`). A
+rule covering noisy traffic then costs the table one line however many hosts it names, which matters
+most when the noise puts its payload in the name itself and every request brings a new long
+hostname. The individual hosts stay in **Communication details**.
 
 A name the step looked up and never connected to gets a row of its own, with `DNS` as the rule kind
 and no port (folded like any other row when a `known_blocked_rules` rule matches it). Under
@@ -599,8 +598,8 @@ server to speak first (SMTP, FTP) ends as one nobody decided. No rule on the nam
 A request no rule blocked can still come to nothing: the origin answers nothing usable, breaks off
 mid-transfer, or its name resolves nowhere. The report lists them as ⚠️ rows in the table of blocked
 hosts, headed **Blocked / Failed Hosts** when it holds both and **Failed Hosts** when it holds only
-them. They come after the unexpected blocks and never move to Known Blocked Hosts, since
-`known_blocked_rules` never matches a failure. **Communication details** shows each with ⚠️ too:
+them. They follow the blocked rows and stay in that table, as `known_blocked_rules` never matches
+a failure. **Communication details** shows each with ⚠️ too:
 
 ```
 ⚠️ 00:12.004: GET https://registry.npmjs.org/big.tgz -> origin-aborted
