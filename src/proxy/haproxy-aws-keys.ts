@@ -232,8 +232,9 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
   ];
 }
 
-/** What the traffic record says of a request: what signed it whatever the
- *  verdict, and the rest only for one the check let through. */
+/** What the traffic record says of a request: the key that signed it, and an
+ *  assumed key's account, whatever the verdict, and the rest only for one the
+ *  check let through. */
 function trafficRecord(roles?: RoleRules): string[] {
   return [
     "    # For the traffic record: what a request was signed with, whatever the",
