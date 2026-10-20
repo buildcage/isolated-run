@@ -440,15 +440,15 @@ refused with an error naming what to write instead.
 
 ## Report details
 
-Matching is per request, so a row that counts several requests to one host is Expected only when a
-rule accounts for every one of them: a URL rule that names one endpoint leaves the host's other
-blocked requests to fail the step. The matched rows leave Blocked Hosts for **Known Blocked Hosts**,
-collapsed below the allowed hosts, so the tables at the top of the report hold only what needs a
-look. Those rows are also folded into one row per rule, named after the rule and counting the hosts
-behind it (`*.example.com:* (12 hosts)`). A rule covering noisy traffic then costs the table one
-line however many hosts it names, which matters most when the noise puts its payload in the name
-itself and every request brings a new long hostname. The individual hosts stay in **Communication
-details**.
+Matching is per request, so a row that counts several requests to one host counts as expected only
+when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's
+other blocked requests to fail the step. The matched rows leave Blocked Hosts for **Known Blocked
+Hosts**, collapsed below the allowed hosts, so the tables at the top of the report hold only what
+needs a look. Those rows are also folded into one row per rule, named after the rule and counting
+the hosts behind it (`*.example.com:* (12 hosts)`). A rule covering noisy traffic then costs the
+table one line however many hosts it names, which matters most when the noise puts its payload in
+the name itself and every request brings a new long hostname. The individual hosts stay in
+**Communication details**.
 
 A name the step looked up and never connected to gets a row of its own, with `DNS` as the rule kind
 and no port (folded like any other row when a `known_blocked_rules` rule matches it). Under

@@ -69214,7 +69214,7 @@ const trafficFrame = (text) => ({
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", blockLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
 	let isAudit = report.parameters.mode === "audit", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
 	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(trafficFrame(top));
-	let wrote = !1, gap = () => wrote ? "\n" : "", folded = foldExpectedBlockedRows(report.blocked), known = folded.filter((r) => r.expected), blocked = folded.filter((r) => !r.expected).map((r) => ({
+	let wrote = !1, gap = () => wrote ? "\n" : "", expected = report.blocked.filter((r) => r.expected), blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
 		...r,
 		outcome: "blocked"
 	}));
@@ -69226,11 +69226,15 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)), wrote = !0;
 	}
 	let extra = extraBlocks(gap());
-	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${gap()}### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), known.length > 0) {
-		let hosts = new Set(report.blocked.filter((r) => r.expected).map((r) => r.host)).size;
+	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${gap()}### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), expected.length > 0) {
+		let hosts = new Set(expected.map((r) => r.host)).size;
 		blocks.push({
-			...trafficTableBlock(TRAFFIC_BLOCK.known, priorities[TRAFFIC_BLOCK.known], `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n`, renderHostTable(known, { showReason: !0 }), "\n"),
-			close: "\n</details>\n"
+			id: TRAFFIC_BLOCK.known,
+			priority: priorities[TRAFFIC_BLOCK.known],
+			level: 3,
+			section: SECTION$1,
+			cut: "atomic",
+			text: `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
 		}), wrote = !0;
 	}
 	if (isAudit) {
