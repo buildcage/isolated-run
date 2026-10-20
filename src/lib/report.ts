@@ -136,7 +136,7 @@ export function computeReportOutcomes(
       actionVersion,
     }),
     noCommunicationBlocks(report),
-    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), undefined, awsKeyLineNote(keys)),
+    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
     engineNoteBlocks(report),
   ]);
 

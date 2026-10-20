@@ -68824,9 +68824,9 @@ function formatElapsedFixed(elapsedSeconds) {
 function communicationTruncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
 }
-function renderCommunicationDetailsBody(timeline, startedAt, blockLabel = () => void 0, lineNote = () => void 0) {
+function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
 	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel, lineNote)).join("\n")}\n\`\`\`\n\n`;
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, lineNote)).join("\n")}\n\`\`\`\n\n`;
 }
 const MARK = {
 	block: "🚫",
@@ -68834,9 +68834,9 @@ const MARK = {
 	incomplete: "⚠️",
 	failed: "⚠️"
 };
-function renderEvent(event, startedAt, blockLabel, lineNote) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}${tail}`;
+function renderEvent(event, startedAt, lineNote) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${event.wouldBlock})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}${tail}`;
 }
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
@@ -68875,8 +68875,8 @@ function subject(event) {
 	}
 	return `${event.method} ${redactCredentialQuery(event.url)}`;
 }
-function outcome(event, label) {
-	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
+function outcome(event) {
+	if (event.action === "block") return event.reason ?? "blocked";
 	if (event.action === "incomplete") return event.reason ?? "no request";
 	if (event.action === "failed") return event.reason ?? "failed";
 	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
@@ -69265,8 +69265,8 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 function noCommunicationBlocks(report) {
 	return report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 ? [trafficFrame("_(no communication)_\n\n")] : [];
 }
-function communicationDetailsBlocks(report, fit, blockLabel, lineNote) {
-	let details = renderCommunicationDetailsBody(report.timeline, report.startedAt, blockLabel, lineNote);
+function communicationDetailsBlocks(report, fit, lineNote) {
+	let details = renderCommunicationDetailsBody(report.timeline, report.startedAt, lineNote);
 	return details ? [{
 		id: TRAFFIC_BLOCK.log,
 		priority: fit.priority,
@@ -70490,7 +70490,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 				actionVersion
 			}),
 			noCommunicationBlocks(report),
-			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), void 0, awsKeyLineNote(keys)),
+			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
 			engineNoteBlocks(report)
 		]),
 		emissions
