@@ -37,7 +37,12 @@ import { wouldBlockTruncationNote } from "./would-block.ts";
 function options(
   overrides: Partial<ComputeReportOutcomesOptions> = {},
 ): ComputeReportOutcomesOptions {
-  return { actionRepo: "buildcage/isolated-run", actionRef: "v1", ...overrides };
+  return {
+    actionRepo: "buildcage/isolated-run",
+    actionRef: "v1",
+    artifactAvailable: false,
+    ...overrides,
+  };
 }
 
 const markdownOf = (...args: Parameters<typeof computeReportOutcomes>): string =>

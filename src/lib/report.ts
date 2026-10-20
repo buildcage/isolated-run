@@ -13,7 +13,6 @@ import {
   joinSummaryBlocks,
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
-  withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -30,7 +29,8 @@ import {
   TRAFFIC_BLOCK,
   trafficFrame,
   trafficHeadingBlock,
-  trafficNotice,
+  type PartFit,
+  type TrafficBlockId,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
@@ -43,7 +43,6 @@ import {
   keyBlockLabel,
   WOULD_BLOCK_ID,
   wouldBlockTables,
-  wouldBlockTruncationNote,
   wouldBlockVerdictItems,
 } from "./would-block.ts";
 
@@ -76,6 +75,8 @@ export interface ComputeReportOutcomesOptions {
   extraInputs?: string[];
   actionVersion?: string;
   failOnBlocked?: boolean;
+  /** Whether a truncation notice can point to the traffic artifact. */
+  artifactAvailable: boolean;
 }
 
 export interface ReportOutcomes {
@@ -96,6 +97,7 @@ export function computeReportOutcomes(
     runCommand,
     extraInputs,
     actionVersion,
+    artifactAvailable,
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
   const emissions = describeReportOutcomes(report, {
@@ -105,7 +107,10 @@ export function computeReportOutcomes(
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = blockedKeys(report.timeline);
-  const p = TRAFFIC_PRIORITIES;
+  const fit = (id: TrafficBlockId): PartFit => ({
+    priority: TRAFFIC_PRIORITIES[id],
+    artifactAvailable,
+  });
   const heading = trafficHeadingBlock(
     report,
     reportTitle(stepLabel),
@@ -114,19 +119,19 @@ export function computeReportOutcomes(
   // What needs acting on first, then what got through, then the record. The
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [
-    blockedHostsBlocks(report, p[TRAFFIC_BLOCK.blocked]),
-    wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY),
+    blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
+    wouldBlockTables(report.timeline, keys, { priority: WOULD_BLOCK_PRIORITY, artifactAvailable }),
     awsTroubleshootingBlocks(report, actionRepo, actionRef),
-    passedHostsBlocks(report, p[TRAFFIC_BLOCK.passed]),
-    knownBlockedBlocks(report, p[TRAFFIC_BLOCK.known]),
-    restrictExampleBlocks(report, actionRepo, actionRef, p[TRAFFIC_BLOCK.example], {
+    passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+    knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
+    restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
       stepName: "Start isolated-run",
       runCommand,
       extraInputs,
       actionVersion,
     }),
     noCommunicationBlocks(report),
-    communicationDetailsBlocks(report, p[TRAFFIC_BLOCK.log], keyBlockLabel(keys)),
+    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), keyBlockLabel(keys)),
     engineNoteBlocks(report),
   ]);
 
@@ -296,7 +301,10 @@ export async function writeSummaryBlocks(
   return { cutIds, wrote };
 }
 
-export interface WriteReportSummaryOptions extends ComputeReportOutcomesOptions {
+export interface WriteReportSummaryOptions extends Omit<
+  ComputeReportOutcomesOptions,
+  "artifactAvailable"
+> {
   /** The rest of the step's summary, printed after the report and fitted with it. */
   extraBlocks?: SummaryBlock[];
   /** See WriteSummaryBlocksOptions.commandBytes. */
@@ -318,29 +326,18 @@ export async function writeReportSummary(
   overrides: Partial<WriteReportSummaryDeps> = {},
 ): Promise<void> {
   const { appendFile, fileSize, writeSummary } = { ...realDeps, ...overrides };
-  const outcomes = computeReportOutcomes(report, options);
+  const outcomes = computeReportOutcomes(report, { ...options, artifactAvailable });
 
   // Before any write, so a summary file the isolated command removed or locked
   // cannot take the step's outcome down with it.
   applyOutcomeAnnotations(annotation, outcomes.emissions);
 
-  const { cutIds, wrote } = await writeSummaryBlocks(
-    [
-      ...withNotices(outcomes.blocks, (b) =>
-        b.id === WOULD_BLOCK_ID
-          ? wouldBlockTruncationNote(artifactAvailable)
-          : trafficNotice(b, artifactAvailable),
-      ),
-      ...extraBlocks,
-    ],
-    env,
-    {
-      fileSize,
-      writeSummary,
-      commandBytes,
-      fallbackLine: reportDidNotFitLine(artifactAvailable),
-    },
-  );
+  const { cutIds, wrote } = await writeSummaryBlocks([...outcomes.blocks, ...extraBlocks], env, {
+    fileSize,
+    writeSummary,
+    commandBytes,
+    fallbackLine: reportDidNotFitLine(artifactAvailable),
+  });
   // The whole report gave way to a line, or to nothing: what the summary
   // already held left no room under GitHub's limit.
   if (wrote !== "blocks") {

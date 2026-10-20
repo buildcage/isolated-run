@@ -69183,17 +69183,7 @@ const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	known: "traffic-known",
 	log: "traffic-log"
 };
-function trafficNotice(block, artifactAvailable) {
-	switch (block.id) {
-		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
-		case TRAFFIC_BLOCK.blocked:
-		case TRAFFIC_BLOCK.passed:
-		case TRAFFIC_BLOCK.known: return hostTableTruncationNote(artifactAvailable);
-		default: return;
-	}
-}
-function trafficTableBlock(id, priority, before, table, after) {
+function trafficTableBlock(id, priority, notice, before, table, after) {
 	return {
 		id,
 		priority,
@@ -69201,7 +69191,8 @@ function trafficTableBlock(id, priority, before, table, after) {
 		section: SECTION$1,
 		text: before + table + after,
 		cut: "lines",
-		head: before.split("\n").length + 1
+		head: before.split("\n").length + 1,
+		notice
 	};
 }
 const trafficFrame = (text) => ({
@@ -69236,7 +69227,7 @@ function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
 	return top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), trafficFrame(top);
 }
-function blockedHostsBlocks(report, priority) {
+function blockedHostsBlocks(report, fit) {
 	let blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
 		...r,
 		outcome: "blocked"
@@ -69246,27 +69237,28 @@ function blockedHostsBlocks(report, priority) {
 		...r,
 		outcome: "failed"
 	})), tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
-	return [trafficTableBlock(TRAFFIC_BLOCK.blocked, priority, `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)];
+	return [trafficTableBlock(TRAFFIC_BLOCK.blocked, fit.priority, hostTableTruncationNote(fit.artifactAvailable), `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)];
 }
-function passedHostsBlocks(report, priority) {
+function passedHostsBlocks(report, fit) {
 	if (report.passed.length === 0) return [];
 	let heading = report.parameters.mode === "audit" ? "📋 Audited Hosts" : "✅ Allowed Hosts";
-	return [trafficTableBlock(TRAFFIC_BLOCK.passed, priority, `### ${heading}\n\n`, renderHostTable(report.passed), "\n")];
+	return [trafficTableBlock(TRAFFIC_BLOCK.passed, fit.priority, hostTableTruncationNote(fit.artifactAvailable), `### ${heading}\n\n`, renderHostTable(report.passed), "\n")];
 }
-function knownBlockedBlocks(report, priority) {
+function knownBlockedBlocks(report, fit) {
 	let expected = report.blocked.filter((r) => r.expected);
 	if (expected.length === 0) return [];
 	let hosts = new Set(expected.map((r) => r.host)).size;
 	return [{
 		id: TRAFFIC_BLOCK.known,
-		priority,
+		priority: fit.priority,
 		level: 3,
 		section: SECTION$1,
 		cut: "atomic",
+		notice: hostTableTruncationNote(fit.artifactAvailable),
 		text: `<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
 	}];
 }
-function restrictExampleBlocks(report, actionRepo, actionRef, priority, step = {}) {
+function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 	if (report.parameters.mode !== "audit") return [];
 	let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		...step,
@@ -69275,27 +69267,29 @@ function restrictExampleBlocks(report, actionRepo, actionRef, priority, step = {
 	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
 	return [{
 		id: TRAFFIC_BLOCK.example,
-		priority,
+		priority: fit.priority,
 		level: 2,
 		section: `${SECTION$1}-example`,
 		cut: "atomic",
-		text: example
+		text: example,
+		notice: restrictExampleTruncationNote(fit.artifactAvailable)
 	}];
 }
 function noCommunicationBlocks(report) {
 	return report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 ? [trafficFrame("_(no communication)_\n\n")] : [];
 }
-function communicationDetailsBlocks(report, priority, blockLabel, lineNote) {
+function communicationDetailsBlocks(report, fit, blockLabel, lineNote) {
 	let details = renderInspectDetailsBody(report.timeline, report.startedAt, blockLabel, lineNote);
 	return details ? [{
 		id: TRAFFIC_BLOCK.log,
-		priority,
+		priority: fit.priority,
 		level: 3,
 		section: SECTION$1,
 		cut: "lines",
 		open: "<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
-		close: "</details>\n"
+		close: "</details>\n",
+		notice: communicationTruncationNote(fit.artifactAvailable)
 	}] : [];
 }
 function engineNoteBlocks(report) {
@@ -69507,8 +69501,8 @@ function describeWouldBlock(timeline) {
 		message: `${count} request(s) restrict mode would block. The ⚠️ Restrict Would Block section counts them by key or by host and reason.`
 	};
 }
-function wouldBlockTables(timeline, keys, priority) {
-	let heading = "### ⚠️ Restrict Would Block\n\n", blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
+function wouldBlockTables(timeline, keys, fit) {
+	let notice = wouldBlockTruncationNote(fit.artifactAvailable), heading = "### ⚠️ Restrict Would Block\n\n", blocks = [], audited = [...keys.values()].filter((key) => key.count > 0);
 	if (audited.length > 0) {
 		let table = markdownTable([
 			{
@@ -69533,14 +69527,14 @@ function wouldBlockTables(timeline, keys, priority) {
 				count
 			};
 		}));
-		blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
+		blocks.push(trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, heading, table, "\n"));
 	}
 	let rows = aggregate(timeline.flatMap((e) => !letThrough(e) || auditedKey(e) ? [] : [{
 		...toHostRow(e),
 		reason: e.wouldBlock
 	}]));
 	if (rows.length > 0) {
-		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
+		let before = blocks.length > 0 ? "\n" : heading, table = renderHostTable(rows, { showReason: !0 }), host = trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, before, table, "\n");
 		blocks.push(blocks.length > 0 ? {
 			...host,
 			level: host.level + 1
@@ -70355,28 +70349,34 @@ function summaryFooter(actionRepo) {
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
 	}), wouldBlock = describeWouldBlock(report.timeline);
 	wouldBlock && emissions.push(wouldBlock);
-	let keys = blockedKeys(report.timeline), p = TRAFFIC_PRIORITIES;
+	let keys = blockedKeys(report.timeline), fit = (id) => ({
+		priority: TRAFFIC_PRIORITIES[id],
+		artifactAvailable
+	});
 	return {
 		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), wouldBlockVerdictItems(report.timeline)), [
-			blockedHostsBlocks(report, p[TRAFFIC_BLOCK.blocked]),
-			wouldBlockTables(report.timeline, keys, 2),
+			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
+			wouldBlockTables(report.timeline, keys, {
+				priority: 2,
+				artifactAvailable
+			}),
 			awsTroubleshootingBlocks(report, actionRepo, actionRef),
-			passedHostsBlocks(report, p[TRAFFIC_BLOCK.passed]),
-			knownBlockedBlocks(report, p[TRAFFIC_BLOCK.known]),
-			restrictExampleBlocks(report, actionRepo, actionRef, p[TRAFFIC_BLOCK.example], {
+			passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+			knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
+			restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
 				stepName: "Start isolated-run",
 				runCommand,
 				extraInputs,
 				actionVersion
 			}),
 			noCommunicationBlocks(report),
-			communicationDetailsBlocks(report, p[TRAFFIC_BLOCK.log], keyBlockLabel(keys)),
+			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), keyBlockLabel(keys)),
 			engineNoteBlocks(report)
 		]),
 		emissions
@@ -70449,9 +70449,12 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	let { appendFile, fileSize, writeSummary } = {
 		...realDeps$4,
 		...overrides
-	}, outcomes = computeReportOutcomes(report, options);
+	}, outcomes = computeReportOutcomes(report, {
+		...options,
+		artifactAvailable
+	});
 	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let { cutIds, wrote } = await writeSummaryBlocks([...withNotices(outcomes.blocks, (b) => b.id === "traffic-would-block" ? wouldBlockTruncationNote(artifactAvailable) : trafficNotice(b, artifactAvailable)), ...extraBlocks], env, {
+	let { cutIds, wrote } = await writeSummaryBlocks([...outcomes.blocks, ...extraBlocks], env, {
 		fileSize,
 		writeSummary,
 		commandBytes,

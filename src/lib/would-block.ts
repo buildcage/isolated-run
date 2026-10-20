@@ -6,7 +6,7 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
 import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
 import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
-import { trafficTableBlock } from "#core/lib/report/render/render-report-markdown.ts";
+import { trafficTableBlock, type PartFit } from "#core/lib/report/render/render-report-markdown.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
@@ -135,8 +135,9 @@ export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | 
 export function wouldBlockTables(
   timeline: TrafficEvent[],
   keys: Map<string, BlockedKey>,
-  priority: number,
+  fit: PartFit,
 ): SummaryBlock[] {
+  const notice = wouldBlockTruncationNote(fit.artifactAvailable);
   const heading = "### ⚠️ Restrict Would Block\n\n";
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
@@ -155,7 +156,7 @@ export function wouldBlockTables(
         return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
       }),
     );
-    blocks.push(trafficTableBlock(WOULD_BLOCK_ID, priority, heading, table, "\n"));
+    blocks.push(trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, heading, table, "\n"));
   }
   const rows = aggregate(
     timeline.flatMap((e) =>
@@ -165,7 +166,7 @@ export function wouldBlockTables(
   if (rows.length > 0) {
     const before = blocks.length > 0 ? "\n" : heading;
     const table = renderHostTable(rows, { showReason: true });
-    const host = trafficTableBlock(WOULD_BLOCK_ID, priority, before, table, "\n");
+    const host = trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, before, table, "\n");
     // Nest the host table under the key table when both print: once a block is
     // cut, fitStepSummary skips the deeper ones of its section, so the section's
     // truncation notice appears once rather than on each table in turn. They
