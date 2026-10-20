@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
-import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
+import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
@@ -700,6 +700,36 @@ describe("writeSummaryBlocks", () => {
     );
     expect(written).toStrictEqual(["see the artifact\n"]);
     expect(wrote).toBe("fallback");
+  });
+
+  it("writes the blocks when only the notices of what the fit cut run past its budget", async () => {
+    // Two tables too large for the room left: the first takes it all, so the
+    // second is cut to its notice alone, which overruns the budget into the
+    // headroom kept for it.
+    const table = (id: string, priority: number): SummaryBlock => ({
+      id,
+      priority,
+      level: 1,
+      section: id,
+      cut: "lines",
+      head: 4,
+      text: `### ${id}\n\n| h |\n| - |\n${`| ${"x".repeat(217)} |\n`.repeat(5000)}\n`,
+      notice: `_…truncated: ${"n".repeat(150)}._\n`,
+    });
+    const budget = 1024 * 1024 - 8 * 1024;
+    let overran = 0;
+    // Each row is 222 bytes, so one of these offsets leaves less than a notice.
+    for (let used = 0; used < 222; used++) {
+      const written: string[] = [];
+      const { wrote } = await writeSummaryBlocks(
+        [table("a", 1), table("b", 2)],
+        { GITHUB_STEP_SUMMARY: "/summary.md" },
+        { fileSize: () => used, writeSummary: async (m) => void written.push(m) },
+      );
+      expect(wrote).toBe("blocks");
+      if (used + Buffer.byteLength(written[0]) > budget) overran++;
+    }
+    expect(overran).toBeGreaterThan(0);
   });
 
   it("does not count the command's own summary against the blocks' room", async () => {

@@ -70445,8 +70445,8 @@ async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine,
 		onCut: (b) => {
 			b.id !== void 0 && cutIds.add(b.id);
 		}
-	}), fits = (text) => used + bytes(text) <= 1040384, content = "", wrote = "nothing";
-	return fits(fitted) ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && fits(fallbackLine) && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+	}), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
+	return frames <= room && used + bytes(fitted) <= 1048576 ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && bytes(fallbackLine) <= room && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
 		cutIds,
 		wrote
 	};

@@ -13,6 +13,7 @@ import {
   joinSummaryBlocks,
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
+  wholeBlock,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -263,8 +264,9 @@ export interface SummaryWriteResult {
  * fitStepSummary prints a `keep` block (the report's own frame) whole even when
  * it overruns the budget, and GitHub answers a summary over its 1 MiB limit by
  * dropping the whole step's upload, the command's own output included. So
- * buildcage writes its part only when it truly fits under the limit, and
- * otherwise gives way to `fallbackLine` or to nothing.
+ * buildcage writes its part only when its frames fit the budget, and otherwise
+ * gives way to `fallbackLine` or to nothing. The notices of what the fit cut
+ * may run past the budget into the headroom, which is kept for them.
  */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
@@ -282,14 +284,14 @@ export async function writeSummaryBlocks(
   });
   // The same headroom fitStepSummary keeps, so buildcage's part never lands the
   // file at the edge GitHub drops it at.
-  const fits = (text: string): boolean =>
-    used + bytes(text) <= STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
+  const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
+  const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);
   let content = "";
   let wrote: SummaryWriteResult["wrote"] = "nothing";
-  if (fits(fitted)) {
+  if (frames <= room && used + bytes(fitted) <= STEP_SUMMARY_LIMIT_BYTES) {
     content = fitted;
     wrote = "blocks";
-  } else if (fallbackLine !== undefined && fits(fallbackLine)) {
+  } else if (fallbackLine !== undefined && bytes(fallbackLine) <= room) {
     content = fallbackLine;
     wrote = "fallback";
   }
