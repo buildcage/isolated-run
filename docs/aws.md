@@ -177,20 +177,20 @@ The report is the step's section in the workflow run's Job Summary. **🔑 AWS K
 it let through, has one row per access key a request was signed with or an STS or ECR answer issued,
 so it shows what the check made of each key even in a run it blocked nothing in:
 
-| Key   | Check                   | Source                            | Requests | Hosts                                                                  | keyRef             |
-| ----- | ----------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
-| key 1 | ✅ known                | starting key                      |        2 | `sts.us-east-1.amazonaws.com`                                          | `9f2b41c07ad3e815` |
-| key 2 | ✅ known                | role in 111111111111 (from key 1) |       14 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `6e30dca31102cb8a` |
-| key 3 | ⚠️ restrict would block | role in 222222222222 (from key 1) |       66 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `0c5d7e9a43b1f260` |
-| key 4 | ⚠️ restrict would block | unknown                           |        3 | `ssm.us-east-1.amazonaws.com`                                          | `d81a6f3c25e09b74` |
+| Key   | Check                                         | Source                            | Requests | Hosts                                                                  | keyRef             |
+| ----- | --------------------------------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
+| key 1 | ✅ known                                      | starting key                      |        2 | `sts.us-east-1.amazonaws.com`                                          | `9f2b41c07ad3e815` |
+| key 2 | ✅ known                                      | role in 111111111111 (from key 1) |       14 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `6e30dca31102cb8a` |
+| key 3 | ⚠️ restrict would block (aws-key-not-allowed) | role in 222222222222 (from key 1) |       66 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `0c5d7e9a43b1f260` |
+| key 4 | ⚠️ restrict would block (aws-key-not-allowed) | unknown                           |        3 | `ssm.us-east-1.amazonaws.com`                                          | `d81a6f3c25e09b74` |
 
 Keys are numbered `key 1`, `key 2` and so on, in the order they first appear, and every part of the
 report uses the same numbers. **Check** is ✅ when the check let a request signed with the key
-through, 🚫 or ⚠️ when it blocked one as `aws-key-not-allowed` or `restrict` would, and `not checked`
-when no request signed with it reached the check, such as a key issued and never used. **Source** is
-`starting key` for the key the step started with, `role in <account>` for one an STS call in the run
-issued, and `ECR layer URL` for one an ECR registry request was answered with, each followed by the
-key that signed the call, or `a web identity`. `unknown` is a key from anywhere else, such as a
+through, 🚫 or ⚠️ with the reason when it blocked one or `restrict` would, and `not checked` when it
+did neither, such as for a key issued and never used. **Source** is `starting key` for the key the
+step started with, `role in <account>` for one an STS call in the run issued, `STS` for one an STS
+answer issued without an account the proxy could read, and `ECR layer URL` for one an ECR registry
+request was answered with, each followed by the key that signed the call, or `a web identity`. `unknown` is a key from anywhere else, such as a
 profile; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes. A row names up to three
 of the hosts its requests went to. **keyRef** is the key's `keyRef` in the
 [traffic artifact](#in-the-traffic-artifact).
@@ -312,6 +312,9 @@ row in **🔑 AWS Keys** has the **Source**:
   - An STS answer the proxy could not read, because the client asked for JSON with
     `Accept: application/json`, or it was unusually large. Let the SDK send its default headers to
     STS; shorten a large session policy or tag set.
+- `STS (from key N)`: an STS answer that issued the key without a role account the proxy could
+  read, so it taught no key. Get the credentials before the step and pass them in
+  `AWS_ACCESS_KEY_ID`.
 - `ECR layer URL (from key N)`: a layer's presigned URL from an ECR registry request signed with a
   key `restrict` would block, which teaches no key. Fix key N first; in `audit`, the **Switch to
   restrict mode** example's comment names both under the account that lets them through.

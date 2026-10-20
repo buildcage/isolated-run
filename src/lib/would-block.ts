@@ -11,19 +11,14 @@ import {
   type PartFit,
 } from "#core/lib/report/render/traffic-parts.ts";
 
-import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
-import { keyHostsCell, type AwsKey } from "./aws-keys.ts";
-
-const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
+import { awsFieldsOf } from "../proxy/aws-log.ts";
+import { KEY_NOT_ALLOWED, keyHostsCell, type AwsKey } from "./aws-keys.ts";
 
 export interface BlockedKey {
+  key: AwsKey;
   /** "key 2 from a role in 111111111111", the account left out when no STS
    *  answer in the run issued the key. */
   label: string;
-  /** The label without the account, as AWS Keys numbers the key. */
-  name: string;
-  /** The account of the role whose AssumeRole answer in the run issued the key. */
-  account?: string;
   /** The hosts of the requests audit let through, in the order each first
    *  appeared, and how many there were: a key with none has no row in
    *  Restrict Would Block. */
@@ -41,24 +36,23 @@ export function blockedKeys(
   timeline: TrafficEvent[],
   keys: Map<string, AwsKey>,
 ): Map<string, BlockedKey> {
-  const blocked = new Map<string, BlockedKey>();
+  const audited = new Map<string, Pick<BlockedKey, "hosts" | "count">>();
   for (const e of timeline) {
     const keyRef = blockedKeyRef(e);
-    const known = keyRef ? keys.get(keyRef) : undefined;
-    if (!keyRef || !known) continue;
-    const { name, account } = known;
-    const label = account ? `${name} from a role in ${account}` : name;
-    const key = blocked.get(keyRef) ?? { name, account, label, hosts: new Set(), count: 0 };
-    blocked.set(keyRef, key);
+    if (!keyRef) continue;
+    const seen = audited.get(keyRef) ?? { hosts: new Set(), count: 0 };
+    audited.set(keyRef, seen);
     if (!auditedKey(e)) continue;
-    key.hosts.add(e.host);
-    key.count++;
+    seen.hosts.add(e.host);
+    seen.count++;
   }
   // In the order AWS Keys numbers them.
   return new Map(
-    [...keys.keys()].flatMap((keyRef) => {
-      const key = blocked.get(keyRef);
-      return key ? [[keyRef, key] as const] : [];
+    [...keys.values()].flatMap((key) => {
+      const seen = audited.get(key.keyRef);
+      if (!seen) return [];
+      const label = key.account ? `${key.name} from a role in ${key.account}` : key.name;
+      return [[key.keyRef, { key, label, ...seen }] as const];
     }),
   );
 }

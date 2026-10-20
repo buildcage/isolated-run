@@ -8,9 +8,9 @@ import { trafficTableBlock, type PartFit } from "#core/lib/report/render/traffic
 
 import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
-import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { AWS_REASON_PREFIX, awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
 
-const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
+export const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
 const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
 
 export function isEcrRegistry(host: string): boolean {
@@ -25,11 +25,13 @@ export interface AwsKey {
   known?: "env" | "assumed" | "issued";
   /** The account of the role whose AssumeRole answer in the run issued the key. */
   account?: string;
-  /** The first request whose answer issued the key. */
-  issuer?: TrafficEvent;
-  /** Whether aws-key-not-allowed blocked a request signed with it, or in audit would. */
-  blocked: boolean;
-  wouldBlock: boolean;
+  /** The requests whose answers issued the key, the first first: ECR hands
+   *  one key out on many redirects. */
+  issuers: TrafficEvent[];
+  /** The first reason the check blocked a request signed with it for, or in
+   *  audit would. */
+  blocked?: string;
+  wouldBlock?: string;
   /** The hosts of the requests signed with it, in the order each first appeared, and how many. */
   hosts: Set<string>;
   count: number;
@@ -44,8 +46,7 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
       key = {
         keyRef,
         name: `key ${keys.size + 1}`,
-        blocked: false,
-        wouldBlock: false,
+        issuers: [],
         hosts: new Set(),
         count: 0,
       };
@@ -60,13 +61,13 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
       key.hosts.add(e.host);
       key.count++;
       if (known && known !== "none") key.known ??= known;
-      if (e.action === "block" && e.reason === KEY_NOT_ALLOWED) key.blocked = true;
-      if (e.wouldBlock === KEY_NOT_ALLOWED) key.wouldBlock = true;
+      if (e.action === "block" && e.reason?.startsWith(AWS_REASON_PREFIX)) key.blocked ??= e.reason;
+      if (e.wouldBlock?.startsWith(AWS_REASON_PREFIX)) key.wouldBlock ??= e.wouldBlock;
     }
     if (issuedKeyRef) {
       const key = keyOf(issuedKeyRef);
-      if (key.issuer) continue;
-      key.issuer = e;
+      key.issuers.push(e);
+      if (key.issuers.length > 1) continue;
       if (assumedAccount && isAwsAccountId(assumedAccount)) key.account = assumedAccount;
     }
   }
@@ -95,8 +96,8 @@ export function awsKeyLineNote(keys: Map<string, AwsKey>): LineNote {
   };
 }
 
-/** Names the summary block of AWS Keys, for telling whether a fit cut it. */
-export const AWS_KEYS_ID = "traffic-aws-keys";
+/** Names the summary block of AWS Keys. */
+const AWS_KEYS_ID = "traffic-aws-keys";
 
 /** What the report says where the Job Summary's size limit cut AWS Keys. */
 export function awsKeysTruncationNote(artifactAvailable: boolean): string {
@@ -107,14 +108,14 @@ export function awsKeysTruncationNote(artifactAvailable: boolean): string {
 }
 
 function checkCell(key: AwsKey): string {
-  if (key.blocked) return `🚫 ${KEY_NOT_ALLOWED}`;
-  if (key.wouldBlock) return "⚠️ restrict would block";
+  if (key.blocked) return `🚫 ${key.blocked}`;
+  if (key.wouldBlock) return `⚠️ restrict would block (${key.wouldBlock})`;
   return key.known ? "✅ known" : "not checked";
 }
 
 function sourceCell(key: AwsKey, keys: Map<string, AwsKey>): string {
   if (key.known === "env") return "starting key";
-  const { issuer } = key;
+  const [issuer] = key.issuers;
   if (!issuer) return "unknown";
   const from = keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ?? "a web identity";
   if (key.account) return `role in ${key.account} (from ${from})`;

@@ -69347,7 +69347,7 @@ function awsFieldsOf(e) {
 }
 //#endregion
 //#region src/lib/aws-keys.ts
-const KEY_NOT_ALLOWED$2 = "aws-key-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
+const KEY_NOT_ALLOWED = "aws-key-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
 function isEcrRegistry(host) {
 	return ECR_REGISTRY.test(host);
 }
@@ -69357,8 +69357,7 @@ function awsKeys(timeline) {
 		return key || (key = {
 			keyRef,
 			name: `key ${keys.size + 1}`,
-			blocked: !1,
-			wouldBlock: !1,
+			issuers: [],
 			hosts: new Set(),
 			count: 0
 		}, keys.set(keyRef, key)), key;
@@ -69367,12 +69366,12 @@ function awsKeys(timeline) {
 		let { key: known, keyRef, issuedKeyRef, assumedAccount } = awsFieldsOf(e);
 		if (keyRef) {
 			let key = keyOf(keyRef);
-			key.hosts.add(e.host), key.count++, known && known !== "none" && (key.known ??= known), e.action === "block" && e.reason === KEY_NOT_ALLOWED$2 && (key.blocked = !0), e.wouldBlock === KEY_NOT_ALLOWED$2 && (key.wouldBlock = !0);
+			key.hosts.add(e.host), key.count++, known && known !== "none" && (key.known ??= known), e.action === "block" && e.reason?.startsWith("aws-") && (key.blocked ??= e.reason), e.wouldBlock?.startsWith("aws-") && (key.wouldBlock ??= e.wouldBlock);
 		}
 		if (issuedKeyRef) {
 			let key = keyOf(issuedKeyRef);
-			if (key.issuer) continue;
-			key.issuer = e, assumedAccount && isAwsAccountId(assumedAccount) && (key.account = assumedAccount);
+			if (key.issuers.push(e), key.issuers.length > 1) continue;
+			assumedAccount && isAwsAccountId(assumedAccount) && (key.account = assumedAccount);
 		}
 	}
 	return keys;
@@ -69392,11 +69391,11 @@ function awsKeysTruncationNote(artifactAvailable) {
 	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef" : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
-	return key.blocked ? `🚫 ${KEY_NOT_ALLOWED$2}` : key.wouldBlock ? "⚠️ restrict would block" : key.known ? "✅ known" : "not checked";
+	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.known ? "✅ known" : "not checked";
 }
 function sourceCell(key, keys) {
 	if (key.known === "env") return "starting key";
-	let { issuer } = key;
+	let [issuer] = key.issuers;
 	if (!issuer) return "unknown";
 	let from = keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ?? "a web identity";
 	return key.account ? `role in ${key.account} (from ${from})` : isEcrRegistry(issuer.host) ? `ECR layer URL (from ${from})` : `STS (from ${from})`;
@@ -69567,34 +69566,36 @@ async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppe
 }
 //#endregion
 //#region src/lib/would-block.ts
-const KEY_NOT_ALLOWED$1 = "aws-key-not-allowed";
 function blockedKeys(timeline, keys) {
-	let blocked = new Map();
+	let audited = new Map();
 	for (let e of timeline) {
-		let keyRef = blockedKeyRef(e), known = keyRef ? keys.get(keyRef) : void 0;
-		if (!keyRef || !known) continue;
-		let { name, account } = known, label = account ? `${name} from a role in ${account}` : name, key = blocked.get(keyRef) ?? {
-			name,
-			account,
-			label,
+		let keyRef = blockedKeyRef(e);
+		if (!keyRef) continue;
+		let seen = audited.get(keyRef) ?? {
 			hosts: new Set(),
 			count: 0
 		};
-		blocked.set(keyRef, key), auditedKey(e) && (key.hosts.add(e.host), key.count++);
+		audited.set(keyRef, seen), auditedKey(e) && (seen.hosts.add(e.host), seen.count++);
 	}
-	return new Map([...keys.keys()].flatMap((keyRef) => {
-		let key = blocked.get(keyRef);
-		return key ? [[keyRef, key]] : [];
+	return new Map([...keys.values()].flatMap((key) => {
+		let seen = audited.get(key.keyRef);
+		if (!seen) return [];
+		let label = key.account ? `${key.name} from a role in ${key.account}` : key.name;
+		return [[key.keyRef, {
+			key,
+			label,
+			...seen
+		}]];
 	}));
 }
 function blockedKeyRef(e) {
-	return e.action === "block" && e.reason === KEY_NOT_ALLOWED$1 || e.wouldBlock === KEY_NOT_ALLOWED$1 ? awsFieldsOf(e).keyRef : void 0;
+	return e.action === "block" && e.reason === "aws-key-not-allowed" || e.wouldBlock === "aws-key-not-allowed" ? awsFieldsOf(e).keyRef : void 0;
 }
 function letThrough(e) {
 	return e.wouldBlock !== void 0 && e.action !== "block";
 }
 function auditedKey(e) {
-	return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED$1 && awsFieldsOf(e).keyRef !== void 0;
+	return letThrough(e) && e.wouldBlock === "aws-key-not-allowed" && awsFieldsOf(e).keyRef !== void 0;
 }
 const WOULD_BLOCK_ID = "traffic-would-block";
 function wouldBlockTruncationNote(artifactAvailable) {
@@ -69618,7 +69619,7 @@ function wouldBlockTables(timeline, keys, fit) {
 		let table = markdownTable([
 			{
 				key: "key",
-				title: `Key (${KEY_NOT_ALLOWED$1})`
+				title: `Key (${KEY_NOT_ALLOWED})`
 			},
 			{
 				key: "hosts",
@@ -71324,60 +71325,60 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$6 = getInput) {
-	let runInput = getInput$6("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$5 = getInput) {
+	let runInput = getInput$5("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$5 = getInput) {
+function readProxyInputs(getInput$4 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$5("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$5("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$4("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$4("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$9 = getInput) {
+function readFilesystemInputs(notice, getInput$8 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$9("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$9("write_through"),
-			writable: getInput$9("writable"),
-			allowWrite: getInput$9("allow_write")
+			writeThrough: getInput$8("write_through"),
+			writable: getInput$8("writable"),
+			allowWrite: getInput$8("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$8 = getInput) {
-	return resolveFilesystemAudit(getInput$8("filesystem_audit"));
+function readFilesystemAuditInput(getInput$7 = getInput) {
+	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
-	let days = getInput$2("filesystem_audit_retention_days");
+function readFilesystemAuditArtifactInputs(getInput$1 = getInput) {
+	let days = getInput$1("filesystem_audit_retention_days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$2),
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$1),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$3 = getInput) {
-	return getInput$3("label") || void 0;
+function readStepLabel(getInput$2 = getInput) {
+	return getInput$2("label") || void 0;
 }
-function readFailOnCaResidue(getInput$7 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$7);
+function readFailOnCaResidue(getInput$6 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$6);
 }
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$1);
+function readFailOnBlocked(getInput$9 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$9);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$4 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$4("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$4);
+	let check = readBooleanInput("aws_key_check", !1, getInput$3);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -71391,29 +71392,27 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$4 = getInput) {
 const NO_CREDENTIAL = "aws-no-credential", ROLE_NOT_ALLOWED = "aws-role-not-allowed";
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), issuers = new Map();
-	for (let e of timeline) {
-		let { issuedKeyRef } = awsFieldsOf(e);
-		issuedKeyRef && issuers.set(issuedKeyRef, [...issuers.get(issuedKeyRef) ?? [], e]);
-	}
-	let passes = (e, account, seen) => {
+	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), known = awsKeys(timeline), passes = (e, account, seen) => {
 		let { keyRef, roleAccount } = awsFieldsOf(e);
 		switch (e.wouldBlock) {
 			case void 0: return !0;
 			case NO_CREDENTIAL:
 			case ROLE_NOT_ALLOWED: return !keyRef && roleAccount === account;
-			case "aws-key-not-allowed": return keyRef !== void 0 && learned(keyRef, account, seen);
+			case KEY_NOT_ALLOWED: {
+				let key = keyRef && known.get(keyRef);
+				return !!key && learned(key, account, seen);
+			}
 			default: return !1;
 		}
 	}, teaches = (issuer, account, seen) => {
 		let { assumedAccount } = awsFieldsOf(issuer);
 		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host) && issuer.wouldBlock !== void 0) && passes(issuer, account, seen);
-	}, learned = (keyRef, account, seen) => {
-		if (seen.has(keyRef)) return !1;
-		let next = new Set(seen).add(keyRef);
-		return (issuers.get(keyRef) ?? []).some((issuer) => teaches(issuer, account, next));
-	}, keys = [...blockedKeys(timeline, awsKeys(timeline))], mark = (a) => {
-		let names = keys.filter(([keyRef]) => learned(keyRef, a, new Set())).map(([, k]) => k.name);
+	}, learned = (key, account, seen) => {
+		if (seen.has(key)) return !1;
+		let next = new Set(seen).add(key);
+		return key.issuers.some((issuer) => teaches(issuer, account, next));
+	}, keys = [...blockedKeys(timeline, known).values()], mark = (a) => {
+		let names = keys.filter(({ key }) => learned(key, a, new Set())).map(({ key }) => key.name);
 		timeline.some((e) => (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) && passes(e, a, new Set())) && names.push("its AssumeRoleWithWebIdentity call");
 		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;

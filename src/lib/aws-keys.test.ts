@@ -69,15 +69,20 @@ describe("awsKeysBlocks", () => {
         event("sts.amazonaws.com", { keyRef: "aaaa", issuedKeyRef: "ffff" }),
         // A URL rule blocked it first, so the check never judged the key.
         signed("gggg", { action: "block", reason: "not-allowed" }),
+        // The check judged the key's request, though not by the key.
+        signed("hhhh", { action: "block", reason: "aws-role-not-allowed" }),
+        signed("iiii", { action: "audit", wouldBlock: "aws-ambiguous-credential" }),
       ]),
     ).toStrictEqual([
       "| key 1 | ✅ known | starting key | 3 | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `aaaa` |",
       "| key 2 | ✅ known | role in 111111111111 (from key 1) | 2 | `s3.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `bbbb` |",
       "| key 3 | 🚫 aws-key-not-allowed | role in 222222222222 (from a web identity) | 1 | `s3.amazonaws.com` | `cccc` |",
       "| key 4 | not checked | ECR layer URL (from key 2) | 0 |  | `dddd` |",
-      "| key 5 | ⚠️ restrict would block | unknown | 1 | `s3.amazonaws.com` | `eeee` |",
+      "| key 5 | ⚠️ restrict would block (aws-key-not-allowed) | unknown | 1 | `s3.amazonaws.com` | `eeee` |",
       "| key 6 | not checked | STS (from key 1) | 0 |  | `ffff` |",
       "| key 7 | not checked | unknown | 1 | `s3.amazonaws.com` | `gggg` |",
+      "| key 8 | 🚫 aws-role-not-allowed | unknown | 1 | `s3.amazonaws.com` | `hhhh` |",
+      "| key 9 | ⚠️ restrict would block (aws-ambiguous-credential) | unknown | 1 | `s3.amazonaws.com` | `iiii` |",
     ]);
   });
 

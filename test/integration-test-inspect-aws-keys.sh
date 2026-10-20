@@ -162,9 +162,9 @@ fi
 SUMMARY=$(cat "$TMPDIR/keyonlychain.md")
 assert_summary_contains "| key 2 | \`prod-us-east-1-starport-layer-bucket.s3.amazonaws.com\` | 1 |" \
   "the key ECR issued for a registry request restrict would block is one restrict would block too"
-assert_summary_contains "| key 1 | ⚠️ restrict would block | role in 111111111111 (from a web identity) |" \
+assert_summary_contains "| key 1 | ⚠️ restrict would block (aws-key-not-allowed) | role in 111111111111 (from a web identity) |" \
   "AWS Keys says the web identity call's key came from a role in its account"
-assert_summary_contains "| key 2 | ⚠️ restrict would block | ECR layer URL (from key 1) |" \
+assert_summary_contains "| key 2 | ⚠️ restrict would block (aws-key-not-allowed) | ECR layer URL (from key 1) |" \
   "AWS Keys says which key's registry request ECR issued a key to"
 assert_summary_contains '# allowed_aws_role_accounts: "111111111111" # lets key 1, key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours' \
   "the restrict example names the web identity call, its key and the key ECR issued to it under the account"
