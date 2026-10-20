@@ -23204,7 +23204,7 @@ function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT
 	return out.join("");
 }
 function cutBlock(b, budget) {
-	let notice = b.notice ?? "", alone = (wholeBlock(b).startsWith("\n") ? "\n" : "") + notice;
+	let notice = b.notice ?? "", alone = ((b.open || b.text).startsWith("\n") ? "\n" : "") + notice;
 	if (b.cut === "atomic") return alone;
 	let open = b.open ?? "", close = b.close ?? "", room = budget - bytes(open) - bytes(close) - bytes(notice), kept = "", usedBytes = 0, count = 0, fenceOpen = !1;
 	for (let pos = 0;;) {
@@ -69185,6 +69185,12 @@ const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	table: 2,
 	nested: 3
 };
+function partFits(priorities, artifactAvailable) {
+	return (id) => ({
+		priority: priorities[id],
+		artifactAvailable
+	});
+}
 function trafficTableBlock(id, priority, notice, before, table, after) {
 	return {
 		id,
@@ -69246,7 +69252,7 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 		allowedIpRules: report.parameters.allowedIpRules,
 		allowedTlsRules: report.parameters.allowedTlsRules
 	}) : buildUniversalRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
-	return [{
+	return example === "" ? [] : [{
 		id: TRAFFIC_BLOCK.example,
 		priority: fit.priority,
 		level: TRAFFIC_LEVEL.table,
@@ -70358,10 +70364,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 		engineLabel: "sandbox"
 	}), wouldBlock = describeWouldBlock(report.timeline);
 	wouldBlock && emissions.push(wouldBlock);
-	let keys = blockedKeys(report.timeline), fit = (id) => ({
-		priority: TRAFFIC_PRIORITIES[id],
-		artifactAvailable
-	});
+	let keys = blockedKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
 	return {
 		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), wouldBlockVerdictItems(report.timeline)), [
 			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),

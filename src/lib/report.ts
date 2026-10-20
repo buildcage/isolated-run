@@ -28,8 +28,7 @@ import {
   TRAFFIC_BLOCK,
   trafficFrame,
   trafficHeadingBlock,
-  type PartFit,
-  type TrafficBlockId,
+  partFits,
 } from "#core/lib/report/render/traffic-parts.ts";
 import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
@@ -107,10 +106,7 @@ export function computeReportOutcomes(
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = blockedKeys(report.timeline);
-  const fit = (id: TrafficBlockId): PartFit => ({
-    priority: TRAFFIC_PRIORITIES[id],
-    artifactAvailable,
-  });
+  const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
   const heading = trafficHeadingBlock(
     report,
     reportTitle(stepLabel),
