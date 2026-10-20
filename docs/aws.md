@@ -173,31 +173,52 @@ Then, with the report described in [Reading the report](#reading-the-report):
 
 ## Reading the report
 
-The report is the step's section in the workflow run's Job Summary. In `audit` nothing is blocked.
-A warning annotation counts the requests `restrict` would block, and **⚠️ Restrict Would
-Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and one row per host
-for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges every request, so
-one no URL rule allows can carry an `aws-` reason too.
+The report is the step's section in the workflow run's Job Summary. **🔑 AWS Keys**, after the hosts
+it let through, has one row per access key a request was signed with or an STS or ECR answer issued,
+so it shows what the check made of each key even in a run it blocked nothing in:
+
+| Key   | Check                   | Source                            | Requests | Hosts                                                                  | keyRef             |
+| ----- | ----------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
+| key 1 | ✅ known                | starting key                      |        2 | `sts.us-east-1.amazonaws.com`                                          | `9f2b41c07ad3e815` |
+| key 2 | ✅ known                | role in 111111111111 (from key 1) |       14 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `6e30dca31102cb8a` |
+| key 3 | ⚠️ restrict would block | role in 222222222222 (from key 1) |       66 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `0c5d7e9a43b1f260` |
+| key 4 | ⚠️ restrict would block | unknown                           |        3 | `ssm.us-east-1.amazonaws.com`                                          | `d81a6f3c25e09b74` |
+
+Keys are numbered `key 1`, `key 2` and so on, in the order they first appear, and every part of the
+report uses the same numbers. **Check** is ✅ when the check let a request signed with the key
+through, 🚫 or ⚠️ when it blocked one as `aws-key-not-allowed` or `restrict` would, and `not checked`
+when no request signed with it reached the check, such as a key issued and never used. **Source** is
+`starting key` for the key the step started with, `role in <account>` for one an STS call in the run
+issued, and `ECR layer URL` for one an ECR registry request was answered with, each followed by the
+key that signed the call, or `a web identity`. `unknown` is a key from anywhere else, such as a
+profile; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes. A row names up to three
+of the hosts its requests went to. **keyRef** is the key's `keyRef` in the
+[traffic artifact](#in-the-traffic-artifact).
+
+In `audit` nothing is blocked. A warning annotation counts the requests `restrict` would block, and
+**⚠️ Restrict Would Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and
+one row per host for every other reason, as in **🚫 Blocked Hosts**. In `audit` the check judges
+every request, so one no URL rule allows can carry an `aws-` reason too.
 
 | Key (aws-key-not-allowed)         | Hosts                                                                  | Count |
 | --------------------------------- | ---------------------------------------------------------------------- | ----: |
-| key 1 from a role in 222222222222 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |    66 |
-| key 2                             | `ssm.us-east-1.amazonaws.com`                                          |     3 |
+| key 3 from a role in 222222222222 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |    66 |
+| key 4                             | `ssm.us-east-1.amazonaws.com`                                          |     3 |
 
 | Host                              | Rule  | Reason            | Count |
 | --------------------------------- | ----- | ----------------- | ----: |
 | `sts.us-east-1.amazonaws.com:443` | HTTPS | aws-no-credential |     1 |
 
-A key's row names up to three of the hosts its requests went to. Keys are numbered `key 1`, `key 2`
-and so on, in the order they first appear; when only one key was blocked, it has no number. A key
-STS issued during the run shows the account of the role it was issued for. A `key N` with no
-`from a role in` came from somewhere else, such as a profile, or from an STS answer the proxy could
-not read; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
+A key's row names up to three of the hosts its requests went to, and the account of the role it was
+issued for when STS issued it during the run. A `key N` with no `from a role in` came from somewhere
+else, such as a profile, or from an STS answer the proxy could not read.
 
-**Communication details** names the key on each of those requests:
+**Communication details** ends each line signed with a key in `[aws key N]`, and the line of a call
+whose answer issued a key names that key too:
 
 ```
-⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)
+✅ 00:01.234: POST https://sts.us-east-1.amazonaws.com/ -> 200 (1.4KB) [aws key 1 → issued key 3]
+⚠️ 00:12.345: POST https://cloudformation.us-east-1.amazonaws.com/ -> 200 (1.2KB) (restrict would block: aws-key-not-allowed) [aws key 3]
 ```
 
 With `upload_traffic_artifact: true`, the traffic artifact has every one, with the reason in
@@ -207,8 +228,7 @@ annotation says so.
 In `restrict` the URL rules decide first, so a request none of them allows is blocked as
 `not-allowed` rather than with an `aws-` reason. The ones they allow and the check blocks are
 listed under **🚫 Blocked Hosts**. In Communication details a blocked one ends in
-`-> aws-key-not-allowed, key 1 from a role in 222222222222`, and the traffic artifact gives its
-reason in `reason`.
+`-> aws-key-not-allowed [aws key 3]`, and the traffic artifact gives its reason in `reason`.
 
 The report's **Switch to restrict mode** example includes `aws_key_check: true` and
 `allowed_aws_role_accounts`. The accounts it lists are the ones you gave, plus each account the run
@@ -223,7 +243,7 @@ signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
 aws_key_check: true
 allowed_aws_role_accounts: |
   111111111111
-  # 222222222222 # lets key 1 through; assumed in this run, check it is yours
+  # 222222222222 # lets key 3 through; assumed in this run, check it is yours
 ```
 
 A key from a role assumed with the key of another unnamed role is left out of the comment: it
@@ -279,24 +299,22 @@ The request was signed with a key the proxy does not know. Look first at which r
   `allowed_aws_role_accounts`. Add the account, or use CodeCommit's credential helper.
 
 **Every request signed after some point**, whatever its host: a key the proxy did not learn. Its
-line in Communication details ends in:
+row in **🔑 AWS Keys** has the **Source**:
 
-- `key N from a role in <account>`: an assumed role. STS issued the key, but the proxy learns it
-  only for a role in an account in `allowed_aws_role_accounts`. Add the account once you have
-  checked it is yours. If it is already there in `audit`, the STS call was itself one `restrict`
-  would block, so its answer taught no key. In the traffic artifact
-  (`upload_traffic_artifact: true`), the STS call whose `aws.issuedKeyRef` is the request's
-  `aws.keyRef` has the account in `aws.assumedAccount`.
-- `key N` alone, or nothing after the reason when it is the only key blocked, from one of:
+- `role in <account>`: an assumed role. STS issued the key, but the proxy learns it only for a role
+  in an account in `allowed_aws_role_accounts`. Add the account once you have checked it is yours.
+  If it is already there in `audit`, the STS call was itself one `restrict` would block, so its
+  answer taught no key. The line in Communication details ending in `→ issued key N` is that call.
+- `unknown`, from one of:
   - A profile, `~/.aws/credentials` or `credential_process`; see [What it needs](#what-it-needs).
   - `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn. Get the
     credentials before the step and pass them in `AWS_ACCESS_KEY_ID`.
   - An STS answer the proxy could not read, because the client asked for JSON with
     `Accept: application/json`, or it was unusually large. Let the SDK send its default headers to
     STS; shorten a large session policy or tag set.
-  - A layer's presigned URL from an ECR registry request signed with a key `restrict` would block,
-    which teaches no key. Fix that key first; in `audit`, the **Switch to restrict mode** example's
-    comment names both under the account that lets them through.
+- `ECR layer URL (from key N)`: a layer's presigned URL from an ECR registry request signed with a
+  key `restrict` would block, which teaches no key. Fix key N first; in `audit`, the **Switch to
+  restrict mode** example's comment names both under the account that lets them through.
 
 ### `aws-no-credential`
 

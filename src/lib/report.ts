@@ -34,13 +34,17 @@ import {
 import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
+import { awsKeyLineNote, awsKeys, awsKeysBlocks } from "./aws-keys.ts";
 import { awsTroubleshootingBlocks } from "./aws-report.ts";
 import { rewriteRunnerFile } from "./sandbox/runner-output-files.ts";
-import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
+import {
+  AWS_KEYS_PRIORITY,
+  TRAFFIC_PRIORITIES,
+  WOULD_BLOCK_PRIORITY,
+} from "./summary-priorities.ts";
 import {
   blockedKeys,
   describeWouldBlock,
-  keyBlockLabel,
   WOULD_BLOCK_ID,
   wouldBlockTables,
   wouldBlockVerdictItems,
@@ -106,7 +110,7 @@ export function computeReportOutcomes(
   });
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
-  const keys = blockedKeys(report.timeline);
+  const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
   const heading = trafficHeadingBlock(
     report,
@@ -117,9 +121,13 @@ export function computeReportOutcomes(
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [
     blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
-    wouldBlockTables(report.timeline, keys, { priority: WOULD_BLOCK_PRIORITY, artifactAvailable }),
+    wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
+      priority: WOULD_BLOCK_PRIORITY,
+      artifactAvailable,
+    }),
     awsTroubleshootingBlocks(report, actionRepo, actionRef),
     passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+    awsKeysBlocks(keys, { priority: AWS_KEYS_PRIORITY, artifactAvailable }),
     knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
     restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
       stepName: "Start isolated-run",
@@ -128,7 +136,7 @@ export function computeReportOutcomes(
       actionVersion,
     }),
     noCommunicationBlocks(report),
-    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), keyBlockLabel(keys)),
+    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), undefined, awsKeyLineNote(keys)),
     engineNoteBlocks(report),
   ]);
 

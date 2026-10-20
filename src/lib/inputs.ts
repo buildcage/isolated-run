@@ -25,9 +25,9 @@ import {
 } from "#core/lib/actions/inputs.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
-import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccessKeyId, isAwsAccountId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { awsKeys, isEcrRegistry } from "./aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
@@ -278,11 +278,6 @@ const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
 const NO_CREDENTIAL = "aws-no-credential" satisfies AwsBlockedReason;
 const ROLE_NOT_ALLOWED = "aws-role-not-allowed" satisfies AwsBlockedReason;
 const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
-const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
-
-function isEcrRegistry(host: string): boolean {
-  return ECR_REGISTRY.test(host);
-}
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
@@ -343,11 +338,9 @@ export function awsExampleInputs(
     const next = new Set(seen).add(keyRef);
     return (issuers.get(keyRef) ?? []).some((issuer) => teaches(issuer, account, next));
   };
-  const keys = [...blockedKeys(timeline)];
+  const keys = [...blockedKeys(timeline, awsKeys(timeline))];
   const mark = (a: string) => {
-    const names = keys
-      .filter(([keyRef]) => learned(keyRef, a, new Set()))
-      .map(([, k]) => (k.name === "key" ? "the key" : k.name));
+    const names = keys.filter(([keyRef]) => learned(keyRef, a, new Set())).map(([, k]) => k.name);
     const webIdentity = timeline.some(
       (e) =>
         (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) &&

@@ -689,8 +689,8 @@ counts them under **⚠️ Restrict Would Block** for each host and reason, or f
 `aws-key-not-allowed`. This preview does not apply `known_blocked_rules`: it counts, warns about and
 links for every request `restrict`'s rules would block, including ones a rule would then mark
 expected, which the `restrict` run itself would not fail on. **Communication details** lists each
-among the other requests, ending in `(restrict would block: <reason>)`, and the traffic artifact
-has them too.
+among the other requests, marked `(restrict would block: <reason>)`, and the traffic artifact has
+them too.
 
 ## Traffic artifact
 

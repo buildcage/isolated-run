@@ -2,35 +2,28 @@ import { aggregate } from "#core/lib/log/aggregate.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { toHostRow } from "#core/lib/report/build/aggregate.ts";
 import type { OutcomeEmission } from "#core/lib/report/outcome/annotate.ts";
-import type { BlockLabel } from "#core/lib/report/render/communication-details.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
-import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
+import { markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import {
   TRAFFIC_LEVEL,
   trafficTableBlock,
   type PartFit,
 } from "#core/lib/report/render/traffic-parts.ts";
 
-import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { keyHostsCell, type AwsKey } from "./aws-keys.ts";
 
 const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
 
-/** How many hosts the key table names before counting the rest. */
-const KEY_HOSTS_SHOWN = 3;
-
 export interface BlockedKey {
-  /** "key 2 from a role in 111111111111"; the number is left out when the
-   *  run blocked one key alone, and the account when no STS answer in the
-   *  run issued the key. */
+  /** "key 2 from a role in 111111111111", the account left out when no STS
+   *  answer in the run issued the key. */
   label: string;
-  /** The label without the account: "key 2", or "key" when it is the only one. */
+  /** The label without the account, as AWS Keys numbers the key. */
   name: string;
   /** The account of the role whose AssumeRole answer in the run issued the key. */
   account?: string;
-  /** Whether the label is "key" alone, which names nothing a log line could use. */
-  bare: boolean;
   /** The hosts of the requests audit let through, in the order each first
    *  appeared, and how many there were: a key with none has no row in
    *  Restrict Would Block. */
@@ -40,33 +33,32 @@ export interface BlockedKey {
 
 /**
  * Every key aws-key-not-allowed blocked, or in audit would block, by keyRef,
- * numbered in the order each first appeared. A role assumed in an account not
- * given has every later request signed with its key blocked, so the report
- * names the account of the role whose AssumeRole answer issued the key.
+ * named as `keys` names it. A role assumed in an account not given has every
+ * later request signed with its key blocked, so the report names the account
+ * of the role whose AssumeRole answer issued the key.
  */
-export function blockedKeys(timeline: TrafficEvent[]): Map<string, BlockedKey> {
-  const issuers = new Map<string, string>();
-  const seen = new Map<string, Pick<BlockedKey, "hosts" | "count">>();
+export function blockedKeys(
+  timeline: TrafficEvent[],
+  keys: Map<string, AwsKey>,
+): Map<string, BlockedKey> {
+  const blocked = new Map<string, BlockedKey>();
   for (const e of timeline) {
-    const { issuedKeyRef, assumedAccount } = awsFieldsOf(e);
-    if (issuedKeyRef && assumedAccount && isAwsAccountId(assumedAccount)) {
-      issuers.set(issuedKeyRef, assumedAccount);
-    }
     const keyRef = blockedKeyRef(e);
-    if (!keyRef) continue;
-    const key = seen.get(keyRef) ?? { hosts: new Set(), count: 0 };
-    seen.set(keyRef, key);
+    const known = keyRef ? keys.get(keyRef) : undefined;
+    if (!keyRef || !known) continue;
+    const { name, account } = known;
+    const label = account ? `${name} from a role in ${account}` : name;
+    const key = blocked.get(keyRef) ?? { name, account, label, hosts: new Set(), count: 0 };
+    blocked.set(keyRef, key);
     if (!auditedKey(e)) continue;
     key.hosts.add(e.host);
     key.count++;
   }
-  const numbered = seen.size > 1;
+  // In the order AWS Keys numbers them.
   return new Map(
-    [...seen].map(([keyRef, key], i) => {
-      const account = issuers.get(keyRef);
-      const name = numbered ? `key ${i + 1}` : "key";
-      const label = account ? `${name} from a role in ${account}` : name;
-      return [keyRef, { ...key, name, account, label, bare: !numbered && !account }];
+    [...keys.keys()].flatMap((keyRef) => {
+      const key = blocked.get(keyRef);
+      return key ? [[keyRef, key] as const] : [];
     }),
   );
 }
@@ -84,15 +76,6 @@ export function letThrough(e: TrafficEvent): e is TrafficEvent & { wouldBlock: s
 
 function auditedKey(e: TrafficEvent): boolean {
   return letThrough(e) && e.wouldBlock === KEY_NOT_ALLOWED && awsFieldsOf(e).keyRef !== undefined;
-}
-
-/** aws-key-not-allowed with the key it names, unless that says nothing more. */
-export function keyBlockLabel(keys: Map<string, BlockedKey>): BlockLabel {
-  return (e, reason) => {
-    const keyRef = reason === KEY_NOT_ALLOWED ? awsFieldsOf(e).keyRef : undefined;
-    const key = keyRef ? keys.get(keyRef) : undefined;
-    return key && !key.bare ? `${KEY_NOT_ALLOWED}, ${key.label}` : undefined;
-  };
 }
 
 /** Names the summary blocks of Restrict Would Block, for picking their notice. */
@@ -154,11 +137,7 @@ export function wouldBlockTables(
         { key: "hosts", title: "Hosts", cell: String },
         { key: "count", title: "Count", align: "right" },
       ],
-      audited.map(({ label, hosts, count }) => {
-        const rest = hosts.size - KEY_HOSTS_SHOWN;
-        const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).map(codeCell).join(", ");
-        return { key: label, hosts: rest > 0 ? `${shown} and ${rest} more` : shown, count };
-      }),
+      audited.map(({ label, hosts, count }) => ({ key: label, hosts: keyHostsCell(hosts), count })),
     );
     blocks.push(trafficTableBlock(WOULD_BLOCK_ID, fit.priority, notice, heading, table, "\n"));
   }
