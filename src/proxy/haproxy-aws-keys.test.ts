@@ -244,6 +244,15 @@ describe("the traffic record", () => {
     }
   });
 
+  it("records a request before restrict blocks it, which ends its rules", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict");
+    const deny = rules.indexOf("    http-request deny deny_status 403 if aws_blocked");
+    expect(deny > 0).toBe(true);
+    const logged = rules.flatMap((l, i) => (l.includes("set-var(txn.aws_log_") ? [i] : []));
+    expect(logged.length > 0).toBe(true);
+    expect(logged.every((i) => i < deny)).toBe(true);
+  });
+
   it("names the account a web identity call is judged by, whatever the verdict", () => {
     for (const check of [CHECK, { keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }]) {
       for (const mode of ["restrict", "audit"] as const) {

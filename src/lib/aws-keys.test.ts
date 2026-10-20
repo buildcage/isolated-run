@@ -80,6 +80,11 @@ describe("awsKeysBlocks", () => {
           { key: "env", keyRef: "jjjj" },
           { action: "block", reason: "aws-unreadable" },
         ),
+        event(
+          "s3.amazonaws.com",
+          { key: "assumed", keyRef: "kkkk" },
+          { action: "audit", wouldBlock: "aws-unreadable" },
+        ),
       ]),
     ).toStrictEqual([
       "| key 1 | ✅ known | starting key | 3 | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `aaaa` |",
@@ -93,6 +98,7 @@ describe("awsKeysBlocks", () => {
       "| key 9 | ⚠️ restrict would block (aws-ambiguous-credential) | unknown | 1 | `s3.amazonaws.com` | `iiii` |",
       "| key 10 | not checked | ECR layer URL (from a registry token) | 0 |  | `llll` |",
       "| key 11 | 🚫 aws-unreadable | starting key | 1 | `s3.amazonaws.com` | `jjjj` |",
+      "| key 12 | ⚠️ restrict would block (aws-unreadable) | unknown | 1 | `s3.amazonaws.com` | `kkkk` |",
     ]);
   });
 
