@@ -4,6 +4,7 @@ import { TRAFFIC_BLOCK } from "#core/lib/report/render/traffic-parts.ts";
 
 import { FILESYSTEM_BLOCK } from "./filesystem-audit/render.ts";
 import {
+  AWS_KEYS_PRIORITY,
   FILESYSTEM_PRIORITIES,
   TRAFFIC_PRIORITIES,
   WOULD_BLOCK_PRIORITY,
@@ -16,6 +17,7 @@ describe("summary priorities", () => {
       WOULD_BLOCK_PRIORITY,
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.blocked],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.passed],
+      AWS_KEYS_PRIORITY,
       FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.executed],
       FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.paths],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.log],

@@ -489,7 +489,7 @@ describe("awsExampleInputs", () => {
     ];
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline).slice(1)).toStrictEqual([
       "# allowed_aws_role_accounts: |",
-      "#   222222222222 # lets key 1 and key 3 through; assumed in this run, check it is yours",
+      "#   222222222222 # lets key 1 and key 4 through; assumed in this run, check it is yours",
       "#   333333333333 # assumed in this run, check it is yours",
       "#   444444444444 # assumed in this run, check it is yours",
     ]);
@@ -499,7 +499,7 @@ describe("awsExampleInputs", () => {
     ).toStrictEqual([
       "allowed_aws_role_accounts: |",
       "  111111111111",
-      "  # 222222222222 # lets the key through; assumed in this run, check it is yours",
+      "  # 222222222222 # lets key 1 through; assumed in this run, check it is yours",
       "  # 333333333333 # assumed in this run, check it is yours",
     ]);
   });

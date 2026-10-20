@@ -19,7 +19,7 @@ export const AWS_BLOCKED_VERDICTS = [
 export type AwsBlockedReason =
   `${typeof AWS_REASON_PREFIX}${(typeof AWS_BLOCKED_VERDICTS)[number]}`;
 
-/** What the traffic record says of a request the check let through; see
+/** What the traffic record says of a request; see
  *  docs/aws.md#in-the-traffic-artifact. */
 export type AwsTrafficFields = {
   aws: {

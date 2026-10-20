@@ -99,7 +99,9 @@ export function awsKeyRequestRules(check: AwsKeyCheck, mode: "restrict" | "audit
     ...webIdentityFacts(),
     ...(roles?.facts ?? []),
     ...verdicts(mode, roles),
+    // Before the block, which ends the rules for the request.
     ...trafficRecord(roles),
+    ...(mode === "restrict" ? ["    http-request deny deny_status 403 if aws_blocked"] : []),
     ...learnFlags(),
   ];
 }
@@ -198,7 +200,7 @@ function unsignedAndSts(): string[] {
   ];
 }
 
-/** The verdict, and in restrict the block. */
+/** The verdict, and in restrict the reason a block gives. */
 function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
   return [
     "    # Where a credential could be out of sight: a form body that is",
@@ -223,7 +225,6 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
     ...(mode === "restrict"
       ? [
           `    http-request set-var-fmt(txn.reason) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_blocked`,
-          "    http-request deny deny_status 403 if aws_blocked",
         ]
       : [
           `    http-request set-var-fmt(txn.would_block) ${AWS_REASON_PREFIX}%[var(txn.aws)] if aws_blocked`,
@@ -231,15 +232,17 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
   ];
 }
 
-/** What the traffic record says of a request the check let through. */
+/** What the traffic record says of a request: the key that signed it, and an
+ *  assumed key's account, whatever the verdict, and the rest only for one the
+ *  check let through. */
 function trafficRecord(roles?: RoleRules): string[] {
   return [
-    "    # For the traffic record: what a request the check let through was",
-    "    # signed with. The map holds env for the starting key, the account for",
-    "    # one STS issued, and issued for one ECR did.",
+    "    # For the traffic record: what a request was signed with, whatever the",
+    "    # verdict. The map holds env for the starting key, the account for one",
+    "    # STS issued, and issued for one ECR did.",
     "    acl aws_allowed var(txn.aws) -m str allowed",
     "    http-request set-var(txn.aws_log_key) str(none) if aws_allowed",
-    "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_allowed",
+    "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_key_known",
     "    http-request set-var(txn.aws_log_key) str(env) if { var(txn.aws_key_owner) -m str env }",
     "    http-request set-var(txn.aws_log_key) str(assumed) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",

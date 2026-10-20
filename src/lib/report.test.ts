@@ -16,7 +16,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { annotateKnownBlocked } from "#core/lib/report/build/aggregate.ts";
-import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
+import {
+  bytes,
+  joinSummaryBlocks,
+  type SummaryBlock,
+} from "#core/lib/report/render/fit-step-summary.ts";
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
@@ -391,8 +395,8 @@ describe("computeReportOutcomes", () => {
       expect(tables(markdown)).toStrictEqual([
         [
           "| key 1 from a role in 222222222222 | `s3.amazonaws.com`, `ssm.amazonaws.com` | 3 |",
-          "| key 2 | `ssm.amazonaws.com` | 1 |",
-          "| key 3 | `cloudformation.amazonaws.com` | 1 |",
+          "| key 2 | `cloudformation.amazonaws.com` | 1 |",
+          "| key 3 | `ssm.amazonaws.com` | 1 |",
         ],
         [
           "| `s3.amazonaws.com:443` | HTTPS | aws-no-credential | 1 |",
@@ -400,13 +404,13 @@ describe("computeReportOutcomes", () => {
         ],
       ]);
       expect(details(markdown)).toContain(
-        "⚠️ 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)",
+        "⚠️ 00:01.000: GET https://s3.amazonaws.com/1 -> 200 (restrict would block: aws-key-not-allowed) [aws key 1]",
       );
       expect(details(markdown)).toContain(
-        "⚠️ 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would block: aws-key-not-allowed, key 2)",
+        "⚠️ 00:02.000: GET https://ssm.amazonaws.com/2 -> 200 (restrict would block: aws-key-not-allowed) [aws key 3]",
       );
       expect(details(markdown)).toContain(
-        "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would block: aws-key-not-allowed, key 1 from a role in 222222222222)",
+        "🚫 00:08.000: GET https://sqs.amazonaws.com/8 -> ip-not-allowed (restrict would block: aws-key-not-allowed) [aws key 1]",
       );
       const section = markdown.slice(markdown.indexOf("### ⚠️ Restrict"), markdown.indexOf("🛡️"));
       expect(section).not.toContain("assumed in this run");
@@ -442,28 +446,68 @@ describe("computeReportOutcomes", () => {
         options(),
       );
       expect(tables(markdown)[0][0]).toBe(
-        "| key | `www.a.amazonaws.com`, `b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com` and 1 more | 4 |",
+        "| key 1 | `www.a.amazonaws.com`, `b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com` and 1 more | 4 |",
       );
     });
 
-    it("numbers no key when the run blocked one alone, and leaves a bare key out of the log", () => {
-      const one = markdownOf(
-        audit([assumed("222222222222", "aaaa1111"), signed(1, "s3.amazonaws.com", "aaaa1111")]),
+    it("numbers a key as AWS Keys does, even when the run blocked one alone", () => {
+      const markdown = markdownOf(
+        audit([
+          signed(1, "ssm.amazonaws.com", "bbbb2222"),
+          { ...signed(2, "ssm.amazonaws.com", "bbbb2222"), wouldBlock: undefined },
+          assumed("222222222222", "aaaa1111"),
+          signed(3, "s3.amazonaws.com", "aaaa1111"),
+        ]),
         options(),
       );
-      expect(tables(one)).toStrictEqual([
-        ["| key from a role in 222222222222 | `s3.amazonaws.com` | 1 |"],
+      expect(tables(markdown)).toStrictEqual([
+        [
+          "| key 1 | `ssm.amazonaws.com` | 1 |",
+          "| key 2 from a role in 222222222222 | `s3.amazonaws.com` | 1 |",
+        ],
       ]);
-      expect(details(one).at(-1)).toContain(
-        "(restrict would block: aws-key-not-allowed, key from a role in 222222222222)",
-      );
-      const bare = markdownOf(audit([signed(1, "s3.amazonaws.com", "aaaa1111")]), options());
-      expect(tables(bare)).toStrictEqual([["| key | `s3.amazonaws.com` | 1 |"]]);
-      expect(details(bare).at(-1)).toMatch(/\(restrict would block: aws-key-not-allowed\)$/);
     });
   });
 
-  it("names the key of a request restrict blocked in Communication details, leaving the table alone", () => {
+  it("lists the keys after the hosts let through and before the known blocked ones", () => {
+    const known: TrafficEvent = {
+      time: 2,
+      action: "block",
+      protocol: "https",
+      host: "telemetry.example.com",
+      port: 443,
+      reason: "not-allowed",
+    };
+    const signed: TrafficEvent = {
+      time: 1,
+      action: "allow",
+      protocol: "https",
+      host: "s3.amazonaws.com",
+      port: 443,
+      extensions: { aws: { key: "env", keyRef: "aaaa1111" } },
+    };
+    const r: InspectReportData = {
+      ...report({
+        blockedCount: 1,
+        blocked: annotateKnownBlocked([known], ["telemetry.example.com"]),
+        passed: [
+          { host: "s3.amazonaws.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 },
+        ],
+        timeline: [signed, known],
+      }),
+      engine: "inspect",
+    };
+    const markdown = markdownOf(r, options());
+    const at = (text: string) => markdown.indexOf(text);
+    expect(at("### ✅ Allowed Hosts")).toBeGreaterThan(-1);
+    expect(at("### 🔑 AWS Keys")).toBeGreaterThan(at("### ✅ Allowed Hosts"));
+    expect(at("🚫 Known Blocked Hosts")).toBeGreaterThan(at("### 🔑 AWS Keys"));
+    expect(markdown).toContain(
+      "| key 1 | ✅ known | starting key | 1 | `s3.amazonaws.com` | `aaaa1111` |\n\n<details>",
+    );
+  });
+
+  it("tags the line of a request restrict blocked with its key, leaving the host table alone", () => {
     const blocked: TrafficEvent = {
       time: 1,
       action: "block",
@@ -486,7 +530,7 @@ describe("computeReportOutcomes", () => {
     };
     const markdown = markdownOf(r, options());
     expect(details(markdown)).toContain(
-      "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed, key from a role in 222222222222",
+      "🚫 00:01.000: GET https://s3.amazonaws.com/ -> aws-key-not-allowed [aws key 1]",
     );
     expect(markdown).toContain("| `s3.amazonaws.com:443` | HTTPS | 🚫 aws-key-not-allowed | 1 |");
     expect(markdown).not.toContain("### ⚠️ Restrict");
@@ -700,6 +744,55 @@ describe("writeSummaryBlocks", () => {
     );
     expect(written).toStrictEqual(["see the artifact\n"]);
     expect(wrote).toBe("fallback");
+  });
+
+  describe("when the frame fills the budget and the fit cuts the rest", () => {
+    // The frame takes all of the budget, so each table is cut to its notice
+    // alone, which runs past the budget into the headroom.
+    const budget = 1024 * 1024 - 8 * 1024;
+    const frame: SummaryBlock = {
+      id: "frame",
+      priority: 1,
+      level: 1,
+      section: "frame",
+      cut: "keep",
+      text: `${"f".repeat(99)}\n`,
+    };
+    const table = (id: string, notice: number): SummaryBlock => ({
+      id,
+      priority: 2,
+      level: 1,
+      section: id,
+      cut: "lines",
+      head: 4,
+      text: `### ${id}\n\n| h |\n| - |\n| row |\n\n`,
+      notice: `${"n".repeat(notice - 1)}\n`,
+    });
+    const write = async (blocks: SummaryBlock[]) => {
+      const written: string[] = [];
+      const result = await writeSummaryBlocks(
+        [frame, ...blocks],
+        { GITHUB_STEP_SUMMARY: "/summary.md" },
+        {
+          fileSize: () => budget - bytes(frame.text),
+          writeSummary: async (m) => void written.push(m),
+          fallbackLine: "fallback\n",
+        },
+      );
+      return { ...result, written };
+    };
+
+    it("writes the blocks when the notices stay in the headroom", async () => {
+      const { wrote, written } = await write([table("a", 100), table("b", 100)]);
+      expect(wrote).toBe("blocks");
+      expect(bytes(written[0])).toBe(bytes(frame.text) + 200);
+    });
+
+    it("gives way to the fallback when the notices would take the file past the limit", async () => {
+      const { wrote, written } = await write([table("a", 5 * 1024), table("b", 5 * 1024)]);
+      expect(wrote).toBe("fallback");
+      expect(written).toStrictEqual(["fallback\n"]);
+    });
   });
 
   it("does not count the command's own summary against the blocks' room", async () => {

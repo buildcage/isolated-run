@@ -13,6 +13,7 @@ import {
   joinSummaryBlocks,
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
+  wholeBlock,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -33,13 +34,17 @@ import {
 import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
+import { awsKeyLineNote, awsKeys, awsKeysBlocks } from "./aws-keys.ts";
 import { awsTroubleshootingBlocks } from "./aws-report.ts";
 import { rewriteRunnerFile } from "./sandbox/runner-output-files.ts";
-import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
+import {
+  AWS_KEYS_PRIORITY,
+  TRAFFIC_PRIORITIES,
+  WOULD_BLOCK_PRIORITY,
+} from "./summary-priorities.ts";
 import {
   blockedKeys,
   describeWouldBlock,
-  keyBlockLabel,
   WOULD_BLOCK_ID,
   wouldBlockTables,
   wouldBlockVerdictItems,
@@ -105,7 +110,7 @@ export function computeReportOutcomes(
   });
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
-  const keys = blockedKeys(report.timeline);
+  const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
   const heading = trafficHeadingBlock(
     report,
@@ -116,9 +121,13 @@ export function computeReportOutcomes(
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [
     blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
-    wouldBlockTables(report.timeline, keys, { priority: WOULD_BLOCK_PRIORITY, artifactAvailable }),
+    wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
+      priority: WOULD_BLOCK_PRIORITY,
+      artifactAvailable,
+    }),
     awsTroubleshootingBlocks(report, actionRepo, actionRef),
     passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+    awsKeysBlocks(keys, { priority: AWS_KEYS_PRIORITY, artifactAvailable }),
     knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
     restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
       stepName: "Start isolated-run",
@@ -127,7 +136,7 @@ export function computeReportOutcomes(
       actionVersion,
     }),
     noCommunicationBlocks(report),
-    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), keyBlockLabel(keys)),
+    communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
     engineNoteBlocks(report),
   ]);
 
@@ -263,8 +272,10 @@ export interface SummaryWriteResult {
  * fitStepSummary prints a `keep` block (the report's own frame) whole even when
  * it overruns the budget, and GitHub answers a summary over its 1 MiB limit by
  * dropping the whole step's upload, the command's own output included. So
- * buildcage writes its part only when it truly fits under the limit, and
- * otherwise gives way to `fallbackLine` or to nothing.
+ * buildcage writes its part only when its frames fit the budget, and otherwise
+ * gives way to `fallbackLine` or to nothing. What the fit prints for a block it
+ * cut (the notice, with the block's tags around it) may run past the budget
+ * into the headroom kept for it, as long as the file stays under the limit.
  */
 export async function writeSummaryBlocks(
   blocks: SummaryBlock[],
@@ -280,16 +291,15 @@ export async function writeSummaryBlocks(
       if (b.id !== undefined) cutIds.add(b.id);
     },
   });
-  // The same headroom fitStepSummary keeps, so buildcage's part never lands the
-  // file at the edge GitHub drops it at.
-  const fits = (text: string): boolean =>
-    used + bytes(text) <= STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES;
+  // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
+  const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
+  const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);
   let content = "";
   let wrote: SummaryWriteResult["wrote"] = "nothing";
-  if (fits(fitted)) {
+  if (frames <= room && used + bytes(fitted) <= STEP_SUMMARY_LIMIT_BYTES) {
     content = fitted;
     wrote = "blocks";
-  } else if (fallbackLine !== undefined && fits(fallbackLine)) {
+  } else if (fallbackLine !== undefined && bytes(fallbackLine) <= room) {
     content = fallbackLine;
     wrote = "fallback";
   }

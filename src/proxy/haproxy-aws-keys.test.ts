@@ -222,7 +222,7 @@ describe("the traffic record", () => {
     }
   });
 
-  it("is filled in only for a request the check let through", () => {
+  it("names the key a request was signed with whatever the verdict, and the rest only for one let through", () => {
     for (const rules of [
       awsKeyRequestRules(CHECK, "audit"),
       awsKeyRequestRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }, "restrict"),
@@ -238,12 +238,19 @@ describe("the traffic record", () => {
           true,
         );
       }
-      expect(
-        rules
-          .filter((l) => l.includes("set-var(txn.aws_key_owner)"))
-          .every((l) => / if aws_allowed( |$)/.test(l)),
-      ).toBe(true);
+      expect(rules.filter((l) => l.includes("set-var(txn.aws_key_owner)"))).toStrictEqual([
+        "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_key_known",
+      ]);
     }
+  });
+
+  it("records a request before restrict blocks it, which ends its rules", () => {
+    const rules = awsKeyRequestRules(CHECK, "restrict");
+    const deny = rules.indexOf("    http-request deny deny_status 403 if aws_blocked");
+    expect(deny > 0).toBe(true);
+    const logged = rules.flatMap((l, i) => (l.includes("set-var(txn.aws_log_") ? [i] : []));
+    expect(logged.length > 0).toBe(true);
+    expect(logged.every((i) => i < deny)).toBe(true);
   });
 
   it("names the account a web identity call is judged by, whatever the verdict", () => {

@@ -25,9 +25,9 @@ import {
 } from "#core/lib/actions/inputs.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
-import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccessKeyId, isAwsAccountId, parseAwsAccounts } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { awsKeys, isEcrRegistry, KEY_NOT_ALLOWED, type AwsKey } from "./aws-keys.ts";
 import { SandboxError } from "./errors.ts";
 import { resolveFilesystemAudit, type FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts";
@@ -277,12 +277,6 @@ export function readAwsKeyInputs(
 const ASSUMED_ACCOUNT_MARK = "assumed in this run, check it is yours";
 const NO_CREDENTIAL = "aws-no-credential" satisfies AwsBlockedReason;
 const ROLE_NOT_ALLOWED = "aws-role-not-allowed" satisfies AwsBlockedReason;
-const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
-const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
-
-function isEcrRegistry(host: string): boolean {
-  return ECR_REGISTRY.test(host);
-}
 
 /**
  * The check's inputs for the report's restrict example, only when it was on
@@ -305,18 +299,13 @@ export function awsExampleInputs(
     .filter(isAwsAccountId);
   const added = new Set(assumed.filter((a) => !roleAccounts.includes(a)));
   const accounts = [...roleAccounts, ...added].sort();
-  // ECR hands one key out on many redirects, so a key can have several issuers.
-  const issuers = new Map<string, TrafficEvent[]>();
-  for (const e of timeline) {
-    const { issuedKeyRef } = awsFieldsOf(e);
-    if (issuedKeyRef) issuers.set(issuedKeyRef, [...(issuers.get(issuedKeyRef) ?? []), e]);
-  }
+  const known = awsKeys(timeline);
   // Whether naming `account` alone lets a request through. An answer teaches
   // its key only when restrict lets the call through: an AssumeRole's for a
   // role in the account, and an ECR registry's only for a request audit would
   // block, as audit already learned the rest. A chain through another unnamed
   // account does not pass.
-  const passes = (e: TrafficEvent, account: string, seen: Set<string>): boolean => {
+  const passes = (e: TrafficEvent, account: string, seen: Set<AwsKey>): boolean => {
     const { keyRef, roleAccount } = awsFieldsOf(e);
     switch (e.wouldBlock) {
       case undefined:
@@ -325,29 +314,29 @@ export function awsExampleInputs(
       case ROLE_NOT_ALLOWED:
         // A signed call is judged by its key, whatever its role.
         return !keyRef && roleAccount === account;
-      case KEY_NOT_ALLOWED:
-        return keyRef !== undefined && learned(keyRef, account, seen);
+      case KEY_NOT_ALLOWED: {
+        const key = keyRef && known.get(keyRef);
+        return !!key && learned(key, account, seen);
+      }
       default:
         return false;
     }
   };
-  const teaches = (issuer: TrafficEvent, account: string, seen: Set<string>): boolean => {
+  const teaches = (issuer: TrafficEvent, account: string, seen: Set<AwsKey>): boolean => {
     const { assumedAccount } = awsFieldsOf(issuer);
     const learnable = assumedAccount
       ? assumedAccount === account
       : isEcrRegistry(issuer.host) && issuer.wouldBlock !== undefined;
     return learnable && passes(issuer, account, seen);
   };
-  const learned = (keyRef: string, account: string, seen: Set<string>): boolean => {
-    if (seen.has(keyRef)) return false;
-    const next = new Set(seen).add(keyRef);
-    return (issuers.get(keyRef) ?? []).some((issuer) => teaches(issuer, account, next));
+  const learned = (key: AwsKey, account: string, seen: Set<AwsKey>): boolean => {
+    if (seen.has(key)) return false;
+    const next = new Set(seen).add(key);
+    return key.issuers.some((issuer) => teaches(issuer, account, next));
   };
-  const keys = [...blockedKeys(timeline)];
+  const keys = [...blockedKeys(timeline, known).values()];
   const mark = (a: string) => {
-    const names = keys
-      .filter(([keyRef]) => learned(keyRef, a, new Set()))
-      .map(([, k]) => (k.name === "key" ? "the key" : k.name));
+    const names = keys.filter(({ key }) => learned(key, a, new Set())).map(({ key }) => key.name);
     const webIdentity = timeline.some(
       (e) =>
         (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) &&
