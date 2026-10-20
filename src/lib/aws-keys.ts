@@ -67,8 +67,7 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
     if (issuedKeyRef) {
       const key = keyOf(issuedKeyRef);
       key.issuers.push(e);
-      if (key.issuers.length > 1) continue;
-      if (assumedAccount && isAwsAccountId(assumedAccount)) key.account = assumedAccount;
+      if (assumedAccount && isAwsAccountId(assumedAccount)) key.account ??= assumedAccount;
     }
   }
   return keys;
@@ -117,9 +116,14 @@ function sourceCell(key: AwsKey, keys: Map<string, AwsKey>): string {
   if (key.known === "env") return "starting key";
   const [issuer] = key.issuers;
   if (!issuer) return "unknown";
-  const from = keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ?? "a web identity";
+  const ecr = isEcrRegistry(issuer.host);
+  // An unsigned call that issues a key: a web identity to STS, a registry
+  // token to ECR.
+  const from =
+    keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ??
+    (ecr ? "a registry token" : "a web identity");
   if (key.account) return `role in ${key.account} (from ${from})`;
-  return isEcrRegistry(issuer.host) ? `ECR layer URL (from ${from})` : `STS (from ${from})`;
+  return ecr ? `ECR layer URL (from ${from})` : `STS (from ${from})`;
 }
 
 /**

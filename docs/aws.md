@@ -190,7 +190,7 @@ through, 🚫 or ⚠️ with the reason when it blocked one or `restrict` would,
 did neither, such as for a key issued and never used. **Source** is `starting key` for the key the
 step started with, `role in <account>` for one an STS call in the run issued, `STS` for one an STS
 answer issued without an account the proxy could read, and `ECR layer URL` for one an ECR registry
-request was answered with, each followed by the key that signed the call, or `a web identity`. `unknown` is a key from anywhere else, such as a
+request was answered with, each followed by the key that signed the call, or `a web identity` or `a registry token` for an unsigned one. `unknown` is a key from anywhere else, such as a
 profile; [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes. A row names up to three
 of the hosts its requests went to. **keyRef** is the key's `keyRef` in the
 [traffic artifact](#in-the-traffic-artifact).

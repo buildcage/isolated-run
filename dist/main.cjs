@@ -69370,8 +69370,7 @@ function awsKeys(timeline) {
 		}
 		if (issuedKeyRef) {
 			let key = keyOf(issuedKeyRef);
-			if (key.issuers.push(e), key.issuers.length > 1) continue;
-			assumedAccount && isAwsAccountId(assumedAccount) && (key.account = assumedAccount);
+			key.issuers.push(e), assumedAccount && isAwsAccountId(assumedAccount) && (key.account ??= assumedAccount);
 		}
 	}
 	return keys;
@@ -69397,8 +69396,8 @@ function sourceCell(key, keys) {
 	if (key.known === "env") return "starting key";
 	let [issuer] = key.issuers;
 	if (!issuer) return "unknown";
-	let from = keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ?? "a web identity";
-	return key.account ? `role in ${key.account} (from ${from})` : isEcrRegistry(issuer.host) ? `ECR layer URL (from ${from})` : `STS (from ${from})`;
+	let ecr = isEcrRegistry(issuer.host), from = keys.get(awsFieldsOf(issuer).keyRef ?? "")?.name ?? (ecr ? "a registry token" : "a web identity");
+	return key.account ? `role in ${key.account} (from ${from})` : ecr ? `ECR layer URL (from ${from})` : `STS (from ${from})`;
 }
 function awsKeysBlocks(keys, fit) {
 	if (keys.size === 0) return [];
