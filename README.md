@@ -246,8 +246,8 @@ only whole-line `#` comments, since a path may contain a `#`.
 ### Destinations you expect to stay blocked
 
 A noisy dependency, or a domain you are deliberately keeping off the allowlist to confirm it stays
-blocked, belongs in `known_blocked_rules`. Those rows are marked **Expected** in the report and stop
-failing the step, and the destination stays unreachable:
+blocked, belongs in `known_blocked_rules`. Those rows move to the report's collapsed **Known Blocked
+Hosts** and stop failing the step, and the destination stays unreachable:
 
 ```yaml
 known_blocked_rules: |

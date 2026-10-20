@@ -68915,7 +68915,7 @@ const OUTCOME_MARK = {
 	blocked: "🚫 ",
 	failed: "⚠️ "
 };
-function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
+function renderHostTable(rows, { showReason = !1 } = {}) {
 	let formats = [{
 		key: "host",
 		title: "Host",
@@ -68931,16 +68931,11 @@ function renderHostTable(rows, { showReason = !1, showExpected = !1 } = {}) {
 		key: "count",
 		title: "Count",
 		align: "right"
-	}), showExpected && formats.push({
-		key: "expected",
-		title: "Expected",
-		align: "center"
 	}), markdownTable(formats, rows.map((r) => ({
 		host: codeCell(r.port === "-" ? r.host : `${r.host}:${r.port}`) + (r.note ? ` ${r.note}` : ""),
 		ruleType: r.ruleType,
 		reason: r.outcome ? OUTCOME_MARK[r.outcome] + r.reason : r.reason,
-		count: r.count,
-		expected: r.outcome === "failed" ? "—" : r.expected ? "✅" : ""
+		count: r.count
 	})));
 }
 function hostTableTruncationNote(artifactAvailable) {
@@ -69185,6 +69180,7 @@ const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
 	passed: "traffic-passed",
+	known: "traffic-known",
 	log: "traffic-log"
 };
 function trafficNotice(block, artifactAvailable) {
@@ -69192,7 +69188,8 @@ function trafficNotice(block, artifactAvailable) {
 		case TRAFFIC_BLOCK.example: return restrictExampleTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.log: return communicationTruncationNote(artifactAvailable);
 		case TRAFFIC_BLOCK.blocked:
-		case TRAFFIC_BLOCK.passed: return hostTableTruncationNote(artifactAvailable);
+		case TRAFFIC_BLOCK.passed:
+		case TRAFFIC_BLOCK.known: return hostTableTruncationNote(artifactAvailable);
 		default: return;
 	}
 }
@@ -69215,28 +69212,32 @@ const trafficFrame = (text) => ({
 	cut: "keep"
 });
 function renderReportBlocks(report, actionRepo, actionRef, priorities, { title = "Outbound Traffic Report", blockLabel, verdictItems, footer = !0, extraBlocks = () => [], ...step } = {}) {
-	let isAudit = report.parameters.mode === "audit", showExpected = report.parameters.knownBlockedRules.length > 0, heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
+	let isAudit = report.parameters.mode === "audit", heading = isAudit ? "📋 Audited Hosts" : "✅ Allowed Hosts", blocks = [], top = reportHeading(title, isAudit);
 	top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), blocks.push(trafficFrame(top));
-	let wrote = !1, gap = () => wrote ? "\n" : "";
-	if (report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), report.blocked.length > 0 || report.failed.length > 0) {
-		let blocked = foldExpectedBlockedRows(report.blocked).map((r) => ({
-			...r,
-			outcome: "blocked"
-		})), failed = report.failed.map((r) => ({
+	let wrote = !1, gap = () => wrote ? "\n" : "", expected = report.blocked.filter((r) => r.expected), blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
+		...r,
+		outcome: "blocked"
+	}));
+	if (blocked.length > 0 || report.failed.length > 0) {
+		let failed = report.failed.map((r) => ({
 			...r,
 			outcome: "failed"
-		})), rows = [
-			...blocked.filter((r) => !r.expected),
-			...failed,
-			...blocked.filter((r) => r.expected)
-		], tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
-		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `${gap()}### ${tableTitle}\n\n`, renderHostTable(rows, {
-			showReason: !0,
-			showExpected
-		}), `\n${note}`)), wrote = !0;
+		})), tableTitle = blocked.length === 0 ? "⚠️ Failed Hosts" : failed.length === 0 ? "🚫 Blocked Hosts" : "🚫 Blocked / ⚠️ Failed Hosts", note = failed.length === 0 ? "" : "\n<sub>*Note: no rule blocked the ⚠️ rows; the connection itself did not complete, so no rule can change the outcome and none of them fails the step.*</sub>\n";
+		blocks.push(trafficTableBlock(TRAFFIC_BLOCK.blocked, priorities[TRAFFIC_BLOCK.blocked], `### ${tableTitle}\n\n`, renderHostTable([...blocked, ...failed], { showReason: !0 }), `\n${note}`)), wrote = !0;
 	}
 	let extra = extraBlocks(gap());
-	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), isAudit) {
+	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${gap()}### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), expected.length > 0) {
+		let hosts = new Set(expected.map((r) => r.host)).size;
+		blocks.push({
+			id: TRAFFIC_BLOCK.known,
+			priority: priorities[TRAFFIC_BLOCK.known],
+			level: 3,
+			section: SECTION$1,
+			cut: "atomic",
+			text: `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
+		}), wrote = !0;
+	}
+	if (isAudit) {
 		let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 			...step,
 			allowedIpRules: report.parameters.allowedIpRules,
@@ -70306,11 +70307,12 @@ const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
 	[TRAFFIC_BLOCK.blocked]: 3,
 	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.log]: 7
+	[TRAFFIC_BLOCK.known]: 7,
+	[TRAFFIC_BLOCK.log]: 8
 }, FILESYSTEM_PRIORITIES = {
 	[FILESYSTEM_BLOCK.executed]: 5,
 	[FILESYSTEM_BLOCK.paths]: 6,
-	[FILESYSTEM_BLOCK.log]: 8
+	[FILESYSTEM_BLOCK.log]: 9
 };
 //#endregion
 //#region src/lib/report.ts
