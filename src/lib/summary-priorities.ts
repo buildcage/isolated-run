@@ -18,14 +18,15 @@ export const TRAFFIC_PRIORITIES: TrafficPriorities = {
   [TRAFFIC_BLOCK.example]: 1,
   [TRAFFIC_BLOCK.blocked]: 3,
   [TRAFFIC_BLOCK.passed]: 4,
-  [TRAFFIC_BLOCK.log]: 7,
+  [TRAFFIC_BLOCK.known]: 5,
+  [TRAFFIC_BLOCK.log]: 8,
 };
 
 /** Restrict Would Block, the AWS access key check's own section of the traffic report. */
 export const WOULD_BLOCK_PRIORITY = 2;
 
 export const FILESYSTEM_PRIORITIES: FilesystemPriorities = {
-  [FILESYSTEM_BLOCK.executed]: 5,
-  [FILESYSTEM_BLOCK.paths]: 6,
-  [FILESYSTEM_BLOCK.log]: 8,
+  [FILESYSTEM_BLOCK.executed]: 6,
+  [FILESYSTEM_BLOCK.paths]: 7,
+  [FILESYSTEM_BLOCK.log]: 9,
 };
