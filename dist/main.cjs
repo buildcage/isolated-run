@@ -68816,11 +68816,11 @@ function exampleStepTail({ extraInputs = [], runCommand }) {
 	return yaml;
 }
 function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
-	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "\n<details>\n";
+	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "<details>\n";
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
 }
 function restrictExampleTruncationNote(artifactAvailable) {
-	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n\n`;
+	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/build-example.ts
@@ -68939,7 +68939,7 @@ function renderHostTable(rows, { showReason = !1 } = {}) {
 	})));
 }
 function hostTableTruncationNote(artifactAvailable) {
-	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n`;
 }
 //#endregion
 //#region src/core/lib/report/elapsed-time.ts
@@ -69219,14 +69219,14 @@ function stackTrafficBlocks(heading, parts) {
 			blocks.push(...part);
 			continue;
 		}
-		let b = part[first], opens = b.open ?? b.text, gapped = !wrote || opens.startsWith("\n") ? b : b.open === void 0 ? {
+		let b = part[first], gapped = wrote ? b.open === void 0 ? {
 			...b,
 			text: `\n${b.text}`,
 			head: b.head === void 0 ? void 0 : b.head + 1
 		} : {
 			...b,
 			open: `\n${b.open}`
-		};
+		} : b;
 		blocks.push(...part.slice(0, first), gapped, ...part.slice(first + 1)), wrote = !0;
 	}
 	return blocks;
@@ -69293,19 +69293,19 @@ function communicationDetailsBlocks(report, priority, blockLabel, lineNote) {
 		level: 3,
 		section: SECTION$1,
 		cut: "lines",
-		open: "\n<details>\n<summary>💬 Communication details</summary>\n\n",
+		open: "<details>\n<summary>💬 Communication details</summary>\n\n",
 		text: details,
 		close: "</details>\n"
 	}] : [];
 }
 function engineNoteBlocks(report) {
-	return report.engine === "universal" ? [trafficFrame("\n<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n")] : [];
+	return report.engine === "universal" ? [trafficFrame("<sub>*Note: HTTP rules are based on the Host header, HTTPS rules on SNI, and IP rules on the destination IP address.*</sub>\n")] : [];
 }
 function reportHeading(title, isAudit) {
 	return `## ${escapeCell(title)}${isAudit ? " (audit mode)" : ""}\n\n`;
 }
 function reportFooter(actionRepo) {
-	return `\n*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
+	return `*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
 }
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
@@ -69493,7 +69493,7 @@ function keyBlockLabel(keys) {
 }
 const WOULD_BLOCK_ID = "traffic-would-block";
 function wouldBlockTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n`;
 }
 function wouldBlockVerdictItems(timeline) {
 	let count = timeline.filter(letThrough).length;
@@ -69556,7 +69556,7 @@ function awsTroubleshootingBlocks(report, actionRepo, actionRef) {
 	for (let e of report.timeline) letThrough(e) && e.wouldBlock.startsWith("aws-") && reasons.add(e.wouldBlock);
 	if (reasons.size === 0) return [];
 	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = new Intl.ListFormat("en", { type: "disjunction" }).format([...reasons].map((r) => `\`${r}\``));
-	return [trafficFrame(`\n<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
+	return [trafficFrame(`<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
 }
 //#endregion
 //#region src/lib/step-output-file.ts
@@ -70350,7 +70350,7 @@ function reportTitle(label, title = "Outbound Traffic Report") {
 	return label ? `${title} — ${label}` : title;
 }
 function summaryFooter(actionRepo) {
-	return trafficFrame(reportFooter(actionRepo));
+	return trafficFrame(`\n${reportFooter(actionRepo)}`);
 }
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");

@@ -99,7 +99,7 @@ export function wouldBlockTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run has every one"
     : "set upload_traffic_artifact: true to get every one as a downloadable artifact";
-  return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${rest}._\n\n`;
+  return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${rest}._\n`;
 }
 
 /** The verdict line's count of the requests restrict would block, if any. */

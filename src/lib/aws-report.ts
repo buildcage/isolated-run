@@ -28,5 +28,5 @@ export function awsTroubleshootingBlocks(
   const names = new Intl.ListFormat("en", { type: "disjunction" }).format(
     [...reasons].map((r) => `\`${r}\``),
   );
-  return [trafficFrame(`\n<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
+  return [trafficFrame(`<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
 }

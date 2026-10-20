@@ -56,7 +56,7 @@ export function reportTitle(label: string | undefined, title = "Outbound Traffic
 
 /** The footer, after everything else the step writes to its Job Summary. */
 export function summaryFooter(actionRepo: string): SummaryBlock {
-  return trafficFrame(reportFooter(actionRepo));
+  return trafficFrame(`\n${reportFooter(actionRepo)}`);
 }
 
 /** The title, for a summary written with no traffic report to open it. */
