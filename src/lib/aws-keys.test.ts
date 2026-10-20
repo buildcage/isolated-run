@@ -74,6 +74,12 @@ describe("awsKeysBlocks", () => {
         signed("iiii", { action: "audit", wouldBlock: "aws-ambiguous-credential" }),
         // A registry token, which is no AWS signature, asked for this one.
         event("1.dkr.ecr.us-east-1.amazonaws.com", { issuedKeyRef: "llll" }),
+        // The proxy knew the key, though the check let nothing signed with it through.
+        event(
+          "s3.amazonaws.com",
+          { key: "env", keyRef: "jjjj" },
+          { action: "block", reason: "aws-unreadable" },
+        ),
       ]),
     ).toStrictEqual([
       "| key 1 | ✅ known | starting key | 3 | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `aaaa` |",
@@ -86,6 +92,7 @@ describe("awsKeysBlocks", () => {
       "| key 8 | 🚫 aws-role-not-allowed | unknown | 1 | `s3.amazonaws.com` | `hhhh` |",
       "| key 9 | ⚠️ restrict would block (aws-ambiguous-credential) | unknown | 1 | `s3.amazonaws.com` | `iiii` |",
       "| key 10 | not checked | ECR layer URL (from a registry token) | 0 |  | `llll` |",
+      "| key 11 | 🚫 aws-unreadable | starting key | 1 | `s3.amazonaws.com` | `jjjj` |",
     ]);
   });
 

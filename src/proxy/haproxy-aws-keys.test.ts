@@ -222,7 +222,7 @@ describe("the traffic record", () => {
     }
   });
 
-  it("is filled in only for a request the check let through", () => {
+  it("names the key a request was signed with whatever the verdict, and the rest only for one let through", () => {
     for (const rules of [
       awsKeyRequestRules(CHECK, "audit"),
       awsKeyRequestRules({ keyMapFile: "/rules/keys.map", refSecret: REF_SECRET }, "restrict"),
@@ -238,11 +238,9 @@ describe("the traffic record", () => {
           true,
         );
       }
-      expect(
-        rules
-          .filter((l) => l.includes("set-var(txn.aws_key_owner)"))
-          .every((l) => / if aws_allowed( |$)/.test(l)),
-      ).toBe(true);
+      expect(rules.filter((l) => l.includes("set-var(txn.aws_key_owner)"))).toStrictEqual([
+        "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_key_known",
+      ]);
     }
   });
 

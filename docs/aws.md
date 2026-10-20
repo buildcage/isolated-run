@@ -582,13 +582,14 @@ allowed_url_rules: |
 
 Each request to an AWS API host that the check let through has an `aws` object in the
 [traffic artifact](./reference.md#traffic-artifact), so a run shows that the check was on even
-where it blocked nothing. A request the check blocked has one only for `keyRef` and `roleAccount`,
-and in `audit` mode for `assumedAccount` and `issuedKeyRef` on an STS call and `issuedKeyRef` on an
-ECR registry redirect. Its `reason` or `wouldBlock` says why.
+where it blocked nothing. A request the check blocked has one only for `key`, `keyRef` and
+`roleAccount`, with `accountId` for an `assumed` key, and in `audit` mode for `assumedAccount` and
+`issuedKeyRef` on an STS call and `issuedKeyRef` on an ECR registry redirect. Its `reason` or
+`wouldBlock` says why.
 
 | Field            | When                                                                                                          | Notes                                                                                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key`            | on every request the check let through                                                                        | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
+| `key`            | on every request the check let through, and on one it blocked that a key it knows signed                      | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
 | `accountId`      | when the check confirmed an account                                                                           | the one an `assumed` key came from, a static CodeCommit Git credential names, or the role of an `AssumeRoleWithWebIdentity` call is in                                       |
 | `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it go                                  | the account of that role, whether or not it is named                                                                                                                         |
 | `keyRef`         | on every request signed with an access key, whether or not the check let it go                                | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |

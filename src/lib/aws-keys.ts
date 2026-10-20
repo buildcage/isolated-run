@@ -21,8 +21,10 @@ export interface AwsKey {
   keyRef: string;
   /** "key 1", "key 2" and so on, in the order each first signed a request or was issued. */
   name: string;
-  /** What the check knew the key as when it let a request signed with it through. */
+  /** What the proxy knew the key as when a request was signed with it. */
   known?: "env" | "assumed" | "issued";
+  /** Whether the check let a request signed with it through. */
+  allowed: boolean;
   /** The account of the role whose AssumeRole answer in the run issued the key. */
   account?: string;
   /** The requests whose answers issued the key, the first first: ECR hands
@@ -46,6 +48,7 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
       key = {
         keyRef,
         name: `key ${keys.size + 1}`,
+        allowed: false,
         issuers: [],
         hosts: new Set(),
         count: 0,
@@ -61,8 +64,11 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
       key.hosts.add(e.host);
       key.count++;
       if (known && known !== "none") key.known ??= known;
-      if (e.action === "block" && e.reason?.startsWith(AWS_REASON_PREFIX)) key.blocked ??= e.reason;
-      if (e.wouldBlock?.startsWith(AWS_REASON_PREFIX)) key.wouldBlock ??= e.wouldBlock;
+      const blocked = e.action === "block" && e.reason?.startsWith(AWS_REASON_PREFIX);
+      if (blocked) key.blocked ??= e.reason;
+      const wouldBlock = e.wouldBlock?.startsWith(AWS_REASON_PREFIX);
+      if (wouldBlock) key.wouldBlock ??= e.wouldBlock;
+      if (known && !blocked && !wouldBlock) key.allowed = true;
     }
     if (issuedKeyRef) {
       const key = keyOf(issuedKeyRef);
@@ -109,7 +115,7 @@ export function awsKeysTruncationNote(artifactAvailable: boolean): string {
 function checkCell(key: AwsKey): string {
   if (key.blocked) return `🚫 ${key.blocked}`;
   if (key.wouldBlock) return `⚠️ restrict would block (${key.wouldBlock})`;
-  return key.known ? "✅ known" : "not checked";
+  return key.allowed ? "✅ known" : "not checked";
 }
 
 function sourceCell(key: AwsKey, keys: Map<string, AwsKey>): string {

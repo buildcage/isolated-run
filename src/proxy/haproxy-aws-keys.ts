@@ -234,12 +234,12 @@ function verdicts(mode: "restrict" | "audit", roles?: RoleRules): string[] {
 /** What the traffic record says of a request the check let through. */
 function trafficRecord(roles?: RoleRules): string[] {
   return [
-    "    # For the traffic record: what a request the check let through was",
-    "    # signed with. The map holds env for the starting key, the account for",
-    "    # one STS issued, and issued for one ECR did.",
+    "    # For the traffic record: what a request was signed with, whatever the",
+    "    # verdict. The map holds env for the starting key, the account for one",
+    "    # STS issued, and issued for one ECR did.",
     "    acl aws_allowed var(txn.aws) -m str allowed",
     "    http-request set-var(txn.aws_log_key) str(none) if aws_allowed",
-    "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_allowed",
+    "    http-request set-var(txn.aws_key_owner) var(txn.aws_key_entry) if aws_key_known",
     "    http-request set-var(txn.aws_log_key) str(env) if { var(txn.aws_key_owner) -m str env }",
     "    http-request set-var(txn.aws_log_key) str(assumed) if { var(txn.aws_key_owner) -m reg ^[0-9]{12}$ }",
     "    http-request set-var(txn.aws_log_key) str(issued) if { var(txn.aws_key_owner) -m str issued }",

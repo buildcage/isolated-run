@@ -69357,6 +69357,7 @@ function awsKeys(timeline) {
 		return key || (key = {
 			keyRef,
 			name: `key ${keys.size + 1}`,
+			allowed: !1,
 			issuers: [],
 			hosts: new Set(),
 			count: 0
@@ -69366,7 +69367,11 @@ function awsKeys(timeline) {
 		let { key: known, keyRef, issuedKeyRef, assumedAccount } = awsFieldsOf(e);
 		if (keyRef) {
 			let key = keyOf(keyRef);
-			key.hosts.add(e.host), key.count++, known && known !== "none" && (key.known ??= known), e.action === "block" && e.reason?.startsWith("aws-") && (key.blocked ??= e.reason), e.wouldBlock?.startsWith("aws-") && (key.wouldBlock ??= e.wouldBlock);
+			key.hosts.add(e.host), key.count++, known && known !== "none" && (key.known ??= known);
+			let blocked = e.action === "block" && e.reason?.startsWith("aws-");
+			blocked && (key.blocked ??= e.reason);
+			let wouldBlock = e.wouldBlock?.startsWith("aws-");
+			wouldBlock && (key.wouldBlock ??= e.wouldBlock), known && !blocked && !wouldBlock && (key.allowed = !0);
 		}
 		if (issuedKeyRef) {
 			let key = keyOf(issuedKeyRef);
@@ -69390,7 +69395,7 @@ function awsKeysTruncationNote(artifactAvailable) {
 	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef" : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
-	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.known ? "✅ known" : "not checked";
+	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ known" : "not checked";
 }
 function sourceCell(key, keys) {
 	if (key.known === "env") return "starting key";
