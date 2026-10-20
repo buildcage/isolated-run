@@ -87,7 +87,7 @@ describe("missingReportFrame", () => {
 });
 
 // Only that the annotations and the rendered markdown combine correctly; the
-// markdown itself is covered by render-report-markdown.test.ts.
+// markdown itself is covered by traffic-report.test.ts.
 describe("computeReportOutcomes", () => {
   /** The blocked-connections check, which is always the first emission. */
   const blockedOutcome = (r: UniversalReportData | InspectReportData, failOnBlocked = true) =>

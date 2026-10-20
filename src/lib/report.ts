@@ -25,13 +25,13 @@ import {
   reportFooter,
   reportHeading,
   restrictExampleBlocks,
-  stackTrafficBlocks,
   TRAFFIC_BLOCK,
   trafficFrame,
   trafficHeadingBlock,
   type PartFit,
   type TrafficBlockId,
-} from "#core/lib/report/render/render-report-markdown.ts";
+} from "#core/lib/report/render/traffic-parts.ts";
+import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { awsTroubleshootingBlocks } from "./aws-report.ts";

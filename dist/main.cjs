@@ -23186,7 +23186,7 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
-const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, whole$1 = (b) => (b.open ?? "") + b.text + (b.close ?? "");
+const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, wholeBlock = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function withNotices(blocks, noticeFor) {
 	return blocks.map((b) => b.cut === "keep" ? b : {
 		...b,
@@ -23194,7 +23194,7 @@ function withNotices(blocks, noticeFor) {
 	});
 }
 function fitStepSummary(blocks, { usedBytes = 0, limitBytes = STEP_SUMMARY_LIMIT_BYTES, onCut } = {}) {
-	let full = blocks.map(whole$1), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
+	let full = blocks.map(wholeBlock), sizes = full.map(bytes), budget = limitBytes - 8192 - usedBytes;
 	if (sizes.reduce((sum, n) => sum + n, 0) <= budget) return full.join("");
 	let out = blocks.map(() => ""), cutAt = new Map(), order = blocks.map((_, i) => i).sort((a, b) => rank(blocks[a]) - rank(blocks[b]) || a - b);
 	for (let i of order) {
@@ -68799,54 +68799,95 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule blocked them and none can change the outcome, so none of them fails the step.`
 	};
 }
-function usesLine(actionRepo, actionRef, actionVersion) {
-	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
-}
-function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion } = {}) {
-	let yaml = `- name: ${stepName}\n`;
-	return yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", yaml;
-}
-function exampleStepTail({ extraInputs = [], runCommand }) {
-	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
-	if (runCommand) {
-		let lines = runCommand.replace(/\r?\n$/, "").split(/\r?\n/), indicator = lines.find((line) => line !== "")?.startsWith(" ") ? "|2" : "|";
-		yaml += `    run: ${indicator}\n`;
-		for (let line of lines) yaml += `      ${line}\n`;
-	}
-	return yaml;
-}
-function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
-	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "<details>\n";
-	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
-}
-function restrictExampleTruncationNote(artifactAvailable) {
-	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
-}
 //#endregion
-//#region src/core/lib/report/render/build-example.ts
-const ruleTypeToParam = {
-	HTTPS: "allowed_https_rules",
-	HTTP: "allowed_http_rules",
-	IP: "allowed_ip_rules"
-};
-function buildRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
-	if (!auditedRows || auditedRows.length === 0) return "";
-	let groups = new Map();
-	for (let r of auditedRows) {
-		let param = ruleTypeToParam[r.ruleType];
-		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
-	}
-	if (groups.size === 0) return "";
-	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
-	for (let [param, rules] of groups) {
-		yaml += `    ${param}: >-\n`;
-		for (let rule of rules) yaml += `      ${rule}\n`;
-	}
-	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
+//#region src/core/lib/report/elapsed-time.ts
+function toParts(elapsedSeconds) {
+	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
+	return {
+		hours: Math.floor(totalMinutes / 60),
+		minutes,
+		seconds,
+		ms
+	};
+}
+function pad(n, width = 2) {
+	return String(n).padStart(width, "0");
+}
+function formatElapsedVariable(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
+}
+function formatElapsedFixed(elapsedSeconds) {
+	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
+	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
 function communicationTruncationNote(artifactAvailable) {
 	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+function renderCommunicationDetailsBody(timeline, startedAt, blockLabel = () => void 0, lineNote = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel, lineNote)).join("\n")}\n\`\`\`\n\n`;
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt, blockLabel, lineNote) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`, extra = lineNote(event), tail = extra === void 0 ? "" : ` ${extra}`;
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}${tail}`;
+}
+const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
+function credentialName(name) {
+	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
+}
+function withoutIndexes(name) {
+	let end = name.length;
+	for (; name[end - 1] === "]";) {
+		let open = name.lastIndexOf("[", end - 1);
+		if (open < 0) break;
+		end = open;
+	}
+	return name.slice(0, end);
+}
+const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
+function redactPart(part) {
+	for (let match of part.matchAll(PARAM_NAME)) {
+		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
+		let value = match.index + match[0].length;
+		return value === part.length ? part : `${part.slice(0, value)}***`;
+	}
+	return part;
+}
+function redactCredentialQuery(url) {
+	let start = url.indexOf("?");
+	if (start === -1) return url;
+	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
+	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function subject(event) {
+	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
+	if (event.protocol === "dns") return `DNS ${event.host}`;
+	if (event.url === void 0) {
+		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
+		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
+	}
+	return `${event.method} ${redactCredentialQuery(event.url)}`;
+}
+function outcome(event, label) {
+	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
+	if (event.action === "incomplete") return event.reason ?? "no request";
+	if (event.action === "failed") return event.reason ?? "failed";
+	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
+	let parts = [];
+	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
+}
+function formatTime(epochSeconds, startedAt) {
+	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
+}
+function formatBytes(bytes) {
+	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
 }
 //#endregion
 //#region src/core/lib/report/render/fold-expected-blocked.ts
@@ -68941,94 +68982,28 @@ function renderHostTable(rows, { showReason = !1 } = {}) {
 function hostTableTruncationNote(artifactAvailable) {
 	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n`;
 }
-//#endregion
-//#region src/core/lib/report/elapsed-time.ts
-function toParts(elapsedSeconds) {
-	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
-	return {
-		hours: Math.floor(totalMinutes / 60),
-		minutes,
-		seconds,
-		ms
-	};
+function usesLine(actionRepo, actionRef, actionVersion) {
+	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
 }
-function pad(n, width = 2) {
-	return String(n).padStart(width, "0");
+function exampleStepHead(actionRepo, actionRef, { stepName = "Start Buildcage", actionVersion } = {}) {
+	let yaml = `- name: ${stepName}\n`;
+	return yaml += usesLine(actionRepo, actionRef, actionVersion), yaml += "  with:\n", yaml;
 }
-function formatElapsedVariable(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return hours === 0 ? `${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}` : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-function formatElapsedFixed(elapsedSeconds) {
-	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
-}
-//#endregion
-//#region src/core/lib/report/render/inspect-details.ts
-function renderInspectDetailsBody(timeline, startedAt, blockLabel = () => void 0, lineNote = () => void 0) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, blockLabel, lineNote)).join("\n")}\n\`\`\`\n\n`;
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt, blockLabel, lineNote) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", label = (reason) => blockLabel(event, reason) ?? reason, note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${label(event.wouldBlock)})`, extra = lineNote(event), tail = extra === void 0 ? "" : ` ${extra}`;
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event, label)}${note}${tail}`;
-}
-const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
-function credentialName(name) {
-	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
-}
-function withoutIndexes(name) {
-	let end = name.length;
-	for (; name[end - 1] === "]";) {
-		let open = name.lastIndexOf("[", end - 1);
-		if (open < 0) break;
-		end = open;
+function exampleStepTail({ extraInputs = [], runCommand }) {
+	let yaml = extraInputs.map((line) => `    ${line}\n`).join("");
+	if (runCommand) {
+		let lines = runCommand.replace(/\r?\n$/, "").split(/\r?\n/), indicator = lines.find((line) => line !== "")?.startsWith(" ") ? "|2" : "|";
+		yaml += `    run: ${indicator}\n`;
+		for (let line of lines) yaml += `      ${line}\n`;
 	}
-	return name.slice(0, end);
+	return yaml;
 }
-const PARAM_NAME = /(^|[;?])([^;?=]*)=/g;
-function redactPart(part) {
-	for (let match of part.matchAll(PARAM_NAME)) {
-		if (!CREDENTIAL_PARAMS.has(credentialName(match[2]))) continue;
-		let value = match.index + match[0].length;
-		return value === part.length ? part : `${part.slice(0, value)}***`;
-	}
-	return part;
+function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
+	let indented = yaml.split("\n").map((line) => line && "      " + line).join("\n"), md = "<details>\n";
+	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
 }
-function redactCredentialQuery(url) {
-	let start = url.indexOf("?");
-	if (start === -1) return url;
-	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
-	return url.slice(0, start + 1) + query + url.slice(end);
-}
-function subject(event) {
-	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
-	if (event.protocol === "dns") return `DNS ${event.host}`;
-	if (event.url === void 0) {
-		let authority = event.port === void 0 ? event.host : `${event.host}:${event.port}`, nameAndPort = `${event.protocol.toUpperCase()} ${authority}`;
-		return event.method === void 0 ? nameAndPort : `${event.method} ${nameAndPort}`;
-	}
-	return `${event.method} ${redactCredentialQuery(event.url)}`;
-}
-function outcome(event, label) {
-	if (event.action === "block") return event.reason === void 0 ? "blocked" : label(event.reason);
-	if (event.action === "incomplete") return event.reason ?? "no request";
-	if (event.action === "failed") return event.reason ?? "failed";
-	if (event.action === "discovery") return `no data (${event.queryType} is never served)`;
-	let parts = [];
-	return event.status !== void 0 && parts.push(String(event.status)), event.bytes !== void 0 && parts.push(`(${formatBytes(event.bytes)})`), parts.length > 0 ? parts.join(" ") : "resolved";
-}
-function formatTime(epochSeconds, startedAt) {
-	return startedAt === void 0 ? new Date(epochSeconds * 1e3).toISOString().slice(11, 23) + "Z" : formatElapsedVariable(epochSeconds - startedAt);
-}
-function formatBytes(bytes) {
-	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
+function restrictExampleTruncationNote(artifactAvailable) {
+	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-example.ts
@@ -69156,6 +69131,29 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 	});
 }
 //#endregion
+//#region src/core/lib/report/render/universal-example.ts
+const ruleTypeToParam = {
+	HTTPS: "allowed_https_rules",
+	HTTP: "allowed_http_rules",
+	IP: "allowed_ip_rules"
+};
+function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
+	if (!auditedRows || auditedRows.length === 0) return "";
+	let groups = new Map();
+	for (let r of auditedRows) {
+		let param = ruleTypeToParam[r.ruleType];
+		param && (groups.has(param) || groups.set(param, new Set()), groups.get(param).add(`${r.host}:${r.port}`));
+	}
+	if (groups.size === 0) return "";
+	let yaml = exampleStepHead(actionRepo, actionRef, step);
+	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
+	for (let [param, rules] of groups) {
+		yaml += `    ${param}: >-\n`;
+		for (let rule of rules) yaml += `      ${rule}\n`;
+	}
+	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
+}
+//#endregion
 //#region src/core/lib/report/render/verdict.ts
 function renderVerdict(report, extraItems = []) {
 	let unexpected = 0, expected = 0;
@@ -69175,7 +69173,7 @@ function renderVerdict(report, extraItems = []) {
 	return `> [!${caution.length ? "CAUTION" : "WARNING"}]\n> ${items}\n\n`;
 }
 //#endregion
-//#region src/core/lib/report/render/render-report-markdown.ts
+//#region src/core/lib/report/render/traffic-parts.ts
 const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
@@ -69206,27 +69204,6 @@ const trafficFrame = (text) => ({
 	text,
 	cut: "keep"
 });
-function stackTrafficBlocks(heading, parts) {
-	let blocks = [heading], wrote = !1;
-	for (let part of parts) {
-		let first = part.findIndex((b) => whole(b) !== "");
-		if (first === -1) {
-			blocks.push(...part);
-			continue;
-		}
-		let b = part[first], gapped = wrote ? b.open === void 0 ? {
-			...b,
-			text: `\n${b.text}`,
-			head: b.head === void 0 ? void 0 : b.head + 1
-		} : {
-			...b,
-			open: `\n${b.open}`
-		} : b;
-		blocks.push(...part.slice(0, first), gapped, ...part.slice(first + 1)), wrote = !0;
-	}
-	return blocks;
-}
-const whole = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
 	return top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), trafficFrame(top);
@@ -69268,7 +69245,7 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 		...step,
 		allowedIpRules: report.parameters.allowedIpRules,
 		allowedTlsRules: report.parameters.allowedTlsRules
-	}) : buildRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
+	}) : buildUniversalRestrictExample([...report.passed, ...report.failed], actionRepo, actionRef, step);
 	return [{
 		id: TRAFFIC_BLOCK.example,
 		priority: fit.priority,
@@ -69283,7 +69260,7 @@ function noCommunicationBlocks(report) {
 	return report.passed.length === 0 && report.blocked.length === 0 && report.failed.length === 0 && report.timeline.length === 0 ? [trafficFrame("_(no communication)_\n\n")] : [];
 }
 function communicationDetailsBlocks(report, fit, blockLabel, lineNote) {
-	let details = renderInspectDetailsBody(report.timeline, report.startedAt, blockLabel, lineNote);
+	let details = renderCommunicationDetailsBody(report.timeline, report.startedAt, blockLabel, lineNote);
 	return details ? [{
 		id: TRAFFIC_BLOCK.log,
 		priority: fit.priority,
@@ -69304,6 +69281,28 @@ function reportHeading(title, isAudit) {
 }
 function reportFooter(actionRepo) {
 	return `*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
+}
+//#endregion
+//#region src/core/lib/report/render/traffic-report.ts
+function stackTrafficBlocks(heading, parts) {
+	let blocks = [heading], wrote = !1;
+	for (let part of parts) {
+		let first = part.findIndex((b) => wholeBlock(b) !== "");
+		if (first === -1) {
+			blocks.push(...part);
+			continue;
+		}
+		let b = part[first], gapped = wrote ? b.open === void 0 ? {
+			...b,
+			text: `\n${b.text}`,
+			head: b.head === void 0 ? void 0 : b.head + 1
+		} : {
+			...b,
+			open: `\n${b.open}`
+		} : b;
+		blocks.push(...part.slice(0, first), gapped, ...part.slice(first + 1)), wrote = !0;
+	}
+	return blocks;
 }
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { TRAFFIC_BLOCK } from "#core/lib/report/render/render-report-markdown.ts";
+import { TRAFFIC_BLOCK } from "#core/lib/report/render/traffic-parts.ts";
 
 import { FILESYSTEM_BLOCK } from "./filesystem-audit/render.ts";
 import {

@@ -1,6 +1,6 @@
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { codeSpan } from "#core/lib/report/render/markdown-table.ts";
-import { reportHeading } from "#core/lib/report/render/render-report-markdown.ts";
+import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
 import { fmtSpan } from "./agg.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";

@@ -2,15 +2,15 @@ import { aggregate } from "#core/lib/log/aggregate.ts";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 import { toHostRow } from "#core/lib/report/build/aggregate.ts";
 import type { OutcomeEmission } from "#core/lib/report/outcome/annotate.ts";
+import type { BlockLabel } from "#core/lib/report/render/communication-details.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { renderHostTable } from "#core/lib/report/render/host-table.ts";
-import type { BlockLabel } from "#core/lib/report/render/inspect-details.ts";
 import { codeCell, markdownTable } from "#core/lib/report/render/markdown-table.ts";
 import {
   TRAFFIC_LEVEL,
   trafficTableBlock,
   type PartFit,
-} from "#core/lib/report/render/render-report-markdown.ts";
+} from "#core/lib/report/render/traffic-parts.ts";
 
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
