@@ -69229,7 +69229,7 @@ function renderReportBlocks(report, actionRepo, actionRef, priorities, { title =
 	if (blocks.push(...extra), wrote ||= extra.some((b) => b.text !== ""), report.passed.length > 0 && (blocks.push(trafficTableBlock(TRAFFIC_BLOCK.passed, priorities[TRAFFIC_BLOCK.passed], `${gap()}### ${heading}\n\n`, renderHostTable(report.passed), "\n")), wrote = !0), known.length > 0) {
 		let hosts = new Set(report.blocked.filter((r) => r.expected).map((r) => r.host)).size;
 		blocks.push({
-			...trafficTableBlock(TRAFFIC_BLOCK.known, priorities[TRAFFIC_BLOCK.known], `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts})</summary>\n\n`, renderHostTable(known, { showReason: !0 }), "\n"),
+			...trafficTableBlock(TRAFFIC_BLOCK.known, priorities[TRAFFIC_BLOCK.known], `${gap()}<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n`, renderHostTable(known, { showReason: !0 }), "\n"),
 			close: "\n</details>\n"
 		}), wrote = !0;
 	}
@@ -70303,11 +70303,11 @@ const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
 	[TRAFFIC_BLOCK.blocked]: 3,
 	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.known]: 5,
+	[TRAFFIC_BLOCK.known]: 7,
 	[TRAFFIC_BLOCK.log]: 8
 }, FILESYSTEM_PRIORITIES = {
-	[FILESYSTEM_BLOCK.executed]: 6,
-	[FILESYSTEM_BLOCK.paths]: 7,
+	[FILESYSTEM_BLOCK.executed]: 5,
+	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 9
 };
 //#endregion
