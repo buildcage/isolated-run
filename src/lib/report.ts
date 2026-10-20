@@ -17,15 +17,24 @@ import {
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
-  renderReportBlocks,
+  blockedHostsBlocks,
+  communicationDetailsBlocks,
+  engineNoteBlocks,
+  knownBlockedBlocks,
+  noCommunicationBlocks,
+  passedHostsBlocks,
   reportFooter,
   reportHeading,
+  restrictExampleBlocks,
+  stackTrafficBlocks,
+  TRAFFIC_BLOCK,
   trafficFrame,
+  trafficHeadingBlock,
   trafficNotice,
 } from "#core/lib/report/render/render-report-markdown.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
-import { withAwsTroubleshootingLink } from "./aws-report.ts";
+import { awsTroubleshootingBlocks } from "./aws-report.ts";
 import { rewriteRunnerFile } from "./sandbox/runner-output-files.ts";
 import { TRAFFIC_PRIORITIES, WOULD_BLOCK_PRIORITY } from "./summary-priorities.ts";
 import {
@@ -96,19 +105,30 @@ export function computeReportOutcomes(
   const wouldBlock = describeWouldBlock(report.timeline);
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = blockedKeys(report.timeline);
-  const rendered = renderReportBlocks(report, actionRepo, actionRef, TRAFFIC_PRIORITIES, {
-    title: reportTitle(stepLabel),
-    // The step closes its summary itself, after the process activity.
-    footer: false,
-    verdictItems: wouldBlockVerdictItems(report.timeline),
-    stepName: "Start isolated-run",
-    runCommand,
-    extraInputs,
-    actionVersion,
-    blockLabel: keyBlockLabel(keys),
-    extraBlocks: (gap) => wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY, gap),
-  });
-  const blocks = withAwsTroubleshootingLink(rendered, report, actionRepo, actionRef);
+  const p = TRAFFIC_PRIORITIES;
+  const heading = trafficHeadingBlock(
+    report,
+    reportTitle(stepLabel),
+    wouldBlockVerdictItems(report.timeline),
+  );
+  // What needs acting on first, then what got through, then the record. The
+  // step closes its summary itself, after the process activity.
+  const blocks = stackTrafficBlocks(heading, [
+    blockedHostsBlocks(report, p[TRAFFIC_BLOCK.blocked]),
+    wouldBlockTables(report.timeline, keys, WOULD_BLOCK_PRIORITY),
+    awsTroubleshootingBlocks(report, actionRepo, actionRef),
+    passedHostsBlocks(report, p[TRAFFIC_BLOCK.passed]),
+    knownBlockedBlocks(report, p[TRAFFIC_BLOCK.known]),
+    restrictExampleBlocks(report, actionRepo, actionRef, p[TRAFFIC_BLOCK.example], {
+      stepName: "Start isolated-run",
+      runCommand,
+      extraInputs,
+      actionVersion,
+    }),
+    noCommunicationBlocks(report),
+    communicationDetailsBlocks(report, p[TRAFFIC_BLOCK.log], keyBlockLabel(keys)),
+    engineNoteBlocks(report),
+  ]);
 
   return { blocks, emissions };
 }

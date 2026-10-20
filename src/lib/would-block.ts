@@ -130,17 +130,14 @@ export function describeWouldBlock(timeline: TrafficEvent[]): OutcomeEmission | 
  * key check would block in restrict. aws-key-not-allowed gets a table of its
  * own, one row per key whatever the host: every request a key not allowed
  * signs is blocked, and a row for each host would bury the other blocked
- * requests. The rest are counted by host and reason, as in Blocked Hosts. The
- * first block opens with `gap`, the blank line renderReportBlocks owes a block
- * before it.
+ * requests. The rest are counted by host and reason, as in Blocked Hosts.
  */
 export function wouldBlockTables(
   timeline: TrafficEvent[],
   keys: Map<string, BlockedKey>,
   priority: number,
-  gap: string,
 ): SummaryBlock[] {
-  const heading = `${gap}### ⚠️ Restrict Would Block\n\n`;
+  const heading = "### ⚠️ Restrict Would Block\n\n";
   const blocks: SummaryBlock[] = [];
   const audited = [...keys.values()].filter((key) => key.count > 0);
   if (audited.length > 0) {
