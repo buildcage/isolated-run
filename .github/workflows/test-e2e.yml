@@ -537,6 +537,17 @@ jobs:
           cat "$RUNNER_TEMP/rules-summary.md"
           grep -qF 'No access fell outside `expected_filesystem_rules`.' "$RUNNER_TEMP/rules-summary.md"
 
+      # As above, so the checks after a failed start below find no file of these steps.
+      - name: The post step removes the rules steps' files
+        if: matrix.enforcement
+        run: |
+          base="/var/tmp/buildcage-$(id -u)"
+          for rec in "$base"/filesystem-audit-*.jsonl; do
+            suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\.jsonl$/\1/p')
+            if [ -n "$suffix" ]; then STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs; fi
+          done
+          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+
       # Container/network/Compose-project namespacing holds under Actions' own
       # `parallel:` keyword; the direct-script counterpart is in
       # test-integration.yml.
