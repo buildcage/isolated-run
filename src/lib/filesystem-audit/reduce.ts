@@ -8,7 +8,7 @@
 
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { fmtFlags, newAgg, ruleFlags, type Access, type Agg } from "./agg.ts";
+import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
@@ -471,7 +471,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const log = byPath && rows(kept(details));
     const ruleRows = proposed?.finish()?.map(({ comm, path, agg }) => ({
       program: ranks[Number(comm)].shown,
-      flags: ruleFlags(agg),
+      flags: fmtFlags(agg),
       path: shown(path),
     }));
     return {

@@ -331,9 +331,10 @@ of **Unexpected Accesses** can be copied in:
 - **Program**: the file the process runs, as the table names it, with `*` for any program. A
   process that ran nothing goes by its own name, as the step's shell does as `bash`. Running a
   program counts as an access of the program that ran it: `bash X /usr/bin/curl`.
-- **Access**: the [flags](#flags), where each letter matches only the outcome it spells. `R` is a
-  read that succeeded, `r` a read that failed, `r!` a read that was refused. `R` alone does not take
-  a failed or refused read; write `Rr` or `Rr!` to expect those too.
+- **Access**: the [flags](#flags), read as the table reads them. `R` takes a read whether it
+  succeeded or failed, as a file that was missing matters less than one that was read; `r` takes
+  only a failed read. A refusal is never folded in: `r!` takes a refused read, and `R` and `r` do
+  not, so write `Rr!` to expect one beside the reads.
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`. `*` matches within one component of a path, and `**`, as a whole component, any
   number of them: `./dist/**` matches `./dist` and everything under it. Regular expressions are not
@@ -343,10 +344,9 @@ of **Unexpected Accesses** can be copied in:
 - A line starting with `#` is a comment, and a blank line is skipped. A `#` anywhere else is part
   of the field it is in, as a path may hold one.
 
-A rule names the outcomes it expects, so an access the rules expect to succeed is unexpected when it
-fails, and one that only ever failed is unexpected once it succeeds. The step fails before the
-command runs on a line that is not a rule, and when the rules are set without
-`filesystem_audit: record`.
+An access that only ever failed is unexpected once it succeeds, and one the sandbox refused is
+unexpected unless a rule names the refusal. The step fails before the command runs on a line that is
+not a rule, and when the rules are set without `filesystem_audit: record`.
 
 Rules match the accesses the accessed paths table counts: a library a program loads, the step's
 shell reading its script, a pipe or a socket, and a refused system call are left out. A program's

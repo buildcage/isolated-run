@@ -3,16 +3,13 @@ import { formatElapsedVariable } from "#core/lib/report/elapsed-time.ts";
 import { BIT, ORDER } from "./record.ts";
 
 // What the accesses folded into one line did: the actions that succeeded,
-// failed, were refused and failed otherwise, as bits, and the first and last access in epoch
+// failed and were refused, as bits, and the first and last access in epoch
 // milliseconds with the earliest one's place in the recording, which orders
 // the rows.
 export interface Agg {
   ok: number;
   failed: number;
   perm: number;
-  /** Failed for another reason than permission, which `failed` cannot tell
-   *  apart once the same action was also refused. */
-  plain: number;
   first: number;
   last: number;
   seq: number;
@@ -22,7 +19,6 @@ export const newAgg = (): Agg => ({
   ok: 0,
   failed: 0,
   perm: 0,
-  plain: 0,
   first: Infinity,
   last: -Infinity,
   seq: Infinity,
@@ -34,7 +30,6 @@ export function mergeAgg(dst: Agg, src: Agg): void {
   dst.ok |= src.ok;
   dst.failed |= src.failed;
   dst.perm |= src.perm;
-  dst.plain |= src.plain;
   dst.first = Math.min(dst.first, src.first);
   dst.last = Math.max(dst.last, src.last);
   dst.seq = Math.min(dst.seq, src.seq);
@@ -57,7 +52,6 @@ export function apply(a: Agg, x: Access): void {
   else {
     a.failed |= x.bit;
     if (x.perm) a.perm |= x.bit;
-    else a.plain |= x.bit;
   }
   if (Number.isNaN(x.t)) return;
   a.first = Math.min(a.first, x.t);
@@ -80,21 +74,6 @@ export function fmtFlags(a: Agg): string {
   for (const c of ORDER) {
     if (a.perm & BIT[c]) out += `${c.toLowerCase()}!`;
     else if (a.failed & ~a.ok & BIT[c]) out += c.toLowerCase();
-  }
-  return out;
-}
-
-/**
- * The flags as an expected_filesystem_rules rule takes them: every outcome
- * spelled out, a failure beside a success included, as a rule matches only
- * the outcomes it names.
- */
-export function ruleFlags(a: Agg): string {
-  let out = "";
-  for (const c of ORDER) if (a.ok & BIT[c]) out += c;
-  for (const c of ORDER) {
-    if (a.plain & BIT[c]) out += c.toLowerCase();
-    if (a.perm & BIT[c]) out += `${c.toLowerCase()}!`;
   }
   return out;
 }

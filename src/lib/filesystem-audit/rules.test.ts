@@ -176,7 +176,7 @@ describe("RuleMatcher", () => {
   const matcher = (text: string) => new RuleMatcher(parse(text).rules);
 
   it("takes an access by the first rule that names its program, path and outcome", () => {
-    const m = matcher("/bin/a R ./x\n* Rr ./**\n* r! /etc/**");
+    const m = matcher("/bin/a R ./x\n* R ./**\n* r! /etc/**");
     expect(m.match("/bin/a", "./x", BIT.R, false, false)).toStrictEqual({
       unmatched: 0,
       ref: "input:1",
@@ -195,10 +195,15 @@ describe("RuleMatcher", () => {
     });
   });
 
-  it("leaves an outcome no rule names unmatched", () => {
-    const m = matcher("* R /etc/**");
-    expect(m.match("/bin/a", "/etc/x", BIT.R, true, false)).toStrictEqual({ unmatched: BIT.R });
+  it("takes a failure by its action, but a success or a refusal only as written", () => {
+    const m = matcher("* R /etc/**\n* r ./x");
+    expect(m.match("/bin/a", "/etc/x", BIT.R, true, false)).toStrictEqual({
+      unmatched: 0,
+      ref: "input:1",
+    });
     expect(m.match("/bin/a", "/etc/x", BIT.R, true, true)).toStrictEqual({ unmatched: BIT.R });
+    expect(m.match("/bin/a", "./x", BIT.R, false, false)).toStrictEqual({ unmatched: BIT.R });
+    expect(m.match("/bin/a", "./x", BIT.R, true, true)).toStrictEqual({ unmatched: BIT.R });
     expect(m.match("/bin/a", "/etc/x", BIT.W, false, false)).toStrictEqual({ unmatched: BIT.W });
   });
 

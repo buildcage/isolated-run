@@ -1445,7 +1445,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
 
   it("marks each line with the rule that took it, or as unexpected", () => {
     const { lines, summary } = marked(
-      { rules: rulesOf("cat R ./a\n* Rr ./b") },
+      { rules: rulesOf("cat R ./a\n* R ./b") },
       { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
       { kind: "open", pid: 3, comm: "cat", path: "/work/b", access: "r", failed: true, err: 2 },
       { kind: "read", pid: 3, comm: "cat", path: "/work/c" },
@@ -1518,7 +1518,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     };
     const { lines, summary } = marked({ propose: true }, read, missing);
     expect(lines).toStrictEqual([JSON.stringify(read), JSON.stringify(missing)]);
-    expect(rows(summary)).toStrictEqual(["cat Rr ./a"]);
+    expect(rows(summary)).toStrictEqual(["cat R ./a"]);
     expect(summary).toMatchObject({ matched: 0, unexpected: 0 });
   });
 

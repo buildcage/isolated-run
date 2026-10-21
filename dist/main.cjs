@@ -70209,16 +70209,15 @@ const newAgg = () => ({
 	ok: 0,
 	failed: 0,
 	perm: 0,
-	plain: 0,
 	first: Infinity,
 	last: -Infinity,
 	seq: Infinity
 }), flagBits = (a) => a.ok | a.failed;
 function mergeAgg(dst, src) {
-	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.plain |= src.plain, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
+	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
 }
 function apply(a, x) {
-	x.failed ? (a.failed |= x.bit, x.perm ? a.perm |= x.bit : a.plain |= x.bit) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
+	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
 }
 function fmtSpan(a, originMs) {
 	if (a.first === Infinity) return "";
@@ -70229,12 +70228,6 @@ function fmtFlags(a) {
 	let out = "";
 	for (let c of ORDER) a.ok & BIT[c] && (out += c);
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
-	return out;
-}
-function ruleFlags(a) {
-	let out = "";
-	for (let c of ORDER) a.ok & BIT[c] && (out += c);
-	for (let c of ORDER) a.plain & BIT[c] && (out += c.toLowerCase()), a.perm & BIT[c] && (out += `${c.toLowerCase()}!`);
 	return out;
 }
 //#endregion
@@ -70448,7 +70441,7 @@ function readExpectedFilesystemRules(inline, configPath, filesystemAudit, readFi
 	}
 }
 function takes(rule, bit, failed, perm) {
-	return failed ? ((perm ? rule.perm : rule.failed) & bit) !== 0 : (rule.ok & bit) !== 0;
+	return failed ? ((perm ? rule.perm : rule.ok | rule.failed) & bit) !== 0 : (rule.ok & bit) !== 0;
 }
 var RuleMatcher = class {
 	cache = new Map();
@@ -71330,7 +71323,7 @@ function createAuditSummary(prefixes) {
 				}
 			})), log = byPath && rows(kept(details)), ruleRows = proposed?.finish()?.map(({ comm, path, agg }) => ({
 				program: ranks[Number(comm)].shown,
-				flags: ruleFlags(agg),
+				flags: fmtFlags(agg),
 				path: shown(path)
 			}));
 			return {

@@ -7,9 +7,9 @@
  * and is matched against the names they stand for: `./` the workspace, `~/`
  * $HOME, `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory.
  * `*` matches within one path component, `**` as a whole component any number
- * of them, and `*` alone as the program any program. The access letters match
- * only the outcome they spell: `R` a read that succeeded, `r` one that failed,
- * `r!` one that was refused.
+ * of them, and `*` alone as the program any program. The access letters are
+ * the summary's: `R` a read, failed or not, `r` one that failed, `r!` one that
+ * was refused, which `R` and `r` do not take.
  */
 
 import { readFileSync } from "node:fs";
@@ -255,7 +255,7 @@ export function readExpectedFilesystemRules(
 /** Whether `rule` takes an access of these bits with this outcome. */
 function takes(rule: ExpectedRule, bit: number, failed: boolean, perm: boolean): boolean {
   if (!failed) return (rule.ok & bit) !== 0;
-  return ((perm ? rule.perm : rule.failed) & bit) !== 0;
+  return ((perm ? rule.perm : rule.ok | rule.failed) & bit) !== 0;
 }
 
 // Past this many program and path pairs, the cache starts afresh.
