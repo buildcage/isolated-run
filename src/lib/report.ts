@@ -77,6 +77,8 @@ export interface ComputeReportOutcomesOptions {
   runCommand?: string;
   /** See ExampleStepOptions.extraInputs. */
   extraInputs?: string[];
+  /** The verdict's items from the rest of the step's summary; see renderVerdict. */
+  verdictItems?: string[];
   actionVersion?: string;
   failOnBlocked?: boolean;
   /** Whether a truncation notice can point to the traffic artifact. */
@@ -102,6 +104,7 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
     artifactAvailable,
+    verdictItems = [],
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
   const emissions = describeReportOutcomes(report, {
@@ -112,11 +115,10 @@ export function computeReportOutcomes(
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
-  const heading = trafficHeadingBlock(
-    report,
-    reportTitle(stepLabel),
-    wouldBlockVerdictItems(report.timeline),
-  );
+  const heading = trafficHeadingBlock(report, reportTitle(stepLabel), [
+    ...wouldBlockVerdictItems(report.timeline),
+    ...verdictItems,
+  ]);
   // What needs acting on first, then what got through, then the record. The
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [

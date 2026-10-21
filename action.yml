@@ -83,6 +83,13 @@ inputs:
     description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
     required: false
     default: ""
+  expected_filesystem_rules:
+    description: "Experimental. The file accesses the step is expected to make, one `<program> <access> <path>` rule per line; with them the summary lists only the accesses outside them. See docs/filesystem-audit.md#expected-accesses."
+    required: false
+    default: ""
+  fail_on_unexpected_file_access:
+    description: "Fail the step if an access fell outside expected_filesystem_rules. Default false."
+    required: false
   label:
     description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"
     required: false

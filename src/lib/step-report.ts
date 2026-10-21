@@ -78,6 +78,8 @@ export interface ReportStepOptions {
    * limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined, stepLabel: string | undefined) => SummaryBlock[];
+  /** The verdict's items from moreBlocks' part of the summary. */
+  verdictItems?: string[];
   /** The command's own summary already at the start of the file, moved
    *  after this action's part once that is written; see
    *  moveCommandSummaryLast. */
@@ -108,6 +110,7 @@ export async function reportStepTraffic(
     trafficArtifact,
     env,
     moreBlocks = () => [],
+    verdictItems,
     commandSummaryBytes = 0,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
@@ -169,6 +172,7 @@ export async function reportStepTraffic(
           stepLabel,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
+          verdictItems,
           commandBytes: commandSummaryBytes,
         },
         trafficArtifact.upload,

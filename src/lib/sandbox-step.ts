@@ -32,6 +32,7 @@ import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -40,6 +41,7 @@ import {
   readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFailOnUnexpectedFileAccess,
   readFilesystemAuditInput,
   readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
@@ -122,6 +124,8 @@ const realDeps = {
   readFilesystemInputs,
   readFilesystemAuditInput,
   readFilesystemAuditArtifactInputs,
+  readExpectedFilesystemRules,
+  readFailOnUnexpectedFileAccess,
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
@@ -273,6 +277,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
+  // Before config_file joins its rules to them, so each rule's line is known.
+  const inlineFilesystemRules = env[EXPECTED_RULES_ENV] ?? "";
   // Before any input is read: it rewrites what they all read.
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
   if (configFile?.warning) deps.warn(configFile.warning);
@@ -287,6 +293,12 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice);
   const filesystemAudit = deps.readFilesystemAuditInput();
   const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
+  const expectedFilesystemRules = deps.readExpectedFilesystemRules(
+    inlineFilesystemRules,
+    configFile?.path,
+    filesystemAudit,
+  );
+  const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
   // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -332,6 +344,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     writeThroughInput,
     filesystemAudit,
     filesystemAuditArtifact,
+    expectedFilesystemRules,
+    failOnUnexpectedFileAccess,
     failOnCaResidue,
     failOnBlocked,
     trafficArtifact,
@@ -493,6 +507,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     actionRepo,
     actionRef: reportActionRef,
     failClosed: proxyMode !== "audit" && failOnBlocked,
+    rules: inputs.expectedFilesystemRules,
+    failOnUnexpected: inputs.failOnUnexpectedFileAccess,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
   // upload takes a while, so a cancelled step writes the whole summary first
@@ -522,6 +538,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     trafficArtifact: inputs.trafficArtifact,
     env,
     moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
+    verdictItems: readAudit.verdictItems,
     commandSummaryBytes,
   });
   if (cancelled) await readAudit.upload();

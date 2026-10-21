@@ -57,7 +57,7 @@ function cleanupLeftoverAudit(
     removeFile = defaultRemoveFile,
   }: PostCleanupDeps,
 ): void {
-  const { outPath, pidFilePath, stepPath } = filesystemAuditPaths(
+  const { outPath, pidFilePath, stepPath, rulesPath } = filesystemAuditPaths(
     containerName,
     SANDBOX_SCRATCH_BASE,
   );
@@ -74,6 +74,7 @@ function cleanupLeftoverAudit(
   }
   removeFile(outPath);
   removeFile(stepPath);
+  removeFile(rulesPath);
 }
 
 /**

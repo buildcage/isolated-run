@@ -286,7 +286,7 @@ describe("planPostCleanup", () => {
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(killed).toStrictEqual([]);
-    expect(removedFiles).toStrictEqual([AUDIT.outPath, AUDIT.stepPath]);
+    expect(removedFiles).toStrictEqual([AUDIT.outPath, AUDIT.stepPath, AUDIT.rulesPath]);
   });
 
   it("warns but carries on when a pidfile holds no usable pid", () => {

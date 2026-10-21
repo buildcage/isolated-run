@@ -10,6 +10,7 @@ describe("filesystemAuditPaths", () => {
       outPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.jsonl",
       pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
       stepPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.step.jsonl",
+      rulesPath: "/var/tmp/buildcage-0/filesystem-audit-expected-rules-abcd1234.yml",
     });
   });
 });

@@ -6,7 +6,8 @@ import { fmtSpan } from "./agg.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import type { AuditSummary, Executed, PathRow, RefusedRow, Row } from "./reduce.ts";
+import type { AuditSummary, Executed, PathRow, RefusedRow, Row, RuleRow } from "./reduce.ts";
+import { EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
@@ -53,6 +54,7 @@ const DETAILS_CLOSE = "</details>\n";
 
 /** The ids renderAuditSummaryBlocks gives its blocks. */
 export const FILESYSTEM_BLOCK = {
+  unexpected: "filesystem-unexpected",
   executed: "filesystem-executed",
   paths: "filesystem-paths",
   log: "filesystem-log",
@@ -101,6 +103,10 @@ export interface RenderOptions {
   legendNote?: string;
   /** Where the skipped-hooks note links to. */
   skippedHooksUrl?: string;
+  /** Whether expected_filesystem_rules were given, which leaves only what they did not take. */
+  expected?: boolean;
+  /** The folded element on the proposed rules, before the closing line. */
+  rulesNote?: string;
 }
 
 // Each part sits a level below the one before it, so once one is cut the
@@ -223,11 +229,51 @@ function detailsBlock(
   };
 }
 
+// What expected_filesystem_rules did not take, as rules would spell it, or
+// why there is no table.
+function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): SummaryBlock {
+  const { proposed, matched } = summary;
+  const block = {
+    id: FILESYSTEM_BLOCK.unexpected,
+    priority: priorities[FILESYSTEM_BLOCK.unexpected],
+    level: 2,
+    section: SECTION,
+  };
+  const took = `<sub>${accesses(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+  if (!proposed)
+    return {
+      ...block,
+      cut: "atomic",
+      text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took,
+    };
+  if (proposed.length === 0)
+    return {
+      ...block,
+      cut: "atomic",
+      text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`,
+    };
+  const md = markdownRows(
+    ["Program", "Access", "Path"],
+    proposed.map((r: RuleRow) => [pathCell(r.program), r.flags, pathCell(r.path)]),
+  );
+  return {
+    ...block,
+    cut: "lines",
+    head: 6,
+    text: `### Unexpected Accesses (${proposed.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${took}`,
+  };
+}
+
+const accesses = (n: number): string =>
+  `${n.toLocaleString("en-US")} recorded ${n === 1 ? "access" : "accesses"}`;
+
 /**
  * The summary as blocks for fitStepSummary, in print order: a frame (heading
  * and notes) kept whole, the executed table, the accessed-paths table under
  * the flag legend, the full per-command record folded into a details element,
- * and the legend note, also kept whole.
+ * the proposed rules' note, and the legend note, also kept whole. With
+ * expected_filesystem_rules, only what they did not take takes the tables'
+ * place.
  */
 export function renderAuditSummaryBlocks(
   summary: AuditSummary,
@@ -252,14 +298,18 @@ export function renderAuditSummaryBlocks(
     return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
-  if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
-  const rows = paths && byProgramAndPath(paths);
-  // Empty when the step only ran programs, which the executed table lists.
-  if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
-  // The table's note stands for the details too. A step that only ran
-  // programs has no accessed paths table, so the details are the first to
-  // show flags.
-  if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
+  if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
+  else {
+    if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
+    const rows = paths && byProgramAndPath(paths);
+    // Empty when the step only ran programs, which the executed table lists.
+    if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
+    // The table's note stands for the details too. A step that only ran
+    // programs has no accessed paths table, so the details are the first to
+    // show flags.
+    if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
+  }
+  if (opts.rulesNote) blocks.push(frame(`\n${opts.rulesNote}`));
   // The blank line ends a </details> above, which would otherwise swallow it.
   if (opts.legendNote) blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`));
   return blocks;
@@ -279,7 +329,53 @@ export function unreadableSummaryBlocks(title: string): SummaryBlock[] {
 }
 
 /** The artifact the summary points the reader to, or why there is none. */
-export type RecordArtifact = { name: string } | "not-requested" | "upload-failed";
+export type RecordArtifact = { name: string; url?: string } | "not-requested" | "upload-failed";
+
+/** What became of the proposed rules file. */
+export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
+
+/**
+ * The folded note on the proposed rules: where the file is, or why there is
+ * none, and how to use one.
+ */
+export function rulesNote(
+  artifact: RecordArtifact,
+  rules: ProposedRules,
+  { fileName, guideUrl, given }: { fileName: string; guideUrl: string; given: boolean },
+): string {
+  const file = `\`${fileName}\``;
+  const holds = given
+    ? "the rules given, and one for each access they did not take"
+    : "a rule for each access this run made";
+  let where: string;
+  if (artifact === "not-requested")
+    where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`;
+  else if (artifact === "upload-failed")
+    where = `${file} was not kept, as the artifact could not be uploaded.`;
+  else if (rules === "too-many-paths")
+    where = "No rules were proposed: the accesses touched too many distinct paths.";
+  else if (rules === "write-failed") where = "The proposed rules could not be written.";
+  else if (rules === "none") where = "No rules were proposed, as no file access was recorded.";
+  else {
+    const name = artifact.url ? `[\`${artifact.name}\`](${artifact.url})` : `\`${artifact.name}\``;
+    where = `${file} in the ${name} artifact holds ${holds}.`;
+  }
+  return (
+    "<details>\n<summary>Expected filesystem rules</summary>\n\n" +
+    `${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file:\n\n` +
+    "```yaml\nconfig_file: ci/expected-filesystem-rules.yml\n```\n\n" +
+    "Or set the rules in the workflow:\n\n" +
+    "```yaml\n" +
+    "filesystem_audit: record\n" +
+    "upload_filesystem_audit_artifact: true\n" +
+    `${EXPECTED_RULES_INPUT}: |\n` +
+    "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
+    "  /usr/local/bin/node  R    ~/.npmrc\n" +
+    "```\n\n" +
+    `The summary then lists only the accesses outside them. [How to write the rules](${guideUrl})\n\n` +
+    "</details>\n"
+  );
+}
 
 /**
  * The legend's second line: what the path notations mean, where the full

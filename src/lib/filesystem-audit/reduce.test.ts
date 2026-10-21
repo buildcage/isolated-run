@@ -6,7 +6,13 @@ import {
   renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
 } from "../test/filesystem-audit.ts";
-import { createAuditSummary, reduceRecording, type SummaryOptions } from "./reduce.ts";
+import {
+  createAuditSummary,
+  reduceRecording,
+  type AuditSummary,
+  type SummaryOptions,
+} from "./reduce.ts";
+import { parseExpectedRules, RuleMatcher } from "./rules.ts";
 
 const BASE = "/var/tmp/buildcage-0";
 const OPTIONS = { workspace: ["/work"], home: ["/home/u"] };
@@ -1336,7 +1342,12 @@ describe("createAuditSummary: limits", () => {
     const blocks = renderFilesystemAuditBlocks(
       jsonl(...execs, ...tmpFiles(40)),
       PREFIXES,
-      { "filesystem-executed": 1, "filesystem-paths": 2, "filesystem-log": 3 },
+      {
+        "filesystem-unexpected": 1,
+        "filesystem-executed": 1,
+        "filesystem-paths": 2,
+        "filesystem-log": 3,
+      },
       () => "unused",
     );
     const md = fitStepSummary(
@@ -1411,5 +1422,155 @@ describe("createAuditSummary: limits", () => {
       { kind: "chmod", comm: "c", path: "/work/a/d" },
     );
     expect(lines(md)).toEqual(["RWA c ./a/**"]);
+  });
+});
+
+describe("createAuditSummary: expected_filesystem_rules", () => {
+  const rulesOf = (text: string) =>
+    new RuleMatcher(parseExpectedRules([{ text, origin: "input", firstLine: 1 }]).rules);
+
+  // The step's lines after buildcage's own, each with the mark it was written with.
+  function marked(options: Partial<SummaryOptions>, ...records: object[]) {
+    const out: string[] = [];
+    const { summary } = reduceRecording(
+      feed(machinery, shell, ...records.map((r) => JSON.stringify(r))),
+      BASE,
+      { ...OPTIONS, ...options },
+      () => (line) => out.push(line),
+    );
+    return { lines: out, summary: summary! };
+  }
+  const rows = (summary: AuditSummary) =>
+    summary.proposed?.map((r) => `${r.program.path} ${r.flags} ${r.path.path}`);
+
+  it("marks each line with the rule that took it, or as unexpected", () => {
+    const { lines, summary } = marked(
+      { rules: rulesOf("cat R ./a\n* Rr ./b") },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+      { kind: "open", pid: 3, comm: "cat", path: "/work/b", access: "r", failed: true, err: 2 },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/c" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "cat" },
+    );
+    expect(lines.map((l) => JSON.parse(l) as object)).toStrictEqual([
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a", rule: "input:1" },
+      {
+        kind: "open",
+        pid: 3,
+        comm: "cat",
+        path: "/work/b",
+        access: "r",
+        failed: true,
+        err: 2,
+        rule: "input:2",
+      },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/c", unexpected: true },
+      { kind: "fork", pid: 4, ppid: 3, comm: "cat" },
+    ]);
+    expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
+    expect(rows(summary)).toStrictEqual(["cat R ./c"]);
+  });
+
+  it("proposes only the actions no rule took", () => {
+    const { lines, summary } = marked(
+      { rules: rulesOf("* r ./a") },
+      { kind: "open", pid: 3, comm: "cat", path: "/work/a", access: "rw", failed: true, err: 13 },
+      { kind: "open", pid: 3, comm: "cat", path: "/work/a", access: "r", failed: true, err: 2 },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { unexpected?: boolean }).unexpected)).toStrictEqual([
+      true,
+      undefined,
+    ]);
+    expect(rows(summary)).toStrictEqual(["cat r!w! ./a"]);
+  });
+
+  it("expects a run of the program that ran it", () => {
+    const { summary } = marked(
+      { rules: rulesOf("bash X /usr/bin/curl") },
+      { kind: "fork", pid: 3, ppid: 2, comm: "run-script.sh" },
+      { kind: "exec", pid: 3, ppid: 2, comm: "curl", path: "/usr/bin/curl" },
+      { kind: "read", pid: 3, comm: "curl", path: "/etc/hosts" },
+      // A process of no name the recording knows of.
+      { kind: "exec", pid: 9, path: "/usr/bin/env" },
+    );
+    expect(rows(summary)).toStrictEqual([" X /usr/bin/env", "/usr/bin/curl R /etc/hosts"]);
+    expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
+  });
+
+  it("matches a memfd by its quoted name and a deleted file by its path", () => {
+    const { summary } = marked(
+      { rules: rulesOf('* W memfd:"m"\n* W ./gone') },
+      { kind: "write", pid: 3, comm: "node", path: "memfd:m", memfd: true },
+      { kind: "write", pid: 3, comm: "node", path: "/work/gone", deleted: true },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 0, proposed: [] });
+  });
+
+  it("proposes every access, unmarked, when there are no rules", () => {
+    const read = { kind: "read", pid: 3, comm: "cat", path: "/work/a" };
+    const missing = {
+      kind: "open",
+      pid: 3,
+      comm: "cat",
+      path: "/work/a",
+      access: "r",
+      failed: true,
+      err: 2,
+    };
+    const { lines, summary } = marked({ propose: true }, read, missing);
+    expect(lines).toStrictEqual([JSON.stringify(read), JSON.stringify(missing)]);
+    expect(rows(summary)).toStrictEqual(["cat Rr ./a"]);
+    expect(summary).toMatchObject({ matched: 0, unexpected: 0 });
+  });
+
+  it("proposes nothing unless asked to or given rules", () => {
+    const { summary } = marked({}, { kind: "read", pid: 3, comm: "cat", path: "/work/a" });
+    expect(summary.proposed).toBeUndefined();
+    expect(summary.proposedCut).toBeUndefined();
+  });
+
+  it("folds the proposals as the table does, but never loosens them", () => {
+    const write = (path: string) => ({ kind: "write", pid: 3, comm: "cat", path });
+    const { summary } = marked(
+      { propose: true, limits: { loose: 1 } },
+      ...["a", "b", "c"].map((f) => write(`/work/d/${f}`)),
+      ...["a", "b", "c", "e", "f"].map((f) => write(`/work/${f}`)),
+    );
+    expect(rows(summary)).toStrictEqual([
+      "cat W ./a",
+      "cat W ./b",
+      "cat W ./c",
+      "cat W ./d/**",
+      "cat W ./e",
+      "cat W ./f",
+    ]);
+  });
+
+  it("orders the proposals by program, then by path as the tables do", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "zz", path: "/etc/x" },
+      { kind: "read", pid: 3, comm: "zz", path: "/home/u/x" },
+      { kind: "read", pid: 3, comm: "zz", path: "/work/y" },
+      { kind: "read", pid: 3, comm: "zz", path: "/work/x" },
+      { kind: "read", pid: 4, comm: "aa", path: "/work/x" },
+    );
+    expect(rows(summary)).toStrictEqual([
+      "aa R ./x",
+      "zz R ./x",
+      "zz R ./y",
+      "zz R ~/x",
+      "zz R /etc/x",
+    ]);
+  });
+
+  it("gives the proposals up past the paths limit", () => {
+    const write = (path: string) => ({ kind: "write", pid: 3, comm: "cat", path });
+    const { summary } = marked(
+      { propose: true, limits: { nodes: 3 } },
+      write("/x/a/1"),
+      write("/x/b/1"),
+    );
+    expect(summary.proposed).toBeUndefined();
+    expect(summary.proposedCut).toBe(true);
   });
 });

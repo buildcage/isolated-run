@@ -15604,10 +15604,10 @@ function readRetentionDays(getInput) {
 		return Number(days);
 	}
 }
-function readTrafficArtifactInputs(getInput$11 = getInput) {
+function readTrafficArtifactInputs(getInput$12 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$11),
-		retentionDays: readRetentionDays(getInput$11)
+		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$12),
+		retentionDays: readRetentionDays(getInput$12)
 	};
 }
 const ENGINES = ["universal", "inspect"];
@@ -16447,12 +16447,12 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 //#endregion
 //#region src/core/lib/actions/rule-inputs.ts
 init_core();
-function readRuleInputs(getInput$10 = getInput) {
+function readRuleInputs(getInput$11 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$10("allowed_https_rules"),
-		httpRulesInput: getInput$10("allowed_http_rules"),
-		ipRulesInput: getInput$10("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$10("known_blocked_rules")), urlRulesInput = getInput$10("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$10("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$11("allowed_https_rules"),
+		httpRulesInput: getInput$11("allowed_http_rules"),
+		ipRulesInput: getInput$11("allowed_ip_rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$11("known_blocked_rules")), urlRulesInput = getInput$11("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$11("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -68625,10 +68625,19 @@ init_core();
 function filesystemAuditArtifactName(containerName) {
 	return artifactName("buildcage-filesystem-audit", containerName);
 }
-async function uploadFilesystemAuditArtifact(outPath, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact } = {}) {
+function artifactUrl(uploaded, env) {
+	let id = uploaded?.id, { GITHUB_SERVER_URL: server, GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: run } = env;
+	if (typeof id == "number" && server && repo && run) return `${server}/${repo}/actions/runs/${run}/artifacts/${id}`;
+}
+async function uploadFilesystemAuditArtifact(files, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, env = process.env } = {}) {
 	try {
-		let name = filesystemAuditArtifactName(containerName);
-		return await upload(name, [outPath], (0, node_path.dirname)(outPath), { retentionDays }), console.log(`Uploaded the filesystem audit as ${name}`), name;
+		let name = filesystemAuditArtifactName(containerName), uploaded = await upload(name, files, (0, node_path.dirname)(files[0]), { retentionDays });
+		console.log(`Uploaded the filesystem audit as ${name}`);
+		let url = artifactUrl(uploaded, env);
+		return url ? {
+			name,
+			url
+		} : { name };
 	} catch (e) {
 		annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
 		return;
@@ -70200,15 +70209,16 @@ const newAgg = () => ({
 	ok: 0,
 	failed: 0,
 	perm: 0,
+	plain: 0,
 	first: Infinity,
 	last: -Infinity,
 	seq: Infinity
 }), flagBits = (a) => a.ok | a.failed;
 function mergeAgg(dst, src) {
-	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
+	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.plain |= src.plain, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
 }
 function apply(a, x) {
-	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
+	x.failed ? (a.failed |= x.bit, x.perm ? a.perm |= x.bit : a.plain |= x.bit) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
 }
 function fmtSpan(a, originMs) {
 	if (a.first === Infinity) return "";
@@ -70219,6 +70229,12 @@ function fmtFlags(a) {
 	let out = "";
 	for (let c of ORDER) a.ok & BIT[c] && (out += c);
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
+	return out;
+}
+function ruleFlags(a) {
+	let out = "";
+	for (let c of ORDER) a.ok & BIT[c] && (out += c);
+	for (let c of ORDER) a.plain & BIT[c] && (out += c.toLowerCase()), a.perm & BIT[c] && (out += `${c.toLowerCase()}!`);
 	return out;
 }
 //#endregion
@@ -70302,6 +70318,181 @@ function markdownRows(header, rows) {
 	].join("\n");
 }
 //#endregion
+//#region src/lib/filesystem-audit/rules.ts
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalid = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES"), NAMED = {
+	n: "\n",
+	r: "\r",
+	t: "	",
+	"\\": "\\",
+	"\"": "\"",
+	"[": "[",
+	"]": "]"
+};
+function unescapeDisplay(text) {
+	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
+		if (cp !== void 0) {
+			let n = parseInt(cp, 16);
+			if (n <= 1114111) return String.fromCodePoint(n);
+		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
+		else if (NAMED[c] !== void 0) return NAMED[c];
+		return bad = !0, "";
+	});
+	return bad ? void 0 : out;
+}
+function fields(line, ref) {
+	let out = [], i = 0;
+	for (; i < line.length;) {
+		if (line[i] === " " || line[i] === "	") {
+			i++;
+			continue;
+		}
+		let raw;
+		if (line[i] === "\"") {
+			let end = i + 1;
+			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
+			if (end >= line.length) throw invalid(ref, "a quote is not closed");
+			if (raw = line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalid(ref, "a closing quote must end its field");
+		} else {
+			let end = line.slice(i).search(/[ \t]/);
+			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
+		}
+		let field = unescapeDisplay(raw);
+		if (field === void 0) throw invalid(ref, `${JSON.stringify(raw)} holds an unknown escape`);
+		out.push(field);
+	}
+	return out;
+}
+const SPECIAL = /[.+?^${}()|[\]\\]/g;
+function globPattern(glob) {
+	let out = "", i = 0;
+	for (; i < glob.length;) {
+		if (glob.startsWith("**", i)) {
+			let atStart = i === 0 || glob[i - 1] === "/", atEnd = i + 2 === glob.length;
+			if (atStart && atEnd) {
+				out = i === 0 ? "[\\s\\S]*" : `${out.slice(0, -1)}(?:/[\\s\\S]*)?`, i += 2;
+				continue;
+			}
+			if (atStart && glob[i + 2] === "/") {
+				out += "(?:[\\s\\S]*/)?", i += 3;
+				continue;
+			}
+		}
+		let c = glob[i];
+		if (c === "*") {
+			for (; glob[i] === "*";) i++;
+			out += "[^/]*";
+			continue;
+		}
+		out += c.replace(SPECIAL, "\\$&"), i++;
+	}
+	return RegExp(`^${out}$`);
+}
+const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+function accessBits(access) {
+	let bits = {
+		ok: 0,
+		failed: 0,
+		perm: 0
+	};
+	for (let i = 0; i < access.length; i++) {
+		let c = access[i], bit = BIT[c.toUpperCase()];
+		c === c.toUpperCase() ? bits.ok |= bit : access[i + 1] === "!" ? (bits.perm |= bit, i++) : bits.failed |= bit;
+	}
+	return bits;
+}
+function parseExpectedRules(sources) {
+	let rules = [], lines = [];
+	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
+		let line = raw.trim();
+		if (lines.push(line), line === "" || line.startsWith("#")) return;
+		let ref = `${origin}:${firstLine + n}`, parts = fields(line, ref);
+		if (parts.length !== 3) throw invalid(ref, `expected a program, an access and a path, got ${parts.length} fields`);
+		let [program, access, path] = parts;
+		if (!ACCESS.test(access)) throw invalid(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
+		rules.push({
+			ref,
+			program: program === "*" ? void 0 : globPattern(program),
+			path: globPattern(path),
+			...accessBits(access)
+		});
+	});
+	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
+	return {
+		rules,
+		lines
+	};
+}
+function ruleSources(inline, configText) {
+	let sources = [];
+	if (inline.trim() && sources.push({
+		text: inline,
+		origin: "input",
+		firstLine: 1
+	}), configText === void 0) return sources;
+	let lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(configText, { lineCounter });
+	if (!(0, import_dist$5.isMap)(doc.contents)) return sources;
+	let value = doc.contents.get(EXPECTED_RULES_INPUT, !0);
+	if (!(0, import_dist$5.isScalar)(value) || value.value == null || !String(value.value).trim()) return sources;
+	let at = lineCounter.linePos(value.range[0]).line, literal = value.type === import_dist$5.Scalar.BLOCK_LITERAL;
+	return sources.push({
+		text: String(value.value),
+		origin: "config",
+		firstLine: literal ? at + 1 : at
+	}), sources;
+}
+function readExpectedFilesystemRules(inline, configPath, filesystemAudit, readFile = (path) => (0, node_fs.readFileSync)(path, "utf8")) {
+	let rules = parseExpectedRules(ruleSources(inline, configPath === void 0 ? void 0 : readFile(configPath)));
+	if (rules.lines.length !== 0) {
+		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+		return rules;
+	}
+}
+function takes(rule, bit, failed, perm) {
+	return failed ? ((perm ? rule.perm : rule.failed) & bit) !== 0 : (rule.ok & bit) !== 0;
+}
+var RuleMatcher = class {
+	cache = new Map();
+	rules;
+	constructor(rules) {
+		this.rules = rules;
+	}
+	match(program, path, bits, failed, perm) {
+		let key = `${program}\0${path}`, candidates = this.cache.get(key);
+		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
+		let unmatched = 0, ref;
+		for (let c of ORDER) {
+			let bit = BIT[c];
+			if (!(bits & bit)) continue;
+			let rule = candidates.find((r) => takes(r, bit, failed, perm));
+			rule ? ref ??= rule.ref : unmatched |= bit;
+		}
+		return ref === void 0 ? { unmatched } : {
+			unmatched,
+			ref
+		};
+	}
+};
+const ruleField = (text) => text.includes(" ") || text.startsWith("#") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
+function expectedRulesFile(given, proposed) {
+	let rows = proposed.map((r) => [
+		ruleField(r.program.path),
+		r.flags,
+		ruleField(anyPid(r.path.path))
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
+		...given,
+		"",
+		"# Not matched in this run",
+		...added
+	];
+	if (lines.length !== 0) return [
+		"filesystem_audit: record",
+		"upload_filesystem_audit_artifact: true",
+		`${EXPECTED_RULES_INPUT}: |`,
+		...lines.map((line) => line ? `  ${line}` : ""),
+		""
+	].join("\n");
+}
+//#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function killedNote(rows) {
@@ -70316,6 +70507,7 @@ function skippedNote(count, url) {
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
 const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+	unexpected: "filesystem-unexpected",
 	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -70402,6 +70594,40 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
 	};
 }
+function unexpectedBlock(summary, { priorities }) {
+	let { proposed, matched } = summary, block = {
+		id: FILESYSTEM_BLOCK.unexpected,
+		priority: priorities[FILESYSTEM_BLOCK.unexpected],
+		level: 2,
+		section: SECTION
+	}, took = `<sub>${accesses(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+	if (!proposed) return {
+		...block,
+		cut: "atomic",
+		text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took
+	};
+	if (proposed.length === 0) return {
+		...block,
+		cut: "atomic",
+		text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`
+	};
+	let md = markdownRows([
+		"Program",
+		"Access",
+		"Path"
+	], proposed.map((r) => [
+		pathCell(r.program),
+		r.flags,
+		pathCell(r.path)
+	]));
+	return {
+		...block,
+		cut: "lines",
+		head: 6,
+		text: `### Unexpected Accesses (${proposed.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${took}`
+	};
+}
+const accesses = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "access" : "accesses"}`;
 function renderAuditSummaryBlocks(summary, opts) {
 	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, killed = killedNote(refused), top = [
 		heading(opts.title),
@@ -70417,9 +70643,13 @@ function renderAuditSummaryBlocks(summary, opts) {
 	});
 	if (details?.length === 0 && !refused.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
-	executed.length !== 0 && blocks.push(executedBlock(executed, opts));
-	let rows = paths && byProgramAndPath(paths);
-	return rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
+	else {
+		executed.length !== 0 && blocks.push(executedBlock(executed, opts));
+		let rows = paths && byProgramAndPath(paths);
+		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts));
+	}
+	return opts.rulesNote && blocks.push(frame(`\n${opts.rulesNote}`)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
 }
 function unreadableSummaryBlocks(title) {
 	return [{
@@ -70430,6 +70660,27 @@ function unreadableSummaryBlocks(title) {
 > artifact was uploaded.\n`,
 		cut: "keep"
 	}];
+}
+function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
+	let file = `\`${fileName}\``, holds = given ? "the rules given, and one for each access they did not take" : "a rule for each access this run made", where;
+	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `${file} was not kept, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in the ${artifact.url ? `[\`${artifact.name}\`](${artifact.url})` : `\`${artifact.name}\``} artifact holds ${holds}.`, `<details>
+<summary>Expected filesystem rules</summary>
+
+${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file:\n\n\`\`\`yaml
+config_file: ci/expected-filesystem-rules.yml
+\`\`\`
+
+Or set the rules in the workflow:
+
+\`\`\`yaml
+filesystem_audit: record
+upload_filesystem_audit_artifact: true
+${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
+  /usr/local/bin/node  R    ~/.npmrc
+\`\`\`
+
+The summary then lists only the accesses outside them. [How to write the rules](${guideUrl})\n\n</details>
+`;
 }
 function filesystemLegendNote(artifact, guideUrl) {
 	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the \`${artifact.name}\` artifact`} · [how to read this](${guideUrl})`;
@@ -70447,6 +70698,7 @@ const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.known]: 8,
 	[TRAFFIC_BLOCK.log]: 9
 }, FILESYSTEM_PRIORITIES = {
+	[FILESYSTEM_BLOCK.unexpected]: 6,
 	[FILESYSTEM_BLOCK.executed]: 6,
 	[FILESYSTEM_BLOCK.paths]: 7,
 	[FILESYSTEM_BLOCK.log]: 10
@@ -70462,7 +70714,7 @@ function summaryFooter(actionRepo) {
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable, verdictItems = [] }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
@@ -70470,7 +70722,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	wouldBlock && emissions.push(wouldBlock);
 	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
 	return {
-		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), wouldBlockVerdictItems(report.timeline)), [
+		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), [...wouldBlockVerdictItems(report.timeline), ...verdictItems]), [
 			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
 			wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
 				priority: 2,
@@ -70936,7 +71188,8 @@ function createAuditSummary(prefixes) {
 			ranks.push({
 				shown: s,
 				bytes,
-				...name ? {} : { program: key }
+				...name ? {} : { program: key },
+				ruleName: name ? key : ruleName(key)
 			});
 		}
 		return r;
@@ -70950,67 +71203,88 @@ function createAuditSummary(prefixes) {
 			key = `${r}/${c.text}`, commands.has(key) || commands.set(key, c), commandKeys.set(memo, key);
 		}
 		return key;
-	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
+	}, rules = prefixes.rules, proposed = prefixes.propose || rules ? new Lines({
+		fanout,
+		keep,
+		limit: Infinity,
+		loose: Infinity,
+		nodes: limits.nodes,
+		rowBytes: () => 0
+	}) : void 0, matched = 0, unexpected = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
-		if (counted) {
-			if (r.kind === "fork") {
-				programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
-				let runName = runNames.get(r.ppid);
-				runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
-			}
-			if (r.kind === "end") {
-				ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
-				return;
-			}
-			if (r.kind === "syscall") {
-				let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
-				if (!row) {
-					if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
-					let { text, field } = commands.get(comm);
-					row = {
-						agg: newAgg(),
-						flags: "!",
-						comm: text,
-						commField: field,
-						path,
-						syscall: {
-							name,
-							killed: !!r.killed
-						}
-					}, refused.set(key, row), r.killed || refusedNames.add(name);
-				}
-				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
-				return;
-			}
-			if (r.kind === "exec" && r.path) {
-				let p = normalize$2(marked(r, canonical(r.path, prefixes)));
-				programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
-				let runs = executed.get(p);
-				runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
-			} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
-			if (!isLibraryMap(r)) for (let c of classify(r)) {
-				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
-				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
-				let t = Date.parse(r.t ?? ""), x = {
-					comm: commandKey(r.pid, r.comm ?? ""),
-					path: normalize$2(path),
-					bit: bitsOf(c.letter),
-					failed: c.failed,
-					perm: c.perm,
-					t,
-					seq: Number.isNaN(t) ? Infinity : seq++
-				}, parts = components(x.path);
-				details.add(x, parts);
-				let program = programOf(r.pid, r.comm ?? "");
-				paths.add({
-					...x,
-					comm: String(program),
-					bit: x.bit & ~BIT.X
-				}, parts);
-			}
+		if (!counted) return;
+		if (r.kind === "fork") {
+			programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+			let runName = runNames.get(r.ppid);
+			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
 		}
-	}, shown = (path) => {
+		if (r.kind === "end") {
+			ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
+			return;
+		}
+		if (r.kind === "syscall") {
+			let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+			if (!row) {
+				if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
+				let { text, field } = commands.get(comm);
+				row = {
+					agg: newAgg(),
+					flags: "!",
+					comm: text,
+					commField: field,
+					path,
+					syscall: {
+						name,
+						killed: !!r.killed
+					}
+				}, refused.set(key, row), r.killed || refusedNames.add(name);
+			}
+			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
+			return;
+		}
+		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0;
+		if (r.kind === "exec" && r.path) {
+			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
+			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
+			let runs = executed.get(p);
+			runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
+		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
+		if (isLibraryMap(r)) return;
+		let mark;
+		for (let c of classify(r)) {
+			let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
+			if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+			let t = Date.parse(r.t ?? ""), x = {
+				comm: commandKey(r.pid, r.comm ?? ""),
+				path: normalize$2(path),
+				bit: bitsOf(c.letter),
+				failed: c.failed,
+				perm: c.perm,
+				t,
+				seq: Number.isNaN(t) ? Infinity : seq++
+			}, parts = components(x.path);
+			details.add(x, parts);
+			let program = programOf(r.pid, r.comm ?? "");
+			if (paths.add({
+				...x,
+				comm: String(program),
+				bit: x.bit & ~BIT.X
+			}, parts), !proposed) continue;
+			let by = runBy ?? program, bit = x.bit;
+			if (rules) {
+				let m = rules.match(ranks[by].ruleName, ruleName(x.path), bit, x.failed, x.perm);
+				bit = m.unmatched, bit ? mark = { unexpected: !0 } : mark ??= { rule: m.ref };
+			}
+			proposed.add({
+				...x,
+				comm: String(by),
+				bit
+			}, parts);
+		}
+		return mark && "rule" in mark ? matched++ : mark && unexpected++, mark;
+	};
+	function shown(path) {
 		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
 		if (path.startsWith(MEMFD)) {
 			let name = escapeForDisplay(path.slice(MEMFD.length));
@@ -71023,7 +71297,11 @@ function createAuditSummary(prefixes) {
 			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
 			deleted: !0
 		} : { path: escapeForDisplay(relativize(path, prefixes)) };
-	}, rows = (lines) => lines?.map(({ comm, path, agg }) => {
+	}
+	function ruleName(path) {
+		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), prefixes);
+	}
+	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
 		return {
 			agg,
@@ -71050,7 +71328,11 @@ function createAuditSummary(prefixes) {
 					...ranks[Number(comm)].shown,
 					rank: Number(comm)
 				}
-			})), log = byPath && rows(kept(details));
+			})), log = byPath && rows(kept(details)), ruleRows = proposed?.finish()?.map(({ comm, path, agg }) => ({
+				program: ranks[Number(comm)].shown,
+				flags: ruleFlags(agg),
+				path: shown(path)
+			}));
 			return {
 				ended,
 				lost,
@@ -71063,10 +71345,21 @@ function createAuditSummary(prefixes) {
 				details: log,
 				refused: [...refused.values()],
 				pathsCut: paths.cut,
-				detailsCut: details.cut
+				detailsCut: details.cut,
+				...ruleRows && { proposed: byProgramThenPath(ruleRows) },
+				...proposed?.stopped && { proposedCut: !0 },
+				matched,
+				unexpected
 			};
 		}
 	};
+}
+function byProgramThenPath(rows) {
+	let cmp = (a, b) => a < b ? -1 : +(a > b);
+	return rows.map((row) => ({
+		row,
+		key: sortKey(row.path.path)
+	})).sort((a, b) => cmp(a.row.program.path, b.row.program.path) || a.key[0] - b.key[0] || cmp(a.key[1], b.key[1])).map((k) => k.row);
 }
 function firstPassNeeds(line) {
 	let at = line.indexOf("\"kind\":\"");
@@ -71074,12 +71367,17 @@ function firstPassNeeds(line) {
 	let kind = at + 8;
 	return line.startsWith("exec\"", kind) || line.startsWith("fork\"", kind) || line.startsWith("mmap\"", kind);
 }
+function withMark(line, mark) {
+	let field = "rule" in mark ? `"rule":${JSON.stringify(mark.rule)}` : "\"unexpected\":true";
+	return `${line.slice(0, -1)},${field}}`;
+}
 function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
 	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
 		if (!failedSummary) try {
-			step();
+			return step();
 		} catch (e) {
 			[failedSummary, summaryError] = [!0, e];
+			return;
 		}
 	}, lines = 0, length = 0;
 	forEachLine((line) => {
@@ -71092,8 +71390,8 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 		again++, lengthAgain += line.length;
 		let r = parseLine(line);
 		isRecord(r) && r.kind === "end" && (ended = !0);
-		let kept = stripper.filter(line, r);
-		summarize(() => summary.add(kept ? kept.record : r, kept !== void 0)), kept && sink?.(kept.line);
+		let kept = stripper.filter(line, r), mark = summarize(() => summary.add(kept ? kept.record : r, kept !== void 0));
+		kept && sink?.(mark ? withMark(kept.line, mark) : kept.line);
 	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
 	let result;
 	return summarize(() => result = summary.finish()), {
@@ -71147,7 +71445,8 @@ const realDeps$3 = {
 	renderBlocks: renderAuditSummaryBlocks,
 	uploadArtifact: uploadFilesystemAuditArtifact,
 	setOutput: setFilesystemAuditOutput,
-	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content)
+	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content),
+	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content, { flag: "wx" })
 };
 function prefixes(value, realpath) {
 	if (!value) return [];
@@ -71167,7 +71466,7 @@ function runnerFiles(env, mediated, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] };
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed, rules, failOnUnexpected = !1 }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -71179,6 +71478,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		}
 	}, settled = (result) => ({
 		expected: "not-requested",
+		verdictItems: [],
 		upload: async () => (setOutput(""), "not-requested"),
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE))
 	});
@@ -71186,7 +71486,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	let options = {
 		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 		home: prefixes(env.HOME, deps.realpath),
-		runnerFiles: runnerFiles(env, mediated, deps.realpath)
+		runnerFiles: runnerFiles(env, mediated, deps.realpath),
+		...rules && { rules: new RuleMatcher(rules.rules) },
+		propose: upload
 	}, cleanPath = audit.stepPath, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
@@ -71196,17 +71498,18 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
 	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
-	let artifactOf = (name) => upload ? name ? { name } : "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps) : "none", verdictItems = rules ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
-		expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
+		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
+		verdictItems,
 		upload: async () => {
-			let artifactName = "";
+			let uploaded;
 			try {
-				written && (artifactName = await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation) ?? "");
+				written && (uploaded = await deps.uploadArtifact(proposed === "written" ? [cleanPath, audit.rulesPath] : [cleanPath], containerName, retentionDays, annotation));
 			} catch (e) {
 				annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
 			}
-			return setOutput(artifactName), artifactOf(artifactName);
+			return setOutput(uploaded?.name ?? ""), artifactOf(uploaded);
 		},
 		blocks: (startedAt, artifact, stepLabel) => {
 			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
@@ -71218,7 +71521,13 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					priorities: FILESYSTEM_PRIORITIES,
 					cutNote,
 					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
-					skippedHooksUrl: `${guide}#skipped-hooks`
+					skippedHooksUrl: `${guide}#skipped-hooks`,
+					expected: rules !== void 0,
+					rulesNote: rulesNote(artifact, proposed, {
+						fileName: (0, node_path.basename)(audit.rulesPath),
+						guideUrl: `${guide}#expected-accesses`,
+						given: rules !== void 0
+					})
 				});
 			} catch (e) {
 				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
@@ -71228,6 +71537,22 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 			return withNotices(rendered, () => notice);
 		}
 	};
+}
+function writeProposedRules(summary, rules, path, annotation, deps) {
+	if (!summary) return "write-failed";
+	if (summary.proposedCut) return "too-many-paths";
+	let file = expectedRulesFile(rules?.lines ?? [], summary.proposed);
+	if (file === void 0) return "none";
+	try {
+		return deps.writeFile(path, file), "written";
+	} catch (e) {
+		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
+	}
+}
+function reportUnexpected(summary, failOnUnexpected, annotation) {
+	if (!summary?.unexpected) return [];
+	let n = summary.proposed?.length ?? summary.unexpected, what = `${n} unexpected file ${n === 1 ? "access" : "accesses"}`, message = n === 1 ? `1 file access fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists it.` : `${n} file accesses fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists them.`;
+	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1) : annotation.warning(message), [what];
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
 	let writer, written = !1, dropCopy = (e) => {
@@ -71298,7 +71623,8 @@ const LIST_INPUTS = [
 	"allowed_url_rules",
 	"allowed_tls_rules",
 	"known_blocked_rules",
-	"write_through"
+	"write_through",
+	"expected_filesystem_rules"
 ], ACTION_INPUTS = [
 	"run",
 	"config_file",
@@ -71316,6 +71642,7 @@ const LIST_INPUTS = [
 	"filesystem_audit",
 	"upload_filesystem_audit_artifact",
 	"filesystem_audit_retention_days",
+	"fail_on_unexpected_file_access",
 	"label"
 ], NOT_IN_CONFIG_FILE = [
 	"run",
@@ -71329,60 +71656,63 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$5 = getInput) {
-	let runInput = getInput$5("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$7 = getInput) {
+	let runInput = getInput$7("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$4 = getInput) {
+function readProxyInputs(getInput$8 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$4("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$4("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
+		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$3("write_through"),
+			writable: getInput$3("writable"),
+			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$7 = getInput) {
-	return resolveFilesystemAudit(getInput$7("filesystem_audit"));
+function readFilesystemAuditInput(getInput$2 = getInput) {
+	return resolveFilesystemAudit(getInput$2("filesystem_audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$1 = getInput) {
-	let days = getInput$1("filesystem_audit_retention_days");
+function readFilesystemAuditArtifactInputs(getInput$4 = getInput) {
+	let days = getInput$4("filesystem_audit_retention_days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$1),
+		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$4),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$2 = getInput) {
-	return getInput$2("label") || void 0;
+function readStepLabel(getInput$5 = getInput) {
+	return getInput$5("label") || void 0;
 }
-function readFailOnCaResidue(getInput$6 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$6);
+function readFailOnCaResidue(getInput$1 = getInput) {
+	return readBooleanInput("fail_on_ca_residue", !0, getInput$1);
 }
-function readFailOnBlocked(getInput$9 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$9);
+function readFailOnBlocked(getInput$6 = getInput) {
+	return readBooleanInput("fail_on_blocked", !0, getInput$6);
+}
+function readFailOnUnexpectedFileAccess(getInput$9 = getInput) {
+	return readBooleanInput("fail_on_unexpected_file_access", !1, getInput$9);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$3 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$10 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$3("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$10("allowed_aws_role_accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$3);
+	let check = readBooleanInput("aws_key_check", !1, getInput$10);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
@@ -71954,7 +72284,8 @@ function filesystemAuditPaths(containerName, scratchBase) {
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
+		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
+		rulesPath: (0, node_path.join)(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`)
 	};
 }
 function readPid(readFile, pidFilePath) {
@@ -74619,7 +74950,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], commandSummaryBytes = 0 }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -74645,6 +74976,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			stepLabel,
 			failOnBlocked,
 			extraBlocks: [...rest, ...footer],
+			verdictItems,
 			commandBytes: commandSummaryBytes
 		}, trafficArtifact.upload, env);
 	} catch (e) {
@@ -74708,6 +75040,8 @@ const realDeps = {
 	readFilesystemInputs,
 	readFilesystemAuditInput,
 	readFilesystemAuditArtifactInputs,
+	readExpectedFilesystemRules,
+	readFailOnUnexpectedFileAccess,
 	readRuleInputs,
 	readFailOnCaResidue,
 	readFailOnBlocked,
@@ -74790,11 +75124,11 @@ function writeBackMediatedFile(file, annotation, deps) {
 	};
 }
 function readStepInputs(env, deps) {
-	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", inlineFilesystemRules = env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), expectedFilesystemRules = deps.readExpectedFilesystemRules(inlineFilesystemRules, configFile?.path, filesystemAudit), failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change.");
@@ -74819,6 +75153,8 @@ function readStepInputs(env, deps) {
 		writeThroughInput,
 		filesystemAudit,
 		filesystemAuditArtifact,
+		expectedFilesystemRules,
+		failOnUnexpectedFileAccess,
 		failOnCaResidue,
 		failOnBlocked,
 		trafficArtifact,
@@ -74886,7 +75222,9 @@ async function finalizeStep(run, deps) {
 		mediated: mediation?.files.map((f) => f.variable) ?? [],
 		actionRepo,
 		actionRef: reportActionRef,
-		failClosed: proxyMode !== "audit" && failOnBlocked
+		failClosed: proxyMode !== "audit" && failOnBlocked,
+		rules: inputs.expectedFilesystemRules,
+		failOnUnexpected: inputs.failOnUnexpectedFileAccess
 	}), artifact = cancelled ? readAudit.expected : await readAudit.upload();
 	return await deps.reportStepTraffic({
 		containerName,
@@ -74909,6 +75247,7 @@ async function finalizeStep(run, deps) {
 		trafficArtifact: inputs.trafficArtifact,
 		env,
 		moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
+		verdictItems: readAudit.verdictItems,
 		commandSummaryBytes
 	}), cancelled && await readAudit.upload(), runnerFileFailed;
 }

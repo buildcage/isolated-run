@@ -33,6 +33,8 @@ const mocks = {
   readFilesystemInputs: vi.fn(),
   readFilesystemAuditInput: vi.fn(),
   readFilesystemAuditArtifactInputs: vi.fn(),
+  readExpectedFilesystemRules: vi.fn(),
+  readFailOnUnexpectedFileAccess: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
@@ -126,6 +128,8 @@ beforeEach(() => {
   });
   mocks.readFilesystemAuditInput.mockReturnValue("off");
   mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload: false });
+  mocks.readExpectedFilesystemRules.mockReturnValue(undefined);
+  mocks.readFailOnUnexpectedFileAccess.mockReturnValue(false);
   mocks.readRuleInputs.mockReturnValue({
     httpsRules: ["example.com:443"],
     httpRules: [],
@@ -315,7 +319,27 @@ describe("runSandboxStep", () => {
     });
   });
 
+  it("reads expected_filesystem_rules as the workflow set them, before config_file joined its own", async () => {
+    mocks.applyConfigFile.mockImplementation((env: NodeJS.ProcessEnv) => {
+      env.INPUT_EXPECTED_FILESYSTEM_RULES = "* R ./a\n* R ./b";
+      return { path: "/w/c.yml" };
+    });
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep({ ...ENV, INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a" }, deps);
+
+    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("* R ./a", "/w/c.yml", "record");
+  });
+
+  it("reads no inline expected_filesystem_rules when the workflow set none", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("", undefined, "off");
+  });
+
   it.each([
+    "readExpectedFilesystemRules",
+    "readFailOnUnexpectedFileAccess",
     "readFailOnCaResidue",
     "readFailOnBlocked",
     "readTrafficArtifactInputs",

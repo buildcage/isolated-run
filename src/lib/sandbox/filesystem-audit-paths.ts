@@ -8,6 +8,8 @@ export interface FilesystemAuditPaths {
   pidFilePath: string;
   /** The recording with buildcage's own records stripped, as uploaded. */
   stepPath: string;
+  /** The proposed expected_filesystem_rules, uploaded beside it. */
+  rulesPath: string;
 }
 
 export function filesystemAuditPaths(
@@ -19,6 +21,7 @@ export function filesystemAuditPaths(
     outPath: join(scratchBase, `filesystem-audit-${suffix}.jsonl`),
     pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
     stepPath: join(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
+    rulesPath: join(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`),
   };
 }
 

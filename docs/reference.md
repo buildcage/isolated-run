@@ -41,13 +41,16 @@ details.
 | `filesystem_audit`                 | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                                       |
 | `upload_filesystem_audit_artifact` | `false`      | Upload the filesystem audit's full record as an artifact (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                     |
 | `filesystem_audit_retention_days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
+| `expected_filesystem_rules`        | empty        | The file accesses the step is expected to make (**experimental**); the summary then lists only those outside them. Requires `filesystem_audit: record`. See [Filesystem audit](#filesystem-audit).                                                                          |
+| `fail_on_unexpected_file_access`   | `false`      | Fail the step when an access fell outside `expected_filesystem_rules`                                                                                                                                                                                                       |
 | `writable`                         | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                                                                                   |
 | `label`                            | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                                                              |
 | `upload_traffic_artifact`          | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                                                                  |
 | `traffic_artifact_retention_days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
 
 `fail_on_blocked`, `fail_on_ca_residue`, `upload_traffic_artifact`,
-`upload_filesystem_audit_artifact` and `aws_key_check` take `true` or `false`, `filesystem_mode`
+`upload_filesystem_audit_artifact`, `fail_on_unexpected_file_access` and `aws_key_check` take
+`true` or `false`, `filesystem_mode`
 `persistent` or `ephemeral`, `filesystem_audit` `off` or `record`, and
 `traffic_artifact_retention_days` and `filesystem_audit_retention_days` a whole number above zero.
 Left empty, each takes its default; any other value fails the step before the sandbox is set up.
@@ -98,8 +101,8 @@ known_blocked_rules: |
 
 - Each key is an input name and each value is written as it would be under `with:`. A key that is
   not an input, `writable` (use `write_through`), a list or a nested mapping fails the step.
-- An input the workflow sets wins over the file. The rule inputs and `write_through` are the
-  exception: the file's lines are added to the workflow's.
+- An input the workflow sets wins over the file. The rule inputs, `expected_filesystem_rules`
+  among them, and `write_through` are the exception: the file's lines are added to the workflow's.
 - The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
   repository has to be checked out by an earlier step.
 - `config_file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
@@ -794,6 +797,13 @@ short form.
   named `buildcage-filesystem-audit-<id>`, whose name the `filesystem_audit_artifact_name` output
   carries; `filesystem_audit_retention_days` sets how long it is kept. It leaves out each program's
   arguments but holds every path the step touched; treat it as sensitive.
+- `expected_filesystem_rules` lists the accesses the step is expected to make, one
+  `<program> <access> <path>` rule per line, and is combined with a config file's as the other rule
+  inputs are. With it, the section lists only the accesses outside the rules, the verdict counts
+  them, and a warning names them; `fail_on_unexpected_file_access: true` fails the step instead.
+  The artifact marks each line with the rule that took it or as unexpected, and holds
+  `filesystem-audit-expected-rules-<id>.yml`, a config file of proposed rules. See
+  [Expected accesses](./filesystem-audit.md#expected-accesses).
 
 ## CA trust variables
 

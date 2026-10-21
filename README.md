@@ -510,6 +510,11 @@ kills the thread that made it, and while the step runs every system call on the 
 included, costs a little more. See [Filesystem audit](./docs/filesystem-audit.md)
 for how to use and read it.
 
+Once a step's accesses are known, `expected_filesystem_rules` lists them, one
+`<program> <access> <path>` rule per line, and the section then shows only the accesses outside
+them. Each uploaded artifact holds a proposed set to start from; see
+[Expected accesses](./docs/filesystem-audit.md#expected-accesses).
+
 ## How it works
 
 <img src="assets/diagram-overview.png" alt="How Buildcage restricts what a run: step can reach" width="1000">
