@@ -32,7 +32,7 @@ import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
-import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules.ts";
+import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,

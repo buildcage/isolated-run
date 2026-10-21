@@ -30,6 +30,7 @@ import {
   type Shown,
 } from "./paths.ts";
 import { BIT, bitsOf, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
+import { RuleTally, type RuleMark } from "./rule-tally.ts";
 import type { RuleMatcher } from "./rules.ts";
 import { createStripper } from "./strip.ts";
 
@@ -105,9 +106,6 @@ export interface RuleRow {
   flags: string;
   path: Shown;
 }
-
-/** Where a line of the recording stands against expected_filesystem_rules. */
-export type RuleMark = { rule: string } | { unexpected: true };
 
 /** A refused syscall's row: its name and whether it killed the program. */
 export interface RefusedRow extends Row {
@@ -286,20 +284,21 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   };
   // What no rule takes, by program and path, folded as the accessed paths
   // are but never loosened nor cut for size.
-  const rules = prefixes.rules;
-  const proposed =
-    prefixes.propose || rules
-      ? new Lines({
-          fanout,
-          keep,
-          limit: Infinity,
-          loose: Infinity,
-          nodes: limits.nodes,
-          rowBytes: () => 0,
-        })
+  const tally =
+    prefixes.propose || prefixes.rules
+      ? new RuleTally(
+          prefixes.rules,
+          new Lines({
+            fanout,
+            keep,
+            limit: Infinity,
+            loose: Infinity,
+            nodes: limits.nodes,
+            rowBytes: () => 0,
+          }),
+          { program: (rank) => ranks[rank].ruleName, path: ruleName },
+        )
       : undefined;
-  let matched = 0;
-  let unexpected = 0;
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -375,7 +374,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       runNames.delete(r.pid);
     }
     if (isLibraryMap(r)) return undefined;
-    let mark: RuleMark | undefined;
     for (const c of classify(r)) {
       // Marked after, so a runner file deleted while open still keys by name.
       const own = canonical(c.path, prefixes);
@@ -409,20 +407,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (!proposed) continue;
-      const by = runBy ?? program;
-      let bit = x.bit;
-      if (rules) {
-        const m = rules.match(ranks[by].ruleName, ruleName(x.path), bit, x.failed, x.perm);
-        bit = m.unmatched;
-        if (bit) mark = { unexpected: true };
-        else mark ??= { rule: m.ref! };
-      }
-      proposed.add({ ...x, comm: String(by), bit }, parts);
+      tally?.take(x, parts, runBy ?? program);
     }
-    if (mark && "rule" in mark) matched++;
-    else if (mark) unexpected++;
-    return mark;
+    return tally?.endLine();
   };
 
   // A memfd shows its name quoted, as one its creator chose; a deleted file
@@ -469,8 +456,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
-    const ruleRows = proposed?.finish()?.map(({ comm, path, agg }) => ({
-      program: ranks[Number(comm)].shown,
+    const ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
+      program: ranks[rank].shown,
       flags: fmtFlags(agg),
       path: shown(path),
     }));
@@ -485,9 +472,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       pathsCut: paths.cut,
       detailsCut: details.cut,
       ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),
-      ...(proposed?.stopped && { proposedCut: true }),
-      matched,
-      unexpected,
+      ...(tally?.givenUp && { proposedCut: true }),
+      matched: tally?.matched ?? 0,
+      unexpected: tally?.unexpected ?? 0,
     };
   };
   return { observe, add, finish };

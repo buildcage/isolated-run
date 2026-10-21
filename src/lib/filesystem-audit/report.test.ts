@@ -1067,6 +1067,18 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     JSON.stringify({ kind: "end", dropped: 0, untracked: 0 }),
   ].join("\n");
 
+  it("counts the table's rows for the verdict and the warning", () => {
+    const note = annotation();
+    const { deps: d } = deps({ raw });
+
+    const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
+
+    expect(read.verdictItems).toStrictEqual(["2 unexpected file accesses"]);
+    expect(note.warning).toHaveBeenCalledWith(
+      "2 file accesses fell outside expected_filesystem_rules; the Unexpected Accesses table lists them.",
+    );
+  });
+
   it("lists only what the rules did not take, warns of it, and counts it for the verdict", async () => {
     const note = annotation();
     const { deps: d, uploads, ruleFiles, writes } = deps({ raw });
@@ -1160,7 +1172,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(ruleFiles[0].content).toContain("expected_filesystem_rules: |\n  node RW ./*\n");
   });
 
-  it("counts the unexpected lines when their paths were too many to list", async () => {
+  it("counts no unexpected access when their paths were too many to list", async () => {
     const note = annotation();
     const {
       deps: d,
@@ -1177,9 +1189,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
     summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
 
-    expect(read.verdictItems).toStrictEqual(["2 unexpected file accesses"]);
+    expect(read.verdictItems).toStrictEqual(["unexpected file accesses (too many to list)"]);
     expect(note.warning).toHaveBeenCalledWith(
-      "2 file accesses fell outside expected_filesystem_rules; the Unexpected Accesses table lists them.",
+      "File accesses fell outside expected_filesystem_rules on too many distinct paths to list.",
     );
     expect(summaries[0]).toContain(
       "_The accesses outside the rules touched too many distinct paths to list._",

@@ -1,52 +1,11 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 import { SandboxError } from "../errors.ts";
-import { escapeForDisplay } from "./escape.ts";
 import { BIT } from "./record.ts";
-import {
-  expectedRulesFile,
-  globPattern,
-  parseExpectedRules,
-  readExpectedFilesystemRules,
-  ruleSources,
-  RuleMatcher,
-  unescapeDisplay,
-} from "./rules.ts";
+import { globPattern, parseExpectedRules, RuleMatcher } from "./rules.ts";
 
 const inline = (text: string) => [{ text, origin: "input" as const, firstLine: 1 }];
 const parse = (text: string) => parseExpectedRules(inline(text));
-
-describe("unescapeDisplay", () => {
-  it.each([
-    "plain",
-    "a b",
-    " lead",
-    "tab\there",
-    'quote"d',
-    "back\\slash",
-    "line\nbreak",
-    "cr\rhere",
-    "\u202eflip",
-    "raw\udcffbyte",
-  ])("reads back what escapeForDisplay showed for %j", (name) => {
-    expect(unescapeDisplay(escapeForDisplay(name))).toBe(name);
-  });
-
-  it("reads a bracket escaped in a command name", () => {
-    expect(unescapeDisplay(String.raw`a\[b\]`)).toBe("a[b]");
-  });
-
-  it.each([String.raw`\q`, "end\\", String.raw`\u{110000}`, String.raw`\x41`])(
-    "refuses %j, an escape the summary never writes",
-    (text) => {
-      expect(unescapeDisplay(text)).toBeUndefined();
-    },
-  );
-});
 
 describe("globPattern", () => {
   const matches = (glob: string, name: string) => globPattern(glob).test(name);
@@ -137,41 +96,6 @@ describe("parseExpectedRules", () => {
   });
 });
 
-describe("ruleSources", () => {
-  it("has nothing for no rules", () => {
-    expect(ruleSources(" \n", undefined)).toStrictEqual([]);
-  });
-
-  it("starts the workflow's value at its first line", () => {
-    expect(ruleSources("* R ./a", undefined)).toStrictEqual([
-      { text: "* R ./a", origin: "input", firstLine: 1 },
-    ]);
-  });
-
-  it("starts a config_file block on the line after its header", () => {
-    const file = "proxy_mode: audit\nexpected_filesystem_rules: |\n  * R ./a\n  * W ./b\n";
-    expect(ruleSources("", file)).toStrictEqual([
-      { text: "* R ./a\n* W ./b\n", origin: "config", firstLine: 3 },
-    ]);
-  });
-
-  it("starts any other config_file value on its key's line", () => {
-    expect(ruleSources("", "a: 1\nexpected_filesystem_rules: '* R ./a'\n")).toStrictEqual([
-      { text: "* R ./a", origin: "config", firstLine: 2 },
-    ]);
-  });
-
-  it.each([
-    ["a file of no mapping", "[]\n"],
-    ["a file without the key", "proxy_mode: audit\n"],
-    ["an empty value", "expected_filesystem_rules:\n"],
-    ["a blank value", "expected_filesystem_rules: ' '\n"],
-    ["a value that is not a scalar", "expected_filesystem_rules: [a]\n"],
-  ])("adds nothing for %s", (_what, file) => {
-    expect(ruleSources("* R ./a", file)).toHaveLength(1);
-  });
-});
-
 describe("RuleMatcher", () => {
   const matcher = (text: string) => new RuleMatcher(parse(text).rules);
 
@@ -226,102 +150,5 @@ describe("RuleMatcher", () => {
       unmatched: 0,
       ref: "input:1",
     });
-  });
-});
-
-describe("expectedRulesFile", () => {
-  const row = (program: string, flags: string, path: string) => ({
-    program: { path: program },
-    flags,
-    path: { path },
-  });
-
-  it("has nothing to write for no rules and nothing proposed", () => {
-    expect(expectedRulesFile([], [])).toBeUndefined();
-  });
-
-  it("writes the proposed rules in columns as a config_file", () => {
-    expect(
-      expectedRulesFile(
-        [],
-        [
-          row("/usr/bin/node", "RW", "./node_modules/**"),
-          row("bash", "Rr!", "/proc/<pid>/status"),
-          row("/opt/my tool", "R", "#x"),
-          row("bash", "R", "/proc/<pid>"),
-        ],
-      ),
-    ).toBe(
-      [
-        "filesystem_audit: record",
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  /usr/bin/node   RW   ./node_modules/**",
-        "  bash            Rr!  /proc/*/status",
-        '  "/opt/my tool"  R    "#x"',
-        "  bash            R    /proc/*",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("keeps the rules given as written, then adds what they did not take", () => {
-    expect(expectedRulesFile(["# npm", "* R ./a", "", "* W ./b"], [row("bash", "R", "./c")])).toBe(
-      [
-        "filesystem_audit: record",
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  # npm",
-        "  * R ./a",
-        "",
-        "  * W ./b",
-        "",
-        "  # Not matched in this run",
-        "  bash  R  ./c",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("writes the rules given alone when they took everything", () => {
-    expect(expectedRulesFile(["* R ./a"], [])).toBe(
-      [
-        "filesystem_audit: record",
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  * R ./a",
-        "",
-      ].join("\n"),
-    );
-  });
-});
-
-describe("readExpectedFilesystemRules", () => {
-  const FILE = "proxy_mode: audit\nexpected_filesystem_rules: |\n  * W ./b\n";
-
-  it("is undefined when neither the workflow nor config_file has a line", () => {
-    expect(readExpectedFilesystemRules(" ", undefined, "off")).toBeUndefined();
-  });
-
-  it("reads the workflow's rules, then config_file's, by their own lines", () => {
-    const read = vi.fn(() => FILE);
-    const rules = readExpectedFilesystemRules("* R ./a", "/w/c.yml", "record", read);
-    expect(read).toHaveBeenCalledWith("/w/c.yml");
-    expect(rules?.rules.map((r) => r.ref)).toStrictEqual(["input:1", "config:3"]);
-    expect(rules?.lines).toStrictEqual(["* R ./a", "* W ./b"]);
-  });
-
-  it("reads config_file from disk by default", () => {
-    const dir = mkdtempSync(join(tmpdir(), "expected-rules-"));
-    writeFileSync(join(dir, "c.yml"), FILE);
-    expect(readExpectedFilesystemRules("", join(dir, "c.yml"), "record")?.lines).toStrictEqual([
-      "* W ./b",
-    ]);
-  });
-
-  it("refuses rules for a step that records nothing to match them against", () => {
-    const reading = () => readExpectedFilesystemRules("* R ./a", undefined, "off");
-    expect(reading).toThrow(SandboxError);
-    expect(reading).toThrow("expected_filesystem_rules needs filesystem_audit: record");
   });
 });

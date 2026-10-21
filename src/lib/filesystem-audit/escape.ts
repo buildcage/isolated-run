@@ -51,6 +51,32 @@ function escapeChar(c: string): string {
   return `\\u{${cp.toString(16)}}`;
 }
 
+// The character each named escape stands for, by the letter after its backslash.
+const UNESCAPES: Record<string, string> = Object.fromEntries(
+  Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]),
+);
+
+/** The name escapeForDisplay showed as `text`, or undefined for an escape it never writes. */
+export function unescapeDisplay(text: string): string | undefined {
+  let bad = false;
+  const out = text.replace(
+    /\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g,
+    (_, cp, raw, c) => {
+      if (cp !== undefined) {
+        const n = parseInt(cp, 16);
+        if (n <= 0x10ffff) return String.fromCodePoint(n);
+      } else if (raw !== undefined) {
+        return String.fromCharCode(RAW_BYTE_FIRST - 0x80 + parseInt(raw, 16));
+      } else if (UNESCAPES[c] !== undefined) {
+        return UNESCAPES[c];
+      }
+      bad = true;
+      return "";
+    },
+  );
+  return bad ? undefined : out;
+}
+
 // A details line parts its fields with spaces, so a name holding one is quoted.
 // Its own quotes are escaped already, so a quoted name cannot end early.
 export function field(text: string): string {

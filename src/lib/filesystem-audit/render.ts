@@ -3,9 +3,11 @@ import { codeSpan } from "#core/lib/report/render/markdown-table.ts";
 import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
 import { fmtSpan } from "./agg.ts";
+import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
+import type { ProposedRules } from "./proposed-rules.ts";
 import type { AuditSummary, Executed, PathRow, RefusedRow, Row, RuleRow } from "./reduce.ts";
 import { EXPECTED_RULES_INPUT } from "./rules.ts";
 
@@ -329,10 +331,7 @@ export function unreadableSummaryBlocks(title: string): SummaryBlock[] {
 }
 
 /** The artifact the summary points the reader to, or why there is none. */
-export type RecordArtifact = { name: string; url?: string } | "not-requested" | "upload-failed";
-
-/** What became of the proposed rules file. */
-export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
+export type RecordArtifact = UploadedArtifact | "not-requested" | "upload-failed";
 
 /**
  * The folded note on the proposed rules: where the file is, or why there is

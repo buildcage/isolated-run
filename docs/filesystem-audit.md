@@ -275,8 +275,8 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 ```
 
 The executed table, the accessed paths and the details give way to it; the artifact still has every
-access. The verdict at the top of the traffic report counts the accesses outside the rules, and a
-warning says how many. `fail_on_unexpected_file_access: true` fails the step instead. The rules
+access. The verdict at the top of the traffic report and a warning count the table's rows, or say
+there were too many to list. `fail_on_unexpected_file_access: true` fails the step instead. The rules
 only change what the summary shows: like the audit itself, they never block an access.
 
 ### Getting the rules

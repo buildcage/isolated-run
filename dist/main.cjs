@@ -70296,6 +70296,18 @@ function escapeChar(c) {
 	let cp = Number(c.codePointAt(0));
 	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
 }
+const UNESCAPES = Object.fromEntries(Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]));
+function unescapeDisplay(text) {
+	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
+		if (cp !== void 0) {
+			let n = parseInt(cp, 16);
+			if (n <= 1114111) return String.fromCodePoint(n);
+		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
+		else if (UNESCAPES[c] !== void 0) return UNESCAPES[c];
+		return bad = !0, "";
+	});
+	return bad ? void 0 : out;
+}
 function field(text) {
 	return text.includes(" ") ? `"${text}"` : text;
 }
@@ -70312,26 +70324,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalid = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES"), NAMED = {
-	n: "\n",
-	r: "\r",
-	t: "	",
-	"\\": "\\",
-	"\"": "\"",
-	"[": "[",
-	"]": "]"
-};
-function unescapeDisplay(text) {
-	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
-		if (cp !== void 0) {
-			let n = parseInt(cp, 16);
-			if (n <= 1114111) return String.fromCodePoint(n);
-		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
-		else if (NAMED[c] !== void 0) return NAMED[c];
-		return bad = !0, "";
-	});
-	return bad ? void 0 : out;
-}
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -70343,14 +70336,14 @@ function fields(line, ref) {
 		if (line[i] === "\"") {
 			let end = i + 1;
 			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
-			if (end >= line.length) throw invalid(ref, "a quote is not closed");
-			if (raw = line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalid(ref, "a closing quote must end its field");
+			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
+			if (raw = line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
 		} else {
 			let end = line.slice(i).search(/[ \t]/);
 			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
 		}
 		let field = unescapeDisplay(raw);
-		if (field === void 0) throw invalid(ref, `${JSON.stringify(raw)} holds an unknown escape`);
+		if (field === void 0) throw invalidRules(ref, `${JSON.stringify(raw)} holds an unknown escape`);
 		out.push(field);
 	}
 	return out;
@@ -70399,9 +70392,9 @@ function parseExpectedRules(sources) {
 		let line = raw.trim();
 		if (lines.push(line), line === "" || line.startsWith("#")) return;
 		let ref = `${origin}:${firstLine + n}`, parts = fields(line, ref);
-		if (parts.length !== 3) throw invalid(ref, `expected a program, an access and a path, got ${parts.length} fields`);
+		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
-		if (!ACCESS.test(access)) throw invalid(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
+		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : globPattern(program),
@@ -70414,31 +70407,6 @@ function parseExpectedRules(sources) {
 		rules,
 		lines
 	};
-}
-function ruleSources(inline, configText) {
-	let sources = [];
-	if (inline.trim() && sources.push({
-		text: inline,
-		origin: "input",
-		firstLine: 1
-	}), configText === void 0) return sources;
-	let lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(configText, { lineCounter });
-	if (!(0, import_dist$5.isMap)(doc.contents)) return sources;
-	let value = doc.contents.get(EXPECTED_RULES_INPUT, !0);
-	if (!(0, import_dist$5.isScalar)(value) || value.value == null || !String(value.value).trim()) return sources;
-	let at = lineCounter.linePos(value.range[0]).line, literal = value.type === import_dist$5.Scalar.BLOCK_LITERAL;
-	return sources.push({
-		text: String(value.value),
-		origin: "config",
-		firstLine: literal ? at + 1 : at
-	}), sources;
-}
-function readExpectedFilesystemRules(inline, configPath, filesystemAudit, readFile = (path) => (0, node_fs.readFileSync)(path, "utf8")) {
-	let rules = parseExpectedRules(ruleSources(inline, configPath === void 0 ? void 0 : readFile(configPath)));
-	if (rules.lines.length !== 0) {
-		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
-		return rules;
-	}
 }
 function takes(rule, bit, failed, perm) {
 	return failed ? ((perm ? rule.perm : rule.ok | rule.failed) & bit) !== 0 : (rule.ok & bit) !== 0;
@@ -70465,26 +70433,6 @@ var RuleMatcher = class {
 		};
 	}
 };
-const ruleField = (text) => text.includes(" ") || text.startsWith("#") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
-function expectedRulesFile(given, proposed) {
-	let rows = proposed.map((r) => [
-		ruleField(r.program.path),
-		r.flags,
-		ruleField(anyPid(r.path.path))
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
-		...given,
-		"",
-		"# Not matched in this run",
-		...added
-	];
-	if (lines.length !== 0) return [
-		"filesystem_audit: record",
-		"upload_filesystem_audit_artifact: true",
-		`${EXPECTED_RULES_INPUT}: |`,
-		...lines.map((line) => line ? `  ${line}` : ""),
-		""
-	].join("\n");
-}
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
@@ -70822,6 +70770,39 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
+//#region src/lib/filesystem-audit/proposed-rules.ts
+const ruleField = (text) => text.includes(" ") || text.startsWith("#") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
+function expectedRulesFile(given, proposed) {
+	let rows = proposed.map((r) => [
+		ruleField(r.program.path),
+		r.flags,
+		ruleField(anyPid(r.path.path))
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
+		...given,
+		"",
+		"# Not matched in this run",
+		...added
+	];
+	if (lines.length !== 0) return [
+		"filesystem_audit: record",
+		"upload_filesystem_audit_artifact: true",
+		`${EXPECTED_RULES_INPUT}: |`,
+		...lines.map((line) => line ? `  ${line}` : ""),
+		""
+	].join("\n");
+}
+function writeProposedRules(summary, rules, path, annotation, writeFile) {
+	if (!summary) return "write-failed";
+	if (summary.proposedCut) return "too-many-paths";
+	let file = expectedRulesFile(rules?.lines ?? [], summary.proposed);
+	if (file === void 0) return "none";
+	try {
+		return writeFile(path, file), "written";
+	} catch (e) {
+		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
+	}
+}
+//#endregion
 //#region src/lib/filesystem-audit/command.ts
 const utf8 = new TextEncoder();
 function bytesOf(s) {
@@ -71084,6 +71065,42 @@ var Lines = class {
 			agg
 		});
 	}
+}, RuleTally = class {
+	rules;
+	lines;
+	names;
+	matched = 0;
+	unexpected = 0;
+	mark;
+	constructor(rules, lines, names) {
+		this.rules = rules, this.lines = lines, this.names = names;
+	}
+	take(x, parts, by) {
+		let bit = x.bit;
+		if (this.rules) {
+			let m = this.rules.match(this.names.program(by), this.names.path(x.path), bit, x.failed, x.perm);
+			bit = m.unmatched, bit ? this.mark = { unexpected: !0 } : this.mark ??= { rule: m.ref };
+		}
+		this.lines.add({
+			...x,
+			comm: String(by),
+			bit
+		}, parts);
+	}
+	endLine() {
+		let mark = this.mark;
+		return this.mark = void 0, mark && "rule" in mark ? this.matched++ : mark && this.unexpected++, mark;
+	}
+	finish() {
+		return this.lines.finish()?.map(({ comm, path, agg }) => ({
+			rank: Number(comm),
+			path,
+			agg
+		}));
+	}
+	get givenUp() {
+		return this.lines.stopped !== void 0;
+	}
 };
 //#endregion
 //#region src/lib/filesystem-audit/strip.ts
@@ -71196,14 +71213,17 @@ function createAuditSummary(prefixes) {
 			key = `${r}/${c.text}`, commands.has(key) || commands.set(key, c), commandKeys.set(memo, key);
 		}
 		return key;
-	}, rules = prefixes.rules, proposed = prefixes.propose || rules ? new Lines({
+	}, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
 		fanout,
 		keep,
 		limit: Infinity,
 		loose: Infinity,
 		nodes: limits.nodes,
 		rowBytes: () => 0
-	}) : void 0, matched = 0, unexpected = 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
+	}), {
+		program: (rank) => ranks[rank].ruleName,
+		path: ruleName
+	}) : void 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
@@ -71243,39 +71263,29 @@ function createAuditSummary(prefixes) {
 			let runs = executed.get(p);
 			runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
-		if (isLibraryMap(r)) return;
-		let mark;
-		for (let c of classify(r)) {
-			let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
-			if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
-			let t = Date.parse(r.t ?? ""), x = {
-				comm: commandKey(r.pid, r.comm ?? ""),
-				path: normalize$2(path),
-				bit: bitsOf(c.letter),
-				failed: c.failed,
-				perm: c.perm,
-				t,
-				seq: Number.isNaN(t) ? Infinity : seq++
-			}, parts = components(x.path);
-			details.add(x, parts);
-			let program = programOf(r.pid, r.comm ?? "");
-			if (paths.add({
-				...x,
-				comm: String(program),
-				bit: x.bit & ~BIT.X
-			}, parts), !proposed) continue;
-			let by = runBy ?? program, bit = x.bit;
-			if (rules) {
-				let m = rules.match(ranks[by].ruleName, ruleName(x.path), bit, x.failed, x.perm);
-				bit = m.unmatched, bit ? mark = { unexpected: !0 } : mark ??= { rule: m.ref };
+		if (!isLibraryMap(r)) {
+			for (let c of classify(r)) {
+				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
+				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+				let t = Date.parse(r.t ?? ""), x = {
+					comm: commandKey(r.pid, r.comm ?? ""),
+					path: normalize$2(path),
+					bit: bitsOf(c.letter),
+					failed: c.failed,
+					perm: c.perm,
+					t,
+					seq: Number.isNaN(t) ? Infinity : seq++
+				}, parts = components(x.path);
+				details.add(x, parts);
+				let program = programOf(r.pid, r.comm ?? "");
+				paths.add({
+					...x,
+					comm: String(program),
+					bit: x.bit & ~BIT.X
+				}, parts), tally?.take(x, parts, runBy ?? program);
 			}
-			proposed.add({
-				...x,
-				comm: String(by),
-				bit
-			}, parts);
+			return tally?.endLine();
 		}
-		return mark && "rule" in mark ? matched++ : mark && unexpected++, mark;
 	};
 	function shown(path) {
 		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
@@ -71321,8 +71331,8 @@ function createAuditSummary(prefixes) {
 					...ranks[Number(comm)].shown,
 					rank: Number(comm)
 				}
-			})), log = byPath && rows(kept(details)), ruleRows = proposed?.finish()?.map(({ comm, path, agg }) => ({
-				program: ranks[Number(comm)].shown,
+			})), log = byPath && rows(kept(details)), ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
+				program: ranks[rank].shown,
 				flags: fmtFlags(agg),
 				path: shown(path)
 			}));
@@ -71340,9 +71350,9 @@ function createAuditSummary(prefixes) {
 				pathsCut: paths.cut,
 				detailsCut: details.cut,
 				...ruleRows && { proposed: byProgramThenPath(ruleRows) },
-				...proposed?.stopped && { proposedCut: !0 },
-				matched,
-				unexpected
+				...tally?.givenUp && { proposedCut: !0 },
+				matched: tally?.matched ?? 0,
+				unexpected: tally?.unexpected ?? 0
 			};
 		}
 	};
@@ -71491,7 +71501,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
 	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
-	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps) : "none", verdictItems = rules ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
@@ -71515,11 +71525,11 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					cutNote,
 					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
 					skippedHooksUrl: `${guide}#skipped-hooks`,
-					expected: rules !== void 0,
+					expected: given,
 					rulesNote: rulesNote(artifact, proposed, {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						given: rules !== void 0
+						given
 					})
 				});
 			} catch (e) {
@@ -71531,20 +71541,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		}
 	};
 }
-function writeProposedRules(summary, rules, path, annotation, deps) {
-	if (!summary) return "write-failed";
-	if (summary.proposedCut) return "too-many-paths";
-	let file = expectedRulesFile(rules?.lines ?? [], summary.proposed);
-	if (file === void 0) return "none";
-	try {
-		return deps.writeFile(path, file), "written";
-	} catch (e) {
-		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
-	}
-}
 function reportUnexpected(summary, failOnUnexpected, annotation) {
 	if (!summary?.unexpected) return [];
-	let n = summary.proposed?.length ?? summary.unexpected, what = `${n} unexpected file ${n === 1 ? "access" : "accesses"}`, message = n === 1 ? `1 file access fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists it.` : `${n} file accesses fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists them.`;
+	let n = summary.proposed?.length, what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file ${n === 1 ? "access" : "accesses"}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : n === 1 ? `1 file access fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists it.` : `${n} file accesses fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists them.`;
 	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1) : annotation.warning(message), [what];
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
@@ -71589,6 +71588,33 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		...reduced,
 		written
 	};
+}
+//#endregion
+//#region src/lib/filesystem-audit/rules-input.ts
+function ruleSources(inline, configText) {
+	let sources = [];
+	if (inline.trim() && sources.push({
+		text: inline,
+		origin: "input",
+		firstLine: 1
+	}), configText === void 0) return sources;
+	let lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(configText, { lineCounter });
+	if (!(0, import_dist$5.isMap)(doc.contents)) return sources;
+	let value = doc.contents.get(EXPECTED_RULES_INPUT, !0);
+	if (!(0, import_dist$5.isScalar)(value) || value.value == null || !String(value.value).trim()) return sources;
+	let at = lineCounter.linePos(value.range[0]).line, literal = value.type === import_dist$5.Scalar.BLOCK_LITERAL;
+	return sources.push({
+		text: String(value.value),
+		origin: "config",
+		firstLine: literal ? at + 1 : at
+	}), sources;
+}
+function readExpectedFilesystemRules(inline, configPath, filesystemAudit, readFile = (path) => (0, node_fs.readFileSync)(path, "utf8")) {
+	let rules = parseExpectedRules(ruleSources(inline, configPath === void 0 ? void 0 : readFile(configPath)));
+	if (rules.lines.length !== 0) {
+		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+		return rules;
+	}
 }
 //#endregion
 //#region src/lib/filesystem-audit/mode.ts
