@@ -69313,7 +69313,7 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 		section: `${SECTION$1}-example`,
 		cut: "atomic",
 		text: example,
-		notice: restrictExampleTruncationNote(fit.artifactAvailable)
+		notice: restrictExampleTruncationNote(fit.artifactAvailable) + (step.omittedNote ?? "")
 	}];
 }
 function noCommunicationBlocks(report) {
