@@ -69155,12 +69155,16 @@ function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step 
 }
 //#endregion
 //#region src/core/lib/report/render/verdict.ts
-function renderVerdict(report, extraItems = []) {
+function renderVerdict(report, extra = {}) {
 	let unexpected = 0, expected = 0;
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
 	report.blocked.length === 0 && (unexpected = report.blockedCount);
-	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [...report.logLooksPlausible ? [] : ["report incomplete"], ...unexpected ? [`${unexpected} blocked`] : []], warning = [
-		...extraItems,
+	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [
+		...report.logLooksPlausible ? [] : ["report incomplete"],
+		...unexpected ? [`${unexpected} blocked`] : [],
+		...extra.caution ?? []
+	], warning = [
+		...extra.warning ?? [],
 		...failed ? [`${failed} failed`] : [],
 		...undecided ? [`${undecided} not acted on`] : []
 	];
@@ -70470,7 +70474,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	wouldBlock && emissions.push(wouldBlock);
 	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
 	return {
-		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), wouldBlockVerdictItems(report.timeline)), [
+		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), { warning: wouldBlockVerdictItems(report.timeline) }), [
 			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
 			wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
 				priority: 2,
