@@ -421,19 +421,48 @@ async function resolveProxyImage(
 }
 
 /** The filesystem inputs for the report's restrict example, each only when it
- *  is not its default, so pasting the example keeps them. */
-export function filesystemExampleInputs({
-  filesystemMode,
-  writeThroughInput,
-  filesystemAudit,
-}: Pick<StepInputs, "filesystemMode" | "writeThroughInput" | "filesystemAudit">): string[] {
+ *  is not its default, so pasting the example keeps them. The expected rules
+ *  point to `rulesFile`, this run's proposed file, when it is given. */
+export function filesystemExampleInputs(
+  {
+    filesystemMode,
+    writeThroughInput,
+    filesystemAudit,
+    expectedFilesystemRules,
+    failOnUnexpectedFileAccess,
+  }: Pick<
+    StepInputs,
+    | "filesystemMode"
+    | "writeThroughInput"
+    | "filesystemAudit"
+    | "expectedFilesystemRules"
+    | "failOnUnexpectedFileAccess"
+  >,
+  rulesFile?: string,
+): string[] {
   const lines: string[] = [];
   if (filesystemMode !== "persistent") lines.push(`filesystem_mode: ${filesystemMode}`);
   const paths = splitWriteThroughInput(writeThroughInput);
   if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
   if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
+  if (rulesFile && expectedFilesystemRules)
+    lines.push(
+      `# ${rulesFile} from this run's artifact, reviewed and committed`,
+      "config_file: ci/expected-filesystem-rules.yml",
+    );
+  else if (expectedFilesystemRules)
+    lines.push(
+      `${EXPECTED_RULES_INPUT}: |`,
+      ...expectedFilesystemRules.lines.map((line) => (line ? `  ${line}` : "")),
+    );
+  if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
   return lines;
 }
+
+// config_file refuses pull_request_target, and workflow_run when a pull
+// request started it, which is not worth reading the payload for here.
+const configFileAllowed = (env: NodeJS.ProcessEnv): boolean =>
+  !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 
 function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
   deps.withLogGroup("buildcage: Configured ACL Rules", () => {
@@ -536,7 +565,10 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     runCommand: inputs.runInput,
     extraInputs: (report) => [
       ...awsExampleInputs(inputs.aws, report.timeline),
-      ...filesystemExampleInputs(inputs),
+      ...filesystemExampleInputs(
+        inputs,
+        typeof artifact === "object" && configFileAllowed(env) ? readAudit.rulesFile : undefined,
+      ),
     ],
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,

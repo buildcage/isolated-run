@@ -323,6 +323,12 @@ that covers one of your narrower rules is left beside it: the file's diff shows 
 which to keep. The heading of a file proposed before is left out of the rules given, so it never
 ends up over rules a later run matched.
 
+The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
+Where that run's artifact holds the file, the example names it in `config_file` at
+`ci/expected-filesystem-rules.yml`, for you to commit there; on an event that refuses a config file,
+or without the file, it lists the rules given under `with:`. It adds
+`fail_on_unexpected_file_access: true` when the step set it.
+
 ### Rules
 
 Each rule is one line of three fields, the accessed paths table's columns, so a row of the table or

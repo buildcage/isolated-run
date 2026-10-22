@@ -71552,19 +71552,20 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: upload
-	}, cleanPath = audit.stepPath, unchecked = (what) => !rules || !failOnUnexpected ? {} : (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, { caution: ["file access check incomplete"] }), reduced;
+	}, cleanPath = audit.stepPath, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
 		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`));
 	}
-	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
+	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete)) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
-	summary ? summary.lost ? incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && (incomplete = unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	summary ? summary.lost ? incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && (incomplete = unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1, incomplete = checkIncomplete);
 	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
+		...proposed === "written" && { rulesFile: (0, node_path.basename)(audit.rulesPath) },
 		upload: async () => {
 			let uploaded;
 			try {
@@ -75256,12 +75257,13 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 		composeFile: resolveComposeFile(localOverride)
 	};
 }
-function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit }) {
+function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, rulesFile) {
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed`, "config_file: ci/expected-filesystem-rules.yml") : expectedFilesystemRules && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedFilesystemRules.lines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
+const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
 	deps.withLogGroup("buildcage: Configured ACL Rules", () => {
 		deps.logRules("HTTPS", rules.httpsRules), deps.logRules("HTTP", rules.httpRules), deps.logRules("IP", rules.ipRules), deps.logRules("URL", rules.urlRules), deps.logRules("TLS", rules.tlsRules), deps.logRules("Known-blocked (informational only, not sent to proxy ACL)", rules.knownBlockedRules), aws.key && deps.log("AWS access key check: on"), aws.roleAccounts.length > 0 && deps.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
@@ -75315,7 +75317,7 @@ async function finalizeStep(run, deps) {
 		actionRepo,
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
-		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs)],
+		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,

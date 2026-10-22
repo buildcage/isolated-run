@@ -228,6 +228,8 @@ export interface ReadStepFilesystemAudit {
   /** The traffic report's verdict items: the accesses no rule took, if any,
    *  as a caution when they fail the step. */
   verdictItems: VerdictItems;
+  /** The proposed rules file's name, when the artifact is to hold it. */
+  rulesFile?: string;
   /** Uploads the stripped copy, sets the output and returns the artifact as
    *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
@@ -301,13 +303,15 @@ export function readStepFilesystemAudit(
   // new file leaves the root-owned recording in place, so a failed write
   // never uploads the raw. The post step removes both.
   const cleanPath = audit.stepPath;
-  // Accesses that could not be checked fail the step as unexpected ones would,
-  // and raise the verdict too.
+  // What the verdict says of accesses that could not all be checked, which
+  // fail the step as unexpected ones would.
+  const checkIncomplete: VerdictItems =
+    rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {};
   const unchecked = (what: string): VerdictItems => {
-    if (!rules || !failOnUnexpected) return {};
+    if (!checkIncomplete.caution) return {};
     annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;
-    return { caution: ["file access check incomplete"] };
+    return checkIncomplete;
   };
   let reduced: Reduced | undefined;
   try {
@@ -325,7 +329,10 @@ export function readStepFilesystemAudit(
       "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
     );
     process.exitCode = 1;
-    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+    return settled(
+      { blocks: (_startedAt, title) => unreadableSummaryBlocks(title) },
+      checkIncomplete,
+    );
   }
   const { summary, summaryError, ended, written } = reduced;
   let incomplete: VerdictItems = {};
@@ -348,6 +355,7 @@ export function readStepFilesystemAudit(
       "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
     );
     process.exitCode = 1;
+    incomplete = checkIncomplete;
   }
   const proposed = upload
     ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
@@ -366,6 +374,7 @@ export function readStepFilesystemAudit(
       written ? { name: filesystemAuditArtifactName(containerName) } : undefined,
     ),
     verdictItems,
+    ...(proposed === "written" && { rulesFile: basename(audit.rulesPath) }),
     upload: async () => {
       let uploaded: UploadedArtifact | undefined;
       try {

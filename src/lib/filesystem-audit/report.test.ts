@@ -1222,6 +1222,24 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("says the check is incomplete when the tracer stopped early or the recording is gone", () => {
+    const { deps: early } = deps({ raw: raw.split("\n").slice(0, -1).join("\n") });
+    const { deps: gone } = deps({
+      readLines: () => {
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      },
+    });
+    const read = (d: typeof early, failOnUnexpected: boolean) =>
+      readStepFilesystemAudit(
+        { ...base, annotation: annotation(), rules: rules("node RW ./*"), failOnUnexpected },
+        d,
+      ).verdictItems;
+
+    expect(read(early, true)).toStrictEqual({ caution: ["file access check incomplete"] });
+    expect(read(gone, true)).toStrictEqual({ caution: ["file access check incomplete"] });
+    expect(read(early, false)).toStrictEqual({});
+  });
+
   it("fails the step with fail_on_unexpected_file_access when the kernel skipped the tracer's hooks", async () => {
     const note = annotation();
     const { deps: d } = deps({

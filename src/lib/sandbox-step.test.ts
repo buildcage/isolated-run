@@ -6,6 +6,7 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { SandboxError } from "./errors.ts";
 import type { RecordArtifact } from "./filesystem-audit/render.ts";
 import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { parseExpectedRules } from "./filesystem-audit/rules.ts";
 import {
   filesystemExampleInputs,
   finalizeStep,
@@ -580,6 +581,29 @@ describe("runSandboxStep", () => {
     ]);
   });
 
+  it("points the restrict example to the proposed rules only where the artifact holds them and config_file works", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.readExpectedFilesystemRules.mockReturnValue(
+      parseExpectedRules([{ text: "node R ./a", origin: "input", firstLine: 1 }]),
+    );
+    const uploaded = () =>
+      readAudit({ rulesFile: "rules.yml", upload: vi.fn(async () => ({ name: "audit" })) });
+    const example = async (env: NodeJS.ProcessEnv, read: object = uploaded()) => {
+      mocks.reportStepTraffic.mockClear();
+      mocks.readStepFilesystemAudit.mockReturnValue(read);
+      await runSandboxStep(env, deps);
+      return mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] }) as string[];
+    };
+
+    expect(await example(ENV)).toContain("config_file: ci/expected-filesystem-rules.yml");
+    expect(await example({ ...ENV, GITHUB_EVENT_NAME: "pull_request_target" })).toContain(
+      "expected_filesystem_rules: |",
+    );
+    expect(await example(ENV, readAudit({ rulesFile: "rules.yml" }))).toContain(
+      "expected_filesystem_rules: |",
+    );
+  });
+
   it("pulls the image by verified digest, under the action's own repository", async () => {
     await runSandboxStep(ENV, deps);
 
@@ -1090,12 +1114,51 @@ describe("runSandboxStep", () => {
 });
 
 describe("filesystemExampleInputs", () => {
+  const NO_RULES = { expectedFilesystemRules: undefined, failOnUnexpectedFileAccess: false };
+  const given = {
+    filesystemMode: "persistent" as const,
+    writeThroughInput: "",
+    filesystemAudit: "record" as const,
+    expectedFilesystemRules: parseExpectedRules([
+      { text: "# npm\nnode R ./a\n\nnode W ./b", origin: "input", firstLine: 1 },
+    ]),
+    failOnUnexpectedFileAccess: true,
+  };
+
+  it("writes the expected rules as given, and fail_on_unexpected_file_access when set", () => {
+    expect(filesystemExampleInputs(given)).toStrictEqual([
+      "filesystem_audit: record",
+      "expected_filesystem_rules: |",
+      "  # npm",
+      "  node R ./a",
+      "",
+      "  node W ./b",
+      "fail_on_unexpected_file_access: true",
+    ]);
+    expect(filesystemExampleInputs({ ...given, expectedFilesystemRules: undefined })).toStrictEqual(
+      ["filesystem_audit: record", "fail_on_unexpected_file_access: true"],
+    );
+  });
+
+  it("points config_file to this run's proposed rules when the artifact holds them", () => {
+    expect(filesystemExampleInputs(given, "rules.yml")).toStrictEqual([
+      "filesystem_audit: record",
+      "# rules.yml from this run's artifact, reviewed and committed",
+      "config_file: ci/expected-filesystem-rules.yml",
+      "fail_on_unexpected_file_access: true",
+    ]);
+    expect(filesystemExampleInputs({ ...given, ...NO_RULES }, "rules.yml")).toStrictEqual([
+      "filesystem_audit: record",
+    ]);
+  });
+
   it("leaves out every input at its default", () => {
     expect(
       filesystemExampleInputs({
         filesystemMode: "persistent",
         writeThroughInput: "",
         filesystemAudit: "off",
+        ...NO_RULES,
       }),
     ).toStrictEqual([]);
   });
@@ -1106,6 +1169,7 @@ describe("filesystemExampleInputs", () => {
         filesystemMode: "ephemeral",
         writeThroughInput: "# caches\n  ~/.cache  \n\n./dist\n/opt/a # b",
         filesystemAudit: "record",
+        ...NO_RULES,
       }),
     ).toStrictEqual([
       "filesystem_mode: ephemeral",
@@ -1123,6 +1187,7 @@ describe("filesystemExampleInputs", () => {
         filesystemMode: "persistent",
         writeThroughInput: "# none yet\n\n",
         filesystemAudit: "off",
+        ...NO_RULES,
       }),
     ).toStrictEqual([]);
   });
