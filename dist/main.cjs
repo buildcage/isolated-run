@@ -70442,7 +70442,7 @@ function parseExpectedRules(sources) {
 	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
 		let line = raw.trim();
 		if (lines.push(line), line === "" || line.startsWith("#")) return;
-		let ref = `${origin}:${firstLine + n}`, parts = fields(line, ref);
+		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
 		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
@@ -71653,26 +71653,20 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules-input.ts
-function ruleSources(inline, configText) {
-	let sources = [];
-	if (inline.trim() && sources.push({
-		text: inline,
+function ruleSources(value, config) {
+	let lines = value.split("\n"), at = config?.offset ?? lines.length;
+	return [{
+		text: lines.slice(0, at).join("\n"),
 		origin: "input",
 		firstLine: 1
-	}), configText === void 0) return sources;
-	let lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(configText, { lineCounter });
-	if (!(0, import_dist$5.isMap)(doc.contents)) return sources;
-	let value = doc.contents.get(EXPECTED_RULES_INPUT, !0);
-	if (!(0, import_dist$5.isScalar)(value) || value.value == null || !String(value.value).trim()) return sources;
-	let at = lineCounter.linePos(value.range[0]).line, literal = value.type === import_dist$5.Scalar.BLOCK_LITERAL;
-	return sources.push({
-		text: String(value.value),
+	}, {
+		text: lines.slice(at).join("\n"),
 		origin: "config",
-		firstLine: literal ? at + 1 : at
-	}), sources;
+		firstLine: config?.line
+	}].filter((source) => source.text.trim());
 }
-function readExpectedFilesystemRules(inline, configPath, filesystemAudit, readFile = (path) => (0, node_fs.readFileSync)(path, "utf8")) {
-	let rules = parseExpectedRules(ruleSources(inline, configPath === void 0 ? void 0 : readFile(configPath)));
+function readExpectedFilesystemRules(value, config, filesystemAudit) {
+	let rules = parseExpectedRules(ruleSources(value, config));
 	if (rules.lines.length !== 0) {
 		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 		return rules;
@@ -75205,11 +75199,11 @@ function writeBackMediatedFile(file, annotation, deps) {
 	};
 }
 function readStepInputs(env, deps) {
-	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", inlineFilesystemRules = env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), expectedFilesystemRules = deps.readExpectedFilesystemRules(inlineFilesystemRules, configFile?.path, filesystemAudit), failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), expectedFilesystemRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");

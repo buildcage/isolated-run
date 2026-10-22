@@ -45,7 +45,8 @@ export interface RuleSource {
   text: string;
   /** `input` for the workflow's own value, `config` for config_file's. */
   origin: "input" | "config";
-  firstLine: number;
+  /** Absent when the lines are not on the file's lines; see ConfigValueOrigin. */
+  firstLine?: number;
 }
 
 export const invalidRules = (ref: string, reason: string): SandboxError =>
@@ -157,7 +158,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
       const line = raw.trim();
       lines.push(line);
       if (line === "" || line.startsWith("#")) return;
-      const ref = `${origin}:${firstLine + n}`;
+      const ref = firstLine === undefined ? origin : `${origin}:${firstLine + n}`;
       const parts = fields(line, ref);
       if (parts.length !== 3)
         throw invalidRules(

@@ -192,6 +192,7 @@ describe("runSandboxStep", () => {
     mocks.applyConfigFile.mockReturnValue({
       path: "/home/runner/work/repo/repo/c.yml",
       warning: "Ignored from config_file c.yml, set by the workflow: proxy_mode",
+      origins: new Map(),
     });
 
     await runSandboxStep(ENV, deps);
@@ -319,16 +320,21 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it("reads expected_filesystem_rules as the workflow set them, before config_file joined its own", async () => {
+  it("reads expected_filesystem_rules once config_file joined its own, with where they start", async () => {
+    const origin = { offset: 1, line: 3 };
     mocks.applyConfigFile.mockImplementation((env: NodeJS.ProcessEnv) => {
       env.INPUT_EXPECTED_FILESYSTEM_RULES = "* R ./a\n* R ./b";
-      return { path: "/w/c.yml" };
+      return { path: "/w/c.yml", origins: new Map([["expected_filesystem_rules", origin]]) };
     });
     mocks.readFilesystemAuditInput.mockReturnValue("record");
 
     await runSandboxStep({ ...ENV, INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a" }, deps);
 
-    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("* R ./a", "/w/c.yml", "record");
+    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith(
+      "* R ./a\n* R ./b",
+      origin,
+      "record",
+    );
   });
 
   it("warns that fail_on_unexpected_file_access has nothing to fail on without rules", async () => {

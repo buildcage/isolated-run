@@ -33,6 +33,7 @@ import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
+import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -277,8 +278,6 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
-  // Before config_file joins its rules to them, so each rule's line is known.
-  const inlineFilesystemRules = env[EXPECTED_RULES_ENV] ?? "";
   // Before any input is read: it rewrites what they all read.
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
   if (configFile?.warning) deps.warn(configFile.warning);
@@ -294,8 +293,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const filesystemAudit = deps.readFilesystemAuditInput();
   const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
   const expectedFilesystemRules = deps.readExpectedFilesystemRules(
-    inlineFilesystemRules,
-    configFile?.path,
+    env[EXPECTED_RULES_ENV] ?? "",
+    configFile?.origins.get(EXPECTED_RULES_INPUT),
     filesystemAudit,
   );
   const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
