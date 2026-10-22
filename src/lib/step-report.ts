@@ -12,6 +12,7 @@ import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import type { TrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
@@ -79,7 +80,7 @@ export interface ReportStepOptions {
    */
   moreBlocks?: (startedAt: number | undefined, stepLabel: string | undefined) => SummaryBlock[];
   /** The verdict's items from moreBlocks' part of the summary. */
-  verdictItems?: string[];
+  verdictItems?: VerdictItems;
   /** The command's own summary already at the start of the file, moved
    *  after this action's part once that is written; see
    *  moveCommandSummaryLast. */

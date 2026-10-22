@@ -32,6 +32,7 @@ import {
   partFits,
 } from "#core/lib/report/render/traffic-parts.ts";
 import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { awsKeyLineNote, awsKeys, awsKeysBlocks } from "./aws-keys.ts";
@@ -78,7 +79,7 @@ export interface ComputeReportOutcomesOptions {
   /** See ExampleStepOptions.extraInputs. */
   extraInputs?: string[];
   /** The verdict's items from the rest of the step's summary; see renderVerdict. */
-  verdictItems?: string[];
+  verdictItems?: VerdictItems;
   actionVersion?: string;
   failOnBlocked?: boolean;
   /** Whether a truncation notice can point to the traffic artifact. */
@@ -104,7 +105,7 @@ export function computeReportOutcomes(
     extraInputs,
     actionVersion,
     artifactAvailable,
-    verdictItems = [],
+    verdictItems = {},
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
   const emissions = describeReportOutcomes(report, {
@@ -115,10 +116,10 @@ export function computeReportOutcomes(
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
-  const heading = trafficHeadingBlock(report, reportTitle(stepLabel), [
-    ...wouldBlockVerdictItems(report.timeline),
-    ...verdictItems,
-  ]);
+  const heading = trafficHeadingBlock(report, reportTitle(stepLabel), {
+    caution: verdictItems.caution,
+    warning: [...wouldBlockVerdictItems(report.timeline), ...(verdictItems.warning ?? [])],
+  });
   // What needs acting on first, then what got through, then the record. The
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [

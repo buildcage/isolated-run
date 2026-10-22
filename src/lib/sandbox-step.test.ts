@@ -207,7 +207,7 @@ describe("runSandboxStep", () => {
   });
 
   it("saves the merged write_through for the post step when config_file was read", async () => {
-    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml" });
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", origins: new Map() });
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
       writeThroughInput: "/opt/cache",
@@ -426,7 +426,7 @@ describe("runSandboxStep", () => {
   });
 
   it("refuses a symlinked /var/tmp before writing anything under it", async () => {
-    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml" });
+    mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", origins: new Map() });
     mocks.checkScratchBaseParent.mockImplementation(() => {
       throw new SandboxError("/var/tmp resolves to /tmp", "SCRATCH_BASE_SYMLINKED");
     });

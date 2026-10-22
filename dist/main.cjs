@@ -15532,25 +15532,60 @@ function resolveConfigPath(path, env) {
 	if (isOutside((0, node_fs.realpathSync)(workspace), real)) throw pathError("leads outside the workspace.");
 	return real;
 }
+const resolved = (node, doc) => (0, import_dist$5.isAlias)(node) ? node.resolve(doc) : node;
+function isMergeKey(key, doc) {
+	if (!(0, import_dist$5.isScalar)(key) || key.type && key.type !== import_dist$5.Scalar.PLAIN) return !1;
+	let { value } = key;
+	return (value === "<<" || typeof value == "symbol" && value.description === "<<") && doc.schema.tags.some((tag) => tag.tag === "tag:yaml.org,2002:merge" && tag.default);
+}
+function valueNodes(doc) {
+	let read = new Map(), nodesOf = (map) => {
+		let done = read.get(map);
+		if (done) return done;
+		let nodes = new Map(), merged = [];
+		for (let { key, value } of map.items) if (isMergeKey(key, doc)) {
+			let source = resolved(value, doc);
+			merged.push(...(0, import_dist$5.isSeq)(source) ? source.items : [source]);
+		} else {
+			let name = resolved(key, doc);
+			(0, import_dist$5.isScalar)(name) && nodes.set(String(name.value), value);
+		}
+		for (let source of merged.map((node) => resolved(node, doc))) for (let [key, value] of nodesOf(source)) nodes.has(key) || nodes.set(key, value);
+		return read.set(map, nodes), nodes;
+	};
+	return nodesOf(doc.contents);
+}
 function parseConfig(text, path, known) {
-	let invalid = (reason) => new ConfigFileError(`Invalid config_file ${JSON.stringify(path)}: ${reason}`, "CONFIG_FILE_INVALID"), doc;
+	let invalid = (reason) => new ConfigFileError(`Invalid config_file ${JSON.stringify(path)}: ${reason}`, "CONFIG_FILE_INVALID"), lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(text, { lineCounter });
+	for (let warning of doc.warnings) process.emitWarning(warning);
+	if (doc.errors.length > 0) throw invalid(doc.errors[0].message);
+	let js;
 	try {
-		doc = (0, import_dist$5.parse)(text);
+		js = doc.toJS();
 	} catch (e) {
 		throw invalid(errorMessage(e));
 	}
-	if (doc == null) return new Map();
-	if (typeof doc != "object" || Array.isArray(doc)) throw invalid("the top level must be a mapping of input names to values.");
-	let values = new Map();
-	for (let [key, value] of Object.entries(doc)) {
+	if (js == null) return new Map();
+	if (typeof js != "object" || Array.isArray(js)) throw invalid("the top level must be a mapping of input names to values.");
+	let nodes = valueNodes(doc), lineOf = (key, value) => {
+		let node = resolved(nodes.get(key), doc), [start, end] = node.range, at = lineCounter.linePos(start).line;
+		if (node.type === import_dist$5.Scalar.BLOCK_LITERAL) return at + 1;
+		if (node.type !== import_dist$5.Scalar.BLOCK_FOLDED) return value.includes("\n") || lineCounter.linePos(end).line !== at ? void 0 : at;
+	}, values = new Map();
+	for (let [key, value] of Object.entries(js)) {
 		if (!known.includes(key)) throw invalid(`unknown key ${JSON.stringify(key)}. Allowed keys: ${known.join(", ")}.`);
-		if (value == null) values.set(key, "");
+		if (value == null) values.set(key, { text: "" });
 		else if ([
 			"string",
 			"number",
 			"boolean"
-		].includes(typeof value)) values.set(key, String(value));
-		else throw invalid(`${key} must be a string, as it would be in the workflow.`);
+		].includes(typeof value)) {
+			let text = String(value);
+			values.set(key, {
+				text,
+				line: lineOf(key, text)
+			});
+		} else throw invalid(`${key} must be a string, as it would be in the workflow.`);
 	}
 	return values;
 }
@@ -15564,15 +15599,30 @@ function applyConfigFile(env, { known, lists }) {
 	} catch (e) {
 		throw new ConfigFileError(`config_file ${JSON.stringify(path)} could not be read: ${errorMessage(e)}`, "CONFIG_FILE_PATH");
 	}
-	let values = parseConfig(text, path, known), ignored = [];
-	for (let [name, value] of values) {
+	let values = parseConfig(text, path, known), ignored = [], origins = new Map();
+	for (let [name, { text: value, line }] of values) {
 		let envName = inputEnvName(name), inline = env[envName] ?? "";
-		lists.includes(name) ? env[envName] = [inline, value].filter((v) => v.trim()).join("\n") : inline.trim() ? value.trim() && value.trim() !== inline.trim() && ignored.push(name) : env[envName] = value;
+		if (lists.includes(name)) {
+			let joined = [inline, value].filter((v) => v.trim()).join("\n");
+			env[envName] = joined;
+			let before = joined.slice(0, joined.length - value.length);
+			value.trim() && origins.set(name, {
+				offset: before.split("\n").length - 1,
+				line
+			});
+		} else inline.trim() ? value.trim() && value.trim() !== inline.trim() && ignored.push(name) : (env[envName] = value, value.trim() && origins.set(name, {
+			offset: 0,
+			line
+		}));
 	}
 	return ignored.length ? {
 		path: full,
-		warning: `Ignored from config_file ${path}, set by the workflow: ${ignored.join(", ")}`
-	} : { path: full };
+		warning: `Ignored from config_file ${path}, set by the workflow: ${ignored.join(", ")}`,
+		origins
+	} : {
+		path: full,
+		origins
+	};
 }
 //#endregion
 //#region src/core/lib/actions/inputs.ts
@@ -69164,12 +69214,16 @@ function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step 
 }
 //#endregion
 //#region src/core/lib/report/render/verdict.ts
-function renderVerdict(report, extraItems = []) {
+function renderVerdict(report, extra = {}) {
 	let unexpected = 0, expected = 0;
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
 	report.blocked.length === 0 && (unexpected = report.blockedCount);
-	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [...report.logLooksPlausible ? [] : ["report incomplete"], ...unexpected ? [`${unexpected} blocked`] : []], warning = [
-		...extraItems,
+	let failed = report.failed.reduce((total, row) => total + row.count, 0), undecided = countUndecidedRequests(report), caution = [
+		...report.logLooksPlausible ? [] : ["report incomplete"],
+		...unexpected ? [`${unexpected} blocked`] : [],
+		...extra.caution ?? []
+	], warning = [
+		...extra.warning ?? [],
 		...failed ? [`${failed} failed`] : [],
 		...undecided ? [`${undecided} not acted on`] : []
 	];
@@ -70657,7 +70711,7 @@ function summaryFooter(actionRepo) {
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable, verdictItems = [] }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable, verdictItems = {} }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
@@ -70665,7 +70719,10 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 	wouldBlock && emissions.push(wouldBlock);
 	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
 	return {
-		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), [...wouldBlockVerdictItems(report.timeline), ...verdictItems]), [
+		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), {
+			caution: verdictItems.caution,
+			warning: [...wouldBlockVerdictItems(report.timeline), ...verdictItems.warning ?? []]
+		}), [
 			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
 			wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
 				priority: 2,
@@ -71484,7 +71541,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		}
 	}, settled = (result) => ({
 		expected: "not-requested",
-		verdictItems: [],
+		verdictItems: {},
 		upload: async () => (setOutput(""), "not-requested"),
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE))
 	});
@@ -71506,7 +71563,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
 	summary ? summary.lost ? unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`) : unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
-	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
@@ -71547,9 +71604,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	};
 }
 function reportUnexpected(summary, failOnUnexpected, annotation) {
-	if (!summary?.unexpected) return [];
+	if (!summary?.unexpected) return {};
 	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
-	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1) : annotation.warning(message), [what];
+	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
 	let writer, written = !1, dropCopy = (e) => {

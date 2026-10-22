@@ -17,6 +17,7 @@ import {
   withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 
 import { failOrWarn } from "../fail-or-warn.ts";
 import { reportTitle } from "../report.ts";
@@ -224,8 +225,9 @@ export interface ReadStepFilesystemAudit {
   /** The artifact as it will be once uploaded, for a summary written before
    *  the upload. */
   expected: RecordArtifact;
-  /** The traffic report's verdict items: the accesses no rule took, if any. */
-  verdictItems: string[];
+  /** The traffic report's verdict items: the accesses no rule took, if any,
+   *  as a caution when they fail the step. */
+  verdictItems: VerdictItems;
   /** Uploads the stripped copy, sets the output and returns the artifact as
    *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
@@ -275,7 +277,7 @@ export function readStepFilesystemAudit(
   // Nothing to upload, and blocks that say nothing of an artifact.
   const settled = (result: StepFilesystemAudit): ReadStepFilesystemAudit => ({
     expected: "not-requested",
-    verdictItems: [],
+    verdictItems: {},
     upload: async () => {
       setOutput("");
       return "not-requested";
@@ -345,7 +347,7 @@ export function readStepFilesystemAudit(
     ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
     : "none";
   const given = rules !== undefined;
-  const verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [];
+  const verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
   const artifactOf = (uploaded: UploadedArtifact | undefined): RecordArtifact =>
     !upload ? "not-requested" : uploaded ? uploaded : "upload-failed";
   const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
@@ -405,15 +407,15 @@ export function readStepFilesystemAudit(
 
 /**
  * Annotates the accesses no rule took and returns the verdict's item for
- * them, counted as the Unexpected Accesses table lists them, which a table
+ * them, a caution when they fail the step, counted as the Unexpected Accesses table lists them, which a table
  * given up does not.
  */
 function reportUnexpected(
   summary: AuditSummary | undefined,
   failOnUnexpected: boolean,
   annotation: Annotation,
-): string[] {
-  if (!summary?.unexpected) return [];
+): VerdictItems {
+  if (!summary?.unexpected) return {};
   const n = summary.proposed?.length;
   const es = n === 1 ? "" : "es";
   const what =
@@ -427,8 +429,10 @@ function reportUnexpected(
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;
-  } else annotation.warning(message);
-  return [what];
+    return { caution: [what] };
+  }
+  annotation.warning(message);
+  return { warning: [what] };
 }
 
 interface Reduced extends ReducedRecording {

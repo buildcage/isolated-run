@@ -299,6 +299,11 @@ describe("computeReportOutcomes", () => {
     expect(warning?.level).toBe("warning");
     expect(warning?.shouldFail).toBe(false);
     expect(warning?.message.startsWith("2 request(s) restrict mode would block")).toBe(true);
+
+    // The rest of the step's items join the verdict: a caution raises it.
+    expect(
+      markdownOf(r, options({ verdictItems: { caution: ["1 x"], warning: ["3 y"] } })),
+    ).toMatch(/^> \[!CAUTION\]\n> 1 x · 2 restrict would block · 3 y$/m);
   });
 
   describe("Restrict Would Block", () => {
