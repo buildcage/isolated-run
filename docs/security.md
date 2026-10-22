@@ -673,7 +673,7 @@ spells a path. What it can do:
 - Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
   record is incomplete. Flooding can hide which accesses happened, not that some are missing.
 - Touch so many paths that a table or the details would pass GitHub's Job Summary size limit, or
-  hold more than 200,000 files and directories after folding. A few hundred long paths with `..`
+  hold more than 200,000 paths after folding. A few hundred long paths with `..`
   are enough, so a part past 300 KB folds more first, down to rows such as `/**` and `~/**` that
   still carry every flag, and past the limit even so keeps the rows that fit under a note. Every
   access stays in the artifact when one was uploaded, which needs

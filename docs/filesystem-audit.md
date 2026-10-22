@@ -726,6 +726,7 @@ itself can do to the record, and what the record can be trusted for.
   [How rows are grouped](#how-rows-are-grouped)). One that would pass 1 MiB even so keeps the rows
   that fit in it, takes no new ones, and ends with a note; the Job Summary's cap then decides how
   much of it prints. It is left out whole, under a note that says why, when not one row fits, or
-  once its folded tree holds more than 200,000 files and directories, counting every directory on
-  the way and each program's tree apart in the table, each command's in the details. When the table
-  is left out, the details go with it.
+  once it holds more than 200,000 paths after folding, counting every directory on the way and each
+  row that never folds, such as a program run, and each program's tree apart in the table, each
+  command's in the details. When the table is left out, the details go with it. The Unexpected
+  Accesses table and the proposed rules count the same way.

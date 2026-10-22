@@ -70994,7 +70994,7 @@ var Lines = class {
 			}
 			if (a) return apply(a, x);
 			if (this.full) return void (this.dropped = !0);
-			this.climbing.set(key, a = newAgg()), apply(a, x), this.count(this.opts.rowBytes(pathOf(key), x.comm));
+			this.climbing.set(key, a = newAgg()), apply(a, x), this.count(this.opts.rowBytes(pathOf(key), x.comm)), ++this.nodes > this.opts.nodes && this.stop("paths");
 			return;
 		}
 		let kids = this.trees.get(x.comm);
@@ -71047,8 +71047,8 @@ var Lines = class {
 	}
 	gather(group, keys) {
 		let comm = commOf(group), had = this.climbing.get(group), agg = had ?? newAgg();
-		for (let key of keys) mergeAgg(agg, this.climbing.get(key)), this.climbing.delete(key), this.count(-this.opts.rowBytes(pathOf(key), comm));
-		this.members.delete(group), !had && (this.climbing.set(group, agg), this.count(this.opts.rowBytes(pathOf(group), comm)));
+		for (let key of keys) mergeAgg(agg, this.climbing.get(key)), this.climbing.delete(key), this.nodes--, this.count(-this.opts.rowBytes(pathOf(key), comm));
+		this.members.delete(group), !had && (this.climbing.set(group, agg), this.nodes++, this.count(this.opts.rowBytes(pathOf(group), comm)));
 	}
 	loosen() {
 		this.loose = !0, this.loosening = !0;
