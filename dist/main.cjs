@@ -71495,17 +71495,17 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: upload
-	}, cleanPath = audit.stepPath, unchecked = () => {
-		rules && failOnUnexpected && (annotation.error(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1);
+	}, cleanPath = audit.stepPath, unchecked = (what) => {
+		rules && failOnUnexpected && (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1);
 	}, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), unchecked(), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
-	summary || unchecked(), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	summary ? summary.lost && unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
 	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
@@ -71548,7 +71548,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 }
 function reportUnexpected(summary, failOnUnexpected, annotation) {
 	if (!summary?.unexpected) return [];
-	let n = summary.proposed?.length, what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file ${n === 1 ? "access" : "accesses"}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : n === 1 ? `1 file access fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists it.` : `${n} file accesses fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists them.`;
+	let n = summary.proposed?.length, paths = n === 1 ? "1 path" : `${n} paths`, what = n === void 0 ? "unexpected file accesses (too many to list)" : `unexpected file accesses on ${paths}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : `File accesses on ${paths} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
 	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1) : annotation.warning(message), [what];
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {

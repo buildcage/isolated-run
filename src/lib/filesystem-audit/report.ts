@@ -297,11 +297,9 @@ export function readStepFilesystemAudit(
   // never uploads the raw. The post step removes both.
   const cleanPath = audit.stepPath;
   // Accesses that could not be checked fail the step as unexpected ones would.
-  const unchecked = (): void => {
+  const unchecked = (what: string): void => {
     if (!rules || !failOnUnexpected) return;
-    annotation.error(
-      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}; failing the step, as fail_on_unexpected_file_access is true.`,
-    );
+    annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;
   };
   let reduced: Reduced | undefined;
@@ -309,7 +307,9 @@ export function readStepFilesystemAudit(
     reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
-    unchecked();
+    unchecked(
+      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`,
+    );
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   if (!reduced) {
@@ -321,7 +321,14 @@ export function readStepFilesystemAudit(
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   const { summary, summaryError, ended, written } = reduced;
-  if (!summary) unchecked();
+  if (!summary)
+    unchecked(
+      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`,
+    );
+  else if (summary.lost)
+    unchecked(
+      `Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`,
+    );
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
   if (attached && !ended && !cancelled) {
@@ -404,16 +411,15 @@ function reportUnexpected(
 ): string[] {
   if (!summary?.unexpected) return [];
   const n = summary.proposed?.length;
+  const paths = n === 1 ? "1 path" : `${n} paths`;
   const what =
     n === undefined
       ? "unexpected file accesses (too many to list)"
-      : `${n} unexpected file ${n === 1 ? "access" : "accesses"}`;
+      : `unexpected file accesses on ${paths}`;
   const message =
     n === undefined
       ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.`
-      : n === 1
-        ? `1 file access fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists it.`
-        : `${n} file accesses fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists them.`;
+      : `File accesses on ${paths} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;

@@ -1073,9 +1073,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
 
     const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
 
-    expect(read.verdictItems).toStrictEqual(["2 unexpected file accesses"]);
+    expect(read.verdictItems).toStrictEqual(["unexpected file accesses on 2 paths"]);
     expect(note.warning).toHaveBeenCalledWith(
-      "2 file accesses fell outside expected_filesystem_rules; the Unexpected Accesses table lists them.",
+      "File accesses on 2 paths fell outside expected_filesystem_rules; the Unexpected Accesses table lists them.",
     );
   });
 
@@ -1089,9 +1089,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
     const md = joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined));
 
-    expect(read.verdictItems).toStrictEqual(["1 unexpected file access"]);
+    expect(read.verdictItems).toStrictEqual(["unexpected file accesses on 1 path"]);
     expect(note.warning).toHaveBeenCalledWith(
-      "1 file access fell outside expected_filesystem_rules; the Unexpected Accesses table lists it.",
+      "File accesses on 1 path fell outside expected_filesystem_rules; the Unexpected Accesses table lists it.",
     );
     expect(process.exitCode).toBeUndefined();
     expect(md).toContain(
@@ -1141,7 +1141,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(note.error).toHaveBeenCalledWith(
-      "1 file access fell outside expected_filesystem_rules; the Unexpected Accesses table lists it. " +
+      "File accesses on 1 path fell outside expected_filesystem_rules; the Unexpected Accesses table lists it. " +
         "Failing the step, as fail_on_unexpected_file_access is true.",
     );
     expect(process.exitCode).toBe(1);
@@ -1161,7 +1161,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(note.error).toHaveBeenCalledWith(
-      "The file accesses could not be checked against expected_filesystem_rules; failing the step, as fail_on_unexpected_file_access is true.",
+      "The file accesses could not be checked against expected_filesystem_rules, as the recording could not be read; failing the step, as fail_on_unexpected_file_access is true.",
     );
     expect(process.exitCode).toBe(1);
   });
@@ -1187,7 +1187,22 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(note.error).toHaveBeenCalledWith(
-      "The file accesses could not be checked against expected_filesystem_rules; failing the step, as fail_on_unexpected_file_access is true.",
+      "The file accesses could not be checked against expected_filesystem_rules, as summarizing the recording failed; failing the step, as fail_on_unexpected_file_access is true.",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails the step with fail_on_unexpected_file_access when the recording misses accesses", async () => {
+    const note = annotation();
+    const { deps: d } = deps({ raw: raw.replace('"dropped":0', '"dropped":3') });
+
+    readStepFilesystemAudit(
+      { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
+      d,
+    );
+
+    expect(note.error).toHaveBeenCalledWith(
+      "Not every file access was checked against expected_filesystem_rules, as the recording misses some; failing the step, as fail_on_unexpected_file_access is true.",
     );
     expect(process.exitCode).toBe(1);
   });
