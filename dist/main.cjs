@@ -70620,8 +70620,8 @@ function unexpectedBlock(summary, { priorities }) {
 	return {
 		...block,
 		cut: "lines",
-		head: 6,
-		text: `### Unexpected Accesses (${proposed.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${took}`
+		head: 8,
+		text: `### Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
 	};
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
@@ -70830,13 +70830,13 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*"), NOT_MATCHED_HEADING = "# Not matched in this run";
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*"), NOT_MATCHED_HEADING = "# Not matched in this run";
 function expectedRulesFile(written, proposed) {
 	let given = written.filter((line) => line !== NOT_MATCHED_HEADING), rows = proposed.map((r) => [
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(anyPid(r.path.path))
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = [...new Set(rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`))], lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",
 		NOT_MATCHED_HEADING,

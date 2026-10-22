@@ -266,12 +266,11 @@ then shows only what falls outside it:
 ## Process Activity Report
 
 ### Unexpected Accesses (1)
+1,204 recorded operations matched `expected_filesystem_rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path        |
 | --------------------- | ------ | ----------- |
 | `/usr/local/bin/node` | R      | `~/.npmrc`  |
-
-1,204 recorded operations matched `expected_filesystem_rules`.
 ```
 
 The executed table, the accessed paths and the details give way to it; the artifact still has every
@@ -325,8 +324,8 @@ ends up over rules a later run matched.
 
 The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
 Where that run's artifact holds the file, the example names it in `config_file` at
-`ci/expected-filesystem-rules.yml`, for you to commit there; on an event that refuses a config file,
-or without the file, it lists the rules given under `with:`. It adds
+`ci/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
+`workflow_run`, or without the file, it lists the rules given under `with:`. It adds
 `fail_on_unexpected_file_access: true` when the step set it.
 
 ### Rules

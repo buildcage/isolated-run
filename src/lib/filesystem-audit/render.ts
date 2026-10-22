@@ -261,8 +261,9 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
   return {
     ...block,
     cut: "lines",
-    head: 6,
-    text: `### Unexpected Accesses (${proposed.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${took}`,
+    // The count of what matched stays when the table is cut.
+    head: 8,
+    text: `### Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`,
   };
 }
 

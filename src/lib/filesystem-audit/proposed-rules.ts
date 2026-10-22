@@ -14,12 +14,12 @@ import { EXPECTED_RULES_INPUT, type ExpectedRules } from "./rules.ts";
 /** What became of the proposed rules file. */
 export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
 
-// As the details quote a field, and one that would read as a comment too,
-// but for a memfd's, quoted already. Its quotes and backslashes are escaped
-// already, as the summary shows them.
+// As the details quote a field, and one that is empty, as a process's name
+// can be, or would read as a comment too, but for a memfd's, quoted already.
+// Its quotes and backslashes are escaped already, as the summary shows them.
 const ruleField = (text: string): string => {
   if (text.startsWith(`${MEMFD_PREFIX}"`)) return text;
-  return text.startsWith("#") ? `"${text}"` : field(text);
+  return text === "" || text.startsWith("#") ? `"${text}"` : field(text);
 };
 
 // Every process's directory in /proc shows as one, which a rule spells with
@@ -45,9 +45,14 @@ export function expectedRulesFile(written: string[], proposed: RuleRow[]): strin
   ]);
   const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
   const [programW, flagsW] = [width(0), width(1)];
-  const added = rows.map(
-    ([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`,
-  );
+  // Once each: a program shown deleted and not is one rule.
+  const added = [
+    ...new Set(
+      rows.map(
+        ([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`,
+      ),
+    ),
+  ];
   const lines =
     given.length === 0
       ? added
