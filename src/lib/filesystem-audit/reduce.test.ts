@@ -174,7 +174,7 @@ describe("createAuditSummary", () => {
     );
   });
 
-  it("lists each command's refused syscalls in the details and notes only a kill under the heading", () => {
+  it("leaves a refused syscall to the artifact and lists a kill in the details too", () => {
     const refused = (comm: string, syscall: string, t: string): object => ({
       t,
       kind: "syscall",
@@ -187,8 +187,6 @@ describe("createAuditSummary", () => {
       refused("node", "io_uring_setup", "2026-01-01T00:00:01.000Z"),
       { t: "2026-01-01T00:00:02.000Z", kind: "read", comm: "cat", path: "/etc/hostname" },
       refused("bwrap", "unshare", "2026-01-01T00:00:03.000Z"),
-      refused("npm", "io_uring_setup", "2026-01-01T00:00:04.000Z"),
-      refused("node", "io_uring_setup", "2026-01-01T00:00:05.000Z"),
       {
         t: "2026-01-01T00:00:06.000Z",
         kind: "syscall",
@@ -201,15 +199,14 @@ describe("createAuditSummary", () => {
       { kind: "end", dropped: 0, untracked: 0 },
     );
     expect(md).toContain("> 🚫 Killed for a 32-bit system call: `a.out`.");
-    expect(md).not.toContain("Refused system calls");
     expect(tableRows(md)).toEqual(["| `/etc/hostname` | R |"]); // a syscall is no path
     expect(lines(md)).toEqual([
-      "00:00.000-00:04.000: ! node syscall:io_uring_setup",
-      "00:01.000: R cat /etc/hostname",
-      "00:02.000: ! bwrap syscall:unshare",
-      "00:03.000: ! npm syscall:io_uring_setup",
-      "00:05.000: ! a.out syscall:32-bit socketcall (killed)",
+      "00:00.000: R cat /etc/hostname",
+      "00:04.000: ! a.out syscall:32-bit socketcall (killed)",
     ]);
+    expect(render(refused("node", "io_uring_setup", "2026-01-01T00:00:01.000Z"))).toContain(
+      "No file access was recorded.",
+    );
   });
 
   it("notes a command killed for a 32-bit syscall on its own, from a record missing its fields", () => {
@@ -230,58 +227,37 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["! syscall:32-bit ? (killed)", "! a.out syscall:32-bit ? (killed)"]);
   });
 
-  it("keeps the first 200 refused pairs, each syscall's first and every kill", () => {
-    const refused = (comm: string, t?: string): object => ({
+  it("places a kill by its first time, though its first record had none", () => {
+    const kill = (t?: string): object => ({
       ...(t && { t }),
       kind: "syscall",
-      comm,
-      syscall: "unshare",
-      err: 1,
-      failed: true,
-    });
-    const md = render(
-      refused("a"),
-      refused("a", "2026-01-01T00:00:01.000Z"),
-      refused("b", "2026-01-01T00:00:02.000Z"),
-      refused("c", "2026-01-01T00:00:03.000Z"),
-      refused("d", "2026-01-01T00:00:04.000Z"),
-      { kind: "end", dropped: 0, untracked: 0 },
-    );
-    // Placed by its first time, though its first record had none.
-    expect(lines(md)[0]).toBe("00:00.000: ! a syscall:unshare");
-
-    const many = render(...Array.from({ length: 201 }, (_, i) => refused(`p${i}`)), {
-      kind: "syscall",
-      comm: "old",
-      syscall: "socketcall",
+      comm: "a",
+      syscall: "getpid",
       killed: true,
     });
-    expect(lines(many)).toContain("! p199 syscall:unshare");
-    expect(many).not.toContain("p200");
-    expect(lines(many)).toContain("! old syscall:32-bit socketcall (killed)");
-    const late = (comm: string): object => ({ ...refused(comm), syscall: "bpf" });
-    const hidden = render(
-      ...Array.from({ length: 200 }, (_, i) => refused(`p${i}`)),
-      late("late"),
-      late("later"),
+    const md = render(
+      kill(),
+      kill("2026-01-01T00:00:01.000Z"),
+      { t: "2026-01-01T00:00:02.000Z", kind: "read", comm: "cat", path: "/etc/hostname" },
+      kill("2026-01-01T00:00:03.000Z"),
     );
-    expect(lines(hidden)).toContain("! late syscall:bpf");
-    expect(hidden).not.toContain("later");
-    expect(lines(render({ kind: "syscall", comm: "x" }))).toEqual(["! x syscall:?"]);
+    expect(lines(md)).toEqual([
+      "00:00.000-00:02.000: ! a syscall:32-bit getpid (killed)",
+      "00:01.000: R cat /etc/hostname",
+    ]);
   });
 
-  it("shows a step that only made refused syscalls in the details", () => {
+  it("shows a step whose only records are kills in the details", () => {
     const records = Array.from({ length: 12 }, (_, i) => ({
       t: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
       kind: "syscall",
-      comm: "x",
-      syscall: `s${i}`,
-      err: 1,
-      failed: true,
+      comm: `x${i}`,
+      syscall: "getpid",
+      killed: true,
     }));
     const md = render(...records, { kind: "end", dropped: 0, untracked: 0 });
     expect(lines(md)).toHaveLength(12);
-    expect(md).toContain("! x syscall:s11\n");
+    expect(md).toContain("! x11 syscall:32-bit getpid (killed)\n");
     expect(md).not.toContain("No file access was recorded.");
   });
 
@@ -1213,12 +1189,12 @@ describe("createAuditSummary: commands", () => {
     ]);
   });
 
-  it("names a refused syscall's command as a path's", () => {
+  it("names a killed syscall's command as a path's", () => {
     const md = render(
-      { kind: "exec", pid: 2, comm: "node", path: "/usr/bin/node" },
-      { kind: "syscall", pid: 2, comm: "npm ls", syscall: "io_uring_setup", err: 1 },
+      { kind: "exec", pid: 2, comm: "a.out", path: "/tmp/a.out" },
+      { kind: "syscall", pid: 2, comm: "a out", syscall: "getpid", killed: true },
     );
-    expect(lines(md)).toContain("! node[npm ls] syscall:io_uring_setup");
+    expect(lines(md)).toContain("! a.out[a out] syscall:32-bit getpid (killed)");
   });
 });
 

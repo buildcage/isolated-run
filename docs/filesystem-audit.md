@@ -126,7 +126,6 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 🔍 Process details
 first-last access since the proxy started · flags · command · path
 00:00.401-00:00.420: Xw! node /usr/local/bin/node
-00:00.402:           !   node syscall:io_uring_setup
 00:00.412:           R   node ./package.json
 00:00.415-00:00.418: Rr! node /etc/**
 00:00.530-00:41.207: RWD node ./node_modules/**
@@ -180,8 +179,8 @@ From the top:
   a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
-  read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, shows
-  only in the details, as `syscall:unshare` with `!`.
+  read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
+  in the artifact only; see [Refused system calls](#refused-system-calls).
 
 ### Flags
 
@@ -421,7 +420,7 @@ nor is a failed `exec`, though the file it opened before failing can show as an 
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                                                                                                                                                                | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`. One across mounts, such as from `$HOME` into the workspace, fails (`EXDEV`). A refused one marks `to` refused, except on `EPERM`, which marks `path`, as `EPERM` mostly comes from `protected_hardlinks` refusing a file the step does not own and cannot both read and write | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                                                                                                                                                           | `A`                                                          |
-| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                                      | `!` in the details                                           |
+| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                                      | a kill only: `!` in the details                              |
 | `end`                                   | the last line; see below                                                                                                                                                                                                                                                                                            | none                                                         |
 
 ### Access letters
@@ -516,7 +515,7 @@ That changes once a table or the details would pass 300 KB, more rows than anyon
 - A program run, `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` still never fold.
 
 **Quoting.** A command or path holding a space is quoted in the details, as `"a b"`, except a
-memfd's name, which is quoted already, and a refused system call. The name a process gave itself is
+memfd's name, which is quoted already, and a killed system call. The name a process gave itself is
 not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
@@ -534,21 +533,17 @@ not quoted inside brackets, as they mark where it ends.
 ### Refused system calls
 
 A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
-or `unshare`, which fails with `EPERM`. The details, where they fit, show each once per program, as
-`syscall:io_uring_setup` with `!`. One that did not kill the program is not noted under the heading,
-since many programs try a system call and carry on without it, as Node.js does with `io_uring_setup`
-each time it starts. A program that needs one, such as `bwrap` with `unshare`, fails instead, so
-when a step fails, look for a `syscall:` row in the details, or, if the details were cut short, in
-the artifact when one was uploaded.
+or `unshare`, which fails with `EPERM`. The artifact records each once per program as a `syscall`
+line; the summary leaves it out, since many programs try a system call and carry on without it, as
+Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it either way. A
+program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step fails with
+`EPERM`, set `upload_filesystem_audit_artifact: true` and look for a `syscall` line in the artifact.
 
 - One already recorded as a failed change to a path is not repeated.
 - One the profile allows only for some arguments, as `clone`, is not recorded even when refused,
   since the kernel's own `EPERM` for it would read the same.
-- A program killed for a 32-bit system call shows as `syscall:32-bit <name> (killed)` and is noted
-  under the heading; a thread killed while others run on is not recorded.
-- Past 200 command and system call pairs, the details add a row only for each system call's first
-  refusal that did not kill the command, and for every kill; the artifact, if uploaded, has the
-  rest.
+- A program killed for a 32-bit system call is noted under the heading and shows in the details as
+  `syscall:32-bit <name> (killed)`; a thread killed while others run on is not recorded.
 
 ### What the summary leaves out
 
