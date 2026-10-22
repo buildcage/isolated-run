@@ -23,10 +23,11 @@ describe("globPattern", () => {
     expect(matches("memfd:**", 'memfd:"a/b"')).toBe(true);
   });
 
-  it("matches a name's escapes as what they stand for, \\* as a star", () => {
-    expect(matches(String.raw`./out/\*.tmp`, "./out/*.tmp")).toBe(true);
+  it("matches an escape as written, \\* as a star", () => {
+    expect(matches(String.raw`./out/\*.tmp`, String.raw`./out/\*.tmp`)).toBe(true);
     expect(matches(String.raw`./out/\*.tmp`, "./out/a.tmp")).toBe(false);
-    expect(matches(String.raw`./a\u{20}\x80\n\\`, "./a \udc80\n\\")).toBe(true);
+    expect(matches(String.raw`./a\u{20}\x80\n\\`, String.raw`./a\u{20}\x80\n\\`)).toBe(true);
+    expect(matches("./*", String.raw`./a\*b`)).toBe(true);
   });
 
   it("refuses an escape the summary never writes", () => {
@@ -92,12 +93,13 @@ describe("parseExpectedRules", () => {
   it("reads a quoted field with its blanks and escapes", () => {
     const { rules } = parse(String.raw`"/opt/my tool" R "./a \"b\"\\c"`);
     expect(rules[0].program!.test("/opt/my tool")).toBe(true);
-    expect(rules[0].path.test('./a "b"\\c')).toBe(true);
+    expect(rules[0].path.test(String.raw`./a \"b\"\\c`)).toBe(true);
   });
 
-  it("reads a memfd as the summary shows it", () => {
-    const { rules } = parse(String.raw`* R memfd:"a\u{20}"`);
-    expect(rules[0].path.test('memfd:"a "')).toBe(true);
+  it("reads a memfd as the summary shows it, quoted as one field", () => {
+    const { rules } = parse(String.raw`memfd:"x y" R memfd:"\" b\u{20}"`);
+    expect(rules[0].program!.test('memfd:"x y"')).toBe(true);
+    expect(rules[0].path.test(String.raw`memfd:"\" b\u{20}"`)).toBe(true);
   });
 
   it.each([
@@ -106,6 +108,8 @@ describe("parseExpectedRules", () => {
     ["* R! ./a", 'input:1: the access "R!" must be letters of RWXMLDA'],
     ["* RQ ./a", 'input:1: the access "RQ" must be letters of RWXMLDA'],
     ['* R "./a', "input:1: a quote is not closed"],
+    [String.raw`* R memfd:"a\"`, "input:1: a quote is not closed"],
+    ['* R memfd:"a"b', "input:1: a closing quote must end its field"],
     ['* R "./a"b', "input:1: a closing quote must end its field"],
     [String.raw`* R ./a\q`, String.raw`input:1: "./a\\q" holds an unknown escape`],
   ])("refuses %j", (text, reason) => {

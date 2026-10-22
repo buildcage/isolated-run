@@ -241,7 +241,7 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
     level: 2,
     section: SECTION,
   };
-  const took = `<sub>${accesses(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+  const took = `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
   if (!proposed)
     return {
       ...block,
@@ -266,8 +266,9 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
   };
 }
 
-const accesses = (n: number): string =>
-  `${n.toLocaleString("en-US")} recorded ${n === 1 ? "access" : "accesses"}`;
+// Counted by line of the recording: a link is one, though it holds two paths.
+const operations = (n: number): string =>
+  `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
 
 /**
  * The summary as blocks for fitStepSummary, in print order: a frame (heading

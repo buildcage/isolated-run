@@ -4,9 +4,9 @@
  * An access no rule names is unexpected.
  *
  * A rule names programs and paths as the summary shows them, escapes included,
- * and is matched against the names they stand for: `./` the workspace, `~/`
- * $HOME, `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory,
- * as reduce.ts's ruleName spells them.
+ * and is matched against them so spelled: `./` the workspace, `~/` $HOME,
+ * `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory, as
+ * reduce.ts's ruleName spells them.
  * `*` matches within one path component, `**` across them, any number as a
  * whole component, and `*` alone as the program any program; `\*` is a star.
  * The access letters are the summary's: `R` a read, failed or not, `r` one
@@ -16,6 +16,7 @@
 
 import { SandboxError } from "../errors.ts";
 import { unescapeDisplay } from "./escape.ts";
+import { MEMFD_PREFIX } from "./paths.ts";
 import { BIT, ORDER } from "./record.ts";
 
 export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
@@ -53,8 +54,9 @@ export const invalidRules = (ref: string, reason: string): SandboxError =>
     "INVALID_EXPECTED_FILESYSTEM_RULES",
   );
 
-// A line's fields as written: each runs to the next blank, or is quoted, its
-// quotes and backslashes escaped within as the summary escapes them.
+// A line's fields as written: each runs to the next blank, or is quoted, as
+// a memfd's name is too. The summary escapes every quote but those, so the
+// first one not escaped closes the field.
 function fields(line: string, ref: string): string[] {
   const out: string[] = [];
   let i = 0;
@@ -64,11 +66,12 @@ function fields(line: string, ref: string): string[] {
       continue;
     }
     let raw: string;
-    if (line[i] === '"') {
-      let end = i + 1;
+    const memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
+    if (line[i] === '"' || memfd) {
+      let end = line.indexOf('"', i) + 1;
       while (end < line.length && line[end] !== '"') end += line[end] === "\\" ? 2 : 1;
       if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
-      raw = line.slice(i + 1, end);
+      raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end);
       i = end + 1;
       if (i < line.length && line[i] !== " " && line[i] !== "\t")
         throw invalidRules(ref, "a closing quote must end its field");
@@ -87,8 +90,8 @@ const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
 const ANY_DIRS = "(?:[\\s\\S]*/)?";
 
 /**
- * A glob, its names escaped as the summary escapes them, as a regular
- * expression over a whole name. Undefined when it holds an escape the summary
+ * A glob as a regular expression over a whole name, both escaped as the
+ * summary escapes them. Undefined when the glob holds an escape the summary
  * never writes.
  */
 export function globPattern(glob: string): RegExp | undefined {
@@ -117,12 +120,10 @@ export function globPattern(glob: string): RegExp | undefined {
     let c = glob[i];
     if (c === "\\") {
       ESCAPE.lastIndex = i;
-      const escape = ESCAPE.exec(glob)![0];
-      const unescaped = unescapeDisplay(escape);
-      if (unescaped === undefined) return undefined;
-      c = unescaped;
-      i += escape.length;
-    } else i++;
+      c = ESCAPE.exec(glob)![0];
+      if (unescapeDisplay(c) === undefined) return undefined;
+    }
+    i += c.length;
     out += c.replace(SPECIAL, "\\$&");
   }
   return new RegExp(`^${out}$`);

@@ -271,7 +271,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | --------------------- | ------ | ----------- |
 | `/usr/local/bin/node` | R      | `~/.npmrc`  |
 
-1,204 recorded accesses matched `expected_filesystem_rules`.
+1,204 recorded operations matched `expected_filesystem_rules`.
 ```
 
 The executed table, the accessed paths and the details give way to it; the artifact still has every
@@ -341,8 +341,9 @@ of **Unexpected Accesses** can be copied in:
   component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
   name shows as `\*`, which matches only a star. Regular expressions are not supported. A process's
   own directory in `/proc` is spelled `/proc/*/`.
-- A field holding a space is quoted, `"./my file"`. Within it, and in an unquoted field, the
-  escapes the summary shows stand for the characters they escape, `\"` and `\\` included.
+- A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
+  are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
+  summary shows them.
 - A line starting with `#` is a comment, and a blank line is skipped. A `#` anywhere else is part
   of the field it is in, as a path may hold one.
 
@@ -631,15 +632,16 @@ not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
 
-| Shown as                                 | Means                                                                                                                     |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full                  |
-| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                           |
-| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                                 |
-| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row          |
-| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                                       |
-| `\n`, `\u{202e}`, `\"`, `\*`, `\\`       | A control, invisible or blank character, a space at either end, a quote, a star or a backslash, in a path or command name |
-| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                        |
+| Shown as                                 | Means                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
+| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                   |
+| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
+| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
+| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                               |
+| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
+| `\*`                                     | A star in a path or program, which a rule would otherwise read as a wildcard                                      |
+| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                |
 
 ### Refused system calls
 

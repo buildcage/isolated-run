@@ -39,10 +39,10 @@ describe("expectedRulesFile", () => {
     );
   });
 
-  it("quotes a memfd's name holding a blank so the rule reads back", () => {
+  it("leaves a memfd's name holding a blank as it is quoted already, so the rule reads back", () => {
     const file = expectedRulesFile([], [row('memfd:"a b"', "X", 'memfd:"a b"')])!;
     const line = file.split("\n")[3];
-    expect(line).toBe(String.raw`  "memfd:\"a b\""  X  "memfd:\"a b\""`);
+    expect(line).toBe('  memfd:"a b"  X  memfd:"a b"');
     const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
     expect(rule.program!.test('memfd:"a b"')).toBe(true);
     expect(rule.path.test('memfd:"a b"')).toBe(true);

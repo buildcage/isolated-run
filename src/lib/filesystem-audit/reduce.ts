@@ -201,6 +201,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
+  // The workspace and $HOME as the paths spell them once escaped.
+  const shownPrefixes = {
+    workspace: prefixes.workspace.map(escapeForDisplay),
+    home: prefixes.home.map(escapeForDisplay),
+  };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const keep = [
     "/",
@@ -208,10 +213,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/tmp",
     "/proc",
     "/proc/<pid>",
-    ...prefixes.workspace,
-    ...prefixes.home,
+    ...shownPrefixes.workspace,
+    ...shownPrefixes.home,
   ].map(components);
-  const relLength = (path: string): number => relativize(path, prefixes).length;
+  const relLength = (path: string): number => relativize(path, shownPrefixes).length;
   // The fewest bytes a row of each part prints in.
   const paths = new Lines({
     fanout,
@@ -247,13 +252,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r === undefined) {
       r = ranks.length;
       rankOf.set(id, r);
-      const s = name ? { path: escapeForDisplay(key) } : shown(key);
+      const s = name ? { path: escapeForDisplay(key) } : shown(escaped(key));
       const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
       ranks.push({
         shown: s,
         bytes,
         ...(name ? {} : { program: key }),
-        ruleName: name ? key : ruleName(key),
+        ruleName: name ? s.path : ruleName(escaped(key)),
       });
     }
     return r;
@@ -362,11 +367,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
-      const runs = executed.get(p);
-      if (runs !== undefined) executed.set(p, runs + 1);
+      const run = escaped(p);
+      const runs = executed.get(run);
+      if (runs !== undefined) executed.set(run, runs + 1);
       else if (executedBytes <= limit) {
-        executed.set(p, 1);
-        executedBytes += relLength(p) + 11;
+        executed.set(run, 1);
+        executedBytes += relLength(run) + 11;
       }
     } else if (r.kind === "exec") {
       // What it runs now is unknown, as the artifact has it.
@@ -395,7 +401,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
-        path: normalize(path),
+        path: escaped(normalize(path)),
         bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,
@@ -412,29 +418,29 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return tally?.endLine();
   };
 
-  // A memfd shows its name quoted, as one its creator chose; a deleted file
-  // shows the mark outside its path.
-  function shown(path: string): Shown {
-    if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
-    // A folded line's stars are a wildcard, a name's escaped.
-    if (path.endsWith("/**")) {
-      const dir = escapeForDisplay(relativize(path.slice(0, -3) || "/", prefixes));
-      return { path: `${dir.replace(/\/$/, "")}/**` };
-    }
-    if (path.startsWith(MEMFD)) {
-      const name = escapeForDisplay(path.slice(MEMFD.length));
-      return { path: `${MEMFD_PREFIX}"${name}"`, memfd: true };
-    }
-    if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
-    const p = relativize(path.slice(0, -DELETED.length), prefixes);
-    return { path: escapeForDisplay(p), deleted: true };
+  // A path escaped as the summary shows it, its marks kept, before anything
+  // folds it: a star in a name is then never a fold's.
+  function escaped(path: string): string {
+    if (path.startsWith(MEMFD)) return MEMFD + escapeForDisplay(path.slice(MEMFD.length));
+    if (isRunnerFile(path)) return path;
+    if (!path.endsWith(DELETED)) return escapeForDisplay(path);
+    return escapeForDisplay(path.slice(0, -DELETED.length)) + DELETED;
   }
 
-  // The name a rule is matched against: a memfd's quoted, a deleted file's
-  // path alone.
+  // A memfd shows its name quoted, as one its creator chose; a deleted file
+  // shows the mark outside its path. `path` is escaped already.
+  function shown(path: string): Shown {
+    if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
+    if (path.startsWith(MEMFD)) return { path: ruleName(path), memfd: true };
+    if (!path.endsWith(DELETED)) return { path: relativize(path, shownPrefixes) };
+    return { path: ruleName(path), deleted: true };
+  }
+
+  // The name a rule is matched against, as the summary shows it: a memfd's
+  // quoted, a deleted file's path alone.
   function ruleName(path: string): string {
     if (path.startsWith(MEMFD)) return `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`;
-    return relativize(unmarked(path), prefixes);
+    return relativize(unmarked(path), shownPrefixes);
   }
 
   type Line = { comm: string; path: string; agg: Agg };

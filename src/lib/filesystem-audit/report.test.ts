@@ -1097,7 +1097,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(md).toContain(
       "### Unexpected Accesses (1)\n\n<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Access | Path |\n| --- | --- | --- |\n| `node` | W | `./b` |\n\n" +
-        "<sub>1 recorded access matched `expected_filesystem_rules`.</sub>\n\n",
+        "<sub>1 recorded operation matched `expected_filesystem_rules`.</sub>\n\n",
     );
     expect(md).not.toContain("Accessed Paths");
     expect(md).not.toContain("Process details");
@@ -1212,7 +1212,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(note.warning).not.toHaveBeenCalled();
     expect(note.error).not.toHaveBeenCalled();
     expect(summaries[0]).toContain(
-      "No access fell outside `expected_filesystem_rules`.\n\n<sub>2 recorded accesses matched `expected_filesystem_rules`.</sub>",
+      "No access fell outside `expected_filesystem_rules`.\n\n<sub>2 recorded operations matched `expected_filesystem_rules`.</sub>",
     );
     expect(ruleFiles[0].content).toContain("expected_filesystem_rules: |\n  node RW ./*\n");
   });

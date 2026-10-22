@@ -70272,7 +70272,7 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*[\\]]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
@@ -70333,12 +70333,12 @@ function fields(line, ref) {
 			i++;
 			continue;
 		}
-		let raw;
-		if (line[i] === "\"") {
-			let end = i + 1;
+		let raw, memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
+		if (line[i] === "\"" || memfd) {
+			let end = line.indexOf("\"", i) + 1;
 			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
 			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
-			if (raw = line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
+			if (raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
 		} else {
 			let end = line.slice(i).search(/[ \t]/);
 			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
@@ -70365,13 +70365,8 @@ function globPattern(glob) {
 			continue;
 		}
 		let c = glob[i];
-		if (c === "\\") {
-			ESCAPE.lastIndex = i;
-			let escape = ESCAPE.exec(glob)[0], unescaped = unescapeDisplay(escape);
-			if (unescaped === void 0) return;
-			c = unescaped, i += escape.length;
-		} else i++;
-		out += c.replace(SPECIAL, "\\$&");
+		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
+		i += c.length, out += c.replace(SPECIAL, "\\$&");
 	}
 	return RegExp(`^${out}$`);
 }
@@ -70548,7 +70543,7 @@ function unexpectedBlock(summary, { priorities }) {
 		priority: priorities[FILESYSTEM_BLOCK.unexpected],
 		level: 2,
 		section: SECTION
-	}, took = `<sub>${accesses(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+	}, took = `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
 	if (!proposed) return {
 		...block,
 		cut: "atomic",
@@ -70575,7 +70570,7 @@ function unexpectedBlock(summary, { priorities }) {
 		text: `### Unexpected Accesses (${proposed.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${took}`
 	};
 }
-const accesses = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "access" : "accesses"}`;
+const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
 function renderAuditSummaryBlocks(summary, opts) {
 	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, killed = killedNote(refused), top = [
 		heading(opts.title),
@@ -70778,10 +70773,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-function ruleField(text) {
-	return !text.includes(" ") && !text.startsWith("#") ? text : text.startsWith("memfd:\"") ? `"${MEMFD_PREFIX}\\"${text.slice(7, -1)}\\""` : `"${text}"`;
-}
-const anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
+const ruleField = (text) => (text.includes(" ") || text.startsWith("#")) && !text.startsWith("memfd:\"") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
 function expectedRulesFile(given, proposed) {
 	let rows = proposed.map((r) => [
 		ruleField(r.program.path),
@@ -71178,15 +71170,18 @@ function createAuditSummary(prefixes) {
 			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)));
 			images.delete(proc);
 		}
+	}, shownPrefixes = {
+		workspace: prefixes.workspace.map(escapeForDisplay),
+		home: prefixes.home.map(escapeForDisplay)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
 		"/tmp",
 		"/proc",
 		"/proc/<pid>",
-		...prefixes.workspace,
-		...prefixes.home
-	].map(components), relLength = (path) => relativize(path, prefixes).length, paths = new Lines({
+		...shownPrefixes.workspace,
+		...shownPrefixes.home
+	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
 		fanout,
 		keep,
 		limit,
@@ -71204,12 +71199,12 @@ function createAuditSummary(prefixes) {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {
 			r = ranks.length, rankOf.set(id, r);
-			let s = name ? { path: escapeForDisplay(key) } : shown(key), bytes = s.path.length + (s.deleted ? 10 : 0);
+			let s = name ? { path: escapeForDisplay(key) } : shown(escaped(key)), bytes = s.path.length + (s.deleted ? 10 : 0);
 			ranks.push({
 				shown: s,
 				bytes,
 				...name ? {} : { program: key },
-				ruleName: name ? key : ruleName(key)
+				ruleName: name ? s.path : ruleName(escaped(key))
 			});
 		}
 		return r;
@@ -71270,8 +71265,8 @@ function createAuditSummary(prefixes) {
 		if (r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
-			let runs = executed.get(p);
-			runs === void 0 ? executedBytes <= limit && (executed.set(p, 1), executedBytes += relLength(p) + 11) : executed.set(p, runs + 1);
+			let run = escaped(p), runs = executed.get(run);
+			runs === void 0 ? executedBytes <= limit && (executed.set(run, 1), executedBytes += relLength(run) + 11) : executed.set(run, runs + 1);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
@@ -71279,7 +71274,7 @@ function createAuditSummary(prefixes) {
 				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
-					path: normalize$2(path),
+					path: escaped(normalize$2(path)),
 					bit: bitsOf(c.letter),
 					failed: c.failed,
 					perm: c.perm,
@@ -71297,23 +71292,20 @@ function createAuditSummary(prefixes) {
 			return tally?.endLine();
 		}
 	};
+	function escaped(path) {
+		return path.startsWith(MEMFD) ? MEMFD + escapeForDisplay(path.slice(MEMFD.length)) : isRunnerFile(path) ? path : path.endsWith(DELETED) ? escapeForDisplay(path.slice(0, -DELETED.length)) + DELETED : escapeForDisplay(path);
+	}
 	function shown(path) {
-		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
-		if (path.endsWith("/**")) return { path: `${escapeForDisplay(relativize(path.slice(0, -3) || "/", prefixes)).replace(/\/$/, "")}/**` };
-		if (path.startsWith(MEMFD)) {
-			let name = escapeForDisplay(path.slice(MEMFD.length));
-			return {
-				path: `${MEMFD_PREFIX}"${name}"`,
-				memfd: !0
-			};
-		}
-		return path.endsWith(DELETED) ? {
-			path: escapeForDisplay(relativize(path.slice(0, -DELETED.length), prefixes)),
+		return path === MEMFDS ? { path: `${MEMFD_PREFIX}**` } : path.startsWith(MEMFD) ? {
+			path: ruleName(path),
+			memfd: !0
+		} : path.endsWith(DELETED) ? {
+			path: ruleName(path),
 			deleted: !0
-		} : { path: escapeForDisplay(relativize(path, prefixes)) };
+		} : { path: relativize(path, shownPrefixes) };
 	}
 	function ruleName(path) {
-		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), prefixes);
+		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
 	}
 	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);

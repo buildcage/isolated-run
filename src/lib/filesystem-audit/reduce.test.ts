@@ -1560,8 +1560,26 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       { propose: true, limits: { loose: 1 } },
       ...["a", "b", "c"].map((f) => write(`/work/d*/${f}`)),
       write("/work/*.tmp"),
+      write("/work/src/**"),
+      { ...write("memfd:a/**"), memfd: true },
     );
-    expect(rows(summary)).toStrictEqual([String.raw`cat W ./\*.tmp`, String.raw`cat W ./d\*/**`]);
+    expect(rows(summary)).toStrictEqual([
+      String.raw`cat W ./\*.tmp`,
+      String.raw`cat W ./d\*/**`,
+      String.raw`cat W ./src/\*\*`,
+      String.raw`cat W memfd:"a/\*\*"`,
+    ]);
+  });
+
+  it("matches a rule against the names as the summary shows them", () => {
+    const { summary } = marked(
+      { rules: rulesOf(String.raw`* W ./src/\*\*` + "\n" + String.raw`* W memfd:"a b/\*"`) },
+      { kind: "write", pid: 3, comm: "cat", path: "/work/src/**" },
+      { kind: "write", pid: 3, comm: "cat", path: "/work/src/x" },
+      { kind: "write", pid: 3, comm: "cat", path: "memfd:a b/*", memfd: true },
+    );
+    expect(rows(summary)).toStrictEqual(["cat W ./src/x"]);
+    expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
   });
 
   it("orders the proposals by program, then by path as the tables do", () => {
