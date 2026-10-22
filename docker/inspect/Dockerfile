@@ -103,6 +103,10 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
       org.opencontainers.image.licenses="MIT AND Apache-2.0 AND GPL-2.0-or-later AND (GPL-2.0-or-later WITH OpenSSL-Exception) AND GPL-1.0-or-later AND curl AND ISC AND MPL-2.0 AND LGPL-2.1-only AND (MPL-2.0 OR LGPL-3.0-or-later) AND BSD-3-Clause AND BSD-2-Clause AND Zlib" \
       org.opencontainers.image.source="https://github.com/buildcage/isolated-run"
 
+# apk add leaves an installed package alone, so without this the CA bundle
+# stays as old as the base image and keeps trusting roots since withdrawn.
+RUN apk add --no-cache --upgrade ca-certificates-bundle
+
 # haproxy carries what this engine needs in one binary: it tells a TLS
 # handshake from a plain request by its first bytes, generates certificates
 # for an SNI, resolves names itself, and normalises a path before matching
