@@ -411,15 +411,15 @@ function reportUnexpected(
 ): string[] {
   if (!summary?.unexpected) return [];
   const n = summary.proposed?.length;
-  const paths = n === 1 ? "1 path" : `${n} paths`;
+  const es = n === 1 ? "" : "es";
   const what =
     n === undefined
       ? "unexpected file accesses (too many to list)"
-      : `unexpected file accesses on ${paths}`;
+      : `${n} unexpected file access${es}`;
   const message =
     n === undefined
       ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.`
-      : `File accesses on ${paths} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+      : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;

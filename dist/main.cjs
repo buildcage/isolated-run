@@ -71548,7 +71548,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 }
 function reportUnexpected(summary, failOnUnexpected, annotation) {
 	if (!summary?.unexpected) return [];
-	let n = summary.proposed?.length, paths = n === 1 ? "1 path" : `${n} paths`, what = n === void 0 ? "unexpected file accesses (too many to list)" : `unexpected file accesses on ${paths}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : `File accesses on ${paths} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
 	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1) : annotation.warning(message), [what];
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
