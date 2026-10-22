@@ -6,6 +6,7 @@
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
+import { field } from "./escape.ts";
 import { MEMFD_PREFIX } from "./paths.ts";
 import type { AuditSummary, RuleRow } from "./reduce.ts";
 import { EXPECTED_RULES_INPUT, type ExpectedRules } from "./rules.ts";
@@ -13,13 +14,13 @@ import { EXPECTED_RULES_INPUT, type ExpectedRules } from "./rules.ts";
 /** What became of the proposed rules file. */
 export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
 
-// A field holding a blank, or that would read as a comment, is quoted, but
-// for a memfd's, quoted already. Its quotes and backslashes are escaped
+// As the details quote a field, and one that would read as a comment too,
+// but for a memfd's, quoted already. Its quotes and backslashes are escaped
 // already, as the summary shows them.
-const ruleField = (text: string): string =>
-  (text.includes(" ") || text.startsWith("#")) && !text.startsWith(`${MEMFD_PREFIX}"`)
-    ? `"${text}"`
-    : text;
+const ruleField = (text: string): string => {
+  if (text.startsWith(`${MEMFD_PREFIX}"`)) return text;
+  return text.startsWith("#") ? `"${text}"` : field(text);
+};
 
 // Every process's directory in /proc shows as one, which a rule spells with
 // a wildcard.

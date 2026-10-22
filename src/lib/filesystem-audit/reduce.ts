@@ -100,6 +100,10 @@ export interface PathRow extends Row {
   program: Shown & { rank: number };
 }
 
+// Each name on its own, so a blank leading or ending one is escaped wherever
+// it falls in the path.
+const escapePath = (path: string): string => path.split("/").map(escapeForDisplay).join("/");
+
 /** A proposed rule: a program, its accesses as a rule spells them, and a path. */
 export interface RuleRow {
   program: Shown;
@@ -203,8 +207,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
 
   // The workspace and $HOME as the paths spell them once escaped.
   const shownPrefixes = {
-    workspace: prefixes.workspace.map(escapeForDisplay),
-    home: prefixes.home.map(escapeForDisplay),
+    workspace: prefixes.workspace.map(escapePath),
+    home: prefixes.home.map(escapePath),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const keep = [
@@ -423,8 +427,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   function escaped(path: string): string {
     if (path.startsWith(MEMFD)) return MEMFD + escapeForDisplay(path.slice(MEMFD.length));
     if (isRunnerFile(path)) return path;
-    if (!path.endsWith(DELETED)) return escapeForDisplay(path);
-    return escapeForDisplay(path.slice(0, -DELETED.length)) + DELETED;
+    if (!path.endsWith(DELETED)) return escapePath(path);
+    return escapePath(path.slice(0, -DELETED.length)) + DELETED;
   }
 
   // A memfd shows its name quoted, as one its creator chose; a deleted file

@@ -335,8 +335,8 @@ describe("createAuditSummary", () => {
       { kind: "read", comm: "  sh ", path: "/work/ l m " },
     );
     expect(lines(md)).toEqual([
-      'R \\u{20}\\u{20}sh\\u{20} "./ l m\\u{20}"',
       "R sh ./.bashrc\\u{fe0f}",
+      'R \\u{20}\\u{20}sh\\u{20} "./\\u{20}l m\\u{20}"',
       "R sh ./a\\u{e0100}b\\u{34f}c",
       "R sh ./d\\u{3164}e\\u{115f}f\\u{ffa0}g\\u{2800}h",
       "R sh ./i\\u{a0}j\\u{3000}k",
@@ -754,6 +754,19 @@ describe("createAuditSummary", () => {
         ),
       ),
     ).toEqual(["Rr! c ./d/**"]);
+    // A name ending in a blank is one directory, itself or in a longer path.
+    expect(
+      lines(
+        render(
+          { kind: "read", comm: "c", path: "/work/d " },
+          { kind: "write", comm: "c", path: "/work/d /1" },
+          { kind: "write", comm: "c", path: "/work/d /2" },
+          { kind: "write", comm: "c", path: "/work/d /3" },
+          { kind: "write", comm: "c", path: "/work/d /4" },
+          { kind: "write", comm: "c", path: "/work/d /5" },
+        ),
+      ),
+    ).toEqual(["RW c ./d\\u{20}/**"]);
   });
 
   it("still drops a directory read whose only lines below are misses", () => {

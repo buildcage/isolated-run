@@ -633,16 +633,16 @@ not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
 
-| Shown as                                 | Means                                                                                                             |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
-| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                   |
-| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
-| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
-| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                               |
-| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
-| `\*`                                     | A star in a path or program, which a rule would otherwise read as a wildcard                                      |
-| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                |
+| Shown as                                 | Means                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full                    |
+| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                             |
+| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                                   |
+| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row            |
+| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                                         |
+| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end of a name, a quote or a backslash, in a path or command name |
+| `\*`                                     | A star in a path or program, which a rule would otherwise read as a wildcard                                                |
+| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                          |
 
 ### Refused system calls
 

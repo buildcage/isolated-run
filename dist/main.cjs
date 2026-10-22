@@ -70773,7 +70773,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => (text.includes(" ") || text.startsWith("#")) && !text.startsWith("memfd:\"") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
 function expectedRulesFile(given, proposed) {
 	let rows = proposed.map((r) => [
 		ruleField(r.program.path),
@@ -71150,7 +71150,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, LIMITS = {
 	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
-};
+}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/");
 function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
@@ -71171,8 +71171,8 @@ function createAuditSummary(prefixes) {
 			images.delete(proc);
 		}
 	}, shownPrefixes = {
-		workspace: prefixes.workspace.map(escapeForDisplay),
-		home: prefixes.home.map(escapeForDisplay)
+		workspace: prefixes.workspace.map(escapePath),
+		home: prefixes.home.map(escapePath)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
@@ -71293,7 +71293,7 @@ function createAuditSummary(prefixes) {
 		}
 	};
 	function escaped(path) {
-		return path.startsWith(MEMFD) ? MEMFD + escapeForDisplay(path.slice(MEMFD.length)) : isRunnerFile(path) ? path : path.endsWith(DELETED) ? escapeForDisplay(path.slice(0, -DELETED.length)) + DELETED : escapeForDisplay(path);
+		return path.startsWith(MEMFD) ? MEMFD + escapeForDisplay(path.slice(MEMFD.length)) : isRunnerFile(path) ? path : path.endsWith(DELETED) ? escapePath(path.slice(0, -DELETED.length)) + DELETED : escapePath(path);
 	}
 	function shown(path) {
 		return path === MEMFDS ? { path: `${MEMFD_PREFIX}**` } : path.startsWith(MEMFD) ? {
