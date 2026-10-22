@@ -8,18 +8,30 @@ const inline = (text: string) => [{ text, origin: "input" as const, firstLine: 1
 const parse = (text: string) => parseExpectedRules(inline(text));
 
 describe("globPattern", () => {
-  const matches = (glob: string, name: string) => globPattern(glob).test(name);
+  const matches = (glob: string, name: string) => globPattern(glob)!.test(name);
 
   it("matches a name with no wildcard as itself, its special characters included", () => {
     expect(matches("./a.b(c)+", "./a.b(c)+")).toBe(true);
     expect(matches("./a.b", "./axb")).toBe(false);
   });
 
-  it("matches * within one component", () => {
+  it("matches * within one component, and ** inside one across them", () => {
     expect(matches("/tmp/*.txt", "/tmp/a.txt")).toBe(true);
     expect(matches("/tmp/*.txt", "/tmp/d/a.txt")).toBe(false);
     expect(matches("/tmp/a***b", "/tmp/axyb")).toBe(true);
-    expect(matches("/tmp/a**b", "/tmp/a/b")).toBe(false);
+    expect(matches("/tmp/a**b", "/tmp/a/b")).toBe(true);
+    expect(matches("memfd:**", 'memfd:"a/b"')).toBe(true);
+  });
+
+  it("matches a name's escapes as what they stand for, \\* as a star", () => {
+    expect(matches(String.raw`./out/\*.tmp`, "./out/*.tmp")).toBe(true);
+    expect(matches(String.raw`./out/\*.tmp`, "./out/a.tmp")).toBe(false);
+    expect(matches(String.raw`./a\u{20}\x80\n\\`, "./a \udc80\n\\")).toBe(true);
+  });
+
+  it("refuses an escape the summary never writes", () => {
+    expect(globPattern(String.raw`./a\q`)).toBeUndefined();
+    expect(globPattern(String.raw`./a\x41`)).toBeUndefined();
   });
 
   it("matches a trailing /** as the directory and everything under it", () => {
@@ -32,6 +44,13 @@ describe("globPattern", () => {
 
   it("matches ** alone as anything", () => {
     expect(matches("**", 'memfd:"x"')).toBe(true);
+    expect(matches("**/**", "a/b")).toBe(true);
+  });
+
+  it("matches a trailing /**/** as /**", () => {
+    expect(matches("./a/**/**", "./a")).toBe(true);
+    expect(matches("./a/**/**", "./a/b/c")).toBe(true);
+    expect(matches("./a/**/**", "./ab")).toBe(false);
   });
 
   it("matches a leading or inner **/ as any number of components", () => {
@@ -120,7 +139,12 @@ describe("RuleMatcher", () => {
   });
 
   it("takes a failure by its action, but a success or a refusal only as written", () => {
-    const m = matcher("* R /etc/**\n* r ./x");
+    const m = matcher("* R /etc/**\n* r ./x\n* r! ./y");
+    expect(m.match("/bin/a", "./y", BIT.R, true, false)).toStrictEqual({
+      unmatched: 0,
+      ref: "input:3",
+    });
+    expect(m.match("/bin/a", "./y", BIT.R, false, false)).toStrictEqual({ unmatched: BIT.R });
     expect(m.match("/bin/a", "/etc/x", BIT.R, true, false)).toStrictEqual({
       unmatched: 0,
       ref: "input:1",

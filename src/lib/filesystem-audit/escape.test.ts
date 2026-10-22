@@ -9,6 +9,7 @@ describe("unescapeDisplay", () => {
     " lead",
     "tab\there",
     'quote"d',
+    "st*r",
     "back\\slash",
     "line\nbreak",
     "cr\rhere",
@@ -16,6 +17,10 @@ describe("unescapeDisplay", () => {
     "raw\udcffbyte",
   ])("reads back what escapeForDisplay showed for %j", (name) => {
     expect(unescapeDisplay(escapeForDisplay(name))).toBe(name);
+  });
+
+  it("escapes a star, which a rule would read as a wildcard", () => {
+    expect(escapeForDisplay("a*b")).toBe(String.raw`a\*b`);
   });
 
   it("reads a bracket escaped in a command name", () => {

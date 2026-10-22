@@ -314,6 +314,11 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   if (filesystemAudit === "record") {
     annotation.warning("filesystem_audit is experimental and may change.");
   }
+  if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
+    annotation.warning(
+      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    );
+  }
 
   // A rule the engine cannot enforce fails (in audit, warns) before any
   // privileged setup.

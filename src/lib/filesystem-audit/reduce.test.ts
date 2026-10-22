@@ -1257,6 +1257,15 @@ describe("createAuditSummary: limits", () => {
     ]);
   });
 
+  it("shows the root folded as /**", () => {
+    const writes = ["a", "b", "c", "e", "f"].map((d) => ({
+      kind: "write",
+      comm: "c",
+      path: `/${d}/x`,
+    }));
+    expect(tableRows(limited({ bytes: 60 }, ...writes))).toEqual(["| `/**` | W |"]);
+  });
+
   it("folds a command's memfds into one line", () => {
     const memfds = Array.from({ length: 5 }, (_, i) => ({
       kind: "write",
@@ -1543,6 +1552,16 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       "cat W ./e",
       "cat W ./f",
     ]);
+  });
+
+  it("escapes a star in a name, but not a folded line's", () => {
+    const write = (path: string) => ({ kind: "write", pid: 3, comm: "cat", path });
+    const { summary } = marked(
+      { propose: true, limits: { loose: 1 } },
+      ...["a", "b", "c"].map((f) => write(`/work/d*/${f}`)),
+      write("/work/*.tmp"),
+    );
+    expect(rows(summary)).toStrictEqual([String.raw`cat W ./\*.tmp`, String.raw`cat W ./d\*/**`]);
   });
 
   it("orders the proposals by program, then by path as the tables do", () => {

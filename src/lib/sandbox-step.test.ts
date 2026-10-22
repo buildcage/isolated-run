@@ -331,6 +331,16 @@ describe("runSandboxStep", () => {
     expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("* R ./a", "/w/c.yml", "record");
   });
 
+  it("warns that fail_on_unexpected_file_access has nothing to fail on without rules", async () => {
+    mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    );
+  });
+
   it("reads no inline expected_filesystem_rules when the workflow set none", async () => {
     await runSandboxStep(ENV, deps);
 

@@ -416,6 +416,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // shows the mark outside its path.
   function shown(path: string): Shown {
     if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
+    // A folded line's stars are a wildcard, a name's escaped.
+    if (path.endsWith("/**")) {
+      const dir = escapeForDisplay(relativize(path.slice(0, -3) || "/", prefixes));
+      return { path: `${dir.replace(/\/$/, "")}/**` };
+    }
     if (path.startsWith(MEMFD)) {
       const name = escapeForDisplay(path.slice(MEMFD.length));
       return { path: `${MEMFD_PREFIX}"${name}"`, memfd: true };

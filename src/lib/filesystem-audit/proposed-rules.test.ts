@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { expectedRulesFile } from "./proposed-rules.ts";
+import { parseExpectedRules } from "./rules.ts";
 
 describe("expectedRulesFile", () => {
   const row = (program: string, flags: string, path: string) => ({
@@ -36,6 +37,15 @@ describe("expectedRulesFile", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  it("quotes a memfd's name holding a blank so the rule reads back", () => {
+    const file = expectedRulesFile([], [row('memfd:"a b"', "X", 'memfd:"a b"')])!;
+    const line = file.split("\n")[3];
+    expect(line).toBe(String.raw`  "memfd:\"a b\""  X  "memfd:\"a b\""`);
+    const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
+    expect(rule.program!.test('memfd:"a b"')).toBe(true);
+    expect(rule.path.test('memfd:"a b"')).toBe(true);
   });
 
   it("keeps the rules given as written, then adds what they did not take", () => {

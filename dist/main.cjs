@@ -70272,12 +70272,13 @@ function spell(parts) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*[\\]]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
 	"	": "\\t",
 	"\\": "\\\\",
 	"\"": "\\\"",
+	"*": "\\*",
 	"[": "\\[",
 	"]": "\\]"
 };
@@ -70342,34 +70343,35 @@ function fields(line, ref) {
 			let end = line.slice(i).search(/[ \t]/);
 			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
 		}
-		let field = unescapeDisplay(raw);
-		if (field === void 0) throw invalidRules(ref, `${JSON.stringify(raw)} holds an unknown escape`);
-		out.push(field);
+		out.push(raw);
 	}
 	return out;
 }
-const SPECIAL = /[.+?^${}()|[\]\\]/g;
+const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
 function globPattern(glob) {
 	let out = "", i = 0;
 	for (; i < glob.length;) {
 		if (glob.startsWith("**", i)) {
-			let atStart = i === 0 || glob[i - 1] === "/", atEnd = i + 2 === glob.length;
-			if (atStart && atEnd) {
-				out = i === 0 ? "[\\s\\S]*" : `${out.slice(0, -1)}(?:/[\\s\\S]*)?`, i += 2;
-				continue;
-			}
-			if (atStart && glob[i + 2] === "/") {
-				out += "(?:[\\s\\S]*/)?", i += 3;
-				continue;
-			}
-		}
-		let c = glob[i];
-		if (c === "*") {
+			let atStart = i === 0 || glob[i - 1] === "/";
 			for (; glob[i] === "*";) i++;
-			out += "[^/]*";
+			if (atStart && i === glob.length) {
+				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
+				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
+			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
 			continue;
 		}
-		out += c.replace(SPECIAL, "\\$&"), i++;
+		if (glob[i] === "*") {
+			out += "[^/]*", i++;
+			continue;
+		}
+		let c = glob[i];
+		if (c === "\\") {
+			ESCAPE.lastIndex = i;
+			let escape = ESCAPE.exec(glob)[0], unescaped = unescapeDisplay(escape);
+			if (unescaped === void 0) return;
+			c = unescaped, i += escape.length;
+		} else i++;
+		out += c.replace(SPECIAL, "\\$&");
 	}
 	return RegExp(`^${out}$`);
 }
@@ -70395,10 +70397,15 @@ function parseExpectedRules(sources) {
 		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
+		let glob = (field) => {
+			let pattern = globPattern(field);
+			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
+			return pattern;
+		};
 		rules.push({
 			ref,
-			program: program === "*" ? void 0 : globPattern(program),
-			path: globPattern(path),
+			program: program === "*" ? void 0 : glob(program),
+			path: glob(path),
 			...accessBits(access)
 		});
 	});
@@ -70409,7 +70416,7 @@ function parseExpectedRules(sources) {
 	};
 }
 function takes(rule, bit, failed, perm) {
-	return failed ? ((perm ? rule.perm : rule.ok | rule.failed) & bit) !== 0 : (rule.ok & bit) !== 0;
+	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
 }
 var RuleMatcher = class {
 	cache = new Map();
@@ -70771,7 +70778,10 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.includes(" ") || text.startsWith("#") ? `"${text}"` : text, anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
+function ruleField(text) {
+	return !text.includes(" ") && !text.startsWith("#") ? text : text.startsWith("memfd:\"") ? `"${MEMFD_PREFIX}\\"${text.slice(7, -1)}\\""` : `"${text}"`;
+}
+const anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
 function expectedRulesFile(given, proposed) {
 	let rows = proposed.map((r) => [
 		ruleField(r.program.path),
@@ -71289,6 +71299,7 @@ function createAuditSummary(prefixes) {
 	};
 	function shown(path) {
 		if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
+		if (path.endsWith("/**")) return { path: `${escapeForDisplay(relativize(path.slice(0, -3) || "/", prefixes)).replace(/\/$/, "")}/**` };
 		if (path.startsWith(MEMFD)) {
 			let name = escapeForDisplay(path.slice(MEMFD.length));
 			return {
@@ -71492,15 +71503,17 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: upload
-	}, cleanPath = audit.stepPath, reduced;
+	}, cleanPath = audit.stepPath, unchecked = () => {
+		rules && failOnUnexpected && (annotation.error(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1);
+	}, reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), unchecked(), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
-	attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	summary || unchecked(), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
 	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
@@ -75150,7 +75163,7 @@ function readStepInputs(env, deps) {
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), expectedFilesystemRules = deps.readExpectedFilesystemRules(inlineFilesystemRules, configFile?.path, filesystemAudit), failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change.");
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,

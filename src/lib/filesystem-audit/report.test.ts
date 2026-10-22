@@ -1147,6 +1147,51 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("fails the step with fail_on_unexpected_file_access when the recording cannot be read", async () => {
+    const note = annotation();
+    const { deps: d } = deps({
+      readLines: () => {
+        throw new Error("EIO: i/o error");
+      },
+    });
+
+    readStepFilesystemAudit(
+      { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
+      d,
+    );
+
+    expect(note.error).toHaveBeenCalledWith(
+      "The file accesses could not be checked against expected_filesystem_rules; failing the step, as fail_on_unexpected_file_access is true.",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails the step with fail_on_unexpected_file_access when the summary fails, but not without it", async () => {
+    const failing = () =>
+      deps({
+        raw,
+        createSummary: (options) => ({
+          ...createAuditSummary(options),
+          add: () => {
+            throw new Error("bad record");
+          },
+        }),
+      }).deps;
+    const note = annotation();
+
+    readStepFilesystemAudit({ ...base, annotation: note, rules: rules("node R ./a") }, failing());
+    expect(note.error).not.toHaveBeenCalled();
+    readStepFilesystemAudit(
+      { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
+      failing(),
+    );
+
+    expect(note.error).toHaveBeenCalledWith(
+      "The file accesses could not be checked against expected_filesystem_rules; failing the step, as fail_on_unexpected_file_access is true.",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it("says so when the rules took every access, and still writes them", async () => {
     const note = annotation();
     const { deps: d, ruleFiles, summaries } = deps({ raw });

@@ -296,11 +296,20 @@ export function readStepFilesystemAudit(
   // new file leaves the root-owned recording in place, so a failed write
   // never uploads the raw. The post step removes both.
   const cleanPath = audit.stepPath;
+  // Accesses that could not be checked fail the step as unexpected ones would.
+  const unchecked = (): void => {
+    if (!rules || !failOnUnexpected) return;
+    annotation.error(
+      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}; failing the step, as fail_on_unexpected_file_access is true.`,
+    );
+    process.exitCode = 1;
+  };
   let reduced: Reduced | undefined;
   try {
     reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
+    unchecked();
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   if (!reduced) {
@@ -312,6 +321,7 @@ export function readStepFilesystemAudit(
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   const { summary, summaryError, ended, written } = reduced;
+  if (!summary) unchecked();
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
   if (attached && !ended && !cancelled) {

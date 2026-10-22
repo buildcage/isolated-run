@@ -8,17 +8,18 @@ import { DELETED_MARK, type Shown } from "./paths.ts";
 // they can make one path read as another, and a backslash so each escape reads
 // one way only. A space shows as itself except in a run at either end of a
 // name. A quote is escaped so a name can be shown inside quotes, as a memfd's
-// and one in the details are.
+// and one in the details are, and a star so it reads as no wildcard in a rule.
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`;
-const UNSAFE_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"]`, "gu");
+const UNSAFE_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu");
 // A bracket opens or closes the name a process gave itself in a command.
-const UNSAFE_COMMAND_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu");
+const UNSAFE_COMMAND_CHARS = new RegExp(`^ +| +$|(?! )[${UNSAFE}"*[\\]]`, "gu");
 const NAMED_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
   "\t": "\\t",
   "\\": "\\\\",
   '"': '\\"',
+  "*": "\\*",
   "[": "\\[",
   "]": "\\]",
 };
