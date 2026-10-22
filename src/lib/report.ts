@@ -112,11 +112,9 @@ export function computeReportOutcomes(
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
-  const heading = trafficHeadingBlock(
-    report,
-    reportTitle(stepLabel),
-    wouldBlockVerdictItems(report.timeline),
-  );
+  const heading = trafficHeadingBlock(report, reportTitle(stepLabel), {
+    warning: wouldBlockVerdictItems(report.timeline),
+  });
   // What needs acting on first, then what got through, then the record. The
   // step closes its summary itself, after the process activity.
   const blocks = stackTrafficBlocks(heading, [
