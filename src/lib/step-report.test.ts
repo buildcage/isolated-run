@@ -155,7 +155,11 @@ describe("reportStepTraffic", () => {
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
     const extraInputs = vi.fn(() => ["aws_key_check: true"]);
     await reportStepTraffic(
-      options({ extraInputs, verdictItems: { warning: ["1 unexpected file access"] } }),
+      options({
+        extraInputs,
+        omittedExampleNote: "_Shorter with x._",
+        verdictItems: { warning: ["1 unexpected file access"] },
+      }),
       deps,
     );
     expect(extraInputs).toHaveBeenCalledWith(mocks.writeReportSummary.mock.calls[0][0]);
@@ -165,6 +169,7 @@ describe("reportStepTraffic", () => {
       actionRef: "v1",
       runCommand: "npm ci",
       extraInputs: ["aws_key_check: true"],
+      omittedExampleNote: "_Shorter with x._",
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,

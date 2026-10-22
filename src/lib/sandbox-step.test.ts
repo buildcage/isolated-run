@@ -8,6 +8,7 @@ import type { RecordArtifact } from "./filesystem-audit/render.ts";
 import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { parseExpectedRules } from "./filesystem-audit/rules.ts";
 import {
+  EXAMPLE_RULES_FILE_NOTE,
   filesystemExampleInputs,
   finalizeStep,
   preflight,
@@ -602,6 +603,24 @@ describe("runSandboxStep", () => {
     expect(await example(ENV, readAudit({ rulesFile: "rules.yml" }))).toContain(
       "expected_filesystem_rules: |",
     );
+  });
+
+  it("says the rules can be a file only where uploading the record would make the example name one", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    const note = async (env: NodeJS.ProcessEnv, upload = false, rules = "node R ./a") => {
+      mocks.reportStepTraffic.mockClear();
+      mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload });
+      mocks.readExpectedFilesystemRules.mockReturnValue(
+        rules ? parseExpectedRules([{ text: rules, origin: "input", firstLine: 1 }]) : undefined,
+      );
+      await runSandboxStep(env, deps);
+      return mocks.reportStepTraffic.mock.calls[0][0].omittedExampleNote;
+    };
+
+    expect(await note(ENV)).toBe(EXAMPLE_RULES_FILE_NOTE);
+    expect(await note(ENV, true)).toBeUndefined();
+    expect(await note({ ...ENV, GITHUB_EVENT_NAME: "workflow_run" })).toBeUndefined();
+    expect(await note(ENV, false, "")).toBeUndefined();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {

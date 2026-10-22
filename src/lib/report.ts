@@ -14,6 +14,7 @@ import {
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
   wholeBlock,
+  withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -78,6 +79,9 @@ export interface ComputeReportOutcomesOptions {
   runCommand?: string;
   /** See ExampleStepOptions.extraInputs. */
   extraInputs?: string[];
+  /** A sentence printed after the notice that the restrict example was too
+   *  large to print. */
+  omittedExampleNote?: string;
   /** The verdict's items from the rest of the step's summary; see renderVerdict. */
   verdictItems?: VerdictItems;
   actionVersion?: string;
@@ -103,6 +107,7 @@ export function computeReportOutcomes(
     actionRef,
     runCommand,
     extraInputs,
+    omittedExampleNote,
     actionVersion,
     artifactAvailable,
     verdictItems = {},
@@ -116,6 +121,12 @@ export function computeReportOutcomes(
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
+  const example = restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
+    stepName: "Start isolated-run",
+    runCommand,
+    extraInputs,
+    actionVersion,
+  });
   const heading = trafficHeadingBlock(report, reportTitle(stepLabel), {
     caution: verdictItems.caution,
     warning: [...wouldBlockVerdictItems(report.timeline), ...(verdictItems.warning ?? [])],
@@ -132,12 +143,9 @@ export function computeReportOutcomes(
     passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
     awsKeysBlocks(keys, { priority: AWS_KEYS_PRIORITY, artifactAvailable }),
     knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
-    restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
-      stepName: "Start isolated-run",
-      runCommand,
-      extraInputs,
-      actionVersion,
-    }),
+    omittedExampleNote
+      ? withNotices(example, ({ notice }) => `${notice}\n${omittedExampleNote}\n`)
+      : example,
     noCommunicationBlocks(report),
     communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
     engineNoteBlocks(report),

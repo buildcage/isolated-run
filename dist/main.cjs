@@ -70711,13 +70711,18 @@ function summaryFooter(actionRepo) {
 function missingReportFrame(title, isAudit) {
 	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
 }
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable, verdictItems = {} }) {
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, omittedExampleNote, actionVersion, artifactAvailable, verdictItems = {} }) {
 	let emissions = describeReportOutcomes(report, {
 		failOnBlocked: failOnBlocked ?? !1,
 		engineLabel: "sandbox"
 	}), wouldBlock = describeWouldBlock(report.timeline);
 	wouldBlock && emissions.push(wouldBlock);
-	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
+	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable), example = restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
+		stepName: "Start isolated-run",
+		runCommand,
+		extraInputs,
+		actionVersion
+	});
 	return {
 		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), {
 			caution: verdictItems.caution,
@@ -70735,12 +70740,7 @@ function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, a
 				artifactAvailable
 			}),
 			knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
-			restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
-				stepName: "Start isolated-run",
-				runCommand,
-				extraInputs,
-				actionVersion
-			}),
+			omittedExampleNote ? withNotices(example, ({ notice }) => `${notice}\n${omittedExampleNote}\n`) : example,
 			noCommunicationBlocks(report),
 			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
 			engineNoteBlocks(report)
@@ -75024,7 +75024,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, omittedExampleNote, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -75046,6 +75046,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			actionRef,
 			runCommand,
 			extraInputs: extraInputs?.(report),
+			omittedExampleNote,
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel,
 			failOnBlocked,
@@ -75318,6 +75319,7 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
 		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
+		omittedExampleNote: inputs.expectedFilesystemRules && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._" : void 0,
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
