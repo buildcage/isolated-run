@@ -70609,7 +70609,7 @@ function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
 	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `${file} was not kept, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in the ${artifact.url ? `[\`${artifact.name}\`](${artifact.url})` : `\`${artifact.name}\``} artifact holds ${holds}.`, `<details>
 <summary>Expected filesystem rules</summary>
 
-${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file:\n\n\`\`\`yaml
+${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file, or add its key to the one the step already has:\n\n\`\`\`yaml
 config_file: ci/expected-filesystem-rules.yml
 \`\`\`
 
@@ -71505,7 +71505,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced;
-	summary ? summary.lost && unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	summary ? summary.lost ? unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`) : unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
 	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : [], artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),

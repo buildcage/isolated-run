@@ -277,7 +277,8 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 The executed table, the accessed paths and the details give way to it; the artifact still has every
 access. The verdict at the top of the traffic report and a warning count the table's rows, or say
 there were too many to list. `fail_on_unexpected_file_access: true` fails the step instead, and
-also when not every access could be checked against the rules, as when the recording misses some.
+also when not every access could be checked against the rules, as when the recording misses some
+or the kernel skipped the tracer's hooks.
 The rules only change what the summary shows: like the audit itself, they never block an access.
 
 ### Getting the rules

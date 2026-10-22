@@ -329,6 +329,10 @@ export function readStepFilesystemAudit(
     unchecked(
       `Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`,
     );
+  else if (summary.hostMissed)
+    unchecked(
+      `Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`,
+    );
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
   if (attached && !ended && !cancelled) {

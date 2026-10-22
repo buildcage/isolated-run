@@ -1207,6 +1207,23 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("fails the step with fail_on_unexpected_file_access when the kernel skipped the tracer's hooks", async () => {
+    const note = annotation();
+    const { deps: d } = deps({
+      raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
+    });
+
+    readStepFilesystemAudit(
+      { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
+      d,
+    );
+
+    expect(note.error).toHaveBeenCalledWith(
+      "Not every file access may have been checked against expected_filesystem_rules, as the kernel skipped the tracer's hooks; failing the step, as fail_on_unexpected_file_access is true.",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it("says so when the rules took every access, and still writes them", async () => {
     const note = annotation();
     const { deps: d, ruleFiles, summaries } = deps({ raw });

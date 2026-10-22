@@ -362,7 +362,7 @@ export function rulesNote(
   }
   return (
     "<details>\n<summary>Expected filesystem rules</summary>\n\n" +
-    `${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file:\n\n` +
+    `${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file, or add its key to the one the step already has:\n\n` +
     "```yaml\nconfig_file: ci/expected-filesystem-rules.yml\n```\n\n" +
     "Or set the rules in the workflow:\n\n" +
     "```yaml\n" +
