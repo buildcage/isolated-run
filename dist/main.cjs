@@ -69299,7 +69299,7 @@ function knownBlockedBlocks(report, fit) {
 		text: `<details>\n<summary>🚫 Known Blocked Hosts (${hosts} host${hosts === 1 ? "" : "s"})</summary>\n\n${renderHostTable(foldExpectedBlockedRows(expected), { showReason: !0 })}\n\n</details>\n`
 	}];
 }
-function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
+function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}, omittedNote) {
 	if (report.parameters.mode !== "audit") return [];
 	let example = report.engine === "inspect" ? buildInspectRestrictExample(report.timeline, actionRepo, actionRef, {
 		...step,
@@ -69313,7 +69313,7 @@ function restrictExampleBlocks(report, actionRepo, actionRef, fit, step = {}) {
 		section: `${SECTION$1}-example`,
 		cut: "atomic",
 		text: example,
-		notice: restrictExampleTruncationNote(fit.artifactAvailable) + (step.omittedNote ?? "")
+		notice: restrictExampleTruncationNote(fit.artifactAvailable) + (omittedNote ? `\n${omittedNote}\n` : "")
 	}];
 }
 function noCommunicationBlocks(report) {
