@@ -70830,16 +70830,16 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
-function expectedRulesFile(given, proposed) {
-	let rows = proposed.map((r) => [
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*"), NOT_MATCHED_HEADING = "# Not matched in this run";
+function expectedRulesFile(written, proposed) {
+	let given = written.filter((line) => line !== NOT_MATCHED_HEADING), rows = proposed.map((r) => [
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(anyPid(r.path.path))
 	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",
-		"# Not matched in this run",
+		NOT_MATCHED_HEADING,
 		...added
 	];
 	if (lines.length !== 0) return [
@@ -71539,9 +71539,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		} catch (e) {
 			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
 		}
-	}, settled = (result) => ({
+	}, settled = (result, verdictItems = {}) => ({
 		expected: "not-requested",
-		verdictItems: {},
+		verdictItems,
 		upload: async () => (setOutput(""), "not-requested"),
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE))
 	});
@@ -71552,18 +71552,16 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: upload
-	}, cleanPath = audit.stepPath, unchecked = (what) => {
-		rules && failOnUnexpected && (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1);
-	}, reduced;
+	}, cleanPath = audit.stepPath, unchecked = (what) => !rules || !failOnUnexpected ? {} : (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, { caution: ["file access check incomplete"] }), reduced;
 	try {
 		reduced = reduce(audit.outPath, upload ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`));
 	}
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) })) : settled(NONE);
-	let { summary, summaryError, ended, written } = reduced;
-	summary ? summary.lost ? unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`) : unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
-	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let { summary, summaryError, ended, written } = reduced, incomplete = {};
+	summary ? summary.lost ? incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && (incomplete = unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1);
+	let proposed = upload ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,

@@ -66,6 +66,23 @@ describe("expectedRulesFile", () => {
     );
   });
 
+  it("leaves out an earlier run's heading among the rules given", () => {
+    const given = ["* R ./a", "", "# Not matched in this run", "bash R ./c"];
+    expect(
+      expectedRulesFile(given, [row("bash", "W", "./d")])
+        ?.split("\n")
+        .slice(3),
+    ).toStrictEqual([
+      "  * R ./a",
+      "",
+      "  bash R ./c",
+      "",
+      "  # Not matched in this run",
+      "  bash  W  ./d",
+      "",
+    ]);
+  });
+
   it("writes the rules given alone when they took everything", () => {
     expect(expectedRulesFile(["* R ./a"], [])).toBe(
       [

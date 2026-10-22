@@ -275,9 +275,12 @@ export function readStepFilesystemAudit(
     }
   };
   // Nothing to upload, and blocks that say nothing of an artifact.
-  const settled = (result: StepFilesystemAudit): ReadStepFilesystemAudit => ({
+  const settled = (
+    result: StepFilesystemAudit,
+    verdictItems: VerdictItems = {},
+  ): ReadStepFilesystemAudit => ({
     expected: "not-requested",
-    verdictItems: {},
+    verdictItems,
     upload: async () => {
       setOutput("");
       return "not-requested";
@@ -298,21 +301,23 @@ export function readStepFilesystemAudit(
   // new file leaves the root-owned recording in place, so a failed write
   // never uploads the raw. The post step removes both.
   const cleanPath = audit.stepPath;
-  // Accesses that could not be checked fail the step as unexpected ones would.
-  const unchecked = (what: string): void => {
-    if (!rules || !failOnUnexpected) return;
+  // Accesses that could not be checked fail the step as unexpected ones would,
+  // and raise the verdict too.
+  const unchecked = (what: string): VerdictItems => {
+    if (!rules || !failOnUnexpected) return {};
     annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;
+    return { caution: ["file access check incomplete"] };
   };
   let reduced: Reduced | undefined;
   try {
     reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
-    unchecked(
+    const incomplete = unchecked(
       `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`,
     );
-    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, incomplete);
   }
   if (!reduced) {
     if (!attached) return settled(NONE);
@@ -323,16 +328,17 @@ export function readStepFilesystemAudit(
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
   }
   const { summary, summaryError, ended, written } = reduced;
+  let incomplete: VerdictItems = {};
   if (!summary)
-    unchecked(
+    incomplete = unchecked(
       `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`,
     );
   else if (summary.lost)
-    unchecked(
+    incomplete = unchecked(
       `Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`,
     );
   else if (summary.hostMissed)
-    unchecked(
+    incomplete = unchecked(
       `Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`,
     );
   // The tracer exited during the step, as a full disk makes it, or did not
@@ -347,7 +353,11 @@ export function readStepFilesystemAudit(
     ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
     : "none";
   const given = rules !== undefined;
-  const verdictItems = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
+  const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
+  // Both are cautions, as only fail_on_unexpected_file_access makes the check's.
+  const verdictItems = incomplete.caution
+    ? { caution: [...(unexpected.caution ?? []), ...incomplete.caution] }
+    : unexpected;
   const artifactOf = (uploaded: UploadedArtifact | undefined): RecordArtifact =>
     !upload ? "not-requested" : uploaded ? uploaded : "upload-failed";
   const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;

@@ -279,7 +279,7 @@ access. The verdict at the top of the traffic report and a warning count the tab
 there were too many to list. `fail_on_unexpected_file_access: true` fails the step instead, with
 the verdict as a caution rather than a warning. It also fails the step when not every access could
 be checked against the rules, as when the recording misses some or the kernel skipped the tracer's
-hooks.
+hooks, and the verdict then says `file access check incomplete`.
 The rules only change what the summary shows: like the audit itself, they never block an access.
 
 ### Getting the rules
@@ -320,7 +320,8 @@ A run with rules writes the file too: the rules given, as they were written, the
 `# Not matched in this run` line, a rule for each access they did not take. Only those accesses
 count toward a fold, so no `dir/**` row comes of paths your own rules already take. A new `dir/**`
 that covers one of your narrower rules is left beside it: the file's diff shows both, and you decide
-which to keep.
+which to keep. The heading of a file proposed before is left out of the rules given, so it never
+ends up over rules a later run matched.
 
 ### Rules
 

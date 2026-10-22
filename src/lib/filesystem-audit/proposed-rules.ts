@@ -30,11 +30,14 @@ const anyPid = (path: string): string => path.replace(/^\/proc\/<pid>(?=\/|$)/, 
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
 
 /**
- * The proposed rules as a config_file: the rules given, as written, then a
- * rule for each access they did not take, in columns. Undefined when there is
- * nothing to write.
+ * The proposed rules as a config_file: the rules given, as written but for an
+ * earlier run's heading, then a rule for each access they did not take, in
+ * columns. Undefined when there is nothing to write.
  */
-export function expectedRulesFile(given: string[], proposed: RuleRow[]): string | undefined {
+export function expectedRulesFile(written: string[], proposed: RuleRow[]): string | undefined {
+  // A file proposed before and committed would otherwise keep its heading
+  // over rules this run matched.
+  const given = written.filter((line) => line !== NOT_MATCHED_HEADING);
   const rows = proposed.map((r) => [
     ruleField(r.program.path),
     r.flags,

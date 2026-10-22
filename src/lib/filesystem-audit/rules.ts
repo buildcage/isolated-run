@@ -92,8 +92,8 @@ const ANY_DIRS = "(?:[\\s\\S]*/)?";
 
 /**
  * A glob as a regular expression over a whole name, both escaped as the
- * summary escapes them. Undefined when the glob holds an escape the summary
- * never writes.
+ * summary escapes them. Undefined when the glob holds an escape that stands
+ * for no character, such as `\q`.
  */
 export function globPattern(glob: string): RegExp | undefined {
   let out = "";

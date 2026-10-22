@@ -1156,11 +1156,12 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       },
     });
 
-    readStepFilesystemAudit(
+    const read = readStepFilesystemAudit(
       { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
       d,
     );
 
+    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
     expect(note.error).toHaveBeenCalledWith(
       "The file accesses could not be checked against expected_filesystem_rules, as the recording could not be read; failing the step, as fail_on_unexpected_file_access is true.",
     );
@@ -1180,13 +1181,18 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       }).deps;
     const note = annotation();
 
-    readStepFilesystemAudit({ ...base, annotation: note, rules: rules("node R ./a") }, failing());
+    const quiet = readStepFilesystemAudit(
+      { ...base, annotation: note, rules: rules("node R ./a") },
+      failing(),
+    );
     expect(note.error).not.toHaveBeenCalled();
-    readStepFilesystemAudit(
+    expect(quiet.verdictItems).toStrictEqual({});
+    const read = readStepFilesystemAudit(
       { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
       failing(),
     );
 
+    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
     expect(note.error).toHaveBeenCalledWith(
       "The file accesses could not be checked against expected_filesystem_rules, as summarizing the recording failed; failing the step, as fail_on_unexpected_file_access is true.",
     );
@@ -1197,11 +1203,19 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     const note = annotation();
     const { deps: d } = deps({ raw: raw.replace('"dropped":0', '"dropped":3') });
 
-    readStepFilesystemAudit(
+    const read = readStepFilesystemAudit(
       { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
       d,
     );
+    const both = readStepFilesystemAudit(
+      { ...base, annotation: annotation(), rules: rules("node R ./a"), failOnUnexpected: true },
+      d,
+    );
 
+    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
+    expect(both.verdictItems).toStrictEqual({
+      caution: ["1 unexpected file access", "file access check incomplete"],
+    });
     expect(note.error).toHaveBeenCalledWith(
       "Not every file access was checked against expected_filesystem_rules, as the recording misses some; failing the step, as fail_on_unexpected_file_access is true.",
     );
@@ -1214,7 +1228,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
     });
 
-    readStepFilesystemAudit(
+    const read = readStepFilesystemAudit(
       { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
       d,
     );
@@ -1222,6 +1236,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(note.error).toHaveBeenCalledWith(
       "Not every file access may have been checked against expected_filesystem_rules, as the kernel skipped the tracer's hooks; failing the step, as fail_on_unexpected_file_access is true.",
     );
+    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
     expect(process.exitCode).toBe(1);
   });
 
