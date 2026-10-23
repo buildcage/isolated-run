@@ -37,7 +37,7 @@ import { createStripper } from "./strip.ts";
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 const DEFAULT_FANOUT = 3;
-// A refused syscall's details row names it where a path would be.
+// A killed syscall's details row names it where a path would be.
 const SYSCALL_PREFIX = "syscall:";
 
 export interface SummaryOptions extends Prefixes {
@@ -52,10 +52,6 @@ export interface SummaryOptions extends Prefixes {
   /** The limits below; a test lowers them. */
   limits?: Partial<Limits>;
 }
-
-// Past this many command and syscall pairs, only kills and each syscall's
-// first command get a row; the artifact has the rest.
-const REFUSED_KEPT = 200;
 
 interface Limits {
   /** The Job Summary's size limit, past which a part is not printed. */
@@ -111,9 +107,10 @@ export interface RuleRow {
   path: Shown;
 }
 
-/** A refused syscall's row: its name and whether it killed the program. */
-export interface RefusedRow extends Row {
-  syscall: { name: string; killed: boolean };
+/** A row for a 32-bit syscall seccomp killed its program for, whose path names
+ *  the syscall. */
+export interface KilledRow extends Row {
+  syscall: true;
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -128,8 +125,8 @@ export interface AuditSummary {
   /** Each part, or undefined where it was given up (see pathsCut). */
   paths: PathRow[] | undefined;
   details: Row[] | undefined;
-  /** Each refused syscall per command, as a details row. */
-  refused: RefusedRow[];
+  /** Each 32-bit syscall a command was killed for, as a details row. */
+  killed: KilledRow[];
   /** Why the paths and the details were given up, or cut short, where they were. */
   pathsCut?: CutCause;
   detailsCut?: CutCause;
@@ -313,9 +310,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   let hostMissed = 0;
   let seq = 0;
   const added = new Map<number | undefined, number>();
-  const refused = new Map<string, RefusedRow>();
-  // Names of the refused syscalls that have a row.
-  const refusedNames = new Set<string>();
+  const killed = new Map<string, KilledRow>();
 
   const add = (r: unknown, counted = true): RuleMark | undefined => {
     if (!isRecord(r)) return undefined;
@@ -334,18 +329,18 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
       return undefined;
     }
+    // A refusal that did not kill the program is left to the artifact: many
+    // programs try a syscall and carry on without it, as libuv does with
+    // io_uring_setup, and the sandbox refused it either way.
     if (r.kind === "syscall") {
+      if (!r.killed) return undefined;
       const name = escapeForDisplay(r.syscall || "?");
-      const path = SYSCALL_PREFIX + (r.killed ? `32-bit ${name} (killed)` : name);
+      const path = `${SYSCALL_PREFIX}32-bit ${name} (killed)`;
       const comm = commandKey(r.pid, r.comm ?? "");
       const key = keyOf(comm, path);
       const t = Date.parse(r.t ?? "");
-      let row = refused.get(key);
+      let row = killed.get(key);
       if (!row) {
-        // A kill explains a step's "Bad system call", and a syscall's first row
-        // makes sure the details name it, so both are always kept. The profile
-        // bounds how many names there are.
-        if (refused.size >= REFUSED_KEPT && !r.killed && refusedNames.has(name)) return undefined;
         const { text, field } = commands.get(comm)!;
         row = {
           agg: newAgg(),
@@ -353,10 +348,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           comm: text,
           commField: field,
           path,
-          syscall: { name, killed: !!r.killed },
+          syscall: true,
         };
-        refused.set(key, row);
-        if (!r.killed) refusedNames.add(name);
+        killed.set(key, row);
       }
       if (!Number.isNaN(t)) {
         if (row.agg.seq === Infinity) row.agg.seq = seq++;
@@ -483,7 +477,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
-      refused: [...refused.values()],
+      killed: [...killed.values()],
       pathsCut: paths.cut,
       detailsCut: details.cut,
       ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),

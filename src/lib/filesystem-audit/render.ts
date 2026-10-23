@@ -8,7 +8,7 @@ import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { ProposedRules } from "./proposed-rules.ts";
-import type { AuditSummary, Executed, PathRow, RefusedRow, Row, RuleRow } from "./reduce.ts";
+import type { AuditSummary, Executed, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
 import { EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
@@ -22,11 +22,9 @@ const INCOMPLETE_NOTE =
 // The note names this many commands; the details, where they fit, show the rest.
 const KILLED_COMMS_SHOWN = 3;
 
-// Each command killed for a 32-bit syscall, in the order killed. Other
-// refusals show only in the details, since a program probing for a syscall,
-// as libuv does for io_uring, carries on without it.
-function killedNote(rows: RefusedRow[]): string | undefined {
-  const killed = inRecordingOrder(rows.filter((r) => r.syscall.killed));
+// Each command killed for a 32-bit syscall, in the order killed.
+function killedNote(rows: KilledRow[]): string | undefined {
+  const killed = inRecordingOrder(rows);
   if (!killed.length) return undefined;
   const comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
   const left = comms.length - KILLED_COMMS_SHOWN;
@@ -174,11 +172,11 @@ function pathsBlock(
   };
 }
 
-// A memfd's name is quoted already, and a refused syscall's row names no path.
+// A memfd's name is quoted already, and a killed syscall's row names no path.
 const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : field(r.path));
 
 function detailsBlock(
-  { details, refused, detailsCut }: AuditSummary,
+  { details, killed, detailsCut }: AuditSummary,
   /** Whether the flag legend is still to be shown. */
   legendDue: boolean,
   { startedAt, priorities, cutNote }: RenderOptions,
@@ -192,7 +190,7 @@ function detailsBlock(
     close: DETAILS_CLOSE,
   };
   if (!details) return { ...log, cut: "atomic", text: cutNote(detailsCut) };
-  const rows = inRecordingOrder([...details, ...refused]);
+  const rows = inRecordingOrder([...details, ...killed]);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
@@ -283,13 +281,13 @@ export function renderAuditSummaryBlocks(
   summary: AuditSummary,
   opts: RenderOptions,
 ): SummaryBlock[] {
-  const { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary;
-  const killed = killedNote(refused);
+  const { ended, lost, hostMissed, executed, paths, details, killed, pathsCut } = summary;
+  const killedLine = killedNote(killed);
   const top = [
     heading(opts.title),
     ...(ended && !lost ? [] : [INCOMPLETE_NOTE]),
     ...(hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : []),
-    ...(killed ? [killed] : []),
+    ...(killedLine ? [killedLine] : []),
   ].join("\n\n");
   const frame = (text: string): SummaryBlock => ({
     priority: 0,
@@ -298,7 +296,7 @@ export function renderAuditSummaryBlocks(
     text,
     cut: "keep",
   });
-  if (details?.length === 0 && !refused.length)
+  if (details?.length === 0 && !killed.length)
     return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];

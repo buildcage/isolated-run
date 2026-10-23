@@ -70493,7 +70493,7 @@ var RuleMatcher = class {
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function killedNote(rows) {
-	let killed = inRecordingOrder(rows.filter((r) => r.syscall.killed));
+	let killed = inRecordingOrder(rows);
 	if (!killed.length) return;
 	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan), left = comms.length - 3;
 	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${comms.slice(0, 3).join(", ")}${left > 0 ? ` and ${left} more` : ""}` : ""}.`;
@@ -70565,7 +70565,7 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
+function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -70579,7 +70579,7 @@ function detailsBlock({ details, refused, detailsCut }, legendDue, { startedAt, 
 		cut: "atomic",
 		text: cutNote(detailsCut)
 	};
-	let rows = inRecordingOrder([...details, ...refused]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
@@ -70626,11 +70626,11 @@ function unexpectedBlock(summary, { priorities }) {
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
 function renderAuditSummaryBlocks(summary, opts) {
-	let { ended, lost, hostMissed, executed, paths, details, refused, pathsCut } = summary, killed = killedNote(refused), top = [
+	let { ended, lost, hostMissed, executed, paths, details, killed, pathsCut } = summary, killedLine = killedNote(killed), top = [
 		heading(opts.title),
 		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
 		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
-		...killed ? [killed] : []
+		...killedLine ? [killedLine] : []
 	].join("\n\n"), frame = (text) => ({
 		priority: 0,
 		level: 1,
@@ -70638,7 +70638,7 @@ function renderAuditSummaryBlocks(summary, opts) {
 		text,
 		cut: "keep"
 	});
-	if (details?.length === 0 && !refused.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
+	if (details?.length === 0 && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
 	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
 	else {
@@ -71285,7 +71285,7 @@ function createAuditSummary(prefixes) {
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
-	}) : void 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), refused = new Map(), refusedNames = new Set(), add = (r, counted = !0) => {
+	}) : void 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
@@ -71299,9 +71299,9 @@ function createAuditSummary(prefixes) {
 			return;
 		}
 		if (r.kind === "syscall") {
-			let name = escapeForDisplay(r.syscall || "?"), path = "syscall:" + (r.killed ? `32-bit ${name} (killed)` : name), comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = refused.get(key);
+			if (!r.killed) return;
+			let path = `syscall:32-bit ${escapeForDisplay(r.syscall || "?")} (killed)`, comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = killed.get(key);
 			if (!row) {
-				if (refused.size >= 200 && !r.killed && refusedNames.has(name)) return;
 				let { text, field } = commands.get(comm);
 				row = {
 					agg: newAgg(),
@@ -71309,11 +71309,8 @@ function createAuditSummary(prefixes) {
 					comm: text,
 					commField: field,
 					path,
-					syscall: {
-						name,
-						killed: !!r.killed
-					}
-				}, refused.set(key, row), r.killed || refusedNames.add(name);
+					syscall: !0
+				}, killed.set(key, row);
 			}
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
@@ -71406,7 +71403,7 @@ function createAuditSummary(prefixes) {
 				})),
 				paths: byPath,
 				details: log,
-				refused: [...refused.values()],
+				killed: [...killed.values()],
 				pathsCut: paths.cut,
 				detailsCut: details.cut,
 				...ruleRows && { proposed: byProgramThenPath(ruleRows) },

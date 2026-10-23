@@ -1344,7 +1344,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       summaries,
     } = deps({
       raw: [
-        JSON.stringify({ kind: "syscall", comm: "node", syscall: "io_uring_setup", err: 1 }),
+        JSON.stringify({ kind: "syscall", comm: "a.out", syscall: "getpid", killed: true }),
         JSON.stringify({ kind: "end", dropped: 0, untracked: 0 }),
       ].join("\n"),
     });
