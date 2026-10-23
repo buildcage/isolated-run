@@ -17,7 +17,7 @@ jobs:
       # audit records every destination; "Switch to restrict mode" in the
       # Job Summary returns them as allowed_https_rules.
       - name: Discover required domains with isolated-run
-        uses: buildcage/isolated-run@b92af398a713e8766a8507d9d81df38b4047d098 # v2.2.2
+        uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
         with:
           proxy_mode: audit
           proxy_engine: universal
