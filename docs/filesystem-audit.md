@@ -180,8 +180,8 @@ From the top:
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
   read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
-  left out unless it killed the program; to find it, set `upload_filesystem_audit_artifact: true`
-  and see [Refused system calls](#refused-system-calls).
+  left out, except a 32-bit one that killed the program; to find it, set
+  `upload_filesystem_audit_artifact: true` and see [Refused system calls](#refused-system-calls).
 
 ### Flags
 

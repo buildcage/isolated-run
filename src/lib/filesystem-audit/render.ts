@@ -6,7 +6,7 @@ import { fmtSpan } from "./agg.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import type { AuditSummary, Executed, PathRow, KilledRow, Row } from "./reduce.ts";
+import type { AuditSummary, Executed, KilledRow, PathRow, Row } from "./reduce.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
