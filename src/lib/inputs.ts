@@ -41,6 +41,7 @@ const LIST_INPUTS = [
   "allowed_tls_rules",
   "known_blocked_rules",
   "write_through",
+  "expected_filesystem_rules",
 ];
 
 /** Every input action.yml declares. config_file takes these less
@@ -63,6 +64,7 @@ export const ACTION_INPUTS = [
   "filesystem_audit",
   "upload_filesystem_audit_artifact",
   "filesystem_audit_retention_days",
+  "fail_on_unexpected_file_access",
   "label",
 ];
 
@@ -200,6 +202,10 @@ export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean
 
 export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
   return readBooleanInput("fail_on_blocked", true, getInput);
+}
+
+export function readFailOnUnexpectedFileAccess(getInput: GetInput = core.getInput): boolean {
+  return readBooleanInput("fail_on_unexpected_file_access", false, getInput);
 }
 
 export interface AwsKeyInputs {

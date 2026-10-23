@@ -484,6 +484,70 @@ jobs:
               exit 1
             fi
 
+      # A step's proposed expected_filesystem_rules, given back to the same
+      # command through config_file, take every access it makes again.
+      - name: Record a step for its proposed rules
+        id: rules_record
+        if: matrix.enforcement
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          filesystem_audit: record
+          upload_filesystem_audit_artifact: true
+          label: rules recorded
+          run: |
+            cat /etc/hostname > /dev/null
+            echo probe > "$GITHUB_WORKSPACE/rules-probe.txt"
+
+      - name: Download the proposed rules
+        if: matrix.enforcement
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.rules_record.outputs.filesystem_audit_artifact_name }}
+          path: ${{ runner.temp }}/rules
+
+      - name: Use the proposed rules as the config file
+        if: matrix.enforcement
+        run: |
+          cp "$RUNNER_TEMP"/rules/filesystem-audit-expected-rules-*.yml e2e-config/expected-rules.yml
+          cat e2e-config/expected-rules.yml
+
+      - name: Run the same command with the proposed rules
+        if: matrix.enforcement
+        uses: ./
+        env:
+          BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
+          BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/rules-summary.md
+        with:
+          proxy_engine: universal
+          proxy_mode: audit
+          config_file: e2e-config/expected-rules.yml
+          fail_on_unexpected_file_access: true
+          label: rules checked
+          run: |
+            cat /etc/hostname > /dev/null
+            echo probe > "$GITHUB_WORKSPACE/rules-probe.txt"
+
+      - name: Verify the rules took every access
+        if: matrix.enforcement
+        run: |
+          cat "$RUNNER_TEMP/rules-summary.md"
+          grep -qF 'No access fell outside `expected_filesystem_rules`.' "$RUNNER_TEMP/rules-summary.md"
+
+      # As above, so the checks after a failed start below find no file of these steps.
+      - name: The post step removes the rules steps' files
+        if: matrix.enforcement
+        run: |
+          base="/var/tmp/buildcage-$(id -u)"
+          for rec in "$base"/filesystem-audit-*.jsonl; do
+            suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\.jsonl$/\1/p')
+            if [ -n "$suffix" ]; then STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs; fi
+          done
+          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+
       # Container/network/Compose-project namespacing holds under Actions' own
       # `parallel:` keyword; the direct-script counterpart is in
       # test-integration.yml.

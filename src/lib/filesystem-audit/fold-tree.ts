@@ -234,6 +234,8 @@ export class Lines {
       this.climbing.set(key, (a = newAgg()));
       apply(a, x);
       this.count(this.opts.rowBytes(pathOf(key), x.comm));
+      // A line of its own is a path held as a node is.
+      if (++this.nodes > this.opts.nodes) this.stop("paths");
       return;
     }
     let kids: Map<string, Node> | undefined = this.trees.get(x.comm);
@@ -358,11 +360,13 @@ export class Lines {
     for (const key of keys) {
       mergeAgg(agg, this.climbing.get(key)!);
       this.climbing.delete(key);
+      this.nodes--;
       this.count(-this.opts.rowBytes(pathOf(key), comm));
     }
     this.members.delete(group);
     if (had) return;
     this.climbing.set(group, agg);
+    this.nodes++;
     this.count(this.opts.rowBytes(pathOf(group), comm));
   }
 

@@ -6,7 +6,9 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { SandboxError } from "./errors.ts";
 import type { RecordArtifact } from "./filesystem-audit/render.ts";
 import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { parseExpectedRules } from "./filesystem-audit/rules.ts";
 import {
+  EXAMPLE_RULES_FILE_NOTE,
   filesystemExampleInputs,
   finalizeStep,
   preflight,
@@ -33,6 +35,8 @@ const mocks = {
   readFilesystemInputs: vi.fn(),
   readFilesystemAuditInput: vi.fn(),
   readFilesystemAuditArtifactInputs: vi.fn(),
+  readExpectedFilesystemRules: vi.fn(),
+  readFailOnUnexpectedFileAccess: vi.fn(),
   readRuleInputs: vi.fn(),
   readFailOnCaResidue: vi.fn(),
   readFailOnBlocked: vi.fn(),
@@ -126,6 +130,8 @@ beforeEach(() => {
   });
   mocks.readFilesystemAuditInput.mockReturnValue("off");
   mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload: false });
+  mocks.readExpectedFilesystemRules.mockReturnValue(undefined);
+  mocks.readFailOnUnexpectedFileAccess.mockReturnValue(false);
   mocks.readRuleInputs.mockReturnValue({
     httpsRules: ["example.com:443"],
     httpRules: [],
@@ -188,6 +194,7 @@ describe("runSandboxStep", () => {
     mocks.applyConfigFile.mockReturnValue({
       path: "/home/runner/work/repo/repo/c.yml",
       warning: "Ignored from config_file c.yml, set by the workflow: proxy_mode",
+      origins: new Map(),
     });
 
     await runSandboxStep(ENV, deps);
@@ -315,7 +322,42 @@ describe("runSandboxStep", () => {
     });
   });
 
+  it("reads expected_filesystem_rules once config_file joined its own, with where they start", async () => {
+    const origin = { offset: 1, line: 3 };
+    mocks.applyConfigFile.mockImplementation((env: NodeJS.ProcessEnv) => {
+      env.INPUT_EXPECTED_FILESYSTEM_RULES = "* R ./a\n* R ./b";
+      return { path: "/w/c.yml", origins: new Map([["expected_filesystem_rules", origin]]) };
+    });
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep({ ...ENV, INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a" }, deps);
+
+    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith(
+      "* R ./a\n* R ./b",
+      origin,
+      "record",
+    );
+  });
+
+  it("warns that fail_on_unexpected_file_access has nothing to fail on without rules", async () => {
+    mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    );
+  });
+
+  it("reads no inline expected_filesystem_rules when the workflow set none", async () => {
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("", undefined, "off");
+  });
+
   it.each([
+    "readExpectedFilesystemRules",
+    "readFailOnUnexpectedFileAccess",
     "readFailOnCaResidue",
     "readFailOnBlocked",
     "readTrafficArtifactInputs",
@@ -538,6 +580,47 @@ describe("runSandboxStep", () => {
       "aws_key_check: true",
       "filesystem_audit: record",
     ]);
+  });
+
+  it("points the restrict example to the proposed rules only where the artifact holds them and config_file works", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.readExpectedFilesystemRules.mockReturnValue(
+      parseExpectedRules([{ text: "node R ./a", origin: "input", firstLine: 1 }]),
+    );
+    const uploaded = () =>
+      readAudit({ rulesFile: "rules.yml", upload: vi.fn(async () => ({ name: "audit" })) });
+    const example = async (env: NodeJS.ProcessEnv, read: object = uploaded()) => {
+      mocks.reportStepTraffic.mockClear();
+      mocks.readStepFilesystemAudit.mockReturnValue(read);
+      await runSandboxStep(env, deps);
+      return mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] }) as string[];
+    };
+
+    expect(await example(ENV)).toContain("config_file: ci/expected-filesystem-rules.yml");
+    expect(await example({ ...ENV, GITHUB_EVENT_NAME: "pull_request_target" })).toContain(
+      "expected_filesystem_rules: |",
+    );
+    expect(await example(ENV, readAudit({ rulesFile: "rules.yml" }))).toContain(
+      "expected_filesystem_rules: |",
+    );
+  });
+
+  it("says the rules can be a file only where uploading the record would make the example name one", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    const note = async (env: NodeJS.ProcessEnv, upload = false, rules = "node R ./a") => {
+      mocks.reportStepTraffic.mockClear();
+      mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload });
+      mocks.readExpectedFilesystemRules.mockReturnValue(
+        rules ? parseExpectedRules([{ text: rules, origin: "input", firstLine: 1 }]) : undefined,
+      );
+      await runSandboxStep(env, deps);
+      return mocks.reportStepTraffic.mock.calls[0][0].omittedExampleNote;
+    };
+
+    expect(await note(ENV)).toBe(EXAMPLE_RULES_FILE_NOTE);
+    expect(await note(ENV, true)).toBeUndefined();
+    expect(await note({ ...ENV, GITHUB_EVENT_NAME: "workflow_run" })).toBeUndefined();
+    expect(await note(ENV, false, "")).toBeUndefined();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {
@@ -1050,12 +1133,51 @@ describe("runSandboxStep", () => {
 });
 
 describe("filesystemExampleInputs", () => {
+  const NO_RULES = { expectedFilesystemRules: undefined, failOnUnexpectedFileAccess: false };
+  const given = {
+    filesystemMode: "persistent" as const,
+    writeThroughInput: "",
+    filesystemAudit: "record" as const,
+    expectedFilesystemRules: parseExpectedRules([
+      { text: "# npm\nnode R ./a\n\nnode W ./b", origin: "input", firstLine: 1 },
+    ]),
+    failOnUnexpectedFileAccess: true,
+  };
+
+  it("writes the expected rules as given, and fail_on_unexpected_file_access when set", () => {
+    expect(filesystemExampleInputs(given)).toStrictEqual([
+      "filesystem_audit: record",
+      "expected_filesystem_rules: |",
+      "  # npm",
+      "  node R ./a",
+      "",
+      "  node W ./b",
+      "fail_on_unexpected_file_access: true",
+    ]);
+    expect(filesystemExampleInputs({ ...given, expectedFilesystemRules: undefined })).toStrictEqual(
+      ["filesystem_audit: record", "fail_on_unexpected_file_access: true"],
+    );
+  });
+
+  it("points config_file to this run's proposed rules when the artifact holds them", () => {
+    expect(filesystemExampleInputs(given, "rules.yml")).toStrictEqual([
+      "filesystem_audit: record",
+      "# rules.yml from this run's artifact, reviewed and committed",
+      "config_file: ci/expected-filesystem-rules.yml",
+      "fail_on_unexpected_file_access: true",
+    ]);
+    expect(filesystemExampleInputs({ ...given, ...NO_RULES }, "rules.yml")).toStrictEqual([
+      "filesystem_audit: record",
+    ]);
+  });
+
   it("leaves out every input at its default", () => {
     expect(
       filesystemExampleInputs({
         filesystemMode: "persistent",
         writeThroughInput: "",
         filesystemAudit: "off",
+        ...NO_RULES,
       }),
     ).toStrictEqual([]);
   });
@@ -1066,6 +1188,7 @@ describe("filesystemExampleInputs", () => {
         filesystemMode: "ephemeral",
         writeThroughInput: "# caches\n  ~/.cache  \n\n./dist\n/opt/a # b",
         filesystemAudit: "record",
+        ...NO_RULES,
       }),
     ).toStrictEqual([
       "filesystem_mode: ephemeral",
@@ -1083,6 +1206,7 @@ describe("filesystemExampleInputs", () => {
         filesystemMode: "persistent",
         writeThroughInput: "# none yet\n\n",
         filesystemAudit: "off",
+        ...NO_RULES,
       }),
     ).toStrictEqual([]);
   });

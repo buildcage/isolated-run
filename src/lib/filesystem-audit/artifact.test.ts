@@ -15,29 +15,66 @@ function annotation(): Annotation & { warning: Mock; error: Mock } {
 
 describe("uploadFilesystemAuditArtifact", () => {
   const OUT = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl";
+  const RULES = "/var/tmp/buildcage-0/filesystem-audit-expected-rules-deadbeef.yml";
+  const RUN = {
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_REPOSITORY: "o/r",
+    GITHUB_RUN_ID: "42",
+  };
 
-  it("uploads the recording from its own directory and returns the name", async () => {
+  it("uploads the files from their own directory and returns the name", async () => {
     const calls: Parameters<UploadArtifact>[] = [];
     const upload: UploadArtifact = async (...args) => {
       calls.push(args);
       return undefined;
     };
 
-    const name = await uploadFilesystemAuditArtifact(
-      OUT,
+    const uploaded = await uploadFilesystemAuditArtifact(
+      [OUT, RULES],
       "buildcage-proxy-deadbeef",
       3,
       annotation(),
-      {
-        upload,
-      },
+      { upload, env: RUN },
     );
 
-    expect(name).toBe("buildcage-filesystem-audit-deadbeef");
+    expect(uploaded).toEqual({ name: "buildcage-filesystem-audit-deadbeef" });
     expect(calls).toEqual([
-      ["buildcage-filesystem-audit-deadbeef", [OUT], "/var/tmp/buildcage-0", { retentionDays: 3 }],
+      [
+        "buildcage-filesystem-audit-deadbeef",
+        [OUT, RULES],
+        "/var/tmp/buildcage-0",
+        { retentionDays: 3 },
+      ],
     ]);
   });
+
+  it("links the artifact's page by the id the upload returns", async () => {
+    const upload: UploadArtifact = async () => ({ id: 7 });
+
+    expect(
+      await uploadFilesystemAuditArtifact([OUT], "buildcage-proxy-deadbeef", 3, annotation(), {
+        upload,
+        env: RUN,
+      }),
+    ).toEqual({
+      name: "buildcage-filesystem-audit-deadbeef",
+      url: "https://github.com/o/r/actions/runs/42/artifacts/7",
+    });
+  });
+
+  it.each(["GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"])(
+    "leaves the link out without %s",
+    async (variable) => {
+      const upload: UploadArtifact = async () => ({ id: 7 });
+
+      expect(
+        await uploadFilesystemAuditArtifact([OUT], "buildcage-proxy-deadbeef", 3, annotation(), {
+          upload,
+          env: { ...RUN, [variable]: "" },
+        }),
+      ).toEqual({ name: "buildcage-filesystem-audit-deadbeef" });
+    },
+  );
 
   it("warns and returns undefined when the upload fails", async () => {
     const note = annotation();
@@ -46,7 +83,7 @@ describe("uploadFilesystemAuditArtifact", () => {
     };
 
     const name = await uploadFilesystemAuditArtifact(
-      OUT,
+      [OUT],
       "buildcage-proxy-deadbeef",
       undefined,
       note,

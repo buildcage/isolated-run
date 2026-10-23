@@ -14,6 +14,7 @@ import {
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
   wholeBlock,
+  withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -32,6 +33,7 @@ import {
   partFits,
 } from "#core/lib/report/render/traffic-parts.ts";
 import { stackTrafficBlocks } from "#core/lib/report/render/traffic-report.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { ReportData } from "#core/lib/report/types.ts";
 
 import { awsKeyLineNote, awsKeys, awsKeysBlocks } from "./aws-keys.ts";
@@ -77,6 +79,11 @@ export interface ComputeReportOutcomesOptions {
   runCommand?: string;
   /** See ExampleStepOptions.extraInputs. */
   extraInputs?: string[];
+  /** A sentence printed after the notice that the restrict example was too
+   *  large to print. */
+  omittedExampleNote?: string;
+  /** The verdict's items from the rest of the step's summary; see renderVerdict. */
+  verdictItems?: VerdictItems;
   actionVersion?: string;
   failOnBlocked?: boolean;
   /** Whether a truncation notice can point to the traffic artifact. */
@@ -100,8 +107,10 @@ export function computeReportOutcomes(
     actionRef,
     runCommand,
     extraInputs,
+    omittedExampleNote,
     actionVersion,
     artifactAvailable,
+    verdictItems = {},
   }: ComputeReportOutcomesOptions,
 ): ReportOutcomes {
   const emissions = describeReportOutcomes(report, {
@@ -112,8 +121,15 @@ export function computeReportOutcomes(
   if (wouldBlock) emissions.push(wouldBlock);
   const keys = awsKeys(report.timeline);
   const fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable);
+  const example = restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
+    stepName: "Start isolated-run",
+    runCommand,
+    extraInputs,
+    actionVersion,
+  });
   const heading = trafficHeadingBlock(report, reportTitle(stepLabel), {
-    warning: wouldBlockVerdictItems(report.timeline),
+    caution: verdictItems.caution,
+    warning: [...wouldBlockVerdictItems(report.timeline), ...(verdictItems.warning ?? [])],
   });
   // What needs acting on first, then what got through, then the record. The
   // step closes its summary itself, after the process activity.
@@ -127,12 +143,9 @@ export function computeReportOutcomes(
     passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
     awsKeysBlocks(keys, { priority: AWS_KEYS_PRIORITY, artifactAvailable }),
     knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
-    restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
-      stepName: "Start isolated-run",
-      runCommand,
-      extraInputs,
-      actionVersion,
-    }),
+    omittedExampleNote
+      ? withNotices(example, ({ notice }) => `${notice}\n${omittedExampleNote}\n`)
+      : example,
     noCommunicationBlocks(report),
     communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
     engineNoteBlocks(report),

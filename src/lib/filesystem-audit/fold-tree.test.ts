@@ -108,6 +108,12 @@ describe("Lines", () => {
     expect(l.finish()).toBeUndefined();
   });
 
+  it("counts each line it cannot fold toward the paths it may hold", () => {
+    const l = lines({ nodes: 2 });
+    for (const p of ["/a/run", "/b/run", "/c/run"]) l.add(access(p, BIT.X));
+    expect(l.stopped).toBe("paths");
+  });
+
   it("keeps the lines that fit once those it cannot fold away outgrow the limit", () => {
     const l = lines({ limit: 2, keep: [["/"]], rowBytes: () => 2 });
     l.add(access("/a"));

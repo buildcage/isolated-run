@@ -12,6 +12,7 @@ import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import type { TrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
@@ -67,6 +68,8 @@ export interface ReportStepOptions {
   runCommand: string;
   /** See ExampleStepOptions.extraInputs; read off the report. */
   extraInputs?: (report: Report) => string[];
+  /** See ComputeReportOutcomesOptions.omittedExampleNote. */
+  omittedExampleNote?: string;
   failOnBlocked: boolean;
   trafficArtifact: TrafficArtifactInputs;
   /** The step's own environment, which is where the summary's destinations
@@ -78,6 +81,8 @@ export interface ReportStepOptions {
    * limit together with the report.
    */
   moreBlocks?: (startedAt: number | undefined, stepLabel: string | undefined) => SummaryBlock[];
+  /** The verdict's items from moreBlocks' part of the summary. */
+  verdictItems?: VerdictItems;
   /** The command's own summary already at the start of the file, moved
    *  after this action's part once that is written; see
    *  moveCommandSummaryLast. */
@@ -104,10 +109,12 @@ export async function reportStepTraffic(
     actionRef,
     runCommand,
     extraInputs,
+    omittedExampleNote,
     failOnBlocked,
     trafficArtifact,
     env,
     moreBlocks = () => [],
+    verdictItems,
     commandSummaryBytes = 0,
   }: ReportStepOptions,
   overrides: Partial<ReportStepDeps> = {},
@@ -165,10 +172,12 @@ export async function reportStepTraffic(
           actionRef,
           runCommand,
           extraInputs: extraInputs?.(report),
+          omittedExampleNote,
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel,
           failOnBlocked,
           extraBlocks: [...rest, ...footer],
+          verdictItems,
           commandBytes: commandSummaryBytes,
         },
         trafficArtifact.upload,

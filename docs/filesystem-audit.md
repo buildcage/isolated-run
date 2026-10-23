@@ -28,6 +28,8 @@ blocks an access: what the step may write is decided by
   [Choosing `write_through`](#choosing-write_through).
 - **Checking what a dependency read, wrote, ran, or was refused.** See
   [What to look for](#what-to-look-for).
+- **Noticing a change** from the accesses a step usually makes: with `expected_filesystem_rules`,
+  the summary lists only the accesses outside them. See [Expected accesses](#expected-accesses).
 
 It suits a step's first runs, a dependency update, or an investigation. It can also stay on, since a
 typical build barely slows down, and then each run leaves a record to compare against.
@@ -254,6 +256,121 @@ off:
     run: npm ci && npm run build
 ```
 
+## Expected accesses
+
+A build touches thousands of files, the same ones run after run, so a change is hard to spot in the
+full tables. `expected_filesystem_rules` lists what the step is expected to touch, and the section
+then shows only what falls outside it:
+
+```
+## Process Activity Report
+
+### Unexpected Accesses (1)
+1,204 recorded operations matched `expected_filesystem_rules`.
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
+| Program               | Access | Path        |
+| --------------------- | ------ | ----------- |
+| `/usr/local/bin/node` | R      | `~/.npmrc`  |
+```
+
+The executed table, the accessed paths and the details give way to it; the artifact still has every
+access. The verdict at the top of the traffic report and a warning count the table's rows, or say
+there were too many to list. `fail_on_unexpected_file_access: true` fails the step instead, with
+the verdict as a caution rather than a warning. It also fails the step when not every access could
+be checked against the rules, as when the recording misses some or the kernel skipped the tracer's
+hooks, and the verdict then says `file access check incomplete`.
+The rules only change what the summary shows: like the audit itself, they never block an access.
+
+### Getting the rules
+
+With `upload_filesystem_audit_artifact: true`, the artifact also holds
+`filesystem-audit-expected-rules-<id>.yml`, a [config file](./reference.md#config-file) with a rule
+for each access the run made, folded as the accessed paths are:
+
+```yaml
+filesystem_audit: record
+upload_filesystem_audit_artifact: true
+expected_filesystem_rules: |
+  /usr/local/bin/node  RWD  ./node_modules/**
+  /usr/local/bin/node  R    ~/.npmrc
+  bash                 X    /usr/local/bin/node
+```
+
+1. Run the step with the audit on and the artifact uploaded, and download the file. The **Expected
+   filesystem rules** element at the end of the section links to the artifact.
+2. Review the rules. A path that changes from run to run, such as a temporary file with a random
+   name, or a directory where a run touched two files and the next will touch a third, needs `*` or
+   `**` to match the next run too. A broad rule such as `~/**` also matches what is worth seeing,
+   such as `~/.ssh`, so widen no further than needed.
+3. Commit the file and name it in `config_file`:
+
+   ```yaml
+   - uses: buildcage/isolated-run@<sha>
+     with:
+       config_file: ci/expected-filesystem-rules.yml
+       run: npm ci
+   ```
+
+   Or set the rules in the workflow itself, under `with:`. Where the step already has a config
+   file, add the file's keys to it. A config file cannot be used on `pull_request_target`, nor on a
+   `workflow_run` a pull request started, so there the rules have to be in the workflow.
+
+A run with rules writes the file too: the rules given, as they were written, then, under a
+`# Not matched in this run` line, a rule for each access they did not take. Only those accesses
+count toward a fold, so no `dir/**` row comes of paths your own rules already take. A new `dir/**`
+that covers one of your narrower rules is left beside it: the file's diff shows both, and you decide
+which to keep. The heading of a file proposed before is left out of the rules given, so it never
+ends up over rules a later run matched.
+
+The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
+Where that run's artifact holds the file, the example names it in `config_file` at
+`ci/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
+`workflow_run`, or without the file, it lists the rules given under `with:`. It adds
+`fail_on_unexpected_file_access: true` when the step set it. When the listed rules make the example
+too large to print and the step did not upload its record, the summary says that
+`upload_filesystem_audit_artifact: true` would have it name the file instead.
+
+### Rules
+
+Each rule is one line of three fields, the accessed paths table's columns, so a row of the table or
+of **Unexpected Accesses** can be copied in:
+
+```
+<program> <access> <path>
+```
+
+- **Program**: the file the process runs, as the table names it, with `*` for any program. A
+  process that ran nothing goes by its own name, as the step's shell does as `bash`. Running a
+  program counts as an access of the program that ran it: `bash X /usr/bin/curl`.
+- **Access**: the [flags](#flags), read as the table reads them. `R` takes a read whether it
+  succeeded or failed, as a file that was missing matters less than one that was read; `r` takes
+  only a failed read. `r!` takes a refused read and a failed one, as the table shows both as `r!`;
+  `R` and `r` never take a refusal, so write `Rr!` to expect one beside the reads.
+- **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
+  `memfd:"name"`. `*` matches within one component of a path, and `**` across them, as a whole
+  component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
+  name shows as `\*`, which matches only a star. Regular expressions are not supported. A process's
+  own directory in `/proc` is spelled `/proc/*/`.
+- A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
+  are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
+  summary shows them.
+- A line starting with `#` is a comment, and a blank line is skipped. A `#` anywhere else is part
+  of the field it is in, as a path may hold one.
+
+An access that only ever failed is unexpected once it succeeds, and one the sandbox refused is
+unexpected unless a rule names the refusal. The step fails before the command runs on a line that is
+not a rule, and when the rules are set without `filesystem_audit: record`.
+
+Rules match the accesses the accessed paths table counts: a library a program loads, the step's
+shell reading its script, a pipe or a socket, and a refused system call are left out. A program's
+path says nothing of what it runs: npm and a package's install script both run as `node`, so a rule
+for `node` takes either. The rules show a new path or a new program; they cannot tell which code
+inside a program made an access.
+
+In the artifact, each line the rules were matched against carries `rule`, where the rule that took
+it was written, or `unexpected`; see [Fields](#fields). A record marked incomplete may miss
+unexpected accesses too.
+
 ## Troubleshooting
 
 The step fails before the command runs with
@@ -328,7 +445,8 @@ offers that mode.
 ## The artifact
 
 With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
-holds one file, `filesystem-audit-<id>.step.jsonl`: one JSON object per line, in the order the
+holds `filesystem-audit-<id>.step.jsonl`, and the proposed rules of
+[Expected accesses](#expected-accesses) beside it. The record is one JSON object per line, in the order the
 tracer caught the accesses. Opens and path changes are written when their call returns, so lines
 from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
 the summary does: the sandbox's setup is left out, and the step's shell is named `bash`, with no
@@ -357,34 +475,37 @@ Unlike the summary, it also lists a directory that was made and then written und
 
 ### Fields
 
-| Field      | On                                             | Notes                                                                                                                                                |
-| ---------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `t`        | every line but `end`                           | ISO 8601 UTC, to the millisecond                                                                                                                     |
-| `kind`     | every line                                     | what happened; see [Kinds](#kinds)                                                                                                                   |
-| `pid`      | every line but `end`                           | the process, as the runner host numbers it                                                                                                           |
-| `ppid`     | every line but `end`                           | its parent at the time; on `fork`, the process that made it                                                                                          |
-| `comm`     | every line but `end`                           | the name the process gave itself, up to 15 bytes                                                                                                     |
-| `program`  | every line but `end`, where known              | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything    |
-| `path`     | all but `fork`, `syscall`, `end`               | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path |
-| `to`       | `rename`, `link`, `symlink`                    | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                   |
-| `name`     | where it differs from `path`, and every `exec` | the name the command passed; on `exec`, the name it was run by                                                                                       |
-| `to_name`  | where it differs from `to`                     | as `name`, for `to`                                                                                                                                  |
-| `access`   | `open`, `mmap`                                 | what was asked for; see [Access letters](#access-letters)                                                                                            |
-| `flags`    | `open`                                         | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                 |
-| `mode`     | `chmod`                                        | the new mode in octal, such as `"0755"`                                                                                                              |
-| `owner`    | `chown`                                        | the new `uid:gid`, with `-1` for a side left as it was                                                                                               |
-| `failed`   | a failed operation                             | `true`                                                                                                                                               |
-| `err`      | a failed operation                             | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                |
-| `image`    | `mmap`                                         | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                       |
-| `memfd`    | a file in memory only                          | `path` is `memfd:` and the name its creator chose                                                                                                    |
-| `deleted`  | a deleted or never-named file                  | a file deleted while it was open, or created without a name and never given one                                                                      |
-| `exchange` | `rename`                                       | a swap of two paths, which shows `M` on both in the summary                                                                                          |
-| `syscall`  | `syscall`                                      | the system call's name, or its number where the tracer has no name for it                                                                            |
-| `compat`   | `syscall`                                      | a 32-bit or x32 system call                                                                                                                          |
-| `killed`   | `syscall`                                      | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                    |
+| Field        | On                                                              | Notes                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t`          | every line but `end`                                            | ISO 8601 UTC, to the millisecond                                                                                                                                                                           |
+| `kind`       | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
+| `pid`        | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
+| `ppid`       | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
+| `comm`       | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
+| `program`    | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
+| `path`       | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
+| `to`         | `rename`, `link`, `symlink`                                     | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                                                                         |
+| `name`       | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
+| `to_name`    | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
+| `access`     | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
+| `flags`      | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                                                                       |
+| `mode`       | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
+| `owner`      | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
+| `failed`     | a failed operation                                              | `true`                                                                                                                                                                                                     |
+| `err`        | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
+| `image`      | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
+| `memfd`      | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
+| `deleted`    | a deleted or never-named file                                   | a file deleted while it was open, or created without a name and never given one                                                                                                                            |
+| `exchange`   | `rename`                                                        | a swap of two paths, which shows `M` on both in the summary                                                                                                                                                |
+| `syscall`    | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
+| `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
+| `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
+| `rule`       | a line the rules took, with `expected_filesystem_rules`         | where the rule that took it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined the value's lines, as outside a `\|` block |
+| `unexpected` | a line the rules did not take, with `expected_filesystem_rules` | some access of the line, such as one side of a link, no rule took                                                                                                                                          |
 
-A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted` and `exchange`
-are absent rather than `false`.
+A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted`, `exchange`
+and `unexpected` are absent rather than `false`. Without `expected_filesystem_rules`, no line has
+`rule` or `unexpected`, and with them a line the rules are not matched against has neither.
 
 `path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the
 kernel names without a path (such as `pipe:[1234]`), a path too deep to record in full (`…/…`), and
@@ -521,15 +642,16 @@ not quoted inside brackets, as they mark where it ends.
 
 ### Other notations
 
-| Shown as                                 | Means                                                                                                             |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full          |
-| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                   |
-| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                         |
-| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row  |
-| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                               |
-| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end, a quote or a backslash, in a path or command name |
-| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                |
+| Shown as                                 | Means                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full                    |
+| `path…`                                  | A failed open's name too long to record in full, cut at its end                                                             |
+| `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                                   |
+| `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row            |
+| `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY` | The runner's file of that name, at whichever path the step wrote it                                                         |
+| `\n`, `\u{202e}`, `\"`, `\\`             | A control, invisible or blank character, a space at either end of a name, a quote or a backslash, in a path or command name |
+| `\*`                                     | A star in a path or program, which a rule would otherwise read as a wildcard                                                |
+| `\xff`                                   | A byte that is not UTF-8 in a path or command name                                                                          |
 
 ### Refused system calls
 
@@ -604,6 +726,7 @@ itself can do to the record, and what the record can be trusted for.
   [How rows are grouped](#how-rows-are-grouped)). One that would pass 1 MiB even so keeps the rows
   that fit in it, takes no new ones, and ends with a note; the Job Summary's cap then decides how
   much of it prints. It is left out whole, under a note that says why, when not one row fits, or
-  once its folded tree holds more than 200,000 files and directories, counting every directory on
-  the way and each program's tree apart in the table, each command's in the details. When the table
-  is left out, the details go with it.
+  once it holds more than 200,000 paths after folding, counting every directory on the way and each
+  row that never folds, such as a program run, and each program's tree apart in the table, each
+  command's in the details. When the table is left out, the details go with it. The Unexpected
+  Accesses table and the proposed rules count the same way.

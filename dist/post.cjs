@@ -263,13 +263,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$8 = getInput) {
+function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$8("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$8("write_through"),
-			writable: getInput$8("writable"),
-			allowWrite: getInput$8("allow_write")
+			writeThrough: getInput$3("write_through"),
+			writable: getInput$3("writable"),
+			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }
@@ -405,7 +405,8 @@ function filesystemAuditPaths(containerName, scratchBase) {
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`)
+		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
+		rulesPath: (0, node_path.join)(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`)
 	};
 }
 function readPid(readFile, pidFilePath) {
@@ -731,7 +732,7 @@ function defaultRemoveFile(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
 }
 function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
-	let { outPath, pidFilePath, stepPath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+	let { outPath, pidFilePath, stepPath, rulesPath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {
 			let pid = readPid(readFile, pidFilePath);
@@ -741,7 +742,7 @@ function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.
 		}
 		removeFile(pidFilePath);
 	}
-	removeFile(outPath), removeFile(stepPath);
+	removeFile(outPath), removeFile(stepPath), removeFile(rulesPath);
 }
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);

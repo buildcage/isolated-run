@@ -5,9 +5,10 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -16,6 +17,7 @@ import {
   withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
+import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 
 import { failOrWarn } from "../fail-or-warn.ts";
 import { reportTitle } from "../report.ts";
@@ -30,11 +32,14 @@ import {
   filesystemAuditArtifactName,
   setFilesystemAuditOutput,
   uploadFilesystemAuditArtifact,
+  type UploadedArtifact,
 } from "./artifact.ts";
 import type { CutCause } from "./fold-tree.ts";
+import { writeProposedRules } from "./proposed-rules.ts";
 import {
   createAuditSummary,
   reduceRecording,
+  type AuditSummary,
   type ReducedRecording,
   type SummaryOptions,
 } from "./reduce.ts";
@@ -42,9 +47,11 @@ import {
   filesystemLegendNote,
   filesystemTruncationNote,
   renderAuditSummaryBlocks,
+  rulesNote,
   unreadableSummaryBlocks,
   type RecordArtifact,
 } from "./render.ts";
+import { EXPECTED_RULES_INPUT, RuleMatcher, type ExpectedRules } from "./rules.ts";
 
 export const PROCESS_ACTIVITY_TITLE = "Process Activity Report";
 
@@ -70,6 +77,10 @@ export interface FilesystemAuditReportOptions {
   actionRef: string;
   /** Under restrict with fail_on_blocked: an output that cannot be set fails the step. */
   failClosed: boolean;
+  /** expected_filesystem_rules, undefined when none were given. */
+  rules?: ExpectedRules;
+  /** fail_on_unexpected_file_access: an access no rule takes fails the step. */
+  failOnUnexpected?: boolean;
 }
 
 export interface FilesystemAuditReportDeps {
@@ -82,6 +93,7 @@ export interface FilesystemAuditReportDeps {
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
   setOutput: typeof setFilesystemAuditOutput;
   appendFile: (path: string, content: string) => void;
+  writeFile: (path: string, content: string) => void;
 }
 
 const CHUNK_BYTES = 1 << 20;
@@ -162,6 +174,7 @@ const realDeps: FilesystemAuditReportDeps = {
   uploadArtifact: uploadFilesystemAuditArtifact,
   setOutput: setFilesystemAuditOutput,
   appendFile: (path, content) => appendFileSync(path, content),
+  writeFile: (path, content) => writeFileSync(path, content, { flag: "wx" }),
 };
 /* v8 ignore stop */
 
@@ -212,6 +225,11 @@ export interface ReadStepFilesystemAudit {
   /** The artifact as it will be once uploaded, for a summary written before
    *  the upload. */
   expected: RecordArtifact;
+  /** The traffic report's verdict items: the accesses no rule took, if any,
+   *  as a caution when they fail the step. */
+  verdictItems: VerdictItems;
+  /** The proposed rules file's name, when the artifact is to hold it. */
+  rulesFile?: string;
   /** Uploads the stripped copy, sets the output and returns the artifact as
    *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
@@ -242,6 +260,8 @@ export function readStepFilesystemAudit(
     actionRepo,
     actionRef,
     failClosed,
+    rules,
+    failOnUnexpected = false,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): ReadStepFilesystemAudit {
@@ -257,8 +277,12 @@ export function readStepFilesystemAudit(
     }
   };
   // Nothing to upload, and blocks that say nothing of an artifact.
-  const settled = (result: StepFilesystemAudit): ReadStepFilesystemAudit => ({
+  const settled = (
+    result: StepFilesystemAudit,
+    verdictItems: VerdictItems = {},
+  ): ReadStepFilesystemAudit => ({
     expected: "not-requested",
+    verdictItems,
     upload: async () => {
       setOutput("");
       return "not-requested";
@@ -271,18 +295,33 @@ export function readStepFilesystemAudit(
     workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
     home: prefixes(env.HOME, deps.realpath),
     runnerFiles: runnerFiles(env, mediated, deps.realpath),
+    ...(rules && { rules: new RuleMatcher(rules.rules) }),
+    propose: upload,
   };
   // The stripped copy goes beside the recording under the scratch base,
   // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
   // new file leaves the root-owned recording in place, so a failed write
   // never uploads the raw. The post step removes both.
   const cleanPath = audit.stepPath;
+  // What the verdict says of accesses that could not all be checked, which
+  // fail the step as unexpected ones would.
+  const checkIncomplete: VerdictItems =
+    rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {};
+  const unchecked = (what: string): VerdictItems => {
+    if (!checkIncomplete.caution) return {};
+    annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`);
+    process.exitCode = 1;
+    return checkIncomplete;
+  };
   let reduced: Reduced | undefined;
   try {
     reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
-    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+    const incomplete = unchecked(
+      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`,
+    );
+    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, incomplete);
   }
   if (!reduced) {
     if (!attached) return settled(NONE);
@@ -290,9 +329,25 @@ export function readStepFilesystemAudit(
       "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
     );
     process.exitCode = 1;
-    return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) });
+    return settled(
+      { blocks: (_startedAt, title) => unreadableSummaryBlocks(title) },
+      checkIncomplete,
+    );
   }
   const { summary, summaryError, ended, written } = reduced;
+  let incomplete: VerdictItems = {};
+  if (!summary)
+    incomplete = unchecked(
+      `The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`,
+    );
+  else if (summary.lost)
+    incomplete = unchecked(
+      `Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`,
+    );
+  else if (summary.hostMissed)
+    incomplete = unchecked(
+      `Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`,
+    );
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
   if (attached && !ended && !cancelled) {
@@ -300,23 +355,41 @@ export function readStepFilesystemAudit(
       "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
     );
     process.exitCode = 1;
+    incomplete = checkIncomplete;
   }
-  const artifactOf = (name: string): RecordArtifact =>
-    !upload ? "not-requested" : name ? { name } : "upload-failed";
+  const proposed = upload
+    ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
+    : "none";
+  const given = rules !== undefined;
+  const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
+  // Both are cautions, as only fail_on_unexpected_file_access makes the check's.
+  const verdictItems = incomplete.caution
+    ? { caution: [...(unexpected.caution ?? []), ...incomplete.caution] }
+    : unexpected;
+  const artifactOf = (uploaded: UploadedArtifact | undefined): RecordArtifact =>
+    !upload ? "not-requested" : uploaded ? uploaded : "upload-failed";
   const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
   return {
-    expected: artifactOf(written ? filesystemAuditArtifactName(containerName) : ""),
+    expected: artifactOf(
+      written ? { name: filesystemAuditArtifactName(containerName) } : undefined,
+    ),
+    verdictItems,
+    ...(proposed === "written" && { rulesFile: basename(audit.rulesPath) }),
     upload: async () => {
-      let artifactName = "";
+      let uploaded: UploadedArtifact | undefined;
       try {
         if (written)
-          artifactName =
-            (await deps.uploadArtifact(cleanPath, containerName, retentionDays, annotation)) ?? "";
+          uploaded = await deps.uploadArtifact(
+            proposed === "written" ? [cleanPath, audit.rulesPath] : [cleanPath],
+            containerName,
+            retentionDays,
+            annotation,
+          );
       } catch (e) {
         annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
       }
-      setOutput(artifactName);
-      return artifactOf(artifactName);
+      setOutput(uploaded?.name ?? "");
+      return artifactOf(uploaded);
     },
     // The summary and the upload are independent: a render failure must not
     // also drop the artifact, which is most wanted when the recording is
@@ -333,6 +406,12 @@ export function readStepFilesystemAudit(
           cutNote,
           legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
           skippedHooksUrl: `${guide}#skipped-hooks`,
+          expected: given,
+          rulesNote: rulesNote(artifact, proposed, {
+            fileName: basename(audit.rulesPath),
+            guideUrl: `${guide}#expected-accesses`,
+            given,
+          }),
         });
       } catch (e) {
         annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`);
@@ -343,6 +422,36 @@ export function readStepFilesystemAudit(
       return withNotices(rendered, () => notice);
     },
   };
+}
+
+/**
+ * Annotates the accesses no rule took and returns the verdict's item for
+ * them, a caution when they fail the step, counted as the Unexpected Accesses table lists them, which a table
+ * given up does not.
+ */
+function reportUnexpected(
+  summary: AuditSummary | undefined,
+  failOnUnexpected: boolean,
+  annotation: Annotation,
+): VerdictItems {
+  if (!summary?.unexpected) return {};
+  const n = summary.proposed?.length;
+  const es = n === 1 ? "" : "es";
+  const what =
+    n === undefined
+      ? "unexpected file accesses (too many to list)"
+      : `${n} unexpected file access${es}`;
+  const message =
+    n === undefined
+      ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.`
+      : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+  if (failOnUnexpected) {
+    annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
+    process.exitCode = 1;
+    return { caution: [what] };
+  }
+  annotation.warning(message);
+  return { warning: [what] };
 }
 
 interface Reduced extends ReducedRecording {

@@ -26,6 +26,7 @@ export const WOULD_BLOCK_PRIORITY = 2;
 export const AWS_KEYS_PRIORITY = 5;
 
 export const FILESYSTEM_PRIORITIES: FilesystemPriorities = {
+  [FILESYSTEM_BLOCK.unexpected]: 6,
   [FILESYSTEM_BLOCK.executed]: 6,
   [FILESYSTEM_BLOCK.paths]: 7,
   [FILESYSTEM_BLOCK.log]: 10,

@@ -154,7 +154,14 @@ describe("reportStepTraffic", () => {
 
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
     const extraInputs = vi.fn(() => ["aws_key_check: true"]);
-    await reportStepTraffic(options({ extraInputs }), deps);
+    await reportStepTraffic(
+      options({
+        extraInputs,
+        omittedExampleNote: "_Shorter with x._",
+        verdictItems: { warning: ["1 unexpected file access"] },
+      }),
+      deps,
+    );
     expect(extraInputs).toHaveBeenCalledWith(mocks.writeReportSummary.mock.calls[0][0]);
 
     expect(mocks.writeReportSummary.mock.calls[0][2]).toStrictEqual({
@@ -162,10 +169,12 @@ describe("reportStepTraffic", () => {
       actionRef: "v1",
       runCommand: "npm ci",
       extraInputs: ["aws_key_check: true"],
+      omittedExampleNote: "_Shorter with x._",
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,
       extraBlocks: [FOOTER],
+      verdictItems: { warning: ["1 unexpected file access"] },
       commandBytes: 0,
     });
     expect(mocks.readActionVersion).toHaveBeenCalledWith(CONTAINER, "inspect");

@@ -24,11 +24,14 @@ import {
   MEMFDS,
   normalize,
   relativize,
+  sortKey,
   unmarked,
   type Prefixes,
   type Shown,
 } from "./paths.ts";
 import { BIT, bitsOf, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
+import { RuleTally, type RuleMark } from "./rule-tally.ts";
+import type { RuleMatcher } from "./rules.ts";
 import { createStripper } from "./strip.ts";
 
 // A shared object or a Node.js addon, by file name.
@@ -40,6 +43,11 @@ const SYSCALL_PREFIX = "syscall:";
 export interface SummaryOptions extends Prefixes {
   /** The proxy's start, in epoch seconds. */
   startedAt?: number;
+  /** expected_filesystem_rules, when given: each access is matched against them. */
+  rules?: RuleMatcher;
+  /** Whether to gather the rules proposed for what no rule takes, every
+   *  access when there are none. */
+  propose?: boolean;
   fanout?: number;
   /** The limits below; a test lowers them. */
   limits?: Partial<Limits>;
@@ -88,6 +96,17 @@ export interface PathRow extends Row {
   program: Shown & { rank: number };
 }
 
+// Each name on its own, so a blank leading or ending one is escaped wherever
+// it falls in the path.
+const escapePath = (path: string): string => path.split("/").map(escapeForDisplay).join("/");
+
+/** A proposed rule: a program, its accesses as a rule spells them, and a path. */
+export interface RuleRow {
+  program: Shown;
+  flags: string;
+  path: Shown;
+}
+
 /** A row for a 32-bit syscall seccomp killed its program for, whose path names
  *  the syscall. */
 export interface KilledRow extends Row {
@@ -111,6 +130,17 @@ export interface AuditSummary {
   /** Why the paths and the details were given up, or cut short, where they were. */
   pathsCut?: CutCause;
   detailsCut?: CutCause;
+  /**
+   * The accesses no rule takes, every access without rules, as rules folded
+   * like the accessed paths, by program and then path. Undefined when not
+   * gathered, or given up for holding too many paths.
+   */
+  proposed?: RuleRow[];
+  /** Whether the proposed rules were given up. */
+  proposedCut?: boolean;
+  /** How many lines of the recording the rules took, and how many they did not. */
+  matched: number;
+  unexpected: number;
 }
 
 /**
@@ -130,7 +160,7 @@ export interface AuditSummary {
  */
 export function createAuditSummary(prefixes: SummaryOptions): {
   observe: (r: unknown) => void;
-  add: (r: unknown, counted?: boolean) => void;
+  add: (r: unknown, counted?: boolean) => RuleMark | undefined;
   finish: () => AuditSummary;
 } {
   const limits = { ...LIMITS, ...prefixes.limits };
@@ -172,6 +202,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
+  // The workspace and $HOME as the paths spell them once escaped.
+  const shownPrefixes = {
+    workspace: prefixes.workspace.map(escapePath),
+    home: prefixes.home.map(escapePath),
+  };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   const keep = [
     "/",
@@ -179,10 +214,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/tmp",
     "/proc",
     "/proc/<pid>",
-    ...prefixes.workspace,
-    ...prefixes.home,
+    ...shownPrefixes.workspace,
+    ...shownPrefixes.home,
   ].map(components);
-  const relLength = (path: string): number => relativize(path, prefixes).length;
+  const relLength = (path: string): number => relativize(path, shownPrefixes).length;
   // The fewest bytes a row of each part prints in.
   const paths = new Lines({
     fanout,
@@ -210,7 +245,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
   // A program's rank holds its path, a command name's none.
-  const ranks: { shown: Shown; bytes: number; program?: string }[] = [];
+  const ranks: { shown: Shown; bytes: number; program?: string; ruleName: string }[] = [];
   const rankOf = new Map<string, number>();
   const rank = (key: string, name: boolean): number => {
     const id = `${name ? "n" : "p"}${key}`;
@@ -218,9 +253,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r === undefined) {
       r = ranks.length;
       rankOf.set(id, r);
-      const s = name ? { path: escapeForDisplay(key) } : shown(key);
+      const s = name ? { path: escapeForDisplay(key) } : shown(escaped(key));
       const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
-      ranks.push({ shown: s, bytes, ...(name ? {} : { program: key }) });
+      ranks.push({
+        shown: s,
+        bytes,
+        ...(name ? {} : { program: key }),
+        ruleName: name ? s.path : ruleName(escaped(key)),
+      });
     }
     return r;
   };
@@ -248,6 +288,23 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return key;
   };
+  // What no rule takes, by program and path, folded as the accessed paths
+  // are but never loosened nor cut for size.
+  const tally =
+    prefixes.propose || prefixes.rules
+      ? new RuleTally(
+          prefixes.rules,
+          new Lines({
+            fanout,
+            keep,
+            limit: Infinity,
+            loose: Infinity,
+            nodes: limits.nodes,
+            rowBytes: () => 0,
+          }),
+          { program: (rank) => ranks[rank].ruleName, path: ruleName },
+        )
+      : undefined;
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -255,10 +312,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const added = new Map<number | undefined, number>();
   const killed = new Map<string, KilledRow>();
 
-  const add = (r: unknown, counted = true): void => {
-    if (!isRecord(r)) return;
+  const add = (r: unknown, counted = true): RuleMark | undefined => {
+    if (!isRecord(r)) return undefined;
     const proc = procOf(added, r);
-    if (!counted) return;
+    if (!counted) return undefined;
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
       programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
@@ -270,13 +327,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
       hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
-      return;
+      return undefined;
     }
     // A refusal that did not kill the program is left to the artifact: many
     // programs try a syscall and carry on without it, as libuv does with
     // io_uring_setup, and the sandbox refused it either way.
     if (r.kind === "syscall") {
-      if (!r.killed) return;
+      if (!r.killed) return undefined;
       const name = escapeForDisplay(r.syscall || "?");
       const path = `${SYSCALL_PREFIX}32-bit ${name} (killed)`;
       const comm = commandKey(r.pid, r.comm ?? "");
@@ -300,24 +357,27 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         row.agg.first = Math.min(row.agg.first, t);
         row.agg.last = Math.max(row.agg.last, t);
       }
-      return;
+      return undefined;
     }
+    // A run is expected of the program that ran it, not of what it ran.
+    const runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : undefined;
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
-      const runs = executed.get(p);
-      if (runs !== undefined) executed.set(p, runs + 1);
+      const run = escaped(p);
+      const runs = executed.get(run);
+      if (runs !== undefined) executed.set(run, runs + 1);
       else if (executedBytes <= limit) {
-        executed.set(p, 1);
-        executedBytes += relLength(p) + 11;
+        executed.set(run, 1);
+        executedBytes += relLength(run) + 11;
       }
     } else if (r.kind === "exec") {
       // What it runs now is unknown, as the artifact has it.
       programs.delete(r.pid);
       runNames.delete(r.pid);
     }
-    if (isLibraryMap(r)) return;
+    if (isLibraryMap(r)) return undefined;
     for (const c of classify(r)) {
       // Marked after, so a runner file deleted while open still keys by name.
       const own = canonical(c.path, prefixes);
@@ -339,7 +399,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
-        path: normalize(path),
+        path: escaped(normalize(path)),
         bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,
@@ -351,21 +411,35 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
+      tally?.take(x, parts, runBy ?? program);
     }
+    return tally?.endLine();
   };
 
+  // A path escaped as the summary shows it, its marks kept, before anything
+  // folds it: a star in a name is then never a fold's.
+  function escaped(path: string): string {
+    if (path.startsWith(MEMFD)) return MEMFD + escapeForDisplay(path.slice(MEMFD.length));
+    if (isRunnerFile(path)) return path;
+    if (!path.endsWith(DELETED)) return escapePath(path);
+    return escapePath(path.slice(0, -DELETED.length)) + DELETED;
+  }
+
   // A memfd shows its name quoted, as one its creator chose; a deleted file
-  // shows the mark outside its path.
-  const shown = (path: string): Shown => {
+  // shows the mark outside its path. `path` is escaped already.
+  function shown(path: string): Shown {
     if (path === MEMFDS) return { path: `${MEMFD_PREFIX}**` };
-    if (path.startsWith(MEMFD)) {
-      const name = escapeForDisplay(path.slice(MEMFD.length));
-      return { path: `${MEMFD_PREFIX}"${name}"`, memfd: true };
-    }
-    if (!path.endsWith(DELETED)) return { path: escapeForDisplay(relativize(path, prefixes)) };
-    const p = relativize(path.slice(0, -DELETED.length), prefixes);
-    return { path: escapeForDisplay(p), deleted: true };
-  };
+    if (path.startsWith(MEMFD)) return { path: ruleName(path), memfd: true };
+    if (!path.endsWith(DELETED)) return { path: relativize(path, shownPrefixes) };
+    return { path: ruleName(path), deleted: true };
+  }
+
+  // The name a rule is matched against, as the summary shows it: a memfd's
+  // quoted, a deleted file's path alone.
+  function ruleName(path: string): string {
+    if (path.startsWith(MEMFD)) return `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`;
+    return relativize(unmarked(path), shownPrefixes);
+  }
 
   type Line = { comm: string; path: string; agg: Agg };
   const rows = (lines: Line[] | undefined): Row[] | undefined =>
@@ -391,6 +465,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
+    const ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
+      program: ranks[rank].shown,
+      flags: fmtFlags(agg),
+      path: shown(path),
+    }));
     return {
       ended,
       lost,
@@ -401,9 +480,27 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       killed: [...killed.values()],
       pathsCut: paths.cut,
       detailsCut: details.cut,
+      ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),
+      ...(tally?.givenUp && { proposedCut: true }),
+      matched: tally?.matched ?? 0,
+      unexpected: tally?.unexpected ?? 0,
     };
   };
   return { observe, add, finish };
+}
+
+// By program, then path as the tables order paths, each by its text.
+function byProgramThenPath(rows: RuleRow[]): RuleRow[] {
+  const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return rows
+    .map((row) => ({ row, key: sortKey(row.path.path) }))
+    .sort(
+      (a, b) =>
+        cmp(a.row.program.path, b.row.program.path) ||
+        a.key[0] - b.key[0] ||
+        cmp(a.key[1], b.key[1]),
+    )
+    .map((k) => k.row);
 }
 
 // The tracer writes Go's encoding/json, with no space after a colon, and kind
@@ -421,6 +518,12 @@ function firstPassNeeds(line: string): boolean {
     line.startsWith('fork"', kind) ||
     line.startsWith('mmap"', kind)
   );
+}
+
+// The line with its mark as the last field: a line with a mark is a JSON object.
+function withMark(line: string, mark: RuleMark): string {
+  const field = "rule" in mark ? `"rule":${JSON.stringify(mark.rule)}` : '"unexpected":true';
+  return `${line.slice(0, -1)},${field}}`;
 }
 
 export interface ReducedRecording {
@@ -450,12 +553,13 @@ export function reduceRecording(
   const summary = createSummary(options);
   let summaryError: unknown;
   let failedSummary = false;
-  const summarize = (step: () => void): void => {
-    if (failedSummary) return;
+  const summarize = <T>(step: () => T): T | undefined => {
+    if (failedSummary) return undefined;
     try {
-      step();
+      return step();
     } catch (e) {
       [failedSummary, summaryError] = [true, e];
+      return undefined;
     }
   };
 
@@ -479,8 +583,8 @@ export function reduceRecording(
     const r = parseLine(line);
     if (isRecord(r) && r.kind === "end") ended = true;
     const kept = stripper.filter(line, r);
-    summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
-    if (kept) sink?.(kept.line);
+    const mark = summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
+    if (kept) sink?.(mark ? withMark(kept.line, mark) : kept.line);
   });
   // The tracer has stopped, so the two reads see the same lines, which the
   // line positions the first pass found depend on.

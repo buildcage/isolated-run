@@ -18,6 +18,7 @@ import {
   readProxyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFailOnUnexpectedFileAccess,
   readFilesystemAuditInput,
   readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
@@ -263,6 +264,7 @@ describe("readStepLabel", () => {
 describe.each([
   { name: "fail_on_ca_residue", read: readFailOnCaResidue, unset: true },
   { name: "fail_on_blocked", read: readFailOnBlocked, unset: true },
+  { name: "fail_on_unexpected_file_access", read: readFailOnUnexpectedFileAccess, unset: false },
 ])("$name", ({ name, read, unset }) => {
   it("reads its own input", () => {
     expect(read(inputs({ [name]: String(!unset) }))).toBe(!unset);

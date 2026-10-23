@@ -32,6 +32,8 @@ import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
+import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -40,6 +42,7 @@ import {
   readAwsKeyInputs,
   readFailOnBlocked,
   readFailOnCaResidue,
+  readFailOnUnexpectedFileAccess,
   readFilesystemAuditInput,
   readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
@@ -122,6 +125,8 @@ const realDeps = {
   readFilesystemInputs,
   readFilesystemAuditInput,
   readFilesystemAuditArtifactInputs,
+  readExpectedFilesystemRules,
+  readFailOnUnexpectedFileAccess,
   readRuleInputs,
   readFailOnCaResidue,
   readFailOnBlocked,
@@ -287,6 +292,12 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice);
   const filesystemAudit = deps.readFilesystemAuditInput();
   const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
+  const expectedFilesystemRules = deps.readExpectedFilesystemRules(
+    env[EXPECTED_RULES_ENV] ?? "",
+    configFile?.origins.get(EXPECTED_RULES_INPUT),
+    filesystemAudit,
+  );
+  const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
   // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -301,6 +312,11 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
   if (filesystemAudit === "record") {
     annotation.warning("filesystem_audit is experimental and may change.");
+  }
+  if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
+    annotation.warning(
+      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    );
   }
 
   // A rule the engine cannot enforce fails (in audit, warns) before any
@@ -332,6 +348,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     writeThroughInput,
     filesystemAudit,
     filesystemAuditArtifact,
+    expectedFilesystemRules,
+    failOnUnexpectedFileAccess,
     failOnCaResidue,
     failOnBlocked,
     trafficArtifact,
@@ -403,19 +421,53 @@ async function resolveProxyImage(
 }
 
 /** The filesystem inputs for the report's restrict example, each only when it
- *  is not its default, so pasting the example keeps them. */
-export function filesystemExampleInputs({
-  filesystemMode,
-  writeThroughInput,
-  filesystemAudit,
-}: Pick<StepInputs, "filesystemMode" | "writeThroughInput" | "filesystemAudit">): string[] {
+ *  is not its default, so pasting the example keeps them. The expected rules
+ *  point to `rulesFile`, this run's proposed file, when it is given. */
+export function filesystemExampleInputs(
+  {
+    filesystemMode,
+    writeThroughInput,
+    filesystemAudit,
+    expectedFilesystemRules,
+    failOnUnexpectedFileAccess,
+  }: Pick<
+    StepInputs,
+    | "filesystemMode"
+    | "writeThroughInput"
+    | "filesystemAudit"
+    | "expectedFilesystemRules"
+    | "failOnUnexpectedFileAccess"
+  >,
+  rulesFile?: string,
+): string[] {
   const lines: string[] = [];
   if (filesystemMode !== "persistent") lines.push(`filesystem_mode: ${filesystemMode}`);
   const paths = splitWriteThroughInput(writeThroughInput);
   if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
   if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
+  if (rulesFile && expectedFilesystemRules)
+    lines.push(
+      `# ${rulesFile} from this run's artifact, reviewed and committed`,
+      "config_file: ci/expected-filesystem-rules.yml",
+    );
+  else if (expectedFilesystemRules)
+    lines.push(
+      `${EXPECTED_RULES_INPUT}: |`,
+      ...expectedFilesystemRules.lines.map((line) => (line ? `  ${line}` : "")),
+    );
+  if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
   return lines;
 }
+
+/** Said where the restrict example is too large to print while it lists the
+ *  expected rules, when uploading the record would name them as a file. */
+export const EXAMPLE_RULES_FILE_NOTE =
+  "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._";
+
+// config_file refuses pull_request_target, and workflow_run when a pull
+// request started it, which is not worth reading the payload for here.
+const configFileAllowed = (env: NodeJS.ProcessEnv): boolean =>
+  !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 
 function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
   deps.withLogGroup("buildcage: Configured ACL Rules", () => {
@@ -493,6 +545,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     actionRepo,
     actionRef: reportActionRef,
     failClosed: proxyMode !== "audit" && failOnBlocked,
+    rules: inputs.expectedFilesystemRules,
+    failOnUnexpected: inputs.failOnUnexpectedFileAccess,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
   // upload takes a while, so a cancelled step writes the whole summary first
@@ -516,12 +570,22 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     runCommand: inputs.runInput,
     extraInputs: (report) => [
       ...awsExampleInputs(inputs.aws, report.timeline),
-      ...filesystemExampleInputs(inputs),
+      ...filesystemExampleInputs(
+        inputs,
+        typeof artifact === "object" && configFileAllowed(env) ? readAudit.rulesFile : undefined,
+      ),
     ],
+    omittedExampleNote:
+      inputs.expectedFilesystemRules &&
+      !inputs.filesystemAuditArtifact.upload &&
+      configFileAllowed(env)
+        ? EXAMPLE_RULES_FILE_NOTE
+        : undefined,
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,
     moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
+    verdictItems: readAudit.verdictItems,
     commandSummaryBytes,
   });
   if (cancelled) await readAudit.upload();

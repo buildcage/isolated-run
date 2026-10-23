@@ -145,6 +145,7 @@ describe("runSandboxedCommand", () => {
       outPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.jsonl",
       pidFilePath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.pid",
       stepPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.step.jsonl",
+      rulesPath: "/var/tmp/buildcage-1001/filesystem-audit-expected-rules-deadbeef.yml",
     };
 
     function auditing() {
