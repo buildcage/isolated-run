@@ -88,9 +88,10 @@ export interface PathRow extends Row {
   program: Shown & { rank: number };
 }
 
-/** A row for a 32-bit syscall seccomp killed its program for, by its name. */
+/** A row for a 32-bit syscall seccomp killed its program for, whose path names
+ *  the syscall. */
 export interface KilledRow extends Row {
-  syscall: string;
+  syscall: true;
 }
 
 /** What the summary is rendered from, reduced from the recording. */
@@ -290,7 +291,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           comm: text,
           commField: field,
           path,
-          syscall: name,
+          syscall: true,
         };
         killed.set(key, row);
       }

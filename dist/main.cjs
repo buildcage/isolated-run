@@ -71019,7 +71019,7 @@ function createAuditSummary(prefixes) {
 			}
 			if (r.kind === "syscall") {
 				if (!r.killed) return;
-				let name = escapeForDisplay(r.syscall || "?"), path = `syscall:32-bit ${name} (killed)`, comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = killed.get(key);
+				let path = `syscall:32-bit ${escapeForDisplay(r.syscall || "?")} (killed)`, comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = killed.get(key);
 				if (!row) {
 					let { text, field } = commands.get(comm);
 					row = {
@@ -71028,7 +71028,7 @@ function createAuditSummary(prefixes) {
 						comm: text,
 						commField: field,
 						path,
-						syscall: name
+						syscall: !0
 					}, killed.set(key, row);
 				}
 				Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));

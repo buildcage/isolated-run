@@ -180,7 +180,8 @@ From the top:
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
   read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
-  in the artifact only; see [Refused system calls](#refused-system-calls).
+  left out unless it killed the program; to find it, set `upload_filesystem_audit_artifact: true`
+  and see [Refused system calls](#refused-system-calls).
 
 ### Flags
 
@@ -557,6 +558,9 @@ packaging tool reads it, is shown.
 A directory's own row is left out when every flag on it shows on a row below it too and none of it
 was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows. Such a
 row does not count toward a fold either.
+
+A refused system call that did not kill its program is left out too; see
+[Refused system calls](#refused-system-calls).
 
 A regular file or directory kept open counts only the first read and the first write through it by
 each program, so the last time in the details can be earlier than its last write. Through a device,

@@ -204,9 +204,14 @@ describe("createAuditSummary", () => {
       "00:00.000: R cat /etc/hostname",
       "00:04.000: ! a.out syscall:32-bit socketcall (killed)",
     ]);
-    expect(render(refused("node", "io_uring_setup", "2026-01-01T00:00:01.000Z"))).toContain(
-      "No file access was recorded.",
-    );
+    const only = render(refused("node", "io_uring_setup", "2026-01-01T00:00:01.000Z"), {
+      kind: "end",
+      dropped: 0,
+      untracked: 0,
+    });
+    expect(only).toContain("No file access was recorded.");
+    expect(only).not.toContain("incomplete");
+    expect(only).not.toContain("syscall:");
   });
 
   it("notes a command killed for a 32-bit syscall on its own, from a record missing its fields", () => {
