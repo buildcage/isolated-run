@@ -16,7 +16,7 @@
 
 import { SandboxError } from "../errors.ts";
 import { unescapeDisplay } from "./escape.ts";
-import { MEMFD_PREFIX } from "./paths.ts";
+import { MEMFD_PREFIX, unnumbered } from "./paths.ts";
 import { BIT, ORDER } from "./record.ts";
 
 export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
@@ -133,9 +133,12 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
-// The summary shows a process's or a thread's number in /proc as <pid> or
-// <tid>, so a rule naming one never matches.
-const NUMBERED_PROC = /^\/proc\/(?:\d+|<pid>\/task\/\d+)(?:\/|$)/;
+// The record names these by number too, as the kernel resolves them.
+const PROC_SELF = /^\/proc\/(?:self|thread-self)(?=\/|$)/;
+
+// A name the summary never shows, as it shows every number in /proc as
+// <pid> or <tid>, so a rule naming one would never match.
+const procByNumber = (name: string): boolean => unnumbered(name) !== name || PROC_SELF.test(name);
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
@@ -183,11 +186,12 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
         return pattern;
       };
-      if (NUMBERED_PROC.test(path))
-        throw invalidRules(
-          ref,
-          `${JSON.stringify(path)} names a process or thread by its number, which changes from run to run; write /proc/<pid>/ or /proc/<pid>/task/<tid>/`,
-        );
+      for (const name of [program, path])
+        if (procByNumber(name))
+          throw invalidRules(
+            ref,
+            `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`,
+          );
       rules.push({
         ref,
         program: program === "*" ? undefined : glob(program),
