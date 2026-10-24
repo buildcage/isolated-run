@@ -73410,7 +73410,15 @@ function createAuditSummary(prefixes) {
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
-	}) : void 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}) : void 0, ruleRanks = new Map(), liveRanks = new Map(), deletedPaths = new Set(), livePaths = new Set(), takeForRules = (x, by) => {
+		let id = ruleRanks.get(ranks[by].ruleName);
+		id === void 0 && ruleRanks.set(ranks[by].ruleName, id = by), ranks[by].shown.deleted || liveRanks.set(id, by);
+		let path = x.path.startsWith(MEMFD) ? x.path : unmarked(x.path);
+		tally.givenUp || (path === x.path ? livePaths : deletedPaths).add(keyOf(String(id), path)), tally.take({
+			...x,
+			path
+		}, components(path), id);
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
@@ -73466,7 +73474,7 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally?.take(x, parts, runBy ?? program);
+				}, parts), tally && takeForRules(x, runBy ?? program);
 			}
 			return tally?.endLine();
 		}
@@ -73487,22 +73495,14 @@ function createAuditSummary(prefixes) {
 		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
 	}
 	function ruleRowsOf(tally) {
-		let lines = tally.finish();
-		if (!lines) return;
-		let merged = new Map();
-		for (let { rank, path, agg } of lines) {
-			let key = keyOf(ranks[rank].ruleName, ruleName(path)), row = merged.get(key);
-			row ? (mergeAgg(row.agg, agg), ranks[rank].shown.deleted || (row.program = ranks[rank].shown), path.endsWith(DELETED) || (row.path = shown(path))) : merged.set(key, {
-				program: ranks[rank].shown,
-				path: shown(path),
-				agg
-			});
-		}
-		return [...merged.values()].map(({ program, path, agg }) => ({
-			program,
-			flags: fmtFlags(agg),
-			path
-		}));
+		return tally.finish()?.map(({ rank, path, agg }) => {
+			let key = keyOf(String(rank), path), deleted = deletedPaths.has(key) && !livePaths.has(key);
+			return {
+				program: ranks[liveRanks.get(rank) ?? rank].shown,
+				flags: fmtFlags(agg),
+				path: shown(deleted ? path + DELETED : path)
+			};
+		});
 	}
 	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
