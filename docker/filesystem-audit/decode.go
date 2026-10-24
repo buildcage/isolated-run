@@ -59,13 +59,14 @@ func applyMarks(r *record, marks uint32, dpath bool) {
 func common(raw []byte) record {
 	le := binary.LittleEndian
 	return record{
-		Kind: kindName(filesystemAuditKind(le.Uint32(raw[offKind:]))),
-		PID:  le.Uint32(raw[offPid:]),
-		PPID: le.Uint32(raw[offPpid:]),
-		Comm: cstr(raw[offComm : offComm+commLen]),
-		boot: le.Uint64(raw[offTs:]),
-		tid:  le.Uint32(raw[offTid:]),
-		nr:   int32(le.Uint32(raw[offNr:])),
+		Kind:  kindName(filesystemAuditKind(le.Uint32(raw[offKind:]))),
+		PID:   le.Uint32(raw[offPid:]),
+		PPID:  le.Uint32(raw[offPpid:]),
+		NSPid: le.Uint32(raw[offNsPid:]),
+		Comm:  cstr(raw[offComm : offComm+commLen]),
+		boot:  le.Uint64(raw[offTs:]),
+		tid:   le.Uint32(raw[offTid:]),
+		nr:    int32(le.Uint32(raw[offNr:])),
 	}
 }
 

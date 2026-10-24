@@ -102,11 +102,22 @@ describe("parseExpectedRules", () => {
     expect(rules[0].path.test(String.raw`memfd:"\" b\u{20}"`)).toBe(true);
   });
 
-  it("takes /proc/<pid>/ and a number /proc does not name a process by", () => {
+  it("takes /proc/<pid>/, /proc/self/ and a number /proc does not name a process by", () => {
     const { rules } = parse(
-      "* R /proc/<pid>/task/<tid>/stat\n* R /proc/12x\n* R ./proc/1/x\n* R /proc/selfx",
+      "* R /proc/<pid>/task/<tid>/stat\n* R /proc/12x\n* R ./proc/1/x\n* R /proc/selfx\n* R /proc/self/status",
     );
-    expect(rules).toHaveLength(4);
+    expect(rules).toHaveLength(5);
+  });
+
+  it("matches /proc/<pid>/ to every process's directory, the step's own as self too", () => {
+    const [any, own, named] = parse(
+      "* R /proc/<pid>/**\n* R /proc/self/status\n* R /proc/<pid>x",
+    ).rules;
+    const takes = (rule: typeof any) =>
+      ["/proc/<pid>/status", "/proc/self/status", "/proc/selfx"].map((p) => rule.path.test(p));
+    expect(takes(any)).toStrictEqual([true, true, false]);
+    expect(takes(own)).toStrictEqual([false, true, false]);
+    expect(named.path.test("/proc/selfx")).toBe(false);
   });
 
   it.each([
@@ -122,7 +133,7 @@ describe("parseExpectedRules", () => {
     ["* R /proc/1/environ", 'input:1: "/proc/1/environ" names a process or a thread in /proc'],
     ["* R /proc/12", 'input:1: "/proc/12" names a process'],
     ["* R /proc/<pid>/task/3/stat", 'input:1: "/proc/<pid>/task/3/stat" names a process'],
-    ["* R /proc/self/status", 'input:1: "/proc/self/status" names a process'],
+    ["* R /proc/self/task/3", 'input:1: "/proc/self/task/3" names a process'],
     ["* R /proc/thread-self", 'input:1: "/proc/thread-self" names a process'],
     ["/proc/3/fd/3 X ./out", 'input:1: "/proc/3/fd/3" names a process'],
   ])("refuses %j", (text, reason) => {

@@ -24,13 +24,18 @@ export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
 /** Where the summary's examples commit the proposed rules file. */
 export const RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml";
 
+/** What a rule's program or path field takes, by the name the summary shows. */
+export interface NameMatcher {
+  test(name: string): boolean;
+}
+
 /** What a rule matches, compiled. */
 export interface ExpectedRule {
   /** Where it was written, as `input:<line>` or `config:<line>`. */
   ref: string;
   /** Undefined matches any program. */
-  program: RegExp | undefined;
-  path: RegExp;
+  program: NameMatcher | undefined;
+  path: NameMatcher;
   /** The actions it expects to succeed, to fail, and to be refused, as bits. */
   ok: number;
   failed: number;
@@ -133,10 +138,23 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
-// A name the summary never shows, as it shows every number in /proc, and
-// self and thread-self, as <pid> or <tid>, so a rule naming one would never
-// match.
+// The summary shows every number in /proc, and thread-self, as <pid> or
+// <tid>, so a rule naming one would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
+
+// /proc/<pid>/ in a rule is any process's directory, the one that made the
+// access as well, which the summary shows as /proc/self: such a name is tried
+// again as /proc/<pid>.
+const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
+const OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/;
+const anyProcess = (glob: string, pattern: RegExp): NameMatcher =>
+  ANY_PROCESS.test(glob)
+    ? {
+        test: (name) =>
+          pattern.test(name) ||
+          (OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>"))),
+      }
+    : pattern;
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
@@ -188,12 +206,12 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (procByNumber(name))
           throw invalidRules(
             ref,
-            `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`,
+            `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`,
           );
       rules.push({
         ref,
-        program: program === "*" ? undefined : glob(program),
-        path: glob(path),
+        program: program === "*" ? undefined : anyProcess(program, glob(program)),
+        path: anyProcess(path, glob(path)),
         ...accessBits(access),
       });
     });

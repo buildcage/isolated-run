@@ -67,6 +67,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		Kind     string  `json:"kind"`
 		PID      uint32  `json:"pid"`
 		PPID     uint32  `json:"ppid"`
+		NSPid    uint32  `json:"nspid,omitempty"`
 		Comm     rawName `json:"comm"`
 		Program  rawName `json:"program,omitempty"`
 		Path     rawName `json:"path,omitempty"`
@@ -86,7 +87,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		Syscall  string  `json:"syscall,omitempty"`
 		Compat   bool    `json:"compat,omitempty"`
 		Killed   bool    `json:"killed,omitempty"`
-	}{l.t, r.Kind, r.PID, r.PPID, rawName(r.Comm), rawName(r.Program), rawName(r.Path), rawName(r.Name),
+	}{l.t, r.Kind, r.PID, r.PPID, r.NSPid, rawName(r.Comm), rawName(r.Program), rawName(r.Path), rawName(r.Name),
 		rawName(r.To), rawName(r.ToName), r.Access, r.Flags, r.Mode, r.Owner, r.Err,
 		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange, r.Syscall, r.Compat, r.Killed})
 }

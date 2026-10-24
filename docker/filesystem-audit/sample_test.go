@@ -13,7 +13,7 @@ type event struct {
 	pathRet                   int32
 	nr                        int32
 	marks                     uint32
-	gid, tid                  uint32
+	gid, tid, nspid           uint32
 	bases                     uint32
 	n1, n2, truncated, trunc2 uint8
 	pid, ppid                 uint32
@@ -38,6 +38,7 @@ func (e event) bytes() []byte {
 	le.PutUint32(b[offMarks:], e.marks)
 	le.PutUint32(b[offGid:], e.gid)
 	le.PutUint32(b[offTid:], e.tid)
+	le.PutUint32(b[offNsPid:], e.nspid)
 	le.PutUint64(b[offTs:], e.boot)
 	return append(b, e.data...)
 }

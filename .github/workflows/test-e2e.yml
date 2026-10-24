@@ -191,6 +191,8 @@ jobs:
           upload_filesystem_audit_artifact: true
           run: |
             cat /etc/hostname > /dev/null
+            # A process's own /proc directory, then another process's.
+            cat /proc/self/status /proc/1/stat > /dev/null
             echo probe > "$GITHUB_WORKSPACE/probe.txt"
             mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
             rm "$GITHUB_WORKSPACE/probe2.txt"

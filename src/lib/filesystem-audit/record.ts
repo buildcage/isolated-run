@@ -3,6 +3,8 @@ export interface AuditRecord {
   kind: string;
   pid?: number;
   ppid?: number;
+  /** On fork and exec, the process's number in its own PID namespace. */
+  nspid?: number;
   comm?: string;
   program?: string;
   path?: string;

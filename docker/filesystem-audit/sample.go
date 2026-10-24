@@ -67,6 +67,7 @@ const (
 	offMarks     = int(unsafe.Offsetof(filesystemAuditEvent{}.Marks))
 	offGid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Gid))
 	offTid       = int(unsafe.Offsetof(filesystemAuditEvent{}.Tid))
+	offNsPid     = int(unsafe.Offsetof(filesystemAuditEvent{}.Nspid))
 	offTs        = int(unsafe.Offsetof(filesystemAuditEvent{}.Ts))
 	hdrLen       = int(unsafe.Offsetof(filesystemAuditEvent{}.Data))
 )

@@ -30,22 +30,36 @@ export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FI
 export const unfoldable = (parts: string[], path: string): boolean =>
   parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 
-// A process's directory in /proc, and a thread's in it, by number, as self
-// or thread-self, which a failed access keeps as passed, or as shown already,
-// before any further name or a deleted file's mark.
+// A process's directory in /proc and a thread's in it, by number, as self or
+// thread-self (which a failed access keeps as passed), or as shown already.
 const PROC_NUMBERS =
-  /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
+  /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
 
-/** The path with its /proc numbers, which change from run to run, shown as `<pid>` and `<tid>`. */
-export const unnumbered = (path: string): string =>
-  path.replace(PROC_NUMBERS, (m) =>
-    m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>",
-  );
+// As a rule spells it, self is the process's own directory.
+const SPELLED_SELF = (proc: string): boolean => proc === "self";
 
-export function normalize(path: string): string {
+/**
+ * The path with its /proc numbers, which change from run to run, shown as
+ * `<pid>` and `<tid>`, but for the accessing process's own directory, which
+ * `own` picks out and which shows as `self`.
+ */
+export const unnumbered = (path: string, own = SPELLED_SELF): string =>
+  path.replace(PROC_NUMBERS, (_, threadSelf?: string, proc?: string, task?: string) => {
+    const self = own(threadSelf ? "self" : proc!);
+    return `/proc/${self ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`;
+  });
+
+/**
+ * A path as the summary keys it. `self` is the number of the process that made
+ * the access in its own PID namespace, where known; where not, its own
+ * directory shows as any other, spelled self or not.
+ */
+export function normalize(path: string, self?: number): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
-  return unnumbered(path.replace(/^\.\//, ""));
+  const own =
+    self === undefined ? () => false : (proc: string) => proc === "self" || proc === String(self);
+  return unnumbered(path.replace(/^\.\//, ""), own);
 }
 
 /** The workspace and $HOME, each as given and with symlinks resolved. */
