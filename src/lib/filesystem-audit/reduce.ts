@@ -323,7 +323,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // row.
   const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
   const programDeletedOnly = new Map<number, boolean>();
-  const takeForRules = (x: Access, parts: string[], by: number): void => {
+  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     let path = deletedPath ? unmarked(x.path) : x.path;
@@ -336,7 +336,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     )
       path = `…/${path}`;
     const same = path === x.path;
-    const left = tally!.take(same ? x : { ...x, path }, same ? parts : components(path), id);
+    const left = tally!.take({ ...x, path, cmd }, same ? parts : components(path), id);
     // Past the tally's limit, only the matching is left to do.
     if (!left || tally!.givenUp) return;
     const program = Boolean(ranks[by].shown.deleted);
@@ -350,6 +350,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   };
   // Each pid's name before its latest record.
   const commsBefore = new Map<number | undefined, string>();
+  const commandBeforeExec = (r: AuditRecord): string => {
+    const before = commsBefore.get(r.pid);
+    if (before !== undefined) return commandKey(r.pid, before);
+    const parent = commsBefore.get(r.ppid);
+    return parent === undefined ? commandKey(r.pid, r.comm ?? "") : commandKey(r.ppid, parent);
+  };
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -363,9 +369,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!counted) return undefined;
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
-      const comm = r.comm ?? "";
-      programs.set(r.pid, programOf(r.ppid, comm));
-      if (tally) commsBefore.set(r.pid, comm);
+      programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
       const runName = runNames.get(r.ppid);
       if (runName === undefined) runNames.delete(r.pid);
       else runNames.set(r.pid, runName);
@@ -410,14 +414,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : undefined;
     // An exec record carries the name the process takes from what it ran, so
     // the run goes by the name before it, or by its parent's command where the
-    // recording has no earlier line of it.
-    const before = commsBefore.get(r.pid);
-    const runCmd =
-      tally && r.kind === "exec"
-        ? before === undefined
-          ? commandKey(r.ppid, commsBefore.get(r.ppid) ?? r.comm ?? "")
-          : commandKey(r.pid, before)
-        : undefined;
+    // recording has no earlier line of it but has one of the parent. With
+    // neither, the parent is left alone: looking it up would make this name
+    // its program.
+    const runCmd = tally && r.kind === "exec" ? commandBeforeExec(r) : undefined;
     if (tally) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
@@ -469,7 +469,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (tally) takeForRules({ ...x, cmd: runCmd ?? x.comm }, parts, runBy ?? program);
+      if (tally) takeForRules(x, parts, runBy ?? program, runCmd ?? x.comm);
     }
     return tally?.endLine();
   };

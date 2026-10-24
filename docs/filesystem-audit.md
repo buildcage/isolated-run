@@ -335,7 +335,8 @@ too large to print and the step did not upload its record, the summary says that
 
 ### Rules
 
-Each rule is one line of three fields, the accessed paths table's columns:
+Each rule is one line of three fields, the accessed paths table's columns, so a row of that table
+can be copied in:
 
 ```
 <program> <access> <path>

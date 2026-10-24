@@ -1760,10 +1760,12 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       { kind: "exec", pid: 3, comm: "bash", path: "/bin/bash" },
       { kind: "exec", pid: 9, ppid: 3, comm: "curl", path: "/usr/bin/curl" },
       { kind: "exec", pid: 10, ppid: 99, comm: "env", path: "/usr/bin/env" },
+      { kind: "write", pid: 99, comm: "sh", path: "/work/x" },
     );
     const by = (path: string) => summary.proposed!.find((r) => r.path.path === path)?.commands;
     expect(by("/usr/bin/curl")).toStrictEqual(["bash"]);
     expect(by("/usr/bin/env")).toStrictEqual(["env"]);
+    expect(rows(summary)).toContain("sh W ./x");
   });
 
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
