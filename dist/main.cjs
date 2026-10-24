@@ -77367,7 +77367,7 @@ function readStepInputs(env, deps) {
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, expectedRulesLines = givenRules?.lines ?? [], failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules ? annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.") : failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules ? annotation.warning(`expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set${failOnUnexpectedFileAccess ? ", and fail_on_unexpected_file_access cannot fail it" : ""}.`) : failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
@@ -77420,11 +77420,11 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 		composeFile: resolveComposeFile(localOverride)
 	};
 }
-function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedRulesLines, failOnUnexpectedFileAccess }, rulesFile) {
+function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, expectedRulesLines, failOnUnexpectedFileAccess }, rulesFile) {
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedRulesLines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedRulesLines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
@@ -77482,7 +77482,7 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
 		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
-		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._" : void 0,
+		omittedExampleNote: inputs.expectedFilesystemRules && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._" : void 0,
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
