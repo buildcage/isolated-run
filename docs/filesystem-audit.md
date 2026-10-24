@@ -356,7 +356,8 @@ can be copied in:
   name shows as `\*`, which matches only a star. Regular expressions are not supported.
   `/proc/<pid>/` stands for the directory of any process, whatever its number, the one that made
   the access included, and `/proc/self/` for that one alone; `/proc/<pid>/task/<tid>/` stands for
-  any of a process's threads. `/proc/*/` would also match `/proc/sys/` and every other entry in
+  any of a process's threads. A process the recording has no `nspid` for shows its own directory as
+  `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match `/proc/sys/` and every other entry in
   `/proc`. A program or a path giving a number, as `/proc/1/`, or naming `/proc/thread-self/`, is
   refused, as the summary never shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names

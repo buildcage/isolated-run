@@ -25,12 +25,17 @@ export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
 export const RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml";
 
 /** What a rule matches, compiled. */
+/** What a rule's program or path field takes, by the name the summary shows. */
+export interface NameMatcher {
+  test(name: string): boolean;
+}
+
 export interface ExpectedRule {
   /** Where it was written, as `input:<line>` or `config:<line>`. */
   ref: string;
   /** Undefined matches any program. */
-  program: RegExp | undefined;
-  path: RegExp;
+  program: NameMatcher | undefined;
+  path: NameMatcher;
   /** The actions it expects to succeed, to fail, and to be refused, as bits. */
   ok: number;
   failed: number;
@@ -137,12 +142,18 @@ export function globPattern(glob: string): RegExp | undefined {
 // thread-self, as <pid> or <tid>, so a rule naming one would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
 
-// Any process's directory, the one that made the access as well, which the
-// summary shows as /proc/self.
+// /proc/<pid>/ in a rule is any process's directory, the one that made the
+// access as well, which the summary shows as /proc/self: such a name is tried
+// again as /proc/<pid>.
 const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
-const anyProcess = (glob: string, pattern: RegExp): RegExp =>
+const OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/;
+const anyProcess = (glob: string, pattern: RegExp): NameMatcher =>
   ANY_PROCESS.test(glob)
-    ? new RegExp(pattern.source.replace("^\\/proc\\/<pid>", "^\\/proc\\/(?:<pid>|self)"))
+    ? {
+        test: (name) =>
+          pattern.test(name) ||
+          (OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>"))),
+      }
     : pattern;
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
