@@ -9,7 +9,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { field } from "./escape.ts";
 import { MEMFD_PREFIX } from "./paths.ts";
 import type { AuditSummary, RuleRow } from "./reduce.ts";
-import { EXPECTED_RULES_INPUT, type ExpectedRules } from "./rules.ts";
+import { EXPECTED_RULES_INPUT } from "./rules.ts";
 
 /** What became of the proposed rules file. */
 export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
@@ -62,14 +62,14 @@ export function expectedRulesFile(written: string[], proposed: RuleRow[]): strin
  */
 export function writeProposedRules(
   summary: AuditSummary | undefined,
-  rules: ExpectedRules | undefined,
+  given: string[],
   path: string,
   annotation: Annotation,
   writeFile: (path: string, content: string) => void,
 ): ProposedRules {
   if (!summary) return "write-failed";
   if (summary.proposedCut) return "too-many-paths";
-  const file = expectedRulesFile(rules?.lines ?? [], summary.proposed!);
+  const file = expectedRulesFile(given, summary.proposed!);
   if (file === undefined) return "none";
   try {
     writeFile(path, file);

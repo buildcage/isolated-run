@@ -58,18 +58,25 @@ describe("readExpectedFilesystemRules", () => {
 
   it("reads the workflow's rules, then config_file's, by their own lines", () => {
     const rules = read("proxy_mode: audit\nexpected_filesystem_rules: |\n  * W ./b\n", "* R ./a\n");
-    expect(rules?.rules.map((r) => r.ref)).toStrictEqual(["input:1", "config:3"]);
+    expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["input:1", "config:3"]);
     expect(rules?.lines).toStrictEqual(["* R ./a", "", "* W ./b"]);
   });
 
   it("reads config_file's rules under an alias, by the anchor's lines", () => {
     const rules = read("proxy_mode: &r |\n  * W ./b\nexpected_filesystem_rules: *r\n");
-    expect(rules?.rules.map((r) => r.ref)).toStrictEqual(["config:2"]);
+    expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["config:2"]);
   });
 
   it("names config_file alone for a rule whose line YAML may have moved", () => {
     const rules = read('expected_filesystem_rules: "* R ./a\\n* W ./b"\n');
-    expect(rules?.rules.map((r) => r.ref)).toStrictEqual(["config", "config"]);
+    expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["config", "config"]);
+  });
+
+  it("holds no rules to match where every line is a comment or blank, whatever the audit", () => {
+    expect(readExpectedFilesystemRules("# * R ./a\n\n", undefined, "off")).toStrictEqual({
+      expected: undefined,
+      lines: ["# * R ./a"],
+    });
   });
 
   it("refuses rules for a step that records nothing to match them against", () => {

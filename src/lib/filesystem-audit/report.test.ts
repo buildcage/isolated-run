@@ -1135,6 +1135,23 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
   });
 
+  it("keeps rules all commented out in the proposed file, matching nothing against them", () => {
+    const note = annotation();
+    const { deps: d, ruleFiles } = deps({ raw });
+
+    const read = readStepFilesystemAudit(
+      { ...base, annotation: note, givenLines: ["# node R ./a"] },
+      d,
+    );
+
+    expect(read.verdictItems).toStrictEqual({});
+    expect(ruleFiles[0].content.split("\n").slice(3, 6)).toStrictEqual([
+      "  # node R ./a",
+      "",
+      "  # Not matched in this run",
+    ]);
+  });
+
   it("lists only what the rules did not take, warns of it, and counts it for the verdict", async () => {
     const note = annotation();
     const { deps: d, uploads, ruleFiles, writes } = deps({ raw });
