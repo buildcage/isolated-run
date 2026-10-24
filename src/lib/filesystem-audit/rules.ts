@@ -24,12 +24,12 @@ export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
 /** Where the summary's examples commit the proposed rules file. */
 export const RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml";
 
-/** What a rule matches, compiled. */
 /** What a rule's program or path field takes, by the name the summary shows. */
 export interface NameMatcher {
   test(name: string): boolean;
 }
 
+/** What a rule matches, compiled. */
 export interface ExpectedRule {
   /** Where it was written, as `input:<line>` or `config:<line>`. */
   ref: string;
@@ -138,8 +138,8 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
-// A name the summary never shows, as it shows every number in /proc, and
-// thread-self, as <pid> or <tid>, so a rule naming one would never match.
+// The summary shows every number in /proc, and thread-self, as <pid> or
+// <tid>, so a rule naming one would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
 
 // /proc/<pid>/ in a rule is any process's directory, the one that made the

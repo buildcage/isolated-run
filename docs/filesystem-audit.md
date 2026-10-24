@@ -214,7 +214,7 @@ From the top:
 | `~/…`                      | Under `$HOME`                                                                                                                                                    |
 | `dir/**`                   | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
 | `/proc/self/…`             | Under the directory in `/proc` of the process that made the access                                                                                               |
-| `/proc/<pid>/…`            | Under another process's directory in `/proc`, every one shown as one                                                                                             |
+| `/proc/<pid>/…`            | Under another process's directory in `/proc`, every process's shown as one                                                                                       |
 | `/proc/<pid>/task/<tid>/…` | Under a thread's directory within a process's, every thread's shown as one, as in `/proc/self/task/<tid>/…`                                                      |
 
 Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
@@ -354,11 +354,11 @@ can be copied in:
   `memfd:"name"`. `*` matches within one component of a path, and `**` across them, as a whole
   component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
   name shows as `\*`, which matches only a star. Regular expressions are not supported.
-  `/proc/<pid>/` stands for the directory of any process, whatever its number, the one that made
-  the access included, and `/proc/self/` for that one alone; `/proc/<pid>/task/<tid>/` stands for
-  any of a process's threads. A process the recording has no `nspid` for shows its own directory as
-  `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match `/proc/sys/` and every other entry in
-  `/proc`. A program or a path giving a number, as `/proc/1/`, or naming `/proc/thread-self/`, is
+  `/proc/<pid>/` stands for the directory of any process, the one that made the access included,
+  and `/proc/self/` for that one alone; `/proc/<pid>/task/<tid>/` stands for any of a process's
+  threads. A process the recording has no `nspid` for shows its own directory as `/proc/<pid>/`
+  too, which a `/proc/self/` rule does not take. `/proc/*/` would also match `/proc/sys/` and every
+  other entry in `/proc`. A program or a path giving a number, as `/proc/1/`, or naming `/proc/thread-self/`, is
   refused, as the summary never shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the

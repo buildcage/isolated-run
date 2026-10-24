@@ -30,9 +30,8 @@ export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FI
 export const unfoldable = (parts: string[], path: string): boolean =>
   parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 
-// A process's directory in /proc, by number, as self, or as shown already,
-// and a thread's in it, or thread-self, which a failed access keeps as
-// passed, before any further name or a deleted file's mark.
+// A process's directory in /proc and a thread's in it, by number, as self or
+// thread-self (which a failed access keeps as passed), or as shown already.
 const PROC_NUMBERS =
   /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
 
@@ -41,8 +40,8 @@ const SPELLED_SELF = (proc: string): boolean => proc === "self";
 
 /**
  * The path with its /proc numbers, which change from run to run, shown as
- * `<pid>` and `<tid>`, and the directory `own` says is the process's own, the
- * one that made the access, as `self`.
+ * `<pid>` and `<tid>`, but for the accessing process's own directory, which
+ * `own` picks out and which shows as `self`.
  */
 export const unnumbered = (path: string, own = SPELLED_SELF): string =>
   path.replace(PROC_NUMBERS, (_, threadSelf?: string, proc?: string, task?: string) => {
