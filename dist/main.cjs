@@ -72418,7 +72418,7 @@ function marked(r, path) {
 }
 const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 function normalize$2(path) {
-	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+(?=\/|$)/, "/proc/<pid>").replace(/^\/proc\/<pid>\/task\/\d+(?=\/|$)/, "/proc/<pid>/task/<tid>");
 }
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
