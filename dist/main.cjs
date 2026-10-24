@@ -73269,16 +73269,18 @@ var Lines = class {
 	constructor(rules, lines, names) {
 		this.rules = rules, this.lines = lines, this.names = names;
 	}
-	take(x, parts, by) {
+	take(x, parts, by, path, cmd) {
 		let bit = x.bit;
 		if (this.rules) {
-			let m = this.rules.match(this.names.program(by), this.names.path(x.path), bit, x.failed, x.perm);
+			let m = this.rules.match(this.names.program(by), this.names.path(path), bit, x.failed, x.perm);
 			bit = m.unmatched, bit ? this.mark = { unexpected: !0 } : this.mark ??= { rule: m.ref };
 		}
 		return this.lines.add({
 			...x,
 			comm: String(by),
-			bit
+			path,
+			bit,
+			cmd
 		}, parts), bit;
 	}
 	endLine() {
@@ -73426,21 +73428,23 @@ function createAuditSummary(prefixes) {
 		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
 		!path.startsWith("/") && !path.startsWith("…/") && !path.startsWith(MEMFD) && !isRunnerFile(path) && (path = `…/${path}`);
 		let same = path === x.path;
-		if (!tally.take({
-			...x,
-			path,
-			cmd
-		}, same ? parts : components(path), id) || tally.givenUp) return;
+		if (!tally.take(x, same ? parts : components(path), id, path, cmd) || tally.givenUp) return;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
 		deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
 		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
-	}, commsBefore = new Map(), commandBeforeExec = (r) => {
-		let before = commsBefore.get(r.pid);
-		if (before !== void 0) return commandKey(r.pid, before);
-		let parent = commsBefore.get(r.ppid);
-		return parent === void 0 ? commandKey(r.pid, r.comm ?? "") : commandKey(r.ppid, parent);
+	}, commsBefore = new Map(), runnerOf = (r) => {
+		let before = commsBefore.get(r.pid), parent = commsBefore.get(r.ppid);
+		if (before === void 0 && parent !== void 0) return {
+			program: programOf(r.ppid, parent),
+			cmd: commandKey(r.ppid, parent)
+		};
+		let comm = r.comm ?? "";
+		return {
+			program: programOf(r.pid, comm),
+			cmd: commandKey(r.pid, before ?? comm)
+		};
 	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
@@ -73471,7 +73475,7 @@ function createAuditSummary(prefixes) {
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
 		}
-		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, runCmd = tally && r.kind === "exec" ? commandBeforeExec(r) : void 0;
+		let runner = tally && r.kind === "exec" ? runnerOf(r) : void 0;
 		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
@@ -73497,7 +73501,7 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally && takeForRules(x, parts, runBy ?? program, runCmd ?? x.comm);
+				}, parts), tally && takeForRules(x, parts, runner?.program ?? program, runner?.cmd ?? x.comm);
 			}
 			return tally?.endLine();
 		}
