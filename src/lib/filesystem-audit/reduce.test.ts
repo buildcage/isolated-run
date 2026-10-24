@@ -398,7 +398,7 @@ describe("createAuditSummary", () => {
     ]);
   });
 
-  it("names /proc/<pid> and its task/<tid> only as whole components at the start of a path", () => {
+  it("names /proc/<pid> and its task/<tid>, self and thread-self too, only as whole components at the start of a path", () => {
     expect(
       lines(
         render(
@@ -408,6 +408,16 @@ describe("createAuditSummary", () => {
           { kind: "read", comm: "ps", path: "/proc/123/task/124x" },
           { kind: "read", comm: "ps", path: "/proc/123x" },
           { kind: "write", comm: "ps", path: "/proc/46", deleted: true },
+          { kind: "open", comm: "ps", path: "/proc/self/a", access: "r", failed: true, err: 13 },
+          {
+            kind: "open",
+            comm: "ps",
+            path: "/proc/thread-self/b",
+            access: "r",
+            failed: true,
+            err: 13,
+          },
+          { kind: "read", comm: "ps", path: "/proc/selfish" },
           { kind: "read", comm: "ps", path: "/work/proc/12/x" },
         ),
       ),
@@ -416,9 +426,12 @@ describe("createAuditSummary", () => {
       "R ps /proc/123x",
       "A ps /proc/<pid>",
       "W ps /proc/<pid> (deleted)",
+      "r! ps /proc/<pid>/a",
       "R ps /proc/<pid>/status",
       "R ps /proc/<pid>/task/124x",
+      "r! ps /proc/<pid>/task/<tid>/b",
       "R ps /proc/<pid>/task/<tid>/stat",
+      "R ps /proc/selfish",
     ]);
   });
 

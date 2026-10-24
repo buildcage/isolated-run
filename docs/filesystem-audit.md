@@ -213,7 +213,7 @@ From the top:
 | `./…`                      | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
 | `~/…`                      | Under `$HOME`                                                                                                                                                    |
 | `dir/**`                   | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
-| `/proc/<pid>/…`            | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
+| `/proc/<pid>/…`            | Under a process's own directory in `/proc`, every process's shown as one, `/proc/self` and `/proc/thread-self` included                                          |
 | `/proc/<pid>/task/<tid>/…` | Under a thread's directory within a process's, every thread's shown as one                                                                                       |
 
 Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
@@ -353,9 +353,9 @@ of **Unexpected Accesses** can be copied in:
   name shows as `\*`, which matches only a star. Regular expressions are not supported.
   `/proc/<pid>/` stands for the directory of any process, whatever its number, as the table shows
   it, and `/proc/<pid>/task/<tid>/` for that of any of its threads; `/proc/*/` would also match
-  `/proc/sys/` and every other entry in `/proc`. A program or a path giving the number, as
-  `/proc/1/`, or `/proc/self/`, which the record shows by number too, is refused, as the summary
-  never shows one.
+  `/proc/sys/` and every other entry in `/proc`. A program or a path giving a number, as
+  `/proc/1/`, or naming `/proc/self/` or `/proc/thread-self/`, is refused, as the summary never
+  shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.

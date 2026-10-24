@@ -133,12 +133,10 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
-// The record names these by number too, as the kernel resolves them.
-const PROC_SELF = /^\/proc\/(?:self|thread-self)(?=\/|$)/;
-
-// A name the summary never shows, as it shows every number in /proc as
-// <pid> or <tid>, so a rule naming one would never match.
-const procByNumber = (name: string): boolean => unnumbered(name) !== name || PROC_SELF.test(name);
+// A name the summary never shows, as it shows every number in /proc, and
+// self and thread-self, as <pid> or <tid>, so a rule naming one would never
+// match.
+const procByNumber = (name: string): boolean => unnumbered(name) !== name;
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
