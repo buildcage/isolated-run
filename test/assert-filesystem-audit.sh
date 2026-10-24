@@ -49,6 +49,8 @@ assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `b
 assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
 assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
 assert_file_has "$f" "The summary has the file access details" '<summary>🔍 File access details</summary>'
+assert_file_has "$f" "A process's own /proc directory shows as /proc/self" -E ' R +cat +/proc/self/status$'
+assert_file_has "$f" "Another process's /proc directory shows as /proc/<pid>" -E ' R +cat +/proc/<pid>/stat$'
 assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3\.[0-9]+ +\./futimens\.txt$'
 assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3\.[0-9]+ +\./empty-name\.txt$'
 
