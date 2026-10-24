@@ -399,15 +399,41 @@ describe("createAuditSummary", () => {
     ]);
   });
 
-  it("names /proc/<pid> only at the start of a path", () => {
+  it("names /proc/<pid> and its task/<tid>, self and thread-self too, only as whole components at the start of a path", () => {
     expect(
       lines(
         render(
           { kind: "read", comm: "ps", path: "/proc/123/status" },
+          { kind: "chmod", comm: "ps", path: "/proc/45" },
+          { kind: "read", comm: "ps", path: "/proc/123/task/124/stat" },
+          { kind: "read", comm: "ps", path: "/proc/123/task/124x" },
+          { kind: "read", comm: "ps", path: "/proc/123x" },
+          { kind: "write", comm: "ps", path: "/proc/46", deleted: true },
+          { kind: "open", comm: "ps", path: "/proc/self/a", access: "r", failed: true, err: 13 },
+          {
+            kind: "open",
+            comm: "ps",
+            path: "/proc/thread-self/b",
+            access: "r",
+            failed: true,
+            err: 13,
+          },
+          { kind: "read", comm: "ps", path: "/proc/selfish" },
           { kind: "read", comm: "ps", path: "/work/proc/12/x" },
         ),
       ),
-    ).toEqual(["R ps ./proc/12/x", "R ps /proc/<pid>/status"]);
+    ).toEqual([
+      "R ps ./proc/12/x",
+      "R ps /proc/123x",
+      "A ps /proc/<pid>",
+      "W ps /proc/<pid> (deleted)",
+      "r! ps /proc/<pid>/a",
+      "R ps /proc/<pid>/status",
+      "R ps /proc/<pid>/task/124x",
+      "r! ps /proc/<pid>/task/<tid>/b",
+      "R ps /proc/<pid>/task/<tid>/stat",
+      "R ps /proc/selfish",
+    ]);
   });
 
   it("leaves out pipes and sockets, but not a file named like one", () => {
@@ -1498,6 +1524,17 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(rows(summary)).toStrictEqual([" X /usr/bin/env", "/usr/bin/curl R /etc/hosts"]);
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
+  });
+
+  it("matches /proc/<pid>/ as any process's directory, and nothing else in /proc", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* R /proc/<pid>/**") },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/3/status" },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/1/environ" },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/sys/kernel/pid_max" },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
+    expect(rows(summary)).toStrictEqual(["cat R /proc/sys/kernel/pid_max"]);
   });
 
   it("proposes one row for a program or a path shown both deleted and not", () => {

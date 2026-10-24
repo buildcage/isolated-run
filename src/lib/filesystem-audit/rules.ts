@@ -16,7 +16,7 @@
 
 import { SandboxError } from "../errors.ts";
 import { unescapeDisplay } from "./escape.ts";
-import { MEMFD_PREFIX } from "./paths.ts";
+import { MEMFD_PREFIX, unnumbered } from "./paths.ts";
 import { BIT, ORDER } from "./record.ts";
 
 export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
@@ -133,6 +133,11 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
+// A name the summary never shows, as it shows every number in /proc, and
+// self and thread-self, as <pid> or <tid>, so a rule naming one would never
+// match.
+const procByNumber = (name: string): boolean => unnumbered(name) !== name;
+
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
 function accessBits(access: string): { ok: number; failed: number; perm: number } {
@@ -179,6 +184,12 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
         return pattern;
       };
+      for (const name of [program, path])
+        if (procByNumber(name))
+          throw invalidRules(
+            ref,
+            `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`,
+          );
       rules.push({
         ref,
         program: program === "*" ? undefined : glob(program),

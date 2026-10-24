@@ -208,12 +208,13 @@ From the top:
 
 ### Paths
 
-| Shown as        | Means                                                                                                                                                            |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./…`           | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
-| `~/…`           | Under `$HOME`                                                                                                                                                    |
-| `dir/**`        | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
-| `/proc/<pid>/…` | Under a process's own directory in `/proc`, every process's shown as one                                                                                         |
+| Shown as                   | Means                                                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./…`                      | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
+| `~/…`                      | Under `$HOME`                                                                                                                                                    |
+| `dir/**`                   | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
+| `/proc/<pid>/…`            | Under a process's own directory in `/proc`, every process's shown as one, `/proc/self` and `/proc/thread-self` included                                          |
+| `/proc/<pid>/task/<tid>/…` | Under a thread's directory within a process's, every thread's shown as one                                                                                       |
 
 Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
 `$HOME` and a program run; [How rows are grouped](#how-rows-are-grouped) lists them, and
@@ -349,8 +350,12 @@ of **Unexpected Accesses** can be copied in:
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`. `*` matches within one component of a path, and `**` across them, as a whole
   component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
-  name shows as `\*`, which matches only a star. Regular expressions are not supported. A process's
-  own directory in `/proc` is spelled `/proc/*/`.
+  name shows as `\*`, which matches only a star. Regular expressions are not supported.
+  `/proc/<pid>/` stands for the directory of any process, whatever its number, as the table shows
+  it, and `/proc/<pid>/task/<tid>/` for that of any of its threads; `/proc/*/` would also match
+  `/proc/sys/` and every other entry in `/proc`. A program or a path giving a number, as
+  `/proc/1/`, or naming `/proc/self/` or `/proc/thread-self/`, is refused, as the summary never
+  shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.

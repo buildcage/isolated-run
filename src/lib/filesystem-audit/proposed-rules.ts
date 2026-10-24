@@ -22,10 +22,6 @@ const ruleField = (text: string): string => {
   return text === "" || text.startsWith("#") ? `"${text}"` : field(text);
 };
 
-// Every process's directory in /proc shows as one, which a rule spells with
-// a wildcard.
-const anyPid = (path: string): string => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*");
-
 /** The heading over the rules a run with rules adds for what they did not take. */
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
 
@@ -38,11 +34,7 @@ export function expectedRulesFile(written: string[], proposed: RuleRow[]): strin
   // A file proposed before and committed would otherwise keep its heading
   // over rules this run matched.
   const given = written.filter((line) => line !== NOT_MATCHED_HEADING);
-  const rows = proposed.map((r) => [
-    ruleField(r.program.path),
-    r.flags,
-    ruleField(anyPid(r.path.path)),
-  ]);
+  const rows = proposed.map((r) => [ruleField(r.program.path), r.flags, ruleField(r.path.path)]);
   const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
   const [programW, flagsW] = [width(0), width(1)];
   const added = rows.map(

@@ -102,6 +102,13 @@ describe("parseExpectedRules", () => {
     expect(rules[0].path.test(String.raw`memfd:"\" b\u{20}"`)).toBe(true);
   });
 
+  it("takes /proc/<pid>/ and a number /proc does not name a process by", () => {
+    const { rules } = parse(
+      "* R /proc/<pid>/task/<tid>/stat\n* R /proc/12x\n* R ./proc/1/x\n* R /proc/selfx",
+    );
+    expect(rules).toHaveLength(4);
+  });
+
   it.each([
     ["* R", "input:1: expected a program, an access and a path, got 2 fields"],
     ["* R ./a b", "input:1: expected a program, an access and a path, got 4 fields"],
@@ -112,6 +119,12 @@ describe("parseExpectedRules", () => {
     ['* R memfd:"a"b', "input:1: a closing quote must end its field"],
     ['* R "./a"b', "input:1: a closing quote must end its field"],
     [String.raw`* R ./a\q`, String.raw`input:1: "./a\\q" holds an unknown escape`],
+    ["* R /proc/1/environ", 'input:1: "/proc/1/environ" names a process or a thread in /proc'],
+    ["* R /proc/12", 'input:1: "/proc/12" names a process'],
+    ["* R /proc/<pid>/task/3/stat", 'input:1: "/proc/<pid>/task/3/stat" names a process'],
+    ["* R /proc/self/status", 'input:1: "/proc/self/status" names a process'],
+    ["* R /proc/thread-self", 'input:1: "/proc/thread-self" names a process'],
+    ["/proc/3/fd/3 X ./out", 'input:1: "/proc/3/fd/3" names a process'],
   ])("refuses %j", (text, reason) => {
     const parsing = () => parse(text);
     expect(parsing).toThrow(SandboxError);
