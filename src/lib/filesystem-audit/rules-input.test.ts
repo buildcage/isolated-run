@@ -72,6 +72,13 @@ describe("readExpectedFilesystemRules", () => {
     expect(rules?.rules.map((r) => r.ref)).toStrictEqual(["config", "config"]);
   });
 
+  it("holds no rule where every line is a comment or blank, whatever the audit", () => {
+    expect(readExpectedFilesystemRules("# * R ./a\n\n", undefined, "off")).toMatchObject({
+      rules: [],
+      lines: ["# * R ./a"],
+    });
+  });
+
   it("refuses rules for a step that records nothing to match them against", () => {
     const reading = () => readExpectedFilesystemRules("* R ./a", undefined, "off");
     expect(reading).toThrow(SandboxError);

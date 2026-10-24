@@ -349,6 +349,24 @@ describe("runSandboxStep", () => {
     );
   });
 
+  it("runs as if rules all commented out were unset, and warns of them", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
+    mocks.readExpectedFilesystemRules.mockReturnValue(
+      parseExpectedRules([{ text: "# node R ./a", origin: "input", firstLine: 1 }]),
+    );
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].rules).toBeUndefined();
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+    );
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    );
+  });
+
   it("reads no inline expected_filesystem_rules when the workflow set none", async () => {
     await runSandboxStep(ENV, deps);
 

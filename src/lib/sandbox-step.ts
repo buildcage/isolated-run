@@ -292,11 +292,13 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice);
   const filesystemAudit = deps.readFilesystemAuditInput();
   const filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs();
-  const expectedFilesystemRules = deps.readExpectedFilesystemRules(
+  const givenRules = deps.readExpectedFilesystemRules(
     env[EXPECTED_RULES_ENV] ?? "",
     configFile?.origins.get(EXPECTED_RULES_INPUT),
     filesystemAudit,
   );
+  // Rules all commented out are none: the step runs as if they were unset.
+  const expectedFilesystemRules = givenRules?.rules.length ? givenRules : undefined;
   const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
   // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
@@ -312,6 +314,11 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
   if (filesystemAudit === "record") {
     annotation.warning("filesystem_audit is experimental and may change.");
+  }
+  if (givenRules && !expectedFilesystemRules) {
+    annotation.warning(
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+    );
   }
   if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
     annotation.warning(

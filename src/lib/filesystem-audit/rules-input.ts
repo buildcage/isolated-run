@@ -35,8 +35,9 @@ export const EXPECTED_RULES_ENV = "INPUT_EXPECTED_FILESYSTEM_RULES";
 /**
  * expected_filesystem_rules, from the input's value once config_file joined
  * its own, each rule known by its line there. Undefined when neither holds a
- * line. Throws on a line that is not a rule, and on rules for a step that
- * records nothing to match them against.
+ * line, and holding no rule where every line is a comment or blank, which the
+ * step treats as unset. Throws on a line that is not a rule, and on rules for
+ * a step that records nothing to match them against.
  */
 export function readExpectedFilesystemRules(
   value: string,
@@ -45,7 +46,7 @@ export function readExpectedFilesystemRules(
 ): ExpectedRules | undefined {
   const rules = parseExpectedRules(ruleSources(value, config));
   if (rules.lines.length === 0) return undefined;
-  if (filesystemAudit !== "record") {
+  if (rules.rules.length > 0 && filesystemAudit !== "record") {
     throw new SandboxError(
       `${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`,
       "INVALID_EXPECTED_FILESYSTEM_RULES",
