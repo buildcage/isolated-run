@@ -72556,7 +72556,7 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
-const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? new RegExp(pattern.source.replace("^\\/proc\\/<pid>", "^\\/proc\\/(?:<pid>|self)")) : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
