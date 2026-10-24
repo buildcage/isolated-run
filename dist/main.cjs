@@ -72416,7 +72416,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:\d+|<pid>)(?:\/task\/(?:\d+|<tid>))?(?=\/|$|\0)/, unnumbered = (path) => path.replace(PROC_NUMBERS, (m) => m.includes("/task/") ? "/proc/<pid>/task/<tid>" : "/proc/<pid>");
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, unnumbered = (path) => path.replace(PROC_NUMBERS, (m) => m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>");
 function normalize$2(path) {
 	return unnumbered(path.replace(/^\.\//, ""));
 }
@@ -72550,7 +72550,7 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
-const PROC_SELF = /^\/proc\/(?:self|thread-self)(?=\/|$)/, procByNumber = (name) => unnumbered(name) !== name || PROC_SELF.test(name), ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
