@@ -179,7 +179,8 @@ describe("readStepFilesystemAudit", () => {
         "and this section then shows only the ones outside them.\n\n" +
         "`expected-filesystem-rules.yml` in this run's filesystem audit artifact " +
         "(`buildcage-filesystem-audit-deadbeef`) holds a rule for each access this run made. " +
-        "Review it, using `**` for the paths that change between runs, commit it, and point the step at it, " +
+        "Review it, using `**` for the paths that change between runs, commit it at a path of your choice, " +
+        "and point `config_file` at it, " +
         "or copy its rules into the config file the step already uses:\n\n" +
         "```yaml\nconfig_file: path/to/buildcage-config.yml\n```\n\n" +
         "Or copy the file's rules into the workflow:\n\n" +

@@ -159,8 +159,8 @@ From the top:
   proxy, about when the step starts, on the same clock as the traffic report's Communication
   details, so a file access can be matched to a request. Where that start is unknown, it counts from
   the first access.
-- The closing line explains the `./`, `~/` and `dir/**` notations, names the artifact that holds the
-  full record and links to this section.
+- The closing line explains the `./`, `~/` and `dir/**` notations, links to the artifact that holds
+  the full record and links to this section.
 
 [How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
 

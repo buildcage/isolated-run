@@ -170,7 +170,8 @@ const realDeps: FilesystemAuditReportDeps = {
   readLines,
   createSummary: createAuditSummary,
   openWriter,
-  makeDir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
+  // Never recursive: anything already at the path, a symlink included, fails it.
+  makeDir: (path) => mkdirSync(path, { mode: 0o700 }),
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: (path) => realpathSync(path),
   renderBlocks: renderAuditSummaryBlocks,

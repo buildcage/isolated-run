@@ -381,7 +381,7 @@ export function rulesNote(
 // How to put the proposed file to use, after where it is.
 function useSteps(where: string, fileName: string): string {
   return (
-    `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n` +
+    `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n` +
     `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
     "Or copy the file's rules into the workflow:\n\n" +
     "```yaml\n" +
