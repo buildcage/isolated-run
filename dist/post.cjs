@@ -672,11 +672,8 @@ function removeUnusedDirs(ledger, deps) {
 		let entry = ledger.dirs[path];
 		delete ledger.dirs[path];
 		let current = dirIdOf(path, deps);
-		if (current === void 0) {
-			info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
-			continue;
-		}
-		if (sameId(current, entry)) try {
+		if (current === void 0) info?.(`buildcage: ${path}, made for Chromium's NSS database by ${entry.createdBy}, had already been removed by something else`);
+		else if (sameId(current, entry)) try {
 			rmdir(path);
 		} catch {}
 	}
@@ -942,22 +939,21 @@ function searchPath(command, pathEnv, persisting, deps) {
 		let resolved = resolveHostPath(candidate, deps);
 		if (!("real" in resolved)) continue;
 		let { real } = resolved;
-		if (inside(real)) {
+		if (inside(real)) search.refusal ??= {
+			candidate,
+			real
+		};
+		else {
+			if ((0, node_path.basename)(real) === command) return {
+				...search,
+				pinned: real
+			};
 			search.refusal ??= {
 				candidate,
-				real
+				real,
+				link: resolved.links.find((l) => inside(l.at)).at
 			};
-			continue;
 		}
-		if ((0, node_path.basename)(real) === command) return {
-			...search,
-			pinned: real
-		};
-		search.refusal ??= {
-			candidate,
-			real,
-			link: resolved.links.find((l) => inside(l.at)).at
-		};
 	}
 	return search;
 }
@@ -976,11 +972,8 @@ function unpinnableMessage(command, refusal, persisting) {
 function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 	for (let command of PINNED_COMMANDS) {
 		let { pinned, onPath, refusal } = searchPath(command, env.PATH, paths, deps);
-		if (pinned) {
-			pinCommand(command, pinned);
-			continue;
-		}
-		if (onPath) throw new SandboxError(unpinnableMessage(command, refusal, paths), "HOST_COMMAND_UNPINNABLE");
+		if (pinned) pinCommand(command, pinned);
+		else if (onPath) throw new SandboxError(unpinnableMessage(command, refusal, paths), "HOST_COMMAND_UNPINNABLE");
 	}
 	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
 }
