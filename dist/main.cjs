@@ -73047,7 +73047,7 @@ function walkedNodes(top) {
 	return walked;
 }
 function* treeLines(top, fanout, showWalked = !1) {
-	let walked = showWalked ? new Set() : walkedNodes(top), pathTo = (e) => {
+	let walked = walkedNodes(top), pathTo = (e) => {
 		let parts = [];
 		for (let at = e; at; at = at.up) parts.push(at.part);
 		return spell(parts.reverse());
@@ -73058,16 +73058,18 @@ function* treeLines(top, fanout, showWalked = !1) {
 	for (; stack.length > 0;) {
 		let e = stack.pop(), { folded, own, kids, kept } = e.node;
 		folded && flagBits(folded) && (yield [starred(pathTo(e)), folded]);
-		let ownLine = own && flagBits(own) && !walked.has(e.node) ? own : void 0;
-		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) yield [starred(pathTo(e)), treeAgg(e.node)];
-		else {
-			ownLine && (yield [pathTo(e), ownLine]);
-			for (let [part, node] of [...kids ?? []].reverse()) stack.push({
-				node,
-				part,
-				up: e
-			});
+		let shown = own && flagBits(own) ? own : void 0, ownLine = shown && !walked.has(e.node) ? shown : void 0;
+		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
+			yield [starred(pathTo(e)), treeAgg(e.node)];
+			continue;
 		}
+		let line = showWalked ? shown : ownLine;
+		line && (yield [pathTo(e), line]);
+		for (let [part, node] of [...kids ?? []].reverse()) stack.push({
+			node,
+			part,
+			up: e
+		});
 	}
 }
 function forEachInSubtree(node, visit) {
