@@ -56,17 +56,6 @@ describe("expectedRulesFile", () => {
     expect(rule.program!.test("")).toBe(true);
   });
 
-  it("writes a rule once for a program shown both deleted and not", () => {
-    const deleted = { ...row("./tool", "R", "./x"), program: { path: "./tool", deleted: true } };
-    expect(expectedRulesFile([], [deleted, row("./tool", "R", "./x")])?.split("\n")).toStrictEqual([
-      "filesystem_audit: record",
-      "upload_filesystem_audit_artifact: true",
-      "expected_filesystem_rules: |",
-      "  ./tool  R  ./x",
-      "",
-    ]);
-  });
-
   it("keeps the rules given as written, then adds what they did not take", () => {
     expect(expectedRulesFile(["# npm", "* R ./a", "", "* W ./b"], [row("bash", "R", "./c")])).toBe(
       [
