@@ -724,7 +724,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     # ubuntu-latest's hosts already run the inspect integration tests.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     name: "e2e: test (sandbox, inspect engine, concurrency, ubuntu-22.04)"
