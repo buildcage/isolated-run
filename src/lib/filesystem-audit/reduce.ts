@@ -8,7 +8,7 @@
 
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
+import { fmtFlags, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
@@ -441,6 +441,30 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return relativize(unmarked(path), shownPrefixes);
   }
 
+  // One row per rule: a program or a path shown both deleted and not is one
+  // rule, shown deleted only where every access was.
+  function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {
+    const lines = tally.finish();
+    if (!lines) return undefined;
+    const merged = new Map<string, { program: Shown; path: Shown; agg: Agg }>();
+    for (const { rank, path, agg } of lines) {
+      const key = keyOf(ranks[rank].ruleName, ruleName(path));
+      const row = merged.get(key);
+      if (!row) {
+        merged.set(key, { program: ranks[rank].shown, path: shown(path), agg });
+        continue;
+      }
+      mergeAgg(row.agg, agg);
+      if (!ranks[rank].shown.deleted) row.program = ranks[rank].shown;
+      if (!path.endsWith(DELETED)) row.path = shown(path);
+    }
+    return [...merged.values()].map(({ program, path, agg }) => ({
+      program,
+      flags: fmtFlags(agg),
+      path,
+    }));
+  }
+
   type Line = { comm: string; path: string; agg: Agg };
   const rows = (lines: Line[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => {
@@ -465,11 +489,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
-    const ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
-      program: ranks[rank].shown,
-      flags: fmtFlags(agg),
-      path: shown(path),
-    }));
+    const ruleRows = tally && ruleRowsOf(tally);
     return {
       ended,
       lost,

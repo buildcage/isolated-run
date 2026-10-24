@@ -1499,6 +1499,51 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
   });
 
+  it("proposes one row for a program or a path shown both deleted and not", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x" },
+    );
+    expect(rows(summary)).toStrictEqual(["./tool RW ./x", "tool X ./tool"]);
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool" },
+      flags: "RW",
+      path: { path: "./x" },
+    });
+  });
+
+  it("shows a proposed row not deleted where any access was not", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool" },
+      flags: "RW",
+      path: { path: "./x" },
+    });
+  });
+
+  it("shows a proposed row deleted where every access was", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+      { kind: "write", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool", deleted: true },
+      flags: "RW",
+      path: { path: "./x", deleted: true },
+    });
+  });
+
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
     const { summary } = marked(
       { rules: rulesOf('* W memfd:"m"\n* W ./gone') },

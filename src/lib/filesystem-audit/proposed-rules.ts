@@ -45,14 +45,9 @@ export function expectedRulesFile(written: string[], proposed: RuleRow[]): strin
   ]);
   const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
   const [programW, flagsW] = [width(0), width(1)];
-  // Once each: a program shown deleted and not is one rule.
-  const added = [
-    ...new Set(
-      rows.map(
-        ([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`,
-      ),
-    ),
-  ];
+  const added = rows.map(
+    ([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`,
+  );
   const lines =
     given.length === 0
       ? added
