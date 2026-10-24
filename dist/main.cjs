@@ -73422,26 +73422,31 @@ function createAuditSummary(prefixes) {
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
-	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by) => {
+	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
 		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
 		!path.startsWith("/") && !path.startsWith("…/") && !path.startsWith(MEMFD) && !isRunnerFile(path) && (path = `…/${path}`);
 		let same = path === x.path;
-		if (!tally.take(same ? x : {
+		if (!tally.take({
 			...x,
-			path
+			path,
+			cmd
 		}, same ? parts : components(path), id) || tally.givenUp) return;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
 		deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
 		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
-	}, commsBefore = new Map(), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}, commsBefore = new Map(), commandBeforeExec = (r) => {
+		let before = commsBefore.get(r.pid);
+		if (before !== void 0) return commandKey(r.pid, before);
+		let parent = commsBefore.get(r.ppid);
+		return parent === void 0 ? commandKey(r.pid, r.comm ?? "") : commandKey(r.ppid, parent);
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
 		if (r.kind === "fork") {
-			let comm = r.comm ?? "";
-			programs.set(r.pid, programOf(r.ppid, comm)), tally && commsBefore.set(r.pid, comm);
+			programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
 			let runName = runNames.get(r.ppid);
 			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
 		}
@@ -73466,7 +73471,7 @@ function createAuditSummary(prefixes) {
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
 		}
-		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, before = commsBefore.get(r.pid), runCmd = tally && r.kind === "exec" ? before === void 0 ? commandKey(r.ppid, commsBefore.get(r.ppid) ?? r.comm ?? "") : commandKey(r.pid, before) : void 0;
+		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, runCmd = tally && r.kind === "exec" ? commandBeforeExec(r) : void 0;
 		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
@@ -73492,10 +73497,7 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally && takeForRules({
-					...x,
-					cmd: runCmd ?? x.comm
-				}, parts, runBy ?? program);
+				}, parts), tally && takeForRules(x, parts, runBy ?? program, runCmd ?? x.comm);
 			}
 			return tally?.endLine();
 		}
