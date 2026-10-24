@@ -1499,6 +1499,17 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
   });
 
+  it("matches /proc/<pid>/ as any process's directory, and nothing else in /proc", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* R /proc/<pid>/**") },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/3/status" },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/1/environ" },
+      { kind: "read", pid: 3, comm: "cat", path: "/proc/sys/kernel/pid_max" },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
+    expect(rows(summary)).toStrictEqual(["cat R /proc/sys/kernel/pid_max"]);
+  });
+
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
     const { summary } = marked(
       { rules: rulesOf('* W memfd:"m"\n* W ./gone') },

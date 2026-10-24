@@ -31,9 +31,9 @@ describe("expectedRulesFile", () => {
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  /usr/bin/node   RW   ./node_modules/**",
-        "  bash            Rr!  /proc/*/status",
+        "  bash            Rr!  /proc/<pid>/status",
         '  "/opt/my tool"  R    "#x"',
-        "  bash            R    /proc/*",
+        "  bash            R    /proc/<pid>",
         "",
       ].join("\n"),
     );

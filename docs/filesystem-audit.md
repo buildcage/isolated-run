@@ -349,8 +349,9 @@ of **Unexpected Accesses** can be copied in:
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`. `*` matches within one component of a path, and `**` across them, as a whole
   component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
-  name shows as `\*`, which matches only a star. Regular expressions are not supported. A process's
-  own directory in `/proc` is spelled `/proc/*/`.
+  name shows as `\*`, which matches only a star. Regular expressions are not supported.
+  `/proc/<pid>/` stands for the directory of any process, whatever its number, as the table shows
+  it; `/proc/*/` would also match `/proc/sys/` and every other entry in `/proc`.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.
