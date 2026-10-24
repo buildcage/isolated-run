@@ -71,6 +71,11 @@
       "description": "CoreDNS still publishes its 2016-2017 tags v001 to v011, which Renovate ranks as majors 1 to 11, so only x.y.z releases are candidates.",
       "matchPackageNames": ["coredns/coredns"],
       "allowedVersions": "/^v?\\d+\\.\\d+\\.\\d+$/"
+    },
+    {
+      "description": "A job names an Ubuntu release only to test on that release: an older host than ubuntu-latest, or the kernel packages it installs into a VM. Moving it to a newer runner drops that coverage, so runner versions are never bumped.",
+      "matchDatasources": ["github-runners"],
+      "enabled": false
     }
   ]
 }
