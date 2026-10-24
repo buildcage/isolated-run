@@ -72550,7 +72550,7 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
-const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const NUMBERED_PROC = /^\/proc\/(?:\d+|<pid>\/task\/\d+)(?:\/|$)/, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72577,6 +72577,7 @@ function parseExpectedRules(sources) {
 			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
 			return pattern;
 		};
+		if (NUMBERED_PROC.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} names a process or thread by its number, which changes from run to run; write /proc/<pid>/ or /proc/<pid>/task/<tid>/`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : glob(program),
