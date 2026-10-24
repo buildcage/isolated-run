@@ -1523,6 +1523,27 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/a", "ls R ./d/b"]);
   });
 
+  it("proposes the workspace itself read on the way to a file in it", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/f" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R .", "ls R ./f"]);
+  });
+
+  it("proposes a walked directory beside a folded one below it, unfolded itself", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/b" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/c" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/y" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/x/**", "ls R ./d/y"]);
+  });
+
   it("lists a walked directory beside the rows that remain unexpected", () => {
     const { summary } = marked(
       { rules: rulesOf("ls R ./d/a") },

@@ -616,8 +616,7 @@ accessed paths table, where each has rows of its own.
   opened, under the first program to make them. A pipe or a socket is left out of the summary.
 - A directory has no row of its own where everything done to it was also done below it, as a read
   of `./d` on the way to reading `./d/f` shows only `./d/f`. **Unexpected Accesses** and the
-  proposed rules keep it, as a rule has to name it to take that access, without counting it toward
-  a `dir/**` row's three.
+  proposed rules keep it, as a rule has to name it to take that access.
 
 **Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
 command's paths on their own, so they often name it; the artifact always does.
@@ -628,6 +627,8 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
   `/proc/<pid>`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
+- In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
+  has to name it, as above: `./d`, `./d/a` and `./d/b` stay three rows.
 
 That changes once a table or the details would pass 300 KB, more rows than anyone reads:
 
