@@ -1153,7 +1153,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(md).toContain(
       "### ⚠️ Unexpected Accesses (1)\n\n<sub>1 recorded operation matched `expected_filesystem_rules`.</sub>\n\n" +
         "<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>\n\n" +
-        "| Program | Access | Path |\n| --- | --- | --- |\n| `node` | W | `./b` |\n\n",
+        "| Program | Command | Access | Path |\n| --- | --- | --- | --- |\n| `node` | `node` | W | `./b` |\n\n",
     );
     expect(md).not.toContain("Accessed Paths");
     expect(md).not.toContain("File access details");

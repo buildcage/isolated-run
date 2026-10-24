@@ -13,6 +13,9 @@ export interface Agg {
   first: number;
   last: number;
   seq: number;
+  /** The commands that made the accesses, each with the earliest one's place
+   *  in the recording, where the line keeps them. */
+  cmds?: Map<string, number>;
 }
 
 export const newAgg = (): Agg => ({
@@ -33,6 +36,12 @@ export function mergeAgg(dst: Agg, src: Agg): void {
   dst.first = Math.min(dst.first, src.first);
   dst.last = Math.max(dst.last, src.last);
   dst.seq = Math.min(dst.seq, src.seq);
+  for (const [cmd, seq] of src.cmds ?? []) addCmd(dst, cmd, seq);
+}
+
+function addCmd(a: Agg, cmd: string, seq: number): void {
+  const had = a.cmds?.get(cmd);
+  (a.cmds ??= new Map()).set(cmd, had === undefined ? seq : Math.min(had, seq));
 }
 
 // One access, as a line records it. bit is 0 where it prints nothing, as a run
@@ -45,6 +54,8 @@ export interface Access {
   perm: boolean;
   t: number;
   seq: number;
+  /** The command that made it, for a line that keeps its commands. */
+  cmd?: string;
 }
 
 export function apply(a: Agg, x: Access): void {
@@ -53,6 +64,7 @@ export function apply(a: Agg, x: Access): void {
     a.failed |= x.bit;
     if (x.perm) a.perm |= x.bit;
   }
+  if (x.cmd !== undefined) addCmd(a, x.cmd, x.seq);
   if (Number.isNaN(x.t)) return;
   a.first = Math.min(a.first, x.t);
   a.last = Math.max(a.last, x.t);

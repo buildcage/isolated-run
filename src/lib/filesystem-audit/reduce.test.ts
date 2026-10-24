@@ -1603,6 +1603,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(rows(summary)).toStrictEqual(["./tool RW ./x", "tool X ./tool"]);
     expect(summary.proposed![0]).toStrictEqual({
       program: { path: "./tool" },
+      commands: ["tool"],
       flags: "RW",
       path: { path: "./x" },
     });
@@ -1646,6 +1647,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary.proposed).toStrictEqual([
       {
         program: { path: "./tool", deleted: true },
+        commands: ["tool"],
         flags: "W",
         path: { path: "./x", deleted: true },
       },
@@ -1687,6 +1689,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(summary.proposed![0]).toStrictEqual({
       program: { path: "./tool" },
+      commands: ["tool"],
       flags: "RW",
       path: { path: "./x" },
     });
@@ -1701,8 +1704,36 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(summary.proposed![0]).toStrictEqual({
       program: { path: "./tool", deleted: true },
+      commands: ["tool"],
       flags: "RW",
       path: { path: "./x", deleted: true },
+    });
+  });
+
+  it("lists the commands of a row, folded or not, once each in the order they first came", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "npm", path: "/usr/bin/node" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", t: "2026-01-01T00:00:01Z" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "npm" },
+      { kind: "exec", pid: 4, comm: "node", path: "/usr/bin/node" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", t: "2026-01-01T00:00:02Z" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/c", t: "2026-01-01T00:00:03Z" },
+    );
+    const folded = summary.proposed!.find((r) => r.path.path === "./m/**");
+    expect(folded?.commands).toStrictEqual(["node[npm]", "node"]);
+  });
+
+  it("names a run by the command that ran it, before it took the new name", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "bash", path: "/bin/bash" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "bash" },
+      { kind: "exec", pid: 4, comm: "curl", path: "/usr/bin/curl" },
+    );
+    expect(summary.proposed!.find((r) => r.path.path === "/usr/bin/curl")).toMatchObject({
+      program: { path: "/bin/bash" },
+      commands: ["bash"],
     });
   });
 

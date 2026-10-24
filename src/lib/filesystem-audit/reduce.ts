@@ -103,6 +103,9 @@ const escapePath = (path: string): string => path.split("/").map(escapeForDispla
 /** A proposed rule: a program, its accesses as a rule spells them, and a path. */
 export interface RuleRow {
   program: Shown;
+  /** The commands that made the accesses, as the details name them, in the
+   *  order they first did. */
+  commands: string[];
   flags: string;
   path: Shown;
 }
@@ -345,6 +348,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
   };
+  // Each pid's name before its latest record.
+  const commsBefore = new Map<number | undefined, string>();
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -358,7 +363,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!counted) return undefined;
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
-      programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+      const comm = r.comm ?? "";
+      programs.set(r.pid, programOf(r.ppid, comm));
+      if (tally) commsBefore.set(r.pid, comm);
       const runName = runNames.get(r.ppid);
       if (runName === undefined) runNames.delete(r.pid);
       else runNames.set(r.pid, runName);
@@ -401,6 +408,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     // A run is expected of the program that ran it, not of what it ran.
     const runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : undefined;
+    // An exec record carries the name the process takes from what it ran.
+    const runCmd =
+      tally && r.kind === "exec"
+        ? commandKey(r.pid, commsBefore.get(r.pid) ?? r.comm ?? "")
+        : undefined;
+    if (tally) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
@@ -451,7 +464,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (tally) takeForRules(x, parts, runBy ?? program);
+      if (tally) takeForRules({ ...x, cmd: runCmd ?? x.comm }, parts, runBy ?? program);
     }
     return tally?.endLine();
   };
@@ -488,6 +501,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return {
         program:
           (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
+        // Once each: a program shown deleted and not names one command.
+        commands: [
+          ...new Set(
+            // Every access the tally takes names its command.
+            [...agg.cmds!].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd)!.text),
+          ),
+        ],
         flags: fmtFlags(agg),
         path: shown(only?.path ? path + DELETED : path),
       };

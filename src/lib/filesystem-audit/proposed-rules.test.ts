@@ -6,6 +6,7 @@ import { parseExpectedRules } from "./rules.ts";
 describe("expectedRulesFile", () => {
   const row = (program: string, flags: string, path: string) => ({
     program: { path: program },
+    commands: [],
     flags,
     path: { path },
   });
