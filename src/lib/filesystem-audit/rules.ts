@@ -133,6 +133,10 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
+// The summary shows a process's or a thread's number in /proc as <pid> or
+// <tid>, so a rule naming one never matches.
+const NUMBERED_PROC = /^\/proc\/(?:\d+|<pid>\/task\/\d+)(?:\/|$)/;
+
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
 function accessBits(access: string): { ok: number; failed: number; perm: number } {
@@ -179,6 +183,11 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
         return pattern;
       };
+      if (NUMBERED_PROC.test(path))
+        throw invalidRules(
+          ref,
+          `${JSON.stringify(path)} names a process or thread by its number, which changes from run to run; write /proc/<pid>/ or /proc/<pid>/task/<tid>/`,
+        );
       rules.push({
         ref,
         program: program === "*" ? undefined : glob(program),

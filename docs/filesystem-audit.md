@@ -353,7 +353,8 @@ of **Unexpected Accesses** can be copied in:
   name shows as `\*`, which matches only a star. Regular expressions are not supported.
   `/proc/<pid>/` stands for the directory of any process, whatever its number, as the table shows
   it, and `/proc/<pid>/task/<tid>/` for that of any of its threads; `/proc/*/` would also match
-  `/proc/sys/` and every other entry in `/proc`.
+  `/proc/sys/` and every other entry in `/proc`. A rule giving the number itself, `/proc/1/`, is
+  refused, as the summary never shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.
