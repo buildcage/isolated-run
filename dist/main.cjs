@@ -72784,9 +72784,10 @@ function unreadableSummaryBlocks(title) {
 		cut: "keep"
 	}];
 }
+const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
 function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
 	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.` : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`, holds = given ? "the rules given plus one for each access they did not take" : "a rule for each access this run made", where;
-	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `This run's ${file} was lost, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in this run's ${artifact.url ? `[filesystem audit artifact](${artifact.url})` : `filesystem audit artifact (\`${artifact.name}\`)`} holds ${holds}.`, `<details>
+	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `This run's ${file} was lost, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`, `<details>
 <summary>📝 Expected filesystem rules</summary>
 
 ${intro}\n\n${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr write the rules in the workflow:
@@ -72802,10 +72803,10 @@ ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
 `;
 }
 function filesystemLegendNote(artifact, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the \`${artifact.name}\` artifact`} · [how to read this](${guideUrl})`;
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
 }
 function filesystemTruncationNote(artifact, cause = "size") {
-	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifact.name} artifact uploaded for this run has every access`;
+	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
 	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
 //#endregion
