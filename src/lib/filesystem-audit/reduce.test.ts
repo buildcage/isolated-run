@@ -398,15 +398,26 @@ describe("createAuditSummary", () => {
     ]);
   });
 
-  it("names /proc/<pid> only at the start of a path", () => {
+  it("names /proc/<pid> and its task/<tid> only as whole components at the start of a path", () => {
     expect(
       lines(
         render(
           { kind: "read", comm: "ps", path: "/proc/123/status" },
+          { kind: "chmod", comm: "ps", path: "/proc/45" },
+          { kind: "read", comm: "ps", path: "/proc/123/task/124/stat" },
+          { kind: "read", comm: "ps", path: "/proc/123/task/124x" },
+          { kind: "read", comm: "ps", path: "/proc/123x" },
           { kind: "read", comm: "ps", path: "/work/proc/12/x" },
         ),
       ),
-    ).toEqual(["R ps ./proc/12/x", "R ps /proc/<pid>/status"]);
+    ).toEqual([
+      "R ps ./proc/12/x",
+      "R ps /proc/123x",
+      "A ps /proc/<pid>",
+      "R ps /proc/<pid>/status",
+      "R ps /proc/<pid>/task/124x",
+      "R ps /proc/<pid>/task/<tid>/stat",
+    ]);
   });
 
   it("leaves out pipes and sockets, but not a file named like one", () => {

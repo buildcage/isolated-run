@@ -32,8 +32,12 @@ export const unfoldable = (parts: string[], path: string): boolean =>
 
 export function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
-  // the path.
-  return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+  // the path, and every process's and thread's numbers in /proc, which change
+  // from run to run.
+  return path
+    .replace(/^\.\//, "")
+    .replace(/^\/proc\/\d+(?=\/|$)/, "/proc/<pid>")
+    .replace(/^\/proc\/<pid>\/task\/\d+(?=\/|$)/, "/proc/<pid>/task/<tid>");
 }
 
 /** The workspace and $HOME, each as given and with symlinks resolved. */
