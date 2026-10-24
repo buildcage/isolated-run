@@ -72416,9 +72416,9 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, unnumbered = (path) => path.replace(PROC_NUMBERS, (m) => m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>");
 function normalize$2(path) {
-	return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+	return unnumbered(path.replace(/^\.\//, ""));
 }
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
@@ -72550,7 +72550,7 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
-const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72577,6 +72577,7 @@ function parseExpectedRules(sources) {
 			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
 			return pattern;
 		};
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : glob(program),
@@ -72956,12 +72957,12 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), anyPid = (path) => path.replace(/^\/proc\/<pid>(?=\/|$)/, "/proc/*"), NOT_MATCHED_HEADING = "# Not matched in this run";
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), NOT_MATCHED_HEADING = "# Not matched in this run";
 function expectedRulesFile(written, proposed) {
 	let given = written.filter((line) => line !== NOT_MATCHED_HEADING), rows = proposed.map((r) => [
 		ruleField(r.program.path),
 		r.flags,
-		ruleField(anyPid(r.path.path))
+		ruleField(r.path.path)
 	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",

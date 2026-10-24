@@ -30,10 +30,22 @@ export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FI
 export const unfoldable = (parts: string[], path: string): boolean =>
   parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 
+// A process's directory in /proc, and a thread's in it, by number, as self
+// or thread-self, which a failed access keeps as passed, or as shown already,
+// before any further name or a deleted file's mark.
+const PROC_NUMBERS =
+  /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
+
+/** The path with its /proc numbers, which change from run to run, shown as `<pid>` and `<tid>`. */
+export const unnumbered = (path: string): string =>
+  path.replace(PROC_NUMBERS, (m) =>
+    m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>",
+  );
+
 export function normalize(path: string): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
-  return path.replace(/^\.\//, "").replace(/^\/proc\/\d+\//, "/proc/<pid>/");
+  return unnumbered(path.replace(/^\.\//, ""));
 }
 
 /** The workspace and $HOME, each as given and with symlinks resolved. */
