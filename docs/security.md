@@ -645,6 +645,11 @@ path. A control, format, separator, invisible or blank character, a space at eit
 backslash or a byte that is not UTF-8 in a name is shown escaped, and the details quote a name
 holding a space, so no name can rewrite the Job Summary or pass for another.
 
+On a kernel that [skips the tracer's hooks](./filesystem-audit.md#skipped-hooks), a skipped hook
+drops the access it was following rather than report it against the wrong call, except that an open
+may carry an earlier open's path, and a path change whose own hook was skipped too an earlier path
+change's.
+
 **Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
 holds no capability. Nor can it make a system call through a 32-bit ABI, numbered apart from the
 calls the tracer reads: under the audit the sandbox's seccomp filter refuses those. Nor can it
@@ -661,6 +666,8 @@ spells a path. What it can do:
   makes, an extended attribute change other than through `setxattr`, `lsetxattr` or `fsetxattr`, a
   failed `exec`, a `mkdir`, `mknod`, `symlink` or `link` on a name that is already there, or one
   made by `bind(2)` that the kernel refuses before reaching its file.
+- Fail an open before the kernel looks its name up, with a seccomp filter of its own or by running
+  out of file descriptors. Such an open is not recorded, unless it failed for a name too long.
 - Look a file up, or read a link's target or an extended attribute. `stat`, `access`, `readlink`,
   `getxattr`, `listxattr` and a successful open with `O_PATH` are not recorded; what a command then
   does through an `O_PATH` descriptor, such as running or reopening the file, is recorded.
