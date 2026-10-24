@@ -301,6 +301,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
             loose: Infinity,
             nodes: limits.nodes,
             rowBytes: () => 0,
+            showWalked: true,
           }),
           { program: (rank) => ranks[rank].ruleName, path: ruleName },
         )

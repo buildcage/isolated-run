@@ -94,16 +94,21 @@ export function walkedNodes(top: Map<string, Node>): Set<Node> {
   return walked;
 }
 
-// Every line of a tree that prints, with its path, but walked directories.
+// Every line of a tree that prints, with its path, but walked directories
+// unless `showWalked`.
 // Each node links to its parent's entry, so only a printed line's path is
 // ever spelled out.
-function* treeLines(top: Map<string, Node>, fanout: number): Generator<[string, Agg]> {
+function* treeLines(
+  top: Map<string, Node>,
+  fanout: number,
+  showWalked = false,
+): Generator<[string, Agg]> {
   interface Entry {
     node: Node;
     part: string;
     up?: Entry;
   }
-  const walked = walkedNodes(top);
+  const walked = showWalked ? new Set<Node>() : walkedNodes(top);
   const pathTo = (e: Entry): string => {
     const parts: string[] = [];
     for (let at: Entry | undefined = e; at; at = at.up) parts.push(at.part);
@@ -156,6 +161,9 @@ interface LinesOptions {
   nodes: number;
   /** The fewest bytes the line of a path prints in. */
   rowBytes: (path: string, comm: string) => number;
+  /** Whether a directory keeps its own line where it only walks to the lines
+   *  below it, as a rule must name it to take its access. */
+  showWalked?: boolean;
 }
 
 /**
@@ -457,7 +465,7 @@ export class Lines {
     for (const [key, agg] of this.climbing)
       if (ran(agg)) yield { comm: commOf(key), path: pathOf(key), agg };
     for (const [comm, top] of this.trees)
-      for (const [path, agg] of treeLines(top, this.opts.fanout)) {
+      for (const [path, agg] of treeLines(top, this.opts.fanout, this.opts.showWalked)) {
         // A command that also ran the file keeps one row for it.
         const run = this.climbing.get(keyOf(comm, path));
         if (run) mergeAgg(run, agg);

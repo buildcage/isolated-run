@@ -1499,6 +1499,20 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
   });
 
+  it("proposes a directory a program read on its way to the files in it", () => {
+    const listing = [
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/f" },
+    ];
+    const { summary } = marked({ propose: true }, ...listing);
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/f"]);
+    const again = marked(
+      { rules: rulesOf(summary.proposed!.map((r) => `ls R ${r.path.path}`).join("\n")) },
+      ...listing,
+    ).summary;
+    expect(again).toMatchObject({ matched: 2, unexpected: 0 });
+  });
+
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
     const { summary } = marked(
       { rules: rulesOf('* W memfd:"m"\n* W ./gone') },
