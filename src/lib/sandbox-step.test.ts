@@ -189,6 +189,12 @@ function orderOf(mock: { mock: { invocationCallOrder: number[] } }): number {
   return first!;
 }
 
+// expected_filesystem_rules as readExpectedFilesystemRules gives them.
+function givenRules(text: string) {
+  const parsed = parseExpectedRules([{ text, origin: "input", firstLine: 1 }]);
+  return { expected: parsed.rules.length ? parsed : undefined, lines: parsed.lines };
+}
+
 describe("runSandboxStep", () => {
   it("applies config_file to the step's env before reading any input, and warns of what it ignored", async () => {
     mocks.applyConfigFile.mockReturnValue({
@@ -349,21 +355,23 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("runs as if rules all commented out were unset, and warns of them", async () => {
+  it("runs as if rules all commented out were unset, keeps their lines, and warns of them once", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
     mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
-    mocks.readExpectedFilesystemRules.mockReturnValue(
-      parseExpectedRules([{ text: "# node R ./a", origin: "input", firstLine: 1 }]),
-    );
+    mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("# node R ./a"));
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].rules).toBeUndefined();
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0]).toMatchObject({
+      rules: undefined,
+      givenLines: ["# node R ./a"],
+    });
+    // Once, for the one cause.
     expect(annotation.warning).toHaveBeenCalledWith(
       "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
     );
-    expect(annotation.warning).toHaveBeenCalledWith(
-      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    expect(annotation.warning).not.toHaveBeenCalledWith(
+      expect.stringContaining("fail_on_unexpected_file_access is true"),
     );
   });
 
@@ -602,9 +610,7 @@ describe("runSandboxStep", () => {
 
   it("points the restrict example to the proposed rules only where the artifact holds them and config_file works", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
-    mocks.readExpectedFilesystemRules.mockReturnValue(
-      parseExpectedRules([{ text: "node R ./a", origin: "input", firstLine: 1 }]),
-    );
+    mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("node R ./a"));
     const uploaded = () =>
       readAudit({ rulesFile: "rules.yml", upload: vi.fn(async () => ({ name: "audit" })) });
     const example = async (env: NodeJS.ProcessEnv, read: object = uploaded()) => {
@@ -628,9 +634,7 @@ describe("runSandboxStep", () => {
     const note = async (env: NodeJS.ProcessEnv, upload = false, rules = "node R ./a") => {
       mocks.reportStepTraffic.mockClear();
       mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload });
-      mocks.readExpectedFilesystemRules.mockReturnValue(
-        rules ? parseExpectedRules([{ text: rules, origin: "input", firstLine: 1 }]) : undefined,
-      );
+      mocks.readExpectedFilesystemRules.mockReturnValue(rules ? givenRules(rules) : undefined);
       await runSandboxStep(env, deps);
       return mocks.reportStepTraffic.mock.calls[0][0].omittedExampleNote;
     };
@@ -1151,14 +1155,12 @@ describe("runSandboxStep", () => {
 });
 
 describe("filesystemExampleInputs", () => {
-  const NO_RULES = { expectedFilesystemRules: undefined, failOnUnexpectedFileAccess: false };
+  const NO_RULES = { expectedRulesLines: [], failOnUnexpectedFileAccess: false };
   const given = {
     filesystemMode: "persistent" as const,
     writeThroughInput: "",
     filesystemAudit: "record" as const,
-    expectedFilesystemRules: parseExpectedRules([
-      { text: "# npm\nnode R ./a\n\nnode W ./b", origin: "input", firstLine: 1 },
-    ]),
+    expectedRulesLines: ["# npm", "node R ./a", "", "node W ./b"],
     failOnUnexpectedFileAccess: true,
   };
 
@@ -1172,8 +1174,13 @@ describe("filesystemExampleInputs", () => {
       "  node W ./b",
       "fail_on_unexpected_file_access: true",
     ]);
-    expect(filesystemExampleInputs({ ...given, expectedFilesystemRules: undefined })).toStrictEqual(
-      ["filesystem_audit: record", "fail_on_unexpected_file_access: true"],
+    expect(filesystemExampleInputs({ ...given, expectedRulesLines: [] })).toStrictEqual([
+      "filesystem_audit: record",
+      "fail_on_unexpected_file_access: true",
+    ]);
+    // Rules all commented out are kept, for the step to turn back on.
+    expect(filesystemExampleInputs({ ...given, expectedRulesLines: ["# node R ./a"] })).toContain(
+      "  # node R ./a",
     );
   });
 

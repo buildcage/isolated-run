@@ -32,25 +32,35 @@ export function ruleSources(value: string, config: ConfigValueOrigin | undefined
  *  offset config_file gives counts its lines. */
 export const EXPECTED_RULES_ENV = "INPUT_EXPECTED_FILESYSTEM_RULES";
 
+/** expected_filesystem_rules as the step was given them. */
+export interface GivenRules {
+  /** The rules to match, undefined where every line is a comment or blank,
+   *  which the step treats as unset. */
+  expected: ExpectedRules | undefined;
+  /** Every line as written, which the proposed rules and the restrict example
+   *  keep either way. */
+  lines: string[];
+}
+
 /**
  * expected_filesystem_rules, from the input's value once config_file joined
  * its own, each rule known by its line there. Undefined when neither holds a
- * line, and holding no rule where every line is a comment or blank, which the
- * step treats as unset. Throws on a line that is not a rule, and on rules for
- * a step that records nothing to match them against.
+ * line. Throws on a line that is not a rule, and on rules for a step that
+ * records nothing to match them against.
  */
 export function readExpectedFilesystemRules(
   value: string,
   config: ConfigValueOrigin | undefined,
   filesystemAudit: FilesystemAudit,
-): ExpectedRules | undefined {
+): GivenRules | undefined {
   const rules = parseExpectedRules(ruleSources(value, config));
   if (rules.lines.length === 0) return undefined;
-  if (rules.rules.length > 0 && filesystemAudit !== "record") {
+  if (rules.rules.length === 0) return { expected: undefined, lines: rules.lines };
+  if (filesystemAudit !== "record") {
     throw new SandboxError(
       `${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`,
       "INVALID_EXPECTED_FILESYSTEM_RULES",
     );
   }
-  return rules;
+  return { expected: rules, lines: rules.lines };
 }

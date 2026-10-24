@@ -80,6 +80,9 @@ export interface FilesystemAuditReportOptions {
   failClosed: boolean;
   /** expected_filesystem_rules, undefined when none were given. */
   rules?: ExpectedRules;
+  /** Every line expected_filesystem_rules was given, comments included, which
+   *  the proposed rules keep. */
+  givenLines?: string[];
   /** fail_on_unexpected_file_access: an access no rule takes fails the step. */
   failOnUnexpected?: boolean;
 }
@@ -265,6 +268,7 @@ export function readStepFilesystemAudit(
     actionRef,
     failClosed,
     rules,
+    givenLines = rules?.lines ?? [],
     failOnUnexpected = false,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
@@ -371,7 +375,7 @@ export function readStepFilesystemAudit(
     incomplete = checkIncomplete;
   }
   const proposed = prepared
-    ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
+    ? writeProposedRules(summary, givenLines, audit.rulesPath, annotation, deps.writeFile)
     : "none";
   const given = rules !== undefined;
   const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};

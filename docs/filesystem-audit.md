@@ -362,8 +362,9 @@ can be copied in:
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.
 - A line starting with `#` is a comment, and a blank line is skipped. A `#` anywhere else is part
-  of the field it is in, as a path may hold one. Rules that are all comments and blank lines, as
-  when every rule is commented out, count as unset, with a warning.
+  of the field it is in, as a path may hold one. A value holding only comments and blank lines,
+  as when every rule is commented out, counts as unset, with a warning; the proposed rules and the
+  restrict example keep its lines.
 
 An access that only ever failed is unexpected once it succeeds, and one the sandbox refused is
 unexpected unless a rule names the refusal. The step fails before the command runs on a line that is

@@ -297,8 +297,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     configFile?.origins.get(EXPECTED_RULES_INPUT),
     filesystemAudit,
   );
-  // Rules all commented out are none: the step runs as if they were unset.
-  const expectedFilesystemRules = givenRules?.rules.length ? givenRules : undefined;
+  const expectedFilesystemRules = givenRules?.expected;
+  const expectedRulesLines = givenRules?.lines ?? [];
   const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
   // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
@@ -319,8 +319,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     annotation.warning(
       "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
     );
-  }
-  if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
+  } else if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
     annotation.warning(
       "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
     );
@@ -356,6 +355,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     filesystemAudit,
     filesystemAuditArtifact,
     expectedFilesystemRules,
+    expectedRulesLines,
     failOnUnexpectedFileAccess,
     failOnCaResidue,
     failOnBlocked,
@@ -435,14 +435,14 @@ export function filesystemExampleInputs(
     filesystemMode,
     writeThroughInput,
     filesystemAudit,
-    expectedFilesystemRules,
+    expectedRulesLines,
     failOnUnexpectedFileAccess,
   }: Pick<
     StepInputs,
     | "filesystemMode"
     | "writeThroughInput"
     | "filesystemAudit"
-    | "expectedFilesystemRules"
+    | "expectedRulesLines"
     | "failOnUnexpectedFileAccess"
   >,
   rulesFile?: string,
@@ -452,15 +452,15 @@ export function filesystemExampleInputs(
   const paths = splitWriteThroughInput(writeThroughInput);
   if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
   if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
-  if (rulesFile && expectedFilesystemRules)
+  if (rulesFile && expectedRulesLines.length)
     lines.push(
       `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
       `config_file: ${RULES_FILE_EXAMPLE}`,
     );
-  else if (expectedFilesystemRules)
+  else if (expectedRulesLines.length)
     lines.push(
       `${EXPECTED_RULES_INPUT}: |`,
-      ...expectedFilesystemRules.lines.map((line) => (line ? `  ${line}` : "")),
+      ...expectedRulesLines.map((line) => (line ? `  ${line}` : "")),
     );
   if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
   return lines;
@@ -553,6 +553,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     actionRef: reportActionRef,
     failClosed: proxyMode !== "audit" && failOnBlocked,
     rules: inputs.expectedFilesystemRules,
+    givenLines: inputs.expectedRulesLines,
     failOnUnexpected: inputs.failOnUnexpectedFileAccess,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
@@ -583,7 +584,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
       ),
     ],
     omittedExampleNote:
-      inputs.expectedFilesystemRules &&
+      inputs.expectedRulesLines.length &&
       !inputs.filesystemAuditArtifact.upload &&
       configFileAllowed(env)
         ? EXAMPLE_RULES_FILE_NOTE
