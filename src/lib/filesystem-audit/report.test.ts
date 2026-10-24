@@ -302,7 +302,7 @@ describe("readStepFilesystemAudit", () => {
       await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
 
       expect(note.error).toHaveBeenCalledWith(
-        "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
+        "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal: or filesystem-audit: read loss counters:",
       );
       expect(process.exitCode).toBe(1);
       expect(summaries[0]).toContain("This record is incomplete");

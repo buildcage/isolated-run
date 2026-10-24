@@ -365,7 +365,7 @@ export function readStepFilesystemAudit(
   // finish its record when stopped. Only the banner would say so otherwise.
   if (attached && !ended && !cancelled) {
     annotation.error(
-      "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:",
+      "The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal: or filesystem-audit: read loss counters:",
     );
     process.exitCode = 1;
     incomplete = checkIncomplete;

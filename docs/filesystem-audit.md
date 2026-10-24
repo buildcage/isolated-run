@@ -319,12 +319,12 @@ expected_filesystem_rules: |
    file, add the file's keys to it. A config file cannot be used on `pull_request_target`, nor on a
    `workflow_run` a pull request started, so there the rules have to be in the workflow.
 
-A run with rules writes the file too: the rules given, as they were written, then, under a
-`# Not matched in this run` line, a rule for each access they did not take. Only those accesses
-count toward a fold, so no `dir/**` row comes of paths your own rules already take. A new `dir/**`
-that covers one of your narrower rules is left beside it: the file's diff shows both, and you decide
-which to keep. The heading of a file proposed before is left out of the rules given, so it never
-ends up over rules a later run matched.
+A run with rules writes the file too: the rules given, each line trimmed, then, under a
+`# Not matched in this run` line, a rule for each access they did not take; with none left, the
+file holds only the rules given. Only those accesses count toward a fold, so no `dir/**` row comes
+of paths your own rules already take. A new `dir/**` that covers one of your narrower rules is left
+beside it: the file's diff shows both, and you decide which to keep. The heading of a file proposed
+before is left out of the rules given, so it never ends up over rules a later run matched.
 
 The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
 Where that run's artifact holds the file, the example names it in `config_file` at
@@ -414,7 +414,8 @@ The summary can also open with a warning, or be missing:
   too. The record has no [end line](#the-end-line): the tracer exited before the step ended, or did
   not finish the record when the step stopped it. A reason the tracer gave is in the step log on a
   `filesystem-audit: fatal:` line, such as one ending in `no space left on device` once the step
-  filled the disk. A cancelled step does not add this error.
+  filled the disk, or on a `filesystem-audit: read loss counters:` line when it could not count
+  what it lost. A cancelled step does not add this error.
 - **❗ The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so
   some accesses may be missing; see [Skipped hooks](#skipped-hooks).
 - **❗ The recording could not be read**, with a `Failed to read the filesystem audit recording`
@@ -500,7 +501,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `name`       | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
 | `to_name`    | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
 | `access`     | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
-| `flags`      | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` even on a plain read-only open                                                                                                       |
+| `flags`      | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` on an open that reached its file; absent on a failed one that asked for none                                                         |
 | `mode`       | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
 | `owner`      | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
 | `failed`     | a failed operation                                              | `true`                                                                                                                                                                                                     |
@@ -554,7 +555,7 @@ nor is a failed `exec`, though the file it opened before failing can show as an 
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                                                                                                                                                                | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`. One across mounts, such as from `$HOME` into the workspace, fails (`EXDEV`). A refused one marks `to` refused, except on `EPERM`, which marks `path`, as `EPERM` mostly comes from `protected_hardlinks` refusing a file the step does not own and cannot both read and write | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                                                                                                                                                           | `A`                                                          |
-| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                                      | a kill only: `!` in the details                              |
+| `syscall`                               | a system call the sandbox's seccomp profile refused, once per program a process runs, unless recorded as a failed path change; or a 32-bit one seccomp killed the program for                                                                                                                                       | a kill only: `!` in the details                              |
 | `end`                                   | the last line; see below                                                                                                                                                                                                                                                                                            | none                                                         |
 
 ### Access letters
@@ -673,11 +674,12 @@ not quoted inside brackets, as they mark where it ends.
 ### Refused system calls
 
 A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
-or `unshare`, which fails with `EPERM`. The artifact records each once per program as a `syscall`
-line; the summary leaves it out, since many programs try a system call and carry on without it, as
-Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it either way. A
-program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step fails with
-`EPERM`, set `upload_filesystem_audit_artifact: true` and look for a `syscall` line in the artifact.
+or `unshare`, which fails with `EPERM`. The artifact records each once per program a process runs,
+as a `syscall` line; the summary leaves it out, since many programs try a system call and carry on
+without it, as Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it
+either way. A program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step
+fails with `EPERM`, set `upload_filesystem_audit_artifact: true` and look for a `syscall` line in
+the artifact.
 
 - One already recorded as a failed change to a path is not repeated.
 - One the profile allows only for some arguments, as `clone`, is not recorded even when refused,
@@ -746,4 +748,7 @@ itself can do to the record, and what the record can be trusted for.
   once it holds more than 200,000 paths after folding, counting every directory on the way and each
   row that never folds, such as a program run, and each program's tree apart in the table, each
   command's in the details. When the table is left out, the details go with it. The Unexpected
-  Accesses table and the proposed rules count the same way.
+  Accesses table and the proposed rules count paths the same way, but do not fold more past
+  300 KB.
+- **Many libraries.** Once the step's processes have loaded 200,000 files between them, each
+  process's counted apart, a library loaded after that shows as a read.
