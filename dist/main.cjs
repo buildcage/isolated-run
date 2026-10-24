@@ -72421,9 +72421,9 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, unnumbered = (path) => path.replace(PROC_NUMBERS, (m) => m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>");
-function normalize$2(path) {
-	return unnumbered(path.replace(/^\.\//, ""));
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, unnumbered = (path, self) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => threadSelf ? "/proc/self/task/<tid>" : `/proc/${proc === "self" || self !== void 0 && proc === String(self) ? "self" : "<pid>"}${task ? "/task/<tid>" : ""}`);
+function normalize$2(path, self) {
+	return unnumbered(path.replace(/^\.\//, ""), self);
 }
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
@@ -72555,7 +72555,7 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
-const procByNumber = (name) => unnumbered(name) !== name, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? new RegExp(pattern.source.replace("^\\/proc\\/<pid>", "^\\/proc\\/(?:<pid>|self)")) : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72582,11 +72582,11 @@ function parseExpectedRules(sources) {
 			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
 			return pattern;
 		};
-		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`);
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : glob(program),
-			path: glob(path),
+			path: anyProcess(path, glob(path)),
 			...accessBits(access)
 		});
 	});
@@ -73373,6 +73373,7 @@ function createAuditSummary(prefixes) {
 		"/tmp",
 		"/proc",
 		"/proc/<pid>",
+		"/proc/self",
 		...shownPrefixes.workspace,
 		...shownPrefixes.home
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
@@ -73445,11 +73446,11 @@ function createAuditSummary(prefixes) {
 			program: programOf(r.pid, comm),
 			cmd: commandKey(r.pid, before ?? comm)
 		};
-	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}, nsPids = new Map(), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
-		if (r.kind === "fork") {
+		if ((r.kind === "fork" || r.kind === "exec") && r.nspid && nsPids.set(r.pid, r.nspid), r.kind === "fork") {
 			programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
 			let runName = runNames.get(r.ppid);
 			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
@@ -73477,7 +73478,7 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = tally && r.kind === "exec" ? runnerOf(r) : void 0;
 		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
+			let p = normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 			let run = escaped(p), runs = executed.get(run);
 			runs === void 0 ? executedBytes <= limit && (executed.set(run, 1), executedBytes += relLength(run) + 11) : executed.set(run, runs + 1);
@@ -73488,7 +73489,7 @@ function createAuditSummary(prefixes) {
 				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
-					path: escaped(normalize$2(path)),
+					path: escaped(normalize$2(path, nsPids.get(r.pid))),
 					bit: bitsOf(c.letter),
 					failed: c.failed,
 					perm: c.perm,
