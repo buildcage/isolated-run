@@ -187,7 +187,7 @@ describe("readStepFilesystemAudit", () => {
     // Below them, not under the heading.
     expect(summaries[0]).toContain(
       "</details>\n\n<sub>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
-        "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
+        "the full record is in the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) · " +
         "[how to read this](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#reading-the-summary)</sub>",
     );
     // The stripped copy is written to the step's own directory and uploaded;
@@ -390,7 +390,7 @@ describe("readStepFilesystemAudit", () => {
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
       Array(3).fill(
         "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
-          "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+          "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
       ),
     );
     expect(blocks.find((b) => b.cut === "keep")?.notice).toBeUndefined();
@@ -579,9 +579,9 @@ describe("readStepFilesystemAudit", () => {
 
     expect(notes).toEqual([
       "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
-        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+        "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
       "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
-        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+        "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
     ]);
   });
 
@@ -1002,7 +1002,7 @@ describe("readStepFilesystemAudit", () => {
     expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
     const text = joinSummaryBlocks(read.blocks(undefined, read.expected, "build"));
     expect(text).toContain(
-      "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact",
+      "the full record is in the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`)",
     );
     expect(uploads).toEqual([]);
 
@@ -1404,7 +1404,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(summaries[0]).toContain("No rules were proposed, as no file access was recorded.");
   });
 
-  it("links the artifact's page where the upload gave one", async () => {
+  it("links the artifact's page, in the note and the legend, where the upload gave one", async () => {
     const { deps: d, summaries } = deps({
       raw,
       uploadArtifact: async () => ({
@@ -1419,6 +1419,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       "`expected-filesystem-rules.yml` in this run's " +
         "[filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) " +
         "holds a rule for each access this run made.",
+    );
+    expect(summaries[0]).toContain(
+      "the full record is in the [filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) · ",
     );
   });
 

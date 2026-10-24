@@ -333,6 +333,10 @@ export function unreadableSummaryBlocks(title: string): SummaryBlock[] {
 /** The artifact the summary points the reader to, or why there is none. */
 export type RecordArtifact = UploadedArtifact | "not-requested" | "upload-failed";
 
+// Its page where the upload gave one; its name, which carries the step's id, only where not.
+const artifactLink = ({ name, url }: UploadedArtifact): string =>
+  url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
+
 /**
  * The folded note on the proposed rules: where the file is, or why there is
  * none, and how to use one.
@@ -359,10 +363,7 @@ export function rulesNote(
   else if (rules === "write-failed") where = "The proposed rules could not be written.";
   else if (rules === "none") where = "No rules were proposed, as no file access was recorded.";
   else {
-    const name = artifact.url
-      ? `[filesystem audit artifact](${artifact.url})`
-      : `filesystem audit artifact (\`${artifact.name}\`)`;
-    where = `${file} in this run's ${name} holds ${holds}.`;
+    where = `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`;
   }
   return (
     "<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
@@ -392,7 +393,7 @@ export function filesystemLegendNote(artifact: RecordArtifact, guideUrl: string)
       ? "set `upload_filesystem_audit_artifact: true` for the full record"
       : artifact === "upload-failed"
         ? "the full record could not be uploaded"
-        : `the full record is in the \`${artifact.name}\` artifact`;
+        : `the full record is in the ${artifactLink(artifact)}`;
   return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 
@@ -410,7 +411,7 @@ export function filesystemTruncationNote(
       ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact"
       : artifact === "upload-failed"
         ? "the recording could not be uploaded as an artifact, so the rest is not kept"
-        : `the ${artifact.name} artifact uploaded for this run has every access`;
+        : `the ${artifactLink(artifact)} uploaded for this run has every access`;
   const why =
     cause === "paths"
       ? "the filesystem audit touched too many distinct paths to summarize"
