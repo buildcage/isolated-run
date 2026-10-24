@@ -195,6 +195,12 @@ function givenRules(text: string) {
   return { expected: parsed.rules.length ? parsed : undefined, lines: parsed.lines };
 }
 
+// The same, as the step's inputs hold them.
+function stepRules(text: string) {
+  const { expected, lines } = givenRules(text);
+  return { expectedFilesystemRules: expected, expectedRulesLines: lines };
+}
+
 describe("runSandboxStep", () => {
   it("applies config_file to the step's env before reading any input, and warns of what it ignored", async () => {
     mocks.applyConfigFile.mockReturnValue({
@@ -368,7 +374,7 @@ describe("runSandboxStep", () => {
     });
     // Once, for the one cause.
     expect(annotation.warning).toHaveBeenCalledWith(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set, and fail_on_unexpected_file_access cannot fail it.",
     );
     expect(annotation.warning).not.toHaveBeenCalledWith(
       expect.stringContaining("fail_on_unexpected_file_access is true"),
@@ -643,6 +649,7 @@ describe("runSandboxStep", () => {
     expect(await note(ENV, true)).toBeUndefined();
     expect(await note({ ...ENV, GITHUB_EVENT_NAME: "workflow_run" })).toBeUndefined();
     expect(await note(ENV, false, "")).toBeUndefined();
+    expect(await note(ENV, false, "# node R ./a")).toBeUndefined();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {
@@ -1155,12 +1162,16 @@ describe("runSandboxStep", () => {
 });
 
 describe("filesystemExampleInputs", () => {
-  const NO_RULES = { expectedRulesLines: [], failOnUnexpectedFileAccess: false };
+  const NO_RULES = {
+    expectedFilesystemRules: undefined,
+    expectedRulesLines: [],
+    failOnUnexpectedFileAccess: false,
+  };
   const given = {
     filesystemMode: "persistent" as const,
     writeThroughInput: "",
     filesystemAudit: "record" as const,
-    expectedRulesLines: ["# npm", "node R ./a", "", "node W ./b"],
+    ...stepRules("# npm\nnode R ./a\n\nnode W ./b"),
     failOnUnexpectedFileAccess: true,
   };
 
@@ -1174,14 +1185,21 @@ describe("filesystemExampleInputs", () => {
       "  node W ./b",
       "fail_on_unexpected_file_access: true",
     ]);
-    expect(filesystemExampleInputs({ ...given, expectedRulesLines: [] })).toStrictEqual([
+    expect(filesystemExampleInputs({ ...given, ...stepRules("") })).toStrictEqual([
       "filesystem_audit: record",
       "fail_on_unexpected_file_access: true",
     ]);
-    // Rules all commented out are kept, for the step to turn back on.
-    expect(filesystemExampleInputs({ ...given, expectedRulesLines: ["# node R ./a"] })).toContain(
-      "  # node R ./a",
-    );
+    // Rules all commented out are kept, for the step to turn back on, and
+    // never point to the proposed file, which would turn on every access.
+    for (const rulesFile of [undefined, "rules.yml"])
+      expect(
+        filesystemExampleInputs({ ...given, ...stepRules("# node R ./a") }, rulesFile),
+      ).toStrictEqual([
+        "filesystem_audit: record",
+        "expected_filesystem_rules: |",
+        "  # node R ./a",
+        "fail_on_unexpected_file_access: true",
+      ]);
   });
 
   it("points config_file to this run's proposed rules when the artifact holds them", () => {

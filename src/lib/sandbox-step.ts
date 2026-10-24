@@ -317,7 +317,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   }
   if (givenRules && !expectedFilesystemRules) {
     annotation.warning(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+      `expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set${failOnUnexpectedFileAccess ? ", and fail_on_unexpected_file_access cannot fail it" : ""}.`,
     );
   } else if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
     annotation.warning(
@@ -435,6 +435,7 @@ export function filesystemExampleInputs(
     filesystemMode,
     writeThroughInput,
     filesystemAudit,
+    expectedFilesystemRules,
     expectedRulesLines,
     failOnUnexpectedFileAccess,
   }: Pick<
@@ -442,6 +443,7 @@ export function filesystemExampleInputs(
     | "filesystemMode"
     | "writeThroughInput"
     | "filesystemAudit"
+    | "expectedFilesystemRules"
     | "expectedRulesLines"
     | "failOnUnexpectedFileAccess"
   >,
@@ -452,7 +454,9 @@ export function filesystemExampleInputs(
   const paths = splitWriteThroughInput(writeThroughInput);
   if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
   if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
-  if (rulesFile && expectedRulesLines.length)
+  // Rules all commented out stay as written: the proposed file would turn on
+  // a rule for every access.
+  if (rulesFile && expectedFilesystemRules)
     lines.push(
       `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
       `config_file: ${RULES_FILE_EXAMPLE}`,
@@ -584,7 +588,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
       ),
     ],
     omittedExampleNote:
-      inputs.expectedRulesLines.length &&
+      inputs.expectedFilesystemRules &&
       !inputs.filesystemAuditArtifact.upload &&
       configFileAllowed(env)
         ? EXAMPLE_RULES_FILE_NOTE
