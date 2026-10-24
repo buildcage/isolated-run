@@ -512,7 +512,7 @@ jobs:
       - name: Use the proposed rules as the config file
         if: matrix.enforcement
         run: |
-          cp "$RUNNER_TEMP"/rules/filesystem-audit-expected-rules-*.yml e2e-config/expected-rules.yml
+          cp "$RUNNER_TEMP"/rules/expected-filesystem-rules.yml e2e-config/expected-rules.yml
           cat e2e-config/expected-rules.yml
 
       - name: Run the same command with the proposed rules

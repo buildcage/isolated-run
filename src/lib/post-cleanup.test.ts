@@ -31,19 +31,19 @@ function deps(overrides: PostCleanupDeps = {}): {
   removed: { dir: string; ephemeralRoots?: string[] }[];
   released: string[];
   killed: number[];
-  removedFiles: string[];
+  removedPaths: string[];
   removedRunnerFiles: string[];
 } {
   const removed: { dir: string; ephemeralRoots?: string[] }[] = [];
   const released: string[] = [];
   const killed: number[] = [];
-  const removedFiles: string[] = [];
+  const removedPaths: string[] = [];
   const removedRunnerFiles: string[] = [];
   return {
     removed,
     released,
     killed,
-    removedFiles,
+    removedPaths,
     removedRunnerFiles,
     deps: {
       readOwner: () => OWNER,
@@ -57,7 +57,7 @@ function deps(overrides: PostCleanupDeps = {}): {
       // The pidfile holds the pid; /proc/<pid>/comm identifies it as the tracer.
       readFile: (p) => (p === AUDIT.pidFilePath ? "4321\n" : "filesystem-audi\n"),
       killTracer: (pid) => killed.push(pid),
-      removeFile: (p) => removedFiles.push(p),
+      removePath: (p) => removedPaths.push(p),
       removeRunnerFilesDir: (dir) => removedRunnerFiles.push(dir),
       ...overrides,
     },
@@ -235,19 +235,19 @@ describe("planPostCleanup", () => {
   });
 
   it("stops a tracer a cancel orphaned and removes its files", () => {
-    const { deps: d, killed, removedFiles } = deps({ fileExists: () => true });
+    const { deps: d, killed, removedPaths } = deps({ fileExists: () => true });
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(killed).toStrictEqual([4321]);
-    expect(removedFiles).toStrictEqual(expect.arrayContaining([AUDIT.pidFilePath, AUDIT.outPath]));
+    expect(removedPaths).toStrictEqual(expect.arrayContaining([AUDIT.pidFilePath, AUDIT.outPath]));
   });
 
   it("does not signal a pid that is no longer the tracer", () => {
     const {
       deps: d,
       killed,
-      removedFiles,
+      removedPaths,
     } = deps({
       fileExists: () => true,
       // The pid is gone (or reused), so /proc/<pid>/comm no longer reads ours.
@@ -260,14 +260,14 @@ describe("planPostCleanup", () => {
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(killed).toStrictEqual([]);
-    expect(removedFiles).toContain(AUDIT.pidFilePath);
+    expect(removedPaths).toContain(AUDIT.pidFilePath);
   });
 
   it("keeps reclaiming the scratch dir when the audit cleanup throws", () => {
     const note = annotation();
     const { deps: d, released } = deps({
       fileExists: () => true,
-      removeFile: () => {
+      removePath: () => {
         throw new Error("EBUSY");
       },
     });
@@ -281,12 +281,12 @@ describe("planPostCleanup", () => {
   });
 
   it("only clears the audit output when the tracer was already stopped", () => {
-    const { deps: d, killed, removedFiles } = deps();
+    const { deps: d, killed, removedPaths } = deps();
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(killed).toStrictEqual([]);
-    expect(removedFiles).toStrictEqual([AUDIT.outPath, AUDIT.stepPath, AUDIT.rulesPath]);
+    expect(removedPaths).toStrictEqual([AUDIT.outPath, AUDIT.uploadDir]);
   });
 
   it("warns but carries on when a pidfile holds no usable pid", () => {
@@ -301,7 +301,7 @@ describe("planPostCleanup", () => {
 
   it("warns and still removes the files when stopping the tracer fails", () => {
     const note = annotation();
-    const { deps: d, removedFiles } = deps({
+    const { deps: d, removedPaths } = deps({
       fileExists: () => true,
       killTracer: () => {
         throw new Error("no such process");
@@ -313,7 +313,7 @@ describe("planPostCleanup", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "run post-cleanup: failed to stop the file-audit tracer: no such process",
     );
-    expect(removedFiles).toStrictEqual(expect.arrayContaining([AUDIT.pidFilePath, AUDIT.outPath]));
+    expect(removedPaths).toStrictEqual(expect.arrayContaining([AUDIT.pidFilePath, AUDIT.outPath]));
   });
 
   // cleanupScratchDir has its own warning to report (a mount it could not

@@ -1,6 +1,7 @@
 import {
   appendFileSync,
   closeSync,
+  mkdirSync,
   openSync,
   readFileSync,
   readSync,
@@ -87,6 +88,7 @@ export interface FilesystemAuditReportDeps {
   readLines: typeof readLines;
   createSummary: typeof createAuditSummary;
   openWriter: typeof openWriter;
+  makeDir: (path: string) => void;
   readFile: (path: string) => string;
   realpath: (path: string) => string;
   renderBlocks: typeof renderAuditSummaryBlocks;
@@ -168,6 +170,7 @@ const realDeps: FilesystemAuditReportDeps = {
   readLines,
   createSummary: createAuditSummary,
   openWriter,
+  makeDir: (path) => mkdirSync(path, { mode: 0o700 }),
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: (path) => realpathSync(path),
   renderBlocks: renderAuditSummaryBlocks,
@@ -298,7 +301,7 @@ export function readStepFilesystemAudit(
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     propose: upload,
   };
-  // The stripped copy goes beside the recording under the scratch base,
+  // The stripped copy goes in the step's own directory under the scratch base,
   // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
   // new file leaves the root-owned recording in place, so a failed write
   // never uploads the raw. The post step removes both.
@@ -483,7 +486,10 @@ function reduce(
   };
   const openSink = (): ((line: string) => void) => {
     try {
-      if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
+      if (cleanPath !== undefined) {
+        deps.makeDir(dirname(cleanPath));
+        writer = deps.openWriter(cleanPath);
+      }
     } catch (e) {
       dropCopy(e);
     }

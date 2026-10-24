@@ -83,7 +83,7 @@ warns and ignores it.
 `writable`, so the policy can sit beside the code that needs it:
 
 ```yaml
-# ci/buildcage.yml
+# path/to/buildcage-config.yml
 proxy_engine: inspect
 allowed_url_rules: |
   GET https://registry.npmjs.org/**
@@ -95,7 +95,7 @@ known_blocked_rules: |
 - uses: actions/checkout@<sha>
 - uses: buildcage/isolated-run@<sha>
   with:
-    config_file: ci/buildcage.yml
+    config_file: path/to/buildcage-config.yml
     run: npm ci
 ```
 
@@ -802,7 +802,7 @@ short form.
   inputs are. With it, the section lists only the accesses outside the rules, the verdict counts
   them, and a warning names them; `fail_on_unexpected_file_access: true` fails the step instead.
   The artifact marks each line with the rule that took it or as unexpected, and holds
-  `filesystem-audit-expected-rules-<id>.yml`, a config file of proposed rules. See
+  `expected-filesystem-rules.yml`, a config file of proposed rules. See
   [Expected accesses](./filesystem-audit.md#expected-accesses).
 
 ## CA trust variables

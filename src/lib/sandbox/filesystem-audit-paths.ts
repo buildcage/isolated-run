@@ -6,6 +6,8 @@ import { join } from "node:path";
 export interface FilesystemAuditPaths {
   outPath: string;
   pidFilePath: string;
+  /** The step's own directory, uploaded as is, so the files in it need no suffix. */
+  uploadDir: string;
   /** The recording with buildcage's own records stripped, as uploaded. */
   stepPath: string;
   /** The proposed expected_filesystem_rules, uploaded beside it. */
@@ -17,11 +19,13 @@ export function filesystemAuditPaths(
   scratchBase: string,
 ): FilesystemAuditPaths {
   const suffix = containerName.split("-").at(-1);
+  const uploadDir = join(scratchBase, `filesystem-audit-${suffix}`);
   return {
     outPath: join(scratchBase, `filesystem-audit-${suffix}.jsonl`),
     pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
-    stepPath: join(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
-    rulesPath: join(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`),
+    uploadDir,
+    stepPath: join(uploadDir, "filesystem-audit.jsonl"),
+    rulesPath: join(uploadDir, "expected-filesystem-rules.yml"),
   };
 }
 

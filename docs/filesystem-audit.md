@@ -110,13 +110,13 @@ A shortened example:
 ```
 ## Filesystem Activity Report
 
-### Executed Programs
+### ⚙️ Executed Programs
 | Path                  | Count |
 | --------------------- | ----: |
 | `/usr/local/bin/node` |     1 |
 | `/usr/bin/dash`       |    12 |
 
-▶ Accessed Paths (4)
+▶ 📂 Accessed Paths (4)
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path                  |
 | --------------------- | ------ | --------------------- |
@@ -265,7 +265,7 @@ then shows only what falls outside it:
 ```
 ## Filesystem Activity Report
 
-### Unexpected Accesses (1)
+### ⚠️ Unexpected Accesses (1)
 1,204 recorded operations matched `expected_filesystem_rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path        |
@@ -284,7 +284,7 @@ The rules only change what the summary shows: like the audit itself, they never 
 ### Getting the rules
 
 With `upload_filesystem_audit_artifact: true`, the artifact also holds
-`filesystem-audit-expected-rules-<id>.yml`, a [config file](./reference.md#config-file) with a rule
+`expected-filesystem-rules.yml`, a [config file](./reference.md#config-file) with a rule
 for each access the run made, folded as the accessed paths are:
 
 ```yaml
@@ -307,7 +307,7 @@ expected_filesystem_rules: |
    ```yaml
    - uses: buildcage/isolated-run@<sha>
      with:
-       config_file: ci/expected-filesystem-rules.yml
+       config_file: path/to/buildcage-config.yml
        run: npm ci
    ```
 
@@ -324,7 +324,7 @@ ends up over rules a later run matched.
 
 The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
 Where that run's artifact holds the file, the example names it in `config_file` at
-`ci/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
+`path/to/buildcage-config.yml`, for you to commit there; on `pull_request_target` or
 `workflow_run`, or without the file, it lists the rules given under `with:`. It adds
 `fail_on_unexpected_file_access: true` when the step set it. When the listed rules make the example
 too large to print and the step did not upload its record, the summary says that
@@ -445,7 +445,7 @@ offers that mode.
 ## The artifact
 
 With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
-holds `filesystem-audit-<id>.step.jsonl`, and the proposed rules of
+holds `filesystem-audit.jsonl`, and the proposed rules of
 [Expected accesses](#expected-accesses) beside it. The record is one JSON object per line, in the order the
 tracer caught the accesses. Opens and path changes are written when their call returns, so lines
 from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
