@@ -72794,7 +72794,7 @@ ${intro}\n\n` + (steps ? useSteps(where, fileName) : `${where}\n\n`) + `[How to 
 `;
 }
 function useSteps(where, fileName) {
-	return `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
+	return `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
 
 \`\`\`yaml
 filesystem_audit: record
@@ -73625,10 +73625,7 @@ const realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
-	makeDir: (path) => (0, node_fs.mkdirSync)(path, {
-		recursive: !0,
-		mode: 448
-	}),
+	makeDir: (path) => (0, node_fs.mkdirSync)(path, { mode: 448 }),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	renderBlocks: renderAuditSummaryBlocks,
