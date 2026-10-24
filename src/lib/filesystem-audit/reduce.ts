@@ -8,7 +8,7 @@
 
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
+import { fmtFlags, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
@@ -309,17 +309,30 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // it is, before anything folds: each program by the first rank of its rule's
   // name, each path unmarked. Either shows deleted only where every access was.
   const ruleRanks = new Map<string, number>();
+  const ruleIds = new Map<number, number>();
   const liveRanks = new Map<number, number>();
-  const deletedPaths = new Set<string>();
-  const livePaths = new Set<string>();
-  const takeForRules = (x: Access, by: number): void => {
-    let id = ruleRanks.get(ranks[by].ruleName);
-    if (id === undefined) ruleRanks.set(ranks[by].ruleName, (id = by));
-    if (!ranks[by].shown.deleted) liveRanks.set(id, by);
+  // Whether every access of a rule's program and path was to a deleted file.
+  const deletedOnly = new Map<string, boolean>();
+  const takeForRules = (x: Access, parts: string[], by: number): void => {
+    let id = ruleIds.get(by);
+    if (id === undefined) {
+      id = ruleRanks.get(ranks[by].ruleName) ?? by;
+      ruleRanks.set(ranks[by].ruleName, id);
+      ruleIds.set(by, id);
+      if (!ranks[by].shown.deleted) liveRanks.set(id, by);
+    }
     const path = x.path.startsWith(MEMFD) ? x.path : unmarked(x.path);
     // Past the tally's limit, only the matching is left to do.
-    if (!tally!.givenUp) (path === x.path ? livePaths : deletedPaths).add(keyOf(String(id), path));
-    tally!.take({ ...x, path }, components(path), id);
+    if (!tally!.givenUp) {
+      const key = keyOf(String(id), path);
+      if (path === x.path) deletedOnly.set(key, false);
+      else if (!deletedOnly.has(key)) deletedOnly.set(key, true);
+    }
+    tally!.take(
+      path === x.path ? x : { ...x, path },
+      path === x.path ? parts : components(path),
+      id,
+    );
   };
   let ended = false;
   let lost = false;
@@ -427,7 +440,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (tally) takeForRules(x, runBy ?? program);
+      if (tally) takeForRules(x, parts, runBy ?? program);
     }
     return tally?.endLine();
   };
@@ -457,16 +470,27 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return relativize(unmarked(path), shownPrefixes);
   }
 
+  // One row per rule: lines the tree keeps apart but the summary spells
+  // alike, as a relative name and a "…/" walk, are one rule too.
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {
-    return tally.finish()?.map(({ rank, path, agg }) => {
-      const key = keyOf(String(rank), path);
-      const deleted = deletedPaths.has(key) && !livePaths.has(key);
-      return {
-        program: ranks[liveRanks.get(rank) ?? rank].shown,
-        flags: fmtFlags(agg),
-        path: shown(deleted ? path + DELETED : path),
-      };
-    });
+    const lines = tally.finish();
+    if (!lines) return undefined;
+    const rows = new Map<string, { rank: number; path: string; agg: Agg; deleted: boolean }>();
+    for (const { rank, path, agg } of lines) {
+      const deleted = deletedOnly.get(keyOf(String(rank), path)) ?? false;
+      const key = keyOf(ranks[rank].ruleName, ruleName(path));
+      const row = rows.get(key);
+      if (!row) rows.set(key, { rank, path, agg, deleted });
+      else {
+        mergeAgg(row.agg, agg);
+        row.deleted &&= deleted;
+      }
+    }
+    return [...rows.values()].map(({ rank, path, agg, deleted }) => ({
+      program: ranks[liveRanks.get(rank) ?? rank].shown,
+      flags: fmtFlags(agg),
+      path: shown(deleted ? path + DELETED : path),
+    }));
   }
 
   type Line = { comm: string; path: string; agg: Agg };

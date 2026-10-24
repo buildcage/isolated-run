@@ -1533,6 +1533,16 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(new Set(added).size).toBe(added.length);
   });
 
+  it("proposes one rule for lines the summary spells alike", () => {
+    const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
+    const { summary } = marked(
+      { propose: true },
+      { ...missing, path: "x" },
+      { ...missing, path: "…/x" },
+    );
+    expect(rows(summary)).toStrictEqual(["cat r …/x"]);
+  });
+
   it("shows a proposed row not deleted where any access was not", () => {
     const { summary } = marked(
       { propose: true },
