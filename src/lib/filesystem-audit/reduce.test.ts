@@ -1764,6 +1764,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     const by = (path: string) => summary.proposed!.find((r) => r.path.path === path)?.commands;
     expect(by("/usr/bin/curl")).toStrictEqual(["bash"]);
+    expect(rows(summary)).toContain("/bin/bash X /usr/bin/curl");
     expect(by("/usr/bin/env")).toStrictEqual(["env"]);
     expect(rows(summary)).toContain("sh W ./x");
   });

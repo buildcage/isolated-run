@@ -27,14 +27,14 @@ export class RuleTally {
     private readonly names: RuleNames,
   ) {}
 
-  /** An access of the current line, by the program of rank `by`. Returns the
-   *  actions no rule took. */
-  take(x: Access, parts: string[], by: number): number {
+  /** An access of the current line, by the program of rank `by` and command
+   *  `cmd`, under `path`. Returns the actions no rule took. */
+  take(x: Access, parts: string[], by: number, path: string, cmd: string): number {
     let bit = x.bit;
     if (this.rules) {
       const m = this.rules.match(
         this.names.program(by),
-        this.names.path(x.path),
+        this.names.path(path),
         bit,
         x.failed,
         x.perm,
@@ -43,7 +43,7 @@ export class RuleTally {
       if (bit) this.mark = { unexpected: true };
       else this.mark ??= { rule: m.ref! };
     }
-    this.lines.add({ ...x, comm: String(by), bit }, parts);
+    this.lines.add({ ...x, comm: String(by), path, bit, cmd }, parts);
     return bit;
   }
 
