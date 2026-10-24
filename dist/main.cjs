@@ -72790,12 +72790,12 @@ function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
 	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `This run's ${file} was lost, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`, `<details>
 <summary>📝 Expected filesystem rules</summary>
 
-${intro}\n\n${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr write the rules in the workflow:
+${intro}\n\n${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
 
 \`\`\`yaml
 filesystem_audit: record
 upload_filesystem_audit_artifact: true
-${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
+${EXPECTED_RULES_INPUT}: |\n  # The reviewed rules from ${fileName}, such as:\n  /usr/local/bin/node  RWD  ./node_modules/**
   /usr/local/bin/node  R    ~/.npmrc
 \`\`\`
 
