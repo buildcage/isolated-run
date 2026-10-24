@@ -134,7 +134,7 @@ first-last access since the proxy started · flags · command · path
 00:00.531-00:40.982: X   dash /usr/bin/dash
 
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
-buildcage-filesystem-audit-<id> artifact · how to read this
+filesystem audit artifact · how to read this
 ```
 
 Where there is no artifact, the line closing the section says how to ask for one, or that the upload
@@ -151,7 +151,7 @@ From the top:
   action. Programs are in the order they first ran, and each one's paths in path order: the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
   directory; see [Paths](#paths).
-- **🔍 File access details**, folded, has one row per command and path, in the order the rows were
+- **File access details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the file name of the program the process runs, followed in brackets
   by the name the process gave itself, as `ps` shows it, where that differs: npm renames its node
   process, which shows as `node[npm ls]`; see [How rows are grouped](#how-rows-are-grouped). The
@@ -461,13 +461,13 @@ jq -r 'select(.failed | not)
     elif .kind == "link" or .kind == "rename" then .to
     else empty end
   | select(. != null and (startswith("/") or startswith("…/") or startswith("memfd:")))' \
-  filesystem-audit-*.jsonl | sort -u
+  filesystem-audit.jsonl | sort -u
 
 # Who opened a credential file, and when
-jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit-*.jsonl
+jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit.jsonl
 
 # Every refused open
-jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
+jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit.jsonl
 ```
 
 The last `select` of the first example drops pipes and sockets, which the summary leaves out too.

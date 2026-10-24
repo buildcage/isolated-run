@@ -447,7 +447,7 @@ export function filesystemExampleInputs(
   if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
   if (rulesFile && expectedFilesystemRules)
     lines.push(
-      `# ${rulesFile} from this run's artifact, reviewed and committed`,
+      `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
       `config_file: ${CONFIG_FILE_EXAMPLE}`,
     );
   else if (expectedFilesystemRules)

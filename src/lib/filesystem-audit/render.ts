@@ -354,9 +354,12 @@ export function rulesNote(
     ? "the rules given plus one for each access they did not take"
     : "a rule for each access this run made";
   let where: string;
-  if (artifact === "not-requested")
+  // How to use the file follows only where there is one, or the next run will have one.
+  let steps = false;
+  if (artifact === "not-requested") {
     where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`;
-  else if (artifact === "upload-failed")
+    steps = true;
+  } else if (artifact === "upload-failed")
     where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
   else if (rules === "too-many-paths")
     where = "No rules were proposed: the accesses touched too many distinct paths.";
@@ -364,10 +367,20 @@ export function rulesNote(
   else if (rules === "none") where = "No rules were proposed, as no file access was recorded.";
   else {
     where = `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`;
+    steps = true;
   }
   return (
     "<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
     `${intro}\n\n` +
+    (steps ? useSteps(where, fileName) : `${where}\n\n`) +
+    `[How to write the rules](${guideUrl})\n\n` +
+    "</details>\n"
+  );
+}
+
+// How to put the proposed file to use, after where it is.
+function useSteps(where: string, fileName: string): string {
+  return (
     `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n` +
     `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
     "Or copy the file's rules into the workflow:\n\n" +
@@ -378,9 +391,7 @@ export function rulesNote(
     `  # The reviewed rules from ${fileName}, such as:\n` +
     "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
     "  /usr/local/bin/node  R    ~/.npmrc\n" +
-    "```\n\n" +
-    `[How to write the rules](${guideUrl})\n\n` +
-    "</details>\n"
+    "```\n\n"
   );
 }
 

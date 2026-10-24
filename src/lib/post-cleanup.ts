@@ -23,7 +23,8 @@ export interface PostCleanupDeps {
   releaseNssDb?: typeof releaseNssDb;
   readFile?: (path: string) => string;
   killTracer?: (pid: number) => void;
-  removePath?: (path: string) => void;
+  removeFile?: (path: string) => void;
+  removeDir?: (path: string) => void;
   removeRunnerFilesDir?: (dir: string) => void;
 }
 
@@ -36,7 +37,10 @@ function defaultKillTracer(pid: number): void {
 function defaultReadFile(path: string): string {
   return readFileSync(path, "utf8");
 }
-function defaultRemovePath(path: string): void {
+function defaultRemoveFile(path: string): void {
+  rmSync(path, { force: true });
+}
+function defaultRemoveDir(path: string): void {
   rmSync(path, { recursive: true, force: true });
 }
 /* v8 ignore stop */
@@ -54,7 +58,8 @@ function cleanupLeftoverAudit(
     fileExists = existsSync,
     readFile = defaultReadFile,
     killTracer = defaultKillTracer,
-    removePath = defaultRemovePath,
+    removeFile = defaultRemoveFile,
+    removeDir = defaultRemoveDir,
   }: PostCleanupDeps,
 ): void {
   const { outPath, pidFilePath, uploadDir } = filesystemAuditPaths(
@@ -70,10 +75,10 @@ function cleanupLeftoverAudit(
         `run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`,
       );
     }
-    removePath(pidFilePath);
+    removeFile(pidFilePath);
   }
-  removePath(outPath);
-  removePath(uploadDir);
+  removeFile(outPath);
+  removeDir(uploadDir);
 }
 
 /**

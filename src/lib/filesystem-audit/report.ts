@@ -170,7 +170,7 @@ const realDeps: FilesystemAuditReportDeps = {
   readLines,
   createSummary: createAuditSummary,
   openWriter,
-  makeDir: (path) => mkdirSync(path, { mode: 0o700 }),
+  makeDir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
   readFile: (path) => readFileSync(path, "utf8"),
   realpath: (path) => realpathSync(path),
   renderBlocks: renderAuditSummaryBlocks,
@@ -301,11 +301,20 @@ export function readStepFilesystemAudit(
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     propose: upload,
   };
-  // The stripped copy goes in the step's own directory under the scratch base,
-  // which the sandbox cannot reach (unlike $RUNNER_TEMP or /tmp). Writing a
-  // new file leaves the root-owned recording in place, so a failed write
-  // never uploads the raw. The post step removes both.
+  // The stripped copy and the proposed rules go in the step's own directory
+  // under the scratch base, which the sandbox cannot reach (unlike
+  // $RUNNER_TEMP or /tmp). Writing a new file leaves the root-owned recording
+  // in place, so a failed write never uploads the raw. The post step removes
+  // both.
   const cleanPath = audit.stepPath;
+  let prepared = upload;
+  if (upload)
+    try {
+      deps.makeDir(audit.uploadDir);
+    } catch (e) {
+      annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+      prepared = false;
+    }
   // What the verdict says of accesses that could not all be checked, which
   // fail the step as unexpected ones would.
   const checkIncomplete: VerdictItems =
@@ -318,7 +327,7 @@ export function readStepFilesystemAudit(
   };
   let reduced: Reduced | undefined;
   try {
-    reduced = reduce(audit.outPath, upload ? cleanPath : undefined, options, annotation, deps);
+    reduced = reduce(audit.outPath, prepared ? cleanPath : undefined, options, annotation, deps);
   } catch (e) {
     annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`);
     const incomplete = unchecked(
@@ -360,9 +369,11 @@ export function readStepFilesystemAudit(
     process.exitCode = 1;
     incomplete = checkIncomplete;
   }
-  const proposed = upload
+  const proposed = prepared
     ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
-    : "none";
+    : upload
+      ? "write-failed"
+      : "none";
   const given = rules !== undefined;
   const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
   // Both are cautions, as only fail_on_unexpected_file_access makes the check's.
@@ -486,10 +497,7 @@ function reduce(
   };
   const openSink = (): ((line: string) => void) => {
     try {
-      if (cleanPath !== undefined) {
-        deps.makeDir(dirname(cleanPath));
-        writer = deps.openWriter(cleanPath);
-      }
+      if (cleanPath !== undefined) writer = deps.openWriter(cleanPath);
     } catch (e) {
       dropCopy(e);
     }

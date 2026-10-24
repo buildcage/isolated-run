@@ -401,7 +401,11 @@ describe("readStepFilesystemAudit", () => {
   it("warns and uploads nothing when the step's directory cannot be made", async () => {
     const note = annotation();
     const opened: string[] = [];
-    const { deps: d, uploads } = deps({
+    const {
+      deps: d,
+      uploads,
+      ruleFiles,
+    } = deps({
       makeDir: () => {
         throw new Error("EEXIST");
       },
@@ -416,10 +420,12 @@ describe("readStepFilesystemAudit", () => {
       d,
     );
 
-    expect(note.warning).toHaveBeenCalledWith(
-      "Failed to prepare the filesystem audit artifact: EEXIST",
-    );
+    // One warning: neither file is attempted in a directory that is not there.
+    expect(note.warning.mock.calls).toEqual([
+      ["Failed to prepare the filesystem audit artifact: EEXIST"],
+    ]);
     expect(opened).toEqual([]);
+    expect(ruleFiles).toEqual([]);
     expect(uploads).toEqual([]);
   });
 
@@ -1403,7 +1409,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(uploads).toStrictEqual([[CLEAN]]);
-    expect(summaries[0]).toContain("No rules were proposed, as no file access was recorded.");
+    expect(summaries[0]).toContain(
+      "No rules were proposed, as no file access was recorded.\n\n[How to write the rules]",
+    );
   });
 
   it("links the artifact's page, in the note and the legend, where the upload gave one", async () => {
@@ -1450,7 +1458,8 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(summaries[0]).toContain(
-      "This run's `expected-filesystem-rules.yml` was lost, as the artifact could not be uploaded.",
+      "This run's `expected-filesystem-rules.yml` was lost, as the artifact could not be uploaded.\n\n" +
+        "[How to write the rules]",
     );
   });
 });

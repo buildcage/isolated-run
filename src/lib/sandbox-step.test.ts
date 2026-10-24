@@ -1162,7 +1162,7 @@ describe("filesystemExampleInputs", () => {
   it("points config_file to this run's proposed rules when the artifact holds them", () => {
     expect(filesystemExampleInputs(given, "rules.yml")).toStrictEqual([
       "filesystem_audit: record",
-      "# rules.yml from this run's artifact, reviewed and committed",
+      "# rules.yml from this run's artifact, reviewed and committed at this path",
       "config_file: path/to/buildcage-config.yml",
       "fail_on_unexpected_file_access: true",
     ]);

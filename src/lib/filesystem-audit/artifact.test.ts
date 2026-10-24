@@ -14,8 +14,8 @@ function annotation(): Annotation & { warning: Mock; error: Mock } {
 }
 
 describe("uploadFilesystemAuditArtifact", () => {
-  const OUT = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl";
-  const RULES = "/var/tmp/buildcage-0/filesystem-audit-expected-rules-deadbeef.yml";
+  const OUT = "/var/tmp/buildcage-0/filesystem-audit-deadbeef/filesystem-audit.jsonl";
+  const RULES = "/var/tmp/buildcage-0/filesystem-audit-deadbeef/expected-filesystem-rules.yml";
   const RUN = {
     GITHUB_SERVER_URL: "https://github.com",
     GITHUB_REPOSITORY: "o/r",
@@ -42,7 +42,7 @@ describe("uploadFilesystemAuditArtifact", () => {
       [
         "buildcage-filesystem-audit-deadbeef",
         [OUT, RULES],
-        "/var/tmp/buildcage-0",
+        "/var/tmp/buildcage-0/filesystem-audit-deadbeef",
         { retentionDays: 3 },
       ],
     ]);
