@@ -6,6 +6,7 @@ import {
   renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
 } from "../test/filesystem-audit.ts";
+import { expectedRulesFile } from "./proposed-rules.ts";
 import {
   createAuditSummary,
   reduceRecording,
@@ -1513,6 +1514,23 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       flags: "RW",
       path: { path: "./x" },
     });
+  });
+
+  it("folds a program and a path shown deleted and not as one, each rule once", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/dir/a", deleted: true },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/a" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/b" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/c" },
+    );
+    expect(rows(summary)).toStrictEqual(["./tool R ./dir/**", "tool X ./tool"]);
+    const file = expectedRulesFile([], summary.proposed!)!;
+    const added = file.split("\n").slice(3, -1);
+    expect(added).toHaveLength(summary.proposed!.length);
+    expect(new Set(added).size).toBe(added.length);
   });
 
   it("shows a proposed row not deleted where any access was not", () => {

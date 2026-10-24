@@ -8,7 +8,7 @@
 
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { fmtFlags, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
+import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
@@ -305,6 +305,22 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           { program: (rank) => ranks[rank].ruleName, path: ruleName },
         )
       : undefined;
+  // The tally counts a program or a path shown deleted and not as the one rule
+  // it is, before anything folds: each program by the first rank of its rule's
+  // name, each path unmarked. Either shows deleted only where every access was.
+  const ruleRanks = new Map<string, number>();
+  const liveRanks = new Map<number, number>();
+  const deletedPaths = new Set<string>();
+  const livePaths = new Set<string>();
+  const takeForRules = (x: Access, by: number): void => {
+    let id = ruleRanks.get(ranks[by].ruleName);
+    if (id === undefined) ruleRanks.set(ranks[by].ruleName, (id = by));
+    if (!ranks[by].shown.deleted) liveRanks.set(id, by);
+    const path = x.path.startsWith(MEMFD) ? x.path : unmarked(x.path);
+    // Past the tally's limit, only the matching is left to do.
+    if (!tally!.givenUp) (path === x.path ? livePaths : deletedPaths).add(keyOf(String(id), path));
+    tally!.take({ ...x, path }, components(path), id);
+  };
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -411,7 +427,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      tally?.take(x, parts, runBy ?? program);
+      if (tally) takeForRules(x, runBy ?? program);
     }
     return tally?.endLine();
   };
@@ -441,28 +457,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return relativize(unmarked(path), shownPrefixes);
   }
 
-  // One row per rule: a program or a path shown both deleted and not is one
-  // rule, shown deleted only where every access was.
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {
-    const lines = tally.finish();
-    if (!lines) return undefined;
-    const merged = new Map<string, { program: Shown; path: Shown; agg: Agg }>();
-    for (const { rank, path, agg } of lines) {
-      const key = keyOf(ranks[rank].ruleName, ruleName(path));
-      const row = merged.get(key);
-      if (!row) {
-        merged.set(key, { program: ranks[rank].shown, path: shown(path), agg });
-        continue;
-      }
-      mergeAgg(row.agg, agg);
-      if (!ranks[rank].shown.deleted) row.program = ranks[rank].shown;
-      if (!path.endsWith(DELETED)) row.path = shown(path);
-    }
-    return [...merged.values()].map(({ program, path, agg }) => ({
-      program,
-      flags: fmtFlags(agg),
-      path,
-    }));
+    return tally.finish()?.map(({ rank, path, agg }) => {
+      const key = keyOf(String(rank), path);
+      const deleted = deletedPaths.has(key) && !livePaths.has(key);
+      return {
+        program: ranks[liveRanks.get(rank) ?? rank].shown,
+        flags: fmtFlags(agg),
+        path: shown(deleted ? path + DELETED : path),
+      };
+    });
   }
 
   type Line = { comm: string; path: string; agg: Agg };
