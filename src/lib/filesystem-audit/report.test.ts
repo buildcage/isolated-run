@@ -182,7 +182,9 @@ describe("readStepFilesystemAudit", () => {
         "Review it, using `**` for the paths that change between runs, commit it, and point the step at it, " +
         "or copy its rules into the config file the step already uses:\n\n" +
         "```yaml\nconfig_file: path/to/buildcage-config.yml\n```\n\n" +
-        "Or write the rules in the workflow:\n\n",
+        "Or copy the file's rules into the workflow:\n\n" +
+        "```yaml\nfilesystem_audit: record\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n" +
+        "  # The reviewed rules from expected-filesystem-rules.yml, such as:\n",
     );
     // Below them, not under the heading.
     expect(summaries[0]).toContain(

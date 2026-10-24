@@ -370,11 +370,12 @@ export function rulesNote(
     `${intro}\n\n` +
     `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n` +
     `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
-    "Or write the rules in the workflow:\n\n" +
+    "Or copy the file's rules into the workflow:\n\n" +
     "```yaml\n" +
     "filesystem_audit: record\n" +
     "upload_filesystem_audit_artifact: true\n" +
     `${EXPECTED_RULES_INPUT}: |\n` +
+    `  # The reviewed rules from ${fileName}, such as:\n` +
     "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
     "  /usr/local/bin/node  R    ~/.npmrc\n" +
     "```\n\n" +
