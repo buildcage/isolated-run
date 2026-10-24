@@ -53,7 +53,7 @@ import {
 } from "./render.ts";
 import { EXPECTED_RULES_INPUT, RuleMatcher, type ExpectedRules } from "./rules.ts";
 
-export const PROCESS_ACTIVITY_TITLE = "Process Activity Report";
+export const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report";
 
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
@@ -288,7 +288,7 @@ export function readStepFilesystemAudit(
       return "not-requested";
     },
     blocks: (startedAt, _artifact, stepLabel) =>
-      result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE)),
+      result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE)),
   });
   if (!audit) return settled(NONE);
   const options: SummaryOptions = {
@@ -400,7 +400,7 @@ export function readStepFilesystemAudit(
       try {
         if (!summary) throw summaryError;
         rendered = deps.renderBlocks(summary, {
-          title: reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE),
+          title: reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE),
           startedAt,
           priorities: FILESYSTEM_PRIORITIES,
           cutNote,

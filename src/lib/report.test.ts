@@ -75,8 +75,8 @@ function report(overrides: Partial<UniversalReportData> = {}): UniversalReportDa
 describe("reportTitle", () => {
   it("names the report, then the label", () => {
     expect(reportTitle(undefined)).toBe("Outbound Traffic Report");
-    expect(reportTitle("npm ci", "Process Activity Report")).toBe(
-      "Process Activity Report — npm ci",
+    expect(reportTitle("npm ci", "Filesystem Activity Report")).toBe(
+      "Filesystem Activity Report — npm ci",
     );
   });
 });

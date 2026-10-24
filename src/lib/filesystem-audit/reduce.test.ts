@@ -146,7 +146,7 @@ describe("createAuditSummary", () => {
 
   it("warns unless the tracer's end line is there and counts nothing lost", () => {
     const read = { kind: "read", comm: "cat", path: "/etc/hostname" };
-    const warning = "## Process Activity Report\n\n> ❗ **This record is incomplete.**";
+    const warning = "## Filesystem Activity Report\n\n> ❗ **This record is incomplete.**";
     expect(render(read, { kind: "end", dropped: 0, untracked: 0 })).not.toContain("❗");
     expect(render(read)).toContain(warning); // cut short before the end line
     const dropped = render(read, { kind: "end", dropped: 3, untracked: 0 });
@@ -164,7 +164,7 @@ describe("createAuditSummary", () => {
       "> runner host while this step ran. Any of them may have been this step's, so some of its\n" +
       "> accesses may be missing from this summary and from the artifact.\n";
     const skipped = render(read, { kind: "end", dropped: 0, untracked: 0, host_missed: 15779 });
-    expect(skipped).toContain(`## Process Activity Report\n\n${note}`);
+    expect(skipped).toContain(`## Filesystem Activity Report\n\n${note}`);
     expect(skipped).not.toContain("incomplete");
     expect(lines(skipped)).toEqual(["R cat /etc/hostname"]);
     // Both, the incomplete warning first.
@@ -279,7 +279,7 @@ describe("createAuditSummary", () => {
     );
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
-    expect(`</details>\n${md}`).toContain("</details>\n\n## Process Activity Report\n");
+    expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
     // Below the executed table, which shows no flags.
     expect(md.indexOf("<summary>Accessed Paths")).toBeGreaterThan(
       md.indexOf("### Executed Programs"),

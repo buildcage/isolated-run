@@ -72697,7 +72697,7 @@ function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, p
 		priority: priorities[FILESYSTEM_BLOCK.log],
 		level: 4,
 		section: SECTION,
-		open: "<details>\n<summary>🔍 Process details</summary>\n\n",
+		open: "<details>\n<summary>🔍 Filesystem details</summary>\n\n",
 		close: DETAILS_CLOSE
 	};
 	if (!details) return {
@@ -73587,7 +73587,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 }
 //#endregion
 //#region src/lib/filesystem-audit/report.ts
-const PROCESS_ACTIVITY_TITLE = "Process Activity Report", CHUNK_BYTES = 1 << 20;
+const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
 	try {
@@ -73665,7 +73665,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		expected: "not-requested",
 		verdictItems,
 		upload: async () => (setOutput(""), "not-requested"),
-		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE))
+		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
 	});
 	if (!audit) return settled(NONE);
 	let options = {
@@ -73702,7 +73702,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 			try {
 				if (!summary) throw summaryError;
 				rendered = deps.renderBlocks(summary, {
-					title: reportTitle(stepLabel, PROCESS_ACTIVITY_TITLE),
+					title: reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE),
 					startedAt,
 					priorities: FILESYSTEM_PRIORITIES,
 					cutNote,

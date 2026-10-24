@@ -49,7 +49,7 @@ const UNREADABLE_NOTE =
   "> ❗ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
 const SECTION = "filesystem";
-const DETAILS_OPEN = "<details>\n<summary>🔍 Process details</summary>\n\n";
+const DETAILS_OPEN = "<details>\n<summary>🔍 Filesystem details</summary>\n\n";
 const DETAILS_CLOSE = "</details>\n";
 
 /** The ids renderAuditSummaryBlocks gives its blocks. */

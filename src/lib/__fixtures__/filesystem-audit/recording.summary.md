@@ -1,5 +1,5 @@
 
-## Process Activity Report
+## Filesystem Activity Report
 
 ### Executed Programs
 
@@ -108,7 +108,7 @@
 </details>
 
 <details>
-<summary>🔍 Process details</summary>
+<summary>🔍 Filesystem details</summary>
 
 <sub>first-last access since the proxy started · flags · command · path</sub>
 

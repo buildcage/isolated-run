@@ -790,7 +790,7 @@ short form.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
   fails before the command runs. A 32-bit system call in the step kills the thread that made it,
   with `SIGSYS`.
-- The step's Job Summary gets a **Process Activity Report** section after the traffic report: the
+- The step's Job Summary gets a **Filesystem Activity Report** section after the traffic report: the
   programs the step ran and how often, every path each program touched with a flag for each action,
   and, folded below them, one row per command and path.
 - `upload_filesystem_audit_artifact: true` uploads the full record as JSON lines in an artifact

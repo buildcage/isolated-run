@@ -156,7 +156,7 @@ describe("readStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("Process Activity");
+    expect(summaries[0]).toContain("Filesystem Activity");
     expect(summaries[0]).toContain("W node ./a.txt");
     // The proposed rules' note follows the details.
     expect(summaries[0]).toContain(
@@ -566,7 +566,7 @@ describe("readStepFilesystemAudit", () => {
       d,
     );
 
-    expect(appended[0]).toContain("Process Activity");
+    expect(appended[0]).toContain("Filesystem Activity");
   });
 
   it("mirrors the raw recording to the debug file for fixture capture", async () => {
@@ -632,7 +632,7 @@ describe("readStepFilesystemAudit", () => {
     );
     expect(summaries).toEqual([
       expect.stringMatching(
-        /^\n## Process Activity Report\n\n> ❗ \*\*The recording could not be read\*\*/,
+        /^\n## Filesystem Activity Report\n\n> ❗ \*\*The recording could not be read\*\*/,
       ),
     ]);
     expect(uploads).toEqual([]);
@@ -657,7 +657,7 @@ describe("readStepFilesystemAudit", () => {
       d,
     );
 
-    expect(summaries[0]).toContain("Process Activity");
+    expect(summaries[0]).toContain("Filesystem Activity");
   });
 
   it("fails the step under restrict with fail_on_blocked when the output cannot be set", async () => {
@@ -681,7 +681,7 @@ describe("readStepFilesystemAudit", () => {
       );
       expect(note.warning).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
-      expect(summaries[0]).toContain("Process Activity");
+      expect(summaries[0]).toContain("Filesystem Activity");
     } finally {
       process.exitCode = exitCode;
     }
@@ -731,7 +731,7 @@ describe("readStepFilesystemAudit", () => {
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
     );
-    expect(summaries[0]).toContain("Process Activity");
+    expect(summaries[0]).toContain("Filesystem Activity");
   });
 
   it("strips buildcage's own records from both the copy and the summary", async () => {
@@ -970,10 +970,10 @@ describe("readStepFilesystemAudit", () => {
     const { deps: d } = deps();
     const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
     expect(joinSummaryBlocks(read.blocks(undefined, read.expected, "a|b"))).toMatch(
-      /^\n## Process Activity Report — a\\\|b\n\n/,
+      /^\n## Filesystem Activity Report — a\\\|b\n\n/,
     );
     expect(joinSummaryBlocks(read.blocks(undefined, read.expected, undefined))).toMatch(
-      /^\n## Process Activity Report\n\n/,
+      /^\n## Filesystem Activity Report\n\n/,
     );
   });
 
@@ -1100,7 +1100,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
         "| Program | Access | Path |\n| --- | --- | --- |\n| `node` | W | `./b` |\n\n",
     );
     expect(md).not.toContain("Accessed Paths");
-    expect(md).not.toContain("Process details");
+    expect(md).not.toContain("Filesystem details");
     expect(md).toContain(
       "`filesystem-audit-expected-rules-deadbeef.yml` in the `buildcage-filesystem-audit-deadbeef` artifact " +
         "holds the rules given, and one for each access they did not take.",

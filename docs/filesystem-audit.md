@@ -6,8 +6,8 @@
 > this action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem_audit: record` records every file the isolated step reads, writes, moves, deletes,
-changes the attributes of, and executes, and adds a **Process Activity Report** section to the Job
-Summary:
+changes the attributes of, and executes, and adds a **Filesystem Activity Report** section to the
+Job Summary:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -70,7 +70,7 @@ A host that falls short fails the step before the command runs, with the reason;
 
 ## Getting started
 
-With `filesystem_audit: record` alone, as above, the step's Job Summary gets a **Process Activity
+With `filesystem_audit: record` alone, as above, the step's Job Summary gets a **Filesystem Activity
 Report** section after the traffic report. The full record, with every access in order, is uploaded
 only when asked for, as the traffic artifact is. It can be downloaded from the run's page, or by a
 later step to query with `jq`, as in [The artifact](#the-artifact):
@@ -108,7 +108,7 @@ of files it only tried to open, so treat it as sensitive, like the traffic artif
 A shortened example:
 
 ```
-## Process Activity Report
+## Filesystem Activity Report
 
 ### Executed Programs
 | Path                  | Count |
@@ -125,7 +125,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | `/usr/local/bin/node` | Rr!    | `/etc/**`             |
 | `/usr/local/bin/node` | w!     | `/usr/local/bin/node` |
 
-🔍 Process details
+🔍 Filesystem details
 first-last access since the proxy started · flags · command · path
 00:00.401-00:00.420: Xw! node /usr/local/bin/node
 00:00.412:           R   node ./package.json
@@ -151,7 +151,7 @@ From the top:
   action. Programs are in the order they first ran, and each one's paths in path order: the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
   directory; see [Paths](#paths).
-- **🔍 Process details**, folded, has one row per command and path, in the order the rows were
+- **🔍 Filesystem details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the file name of the program the process runs, followed in brackets
   by the name the process gave itself, as `ps` shows it, where that differs: npm renames its node
   process, which shows as `node[npm ls]`; see [How rows are grouped](#how-rows-are-grouped). The
@@ -263,7 +263,7 @@ full tables. `expected_filesystem_rules` lists what the step is expected to touc
 then shows only what falls outside it:
 
 ```
-## Process Activity Report
+## Filesystem Activity Report
 
 ### Unexpected Accesses (1)
 1,204 recorded operations matched `expected_filesystem_rules`.
@@ -716,7 +716,7 @@ itself can do to the record, and what the record can be trusted for.
 ## Limits
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
-  process details give way first, and this section's tables after the traffic report's timeline;
+  filesystem details give way first, and this section's tables after the traffic report's timeline;
   [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
   does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
   of it fits. The note names the artifact, which still holds every access, or says how to ask for
