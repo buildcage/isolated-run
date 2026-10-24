@@ -72505,7 +72505,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", CONFIG_FILE_EXAMPLE = "path/to/buildcage-config.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -72794,7 +72794,7 @@ ${intro}\n\n` + (steps ? useSteps(where, fileName) : `${where}\n\n`) + `[How to 
 `;
 }
 function useSteps(where, fileName) {
-	return `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
+	return `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
 
 \`\`\`yaml
 filesystem_audit: record
@@ -73690,7 +73690,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete)) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
 	summary ? summary.lost ? incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`) : summary.hostMissed && (incomplete = unchecked(`Not every file access may have been checked against ${EXPECTED_RULES_INPUT}, as the kernel skipped the tracer's hooks`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer stopped before it finished its record, so the record misses part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:"), process.exitCode = 1, incomplete = checkIncomplete);
-	let proposed = prepared ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : upload ? "write-failed" : "none", given = rules !== void 0, unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let proposed = prepared ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
@@ -77371,7 +77371,7 @@ function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystem
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${CONFIG_FILE_EXAMPLE}`) : expectedFilesystemRules && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedFilesystemRules.lines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedFilesystemRules && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedFilesystemRules.lines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
