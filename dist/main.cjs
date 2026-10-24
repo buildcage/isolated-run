@@ -73466,7 +73466,7 @@ function createAuditSummary(prefixes) {
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
 		}
-		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, runCmd = tally && r.kind === "exec" ? commandKey(r.pid, commsBefore.get(r.pid) ?? r.comm ?? "") : void 0;
+		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, before = commsBefore.get(r.pid), runCmd = tally && r.kind === "exec" ? before === void 0 ? commandKey(r.ppid, commsBefore.get(r.ppid) ?? r.comm ?? "") : commandKey(r.pid, before) : void 0;
 		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
