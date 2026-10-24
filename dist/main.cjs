@@ -72421,9 +72421,10 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, unnumbered = (path, self) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => threadSelf ? "/proc/self/task/<tid>" : `/proc/${proc === "self" || self !== void 0 && proc === String(self) ? "self" : "<pid>"}${task ? "/task/<tid>" : ""}`);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, SPELLED_SELF = (proc) => proc === "self", unnumbered = (path, own = SPELLED_SELF) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
 function normalize$2(path, self) {
-	return unnumbered(path.replace(/^\.\//, ""), self);
+	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
+	return unnumbered(path.replace(/^\.\//, ""), own);
 }
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
@@ -72585,7 +72586,7 @@ function parseExpectedRules(sources) {
 		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`);
 		rules.push({
 			ref,
-			program: program === "*" ? void 0 : glob(program),
+			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
 			path: anyProcess(path, glob(path)),
 			...accessBits(access)
 		});
@@ -73449,8 +73450,8 @@ function createAuditSummary(prefixes) {
 	}, nsPids = new Map(), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
-		if (!counted) return;
-		if ((r.kind === "fork" || r.kind === "exec") && r.nspid && nsPids.set(r.pid, r.nspid), r.kind === "fork") {
+		if ((r.kind === "fork" || r.kind === "exec") && (r.nspid ? nsPids.set(r.pid, r.nspid) : nsPids.delete(r.pid)), !counted) return;
+		if (r.kind === "fork") {
 			programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
 			let runName = runNames.get(r.ppid);
 			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
