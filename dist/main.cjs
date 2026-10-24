@@ -72505,7 +72505,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", CONFIG_FILE_EXAMPLE = "path/to/buildcage-config.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -72652,7 +72652,7 @@ function executedBlock(executed, { priorities }) {
 		priority: priorities[FILESYSTEM_BLOCK.executed],
 		level: 2,
 		section: SECTION,
-		text: `### Executed Programs\n\n${md}\n\n`,
+		text: `### ⚙️ Executed Programs\n\n${md}\n\n`,
 		cut: "lines",
 		head: 4
 	};
@@ -72685,7 +72685,7 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 		...block,
 		cut: "lines",
 		head: 4,
-		open: `<details>\n<summary>Accessed Paths (${rows.length})</summary>\n\n`,
+		open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
 		text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
 		close: `${DETAILS_CLOSE}\n`
 	};
@@ -72747,7 +72747,7 @@ function unexpectedBlock(summary, { priorities }) {
 		...block,
 		cut: "lines",
 		head: 8,
-		text: `### Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
+		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
 	};
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
@@ -72785,15 +72785,11 @@ function unreadableSummaryBlocks(title) {
 	}];
 }
 function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
-	let file = `\`${fileName}\``, holds = given ? "the rules given, and one for each access they did not take" : "a rule for each access this run made", where;
-	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `${file} was not kept, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in the ${artifact.url ? `[\`${artifact.name}\`](${artifact.url})` : `\`${artifact.name}\``} artifact holds ${holds}.`, `<details>
-<summary>Expected filesystem rules</summary>
+	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.` : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`, holds = given ? "the rules given plus one for each access they did not take" : "a rule for each access this run made", where;
+	return where = artifact === "not-requested" ? `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.` : artifact === "upload-failed" ? `This run's ${file} was lost, as the artifact could not be uploaded.` : rules === "too-many-paths" ? "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? "The proposed rules could not be written." : rules === "none" ? "No rules were proposed, as no file access was recorded." : `${file} in this run's ${artifact.url ? `[filesystem audit artifact](${artifact.url})` : `filesystem audit artifact (\`${artifact.name}\`)`} holds ${holds}.`, `<details>
+<summary>📝 Expected filesystem rules</summary>
 
-${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file, or add its key to the one the step already has:\n\n\`\`\`yaml
-config_file: ci/expected-filesystem-rules.yml
-\`\`\`
-
-Or set the rules in the workflow:
+${intro}\n\n${where} Review it, using \`**\` for the paths that change between runs, commit it, and point the step at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\nOr write the rules in the workflow:
 
 \`\`\`yaml
 filesystem_audit: record
@@ -72802,7 +72798,7 @@ ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
   /usr/local/bin/node  R    ~/.npmrc
 \`\`\`
 
-The summary then lists only the accesses outside them. [How to write the rules](${guideUrl})\n\n</details>
+[How to write the rules](${guideUrl})\n\n</details>
 `;
 }
 function filesystemLegendNote(artifact, guideUrl) {
@@ -73625,6 +73621,7 @@ const realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
+	makeDir: (path) => (0, node_fs.mkdirSync)(path, { mode: 448 }),
 	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
 	realpath: (path) => (0, node_fs.realpathSync)(path),
 	renderBlocks: renderAuditSummaryBlocks,
@@ -73739,7 +73736,7 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		} catch {}
 	}, openSink = () => {
 		try {
-			cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
+			cleanPath !== void 0 && (deps.makeDir((0, node_path.dirname)(cleanPath)), writer = deps.openWriter(cleanPath));
 		} catch (e) {
 			dropCopy(e);
 		}
@@ -74472,12 +74469,13 @@ function checkFilesystemAuditHost(probes = realHostProbes) {
 //#endregion
 //#region src/lib/sandbox/filesystem-audit-paths.ts
 function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1);
+	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
-		rulesPath: (0, node_path.join)(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`)
+		uploadDir,
+		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules.yml")
 	};
 }
 function readPid(readFile, pidFilePath) {
@@ -77363,7 +77361,7 @@ function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystem
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed`, "config_file: ci/expected-filesystem-rules.yml") : expectedFilesystemRules && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedFilesystemRules.lines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedFilesystemRules ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed`, `config_file: ${CONFIG_FILE_EXAMPLE}`) : expectedFilesystemRules && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedFilesystemRules.lines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
