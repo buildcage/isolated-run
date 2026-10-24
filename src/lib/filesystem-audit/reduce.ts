@@ -408,10 +408,15 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     // A run is expected of the program that ran it, not of what it ran.
     const runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : undefined;
-    // An exec record carries the name the process takes from what it ran.
+    // An exec record carries the name the process takes from what it ran, so
+    // the run goes by the name before it, or by its parent's command where the
+    // recording has no earlier line of it.
+    const before = commsBefore.get(r.pid);
     const runCmd =
       tally && r.kind === "exec"
-        ? commandKey(r.pid, commsBefore.get(r.pid) ?? r.comm ?? "")
+        ? before === undefined
+          ? commandKey(r.ppid, commsBefore.get(r.ppid) ?? r.comm ?? "")
+          : commandKey(r.pid, before)
         : undefined;
     if (tally) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {

@@ -1737,6 +1737,35 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     });
   });
 
+  it("lists only the commands whose accesses no rule took", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* W ./m/a\n* R ./m/b\n* X **") },
+      { kind: "exec", pid: 3, comm: "npm", path: "/usr/bin/node" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", t: "2026-01-01T00:00:01Z" },
+      { kind: "read", pid: 3, comm: "npm", path: "/work/m/b", t: "2026-01-01T00:00:02Z" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "npm" },
+      { kind: "exec", pid: 4, comm: "node", path: "/usr/bin/node" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", t: "2026-01-01T00:00:03Z" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/c", t: "2026-01-01T00:00:04Z" },
+    );
+    expect(summary.proposed!.map((r) => [r.path.path, r.flags, r.commands])).toStrictEqual([
+      ["./m/b", "W", ["node"]],
+      ["./m/c", "W", ["node"]],
+    ]);
+  });
+
+  it("names a run its recording has no earlier line of by its parent's command", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "bash", path: "/bin/bash" },
+      { kind: "exec", pid: 9, ppid: 3, comm: "curl", path: "/usr/bin/curl" },
+      { kind: "exec", pid: 10, ppid: 99, comm: "env", path: "/usr/bin/env" },
+    );
+    const by = (path: string) => summary.proposed!.find((r) => r.path.path === path)?.commands;
+    expect(by("/usr/bin/curl")).toStrictEqual(["bash"]);
+    expect(by("/usr/bin/env")).toStrictEqual(["env"]);
+  });
+
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
     const { summary } = marked(
       { rules: rulesOf('* W memfd:"m"\n* W ./gone') },
