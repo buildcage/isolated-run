@@ -72962,7 +72962,7 @@ function expectedRulesFile(written, proposed) {
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(anyPid(r.path.path))
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = [...new Set(rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`))], lines = given.length === 0 ? added : added.length === 0 ? given : [
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",
 		NOT_MATCHED_HEADING,
@@ -73486,6 +73486,24 @@ function createAuditSummary(prefixes) {
 	function ruleName(path) {
 		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
 	}
+	function ruleRowsOf(tally) {
+		let lines = tally.finish();
+		if (!lines) return;
+		let merged = new Map();
+		for (let { rank, path, agg } of lines) {
+			let key = keyOf(ranks[rank].ruleName, ruleName(path)), row = merged.get(key);
+			row ? (mergeAgg(row.agg, agg), ranks[rank].shown.deleted || (row.program = ranks[rank].shown), path.endsWith(DELETED) || (row.path = shown(path))) : merged.set(key, {
+				program: ranks[rank].shown,
+				path: shown(path),
+				agg
+			});
+		}
+		return [...merged.values()].map(({ program, path, agg }) => ({
+			program,
+			flags: fmtFlags(agg),
+			path
+		}));
+	}
 	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
 		return {
@@ -73513,11 +73531,7 @@ function createAuditSummary(prefixes) {
 					...ranks[Number(comm)].shown,
 					rank: Number(comm)
 				}
-			})), log = byPath && rows(kept(details)), ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
-				program: ranks[rank].shown,
-				flags: fmtFlags(agg),
-				path: shown(path)
-			}));
+			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
 			return {
 				ended,
 				lost,
