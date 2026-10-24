@@ -596,7 +596,7 @@ describe("runSandboxStep", () => {
       return mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] }) as string[];
     };
 
-    expect(await example(ENV)).toContain("config_file: path/to/buildcage-config.yml");
+    expect(await example(ENV)).toContain("config_file: path/to/expected-filesystem-rules.yml");
     expect(await example({ ...ENV, GITHUB_EVENT_NAME: "pull_request_target" })).toContain(
       "expected_filesystem_rules: |",
     );
@@ -1163,7 +1163,7 @@ describe("filesystemExampleInputs", () => {
     expect(filesystemExampleInputs(given, "rules.yml")).toStrictEqual([
       "filesystem_audit: record",
       "# rules.yml from this run's artifact, reviewed and committed at this path",
-      "config_file: path/to/buildcage-config.yml",
+      "config_file: path/to/expected-filesystem-rules.yml",
       "fail_on_unexpected_file_access: true",
     ]);
     expect(filesystemExampleInputs({ ...given, ...NO_RULES }, "rules.yml")).toStrictEqual([

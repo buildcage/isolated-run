@@ -21,8 +21,8 @@ import { BIT, ORDER } from "./record.ts";
 
 export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
 
-/** Where the summary's examples put a committed config file. */
-export const CONFIG_FILE_EXAMPLE = "path/to/buildcage-config.yml";
+/** Where the summary's examples commit the proposed rules file. */
+export const RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml";
 
 /** What a rule matches, compiled. */
 export interface ExpectedRule {

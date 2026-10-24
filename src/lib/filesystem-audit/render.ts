@@ -9,7 +9,7 @@ import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { ProposedRules } from "./proposed-rules.ts";
 import type { AuditSummary, Executed, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
-import { CONFIG_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
+import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
@@ -382,7 +382,7 @@ export function rulesNote(
 function useSteps(where: string, fileName: string): string {
   return (
     `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n` +
-    `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
+    `\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\n` +
     "Or copy the file's rules into the workflow:\n\n" +
     "```yaml\n" +
     "filesystem_audit: record\n" +

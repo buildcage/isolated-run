@@ -33,7 +33,7 @@ import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
-import { CONFIG_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
+import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -448,7 +448,7 @@ export function filesystemExampleInputs(
   if (rulesFile && expectedFilesystemRules)
     lines.push(
       `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
-      `config_file: ${CONFIG_FILE_EXAMPLE}`,
+      `config_file: ${RULES_FILE_EXAMPLE}`,
     );
   else if (expectedFilesystemRules)
     lines.push(

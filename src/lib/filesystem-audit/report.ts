@@ -372,9 +372,7 @@ export function readStepFilesystemAudit(
   }
   const proposed = prepared
     ? writeProposedRules(summary, rules, audit.rulesPath, annotation, deps.writeFile)
-    : upload
-      ? "write-failed"
-      : "none";
+    : "none";
   const given = rules !== undefined;
   const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
   // Both are cautions, as only fail_on_unexpected_file_access makes the check's.

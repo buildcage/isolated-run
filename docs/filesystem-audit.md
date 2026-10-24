@@ -307,7 +307,7 @@ expected_filesystem_rules: |
    ```yaml
    - uses: buildcage/isolated-run@<sha>
      with:
-       config_file: path/to/buildcage-config.yml
+       config_file: path/to/expected-filesystem-rules.yml
        run: npm ci
    ```
 
@@ -324,7 +324,7 @@ ends up over rules a later run matched.
 
 The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
 Where that run's artifact holds the file, the example names it in `config_file` at
-`path/to/buildcage-config.yml`, for you to commit there; on `pull_request_target` or
+`path/to/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
 `workflow_run`, or without the file, it lists the rules given under `with:`. It adds
 `fail_on_unexpected_file_access: true` when the step set it. When the listed rules make the example
 too large to print and the step did not upload its record, the summary says that
