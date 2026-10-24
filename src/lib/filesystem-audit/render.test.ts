@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 
+import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
+
+import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import { renderFilesystemAuditSummary } from "../test/filesystem-audit.ts";
-import type { SummaryOptions } from "./reduce.ts";
+import { newAgg } from "./agg.ts";
+import type { AuditSummary, SummaryOptions } from "./reduce.ts";
+import { renderAuditSummaryBlocks } from "./render.ts";
 
 const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
 
@@ -399,6 +404,43 @@ describe("renderAuditSummaryBlocks: tables", () => {
     );
     expect(md).toMatch(
       /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+    );
+  });
+});
+
+describe("renderAuditSummaryBlocks: unexpected accesses", () => {
+  it("lists each row's commands beside its program, a | in one escaped", () => {
+    const summary: AuditSummary = {
+      ended: true,
+      lost: false,
+      hostMissed: 0,
+      executed: [],
+      paths: [],
+      details: [{ agg: newAgg(), flags: "W", comm: "node", commField: "node", path: "./m/a" }],
+      killed: [],
+      proposed: [
+        {
+          program: { path: "/usr/bin/node" },
+          commands: ["node[npm ci]", "a|b"],
+          flags: "W",
+          path: { path: "./m/**" },
+        },
+      ],
+      matched: 0,
+      unexpected: 1,
+    };
+    const md = joinSummaryBlocks(
+      renderAuditSummaryBlocks(summary, {
+        title: "T",
+        startedAt: undefined,
+        priorities: FILESYSTEM_PRIORITIES,
+        cutNote: () => "",
+        expected: true,
+      }),
+    );
+    expect(md).toContain(
+      "| Program | Command | Access | Path |\n| --- | --- | --- | --- |\n" +
+        "| `/usr/bin/node` | `node[npm ci]`, `a\\|b` | W | `./m/**` |\n",
     );
   });
 });

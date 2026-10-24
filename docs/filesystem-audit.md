@@ -269,17 +269,19 @@ then shows only what falls outside it:
 ### ⚠️ Unexpected Accesses (1)
 1,204 recorded operations matched `expected_filesystem_rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
-| Program               | Access | Path        |
-| --------------------- | ------ | ----------- |
-| `/usr/local/bin/node` | R      | `~/.npmrc`  |
+| Program               | Command             | Access | Path        |
+| --------------------- | ------------------- | ------ | ----------- |
+| `/usr/local/bin/node` | `node[npm]`, `node` | R      | `~/.npmrc`  |
 ```
 
-The executed table, the accessed paths and the details give way to it; the artifact still has every
-access. The verdict at the top of the traffic report and a warning count the table's rows, or say
-there were too many to list. `fail_on_unexpected_file_access: true` fails the step instead, with
-the verdict as a caution rather than a warning. It also fails the step when not every access could
-be checked against the rules, as when the recording misses some or the kernel skipped the tracer's
-hooks, and the verdict then says `file access check incomplete`.
+Each row is one rule the proposed file adds, and **Command** names every command that made its
+accesses, as the details name them, in the order they first did; a run is named by the command that
+ran it. The executed table, the accessed paths and the details give way to it; the artifact still
+has every access. The verdict at the top of the traffic report and a warning count the table's
+rows, or say there were too many to list. `fail_on_unexpected_file_access: true` fails the step
+instead, with the verdict as a caution rather than a warning. It also fails the step when not every
+access could be checked against the rules, as when the recording misses some or the kernel skipped
+the tracer's hooks, and the verdict then says `file access check incomplete`.
 The rules only change what the summary shows: like the audit itself, they never block an access.
 
 ### Getting the rules
@@ -333,8 +335,8 @@ too large to print and the step did not upload its record, the summary says that
 
 ### Rules
 
-Each rule is one line of three fields, the accessed paths table's columns, so a row of the table or
-of **Unexpected Accesses** can be copied in:
+Each rule is one line of three fields, the accessed paths table's columns, so a row of that table
+can be copied in:
 
 ```
 <program> <access> <path>

@@ -1,5 +1,5 @@
 import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
-import { codeSpan } from "#core/lib/report/render/markdown-table.ts";
+import { codeCell, codeSpan } from "#core/lib/report/render/markdown-table.ts";
 import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
 import { fmtSpan } from "./agg.ts";
@@ -253,8 +253,13 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
       text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`,
     };
   const md = markdownRows(
-    ["Program", "Access", "Path"],
-    proposed.map((r: RuleRow) => [pathCell(r.program), r.flags, pathCell(r.path)]),
+    ["Program", "Command", "Access", "Path"],
+    proposed.map((r: RuleRow) => [
+      pathCell(r.program),
+      r.commands.map(codeCell).join(", "),
+      r.flags,
+      pathCell(r.path),
+    ]),
   );
   return {
     ...block,

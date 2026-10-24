@@ -103,6 +103,9 @@ const escapePath = (path: string): string => path.split("/").map(escapeForDispla
 /** A proposed rule: a program, its accesses as a rule spells them, and a path. */
 export interface RuleRow {
   program: Shown;
+  /** The commands that made the accesses, as the details name them, in the
+   *  order they first did. */
+  commands: string[];
   flags: string;
   path: Shown;
 }
@@ -320,7 +323,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // row.
   const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
   const programDeletedOnly = new Map<number, boolean>();
-  const takeForRules = (x: Access, parts: string[], by: number): void => {
+  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     let path = deletedPath ? unmarked(x.path) : x.path;
@@ -333,7 +336,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     )
       path = `…/${path}`;
     const same = path === x.path;
-    const left = tally!.take(same ? x : { ...x, path }, same ? parts : components(path), id);
+    const left = tally!.take(x, same ? parts : components(path), id, path, cmd);
     // Past the tally's limit, only the matching is left to do.
     if (!left || tally!.givenUp) return;
     const program = Boolean(ranks[by].shown.deleted);
@@ -344,6 +347,21 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       path: (was?.path ?? true) && deletedPath,
     });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
+  };
+  // Each pid's name before its latest record.
+  const commsBefore = new Map<number | undefined, string>();
+  // The program and the command a run is expected of. An exec record carries
+  // the name the process takes from what it ran, so the run goes by the name
+  // before it, or by its parent where the recording has no earlier line of it
+  // but has one of the parent. With neither, the parent is left alone: looking
+  // it up would make this name its program.
+  const runnerOf = (r: AuditRecord): { program: number; cmd: string } => {
+    const before = commsBefore.get(r.pid);
+    const parent = commsBefore.get(r.ppid);
+    if (before === undefined && parent !== undefined)
+      return { program: programOf(r.ppid, parent), cmd: commandKey(r.ppid, parent) };
+    const comm = r.comm ?? "";
+    return { program: programOf(r.pid, comm), cmd: commandKey(r.pid, before ?? comm) };
   };
   let ended = false;
   let lost = false;
@@ -400,7 +418,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return undefined;
     }
     // A run is expected of the program that ran it, not of what it ran.
-    const runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : undefined;
+    const runner = tally && r.kind === "exec" ? runnerOf(r) : undefined;
+    if (tally) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)));
       programs.set(r.pid, rank(p, false));
@@ -451,7 +470,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (tally) takeForRules(x, parts, runBy ?? program);
+      if (tally) takeForRules(x, parts, runner?.program ?? program, runner?.cmd ?? x.comm);
     }
     return tally?.endLine();
   };
@@ -488,6 +507,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return {
         program:
           (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
+        // Once each: a program shown deleted and not names one command.
+        commands: [
+          ...new Set(
+            // Every access the tally takes names its command.
+            [...agg.cmds!].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd)!.text),
+          ),
+        ],
         flags: fmtFlags(agg),
         path: shown(only?.path ? path + DELETED : path),
       };
