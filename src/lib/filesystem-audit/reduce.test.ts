@@ -427,11 +427,12 @@ describe("createAuditSummary", () => {
       "R ps /proc/123x",
       "A ps /proc/<pid>",
       "W ps /proc/<pid> (deleted)",
+      // A process whose own number is unknown shows its directory as any other.
+      "r! ps /proc/<pid>/a",
       "R ps /proc/<pid>/status",
       "R ps /proc/<pid>/task/124x",
+      "r! ps /proc/<pid>/task/<tid>/b",
       "R ps /proc/<pid>/task/<tid>/stat",
-      "r! ps /proc/self/a",
-      "r! ps /proc/self/task/<tid>/b",
       "R ps /proc/selfish",
     ]);
   });
@@ -1595,6 +1596,40 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       "/usr/bin/cat R /proc/self/task/<tid>/stat",
       "sh R /proc/<pid>/status",
     ]);
+  });
+
+  it("knows the step's shell's own number from the lines buildcage's own", () => {
+    const out: string[] = [];
+    const { summary } = reduceRecording(
+      feed(
+        machinery,
+        JSON.stringify({ ...JSON.parse(shell), nspid: 2 }),
+        JSON.stringify({ kind: "read", pid: 2, comm: "bash", path: "/proc/2/status" }),
+      ),
+      BASE,
+      { ...OPTIONS, propose: true },
+      () => (line) => out.push(line),
+    );
+    expect(rows(summary!)).toStrictEqual(["bash R /proc/self/status"]);
+  });
+
+  it("forgets a pid's number when a later fork of it carries none", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "fork", pid: 40, ppid: 3, nspid: 2, comm: "sh" },
+      { kind: "fork", pid: 40, ppid: 3, comm: "sh" },
+      { kind: "read", pid: 40, comm: "sh", path: "/proc/2/environ" },
+    );
+    expect(rows(summary)).toStrictEqual(["sh R /proc/<pid>/environ"]);
+  });
+
+  it("matches a program run through /proc/self by a rule naming /proc/<pid>", () => {
+    const { summary } = marked(
+      { rules: rulesOf("/proc/<pid>/exe R ./x\n* X **") },
+      { kind: "exec", pid: 40, nspid: 2, comm: "tool", path: "/proc/self/exe" },
+      { kind: "read", pid: 40, comm: "tool", path: "/work/x" },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 0 });
   });
 
   it("matches /proc/<pid>/ as any process's directory, and nothing else in /proc", () => {

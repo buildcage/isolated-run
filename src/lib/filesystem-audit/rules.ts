@@ -199,7 +199,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
           );
       rules.push({
         ref,
-        program: program === "*" ? undefined : glob(program),
+        program: program === "*" ? undefined : anyProcess(program, glob(program)),
         path: anyProcess(path, glob(path)),
         ...accessBits(access),
       });

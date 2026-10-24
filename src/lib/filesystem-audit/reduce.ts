@@ -377,8 +377,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const add = (r: unknown, counted = true): RuleMark | undefined => {
     if (!isRecord(r)) return undefined;
     const proc = procOf(added, r);
+    // Before the count: the step's shell is buildcage's until it runs the step.
+    if (r.kind === "fork" || r.kind === "exec") {
+      if (r.nspid) nsPids.set(r.pid, r.nspid);
+      else nsPids.delete(r.pid);
+    }
     if (!counted) return undefined;
-    if ((r.kind === "fork" || r.kind === "exec") && r.nspid) nsPids.set(r.pid, r.nspid);
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
       programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));

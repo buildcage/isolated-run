@@ -36,22 +36,31 @@ export const unfoldable = (parts: string[], path: string): boolean =>
 const PROC_NUMBERS =
   /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
 
+// As a rule spells it, self is the process's own directory.
+const SPELLED_SELF = (proc: string): boolean => proc === "self";
+
 /**
  * The path with its /proc numbers, which change from run to run, shown as
- * `<pid>` and `<tid>`, and the directory of the process `self` names, the one
- * that made the access, as `self`.
+ * `<pid>` and `<tid>`, and the directory `own` says is the process's own, the
+ * one that made the access, as `self`.
  */
-export const unnumbered = (path: string, self?: number): string =>
+export const unnumbered = (path: string, own = SPELLED_SELF): string =>
   path.replace(PROC_NUMBERS, (_, threadSelf?: string, proc?: string, task?: string) => {
-    if (threadSelf) return "/proc/self/task/<tid>";
-    const own = proc === "self" || (self !== undefined && proc === String(self));
-    return `/proc/${own ? "self" : "<pid>"}${task ? "/task/<tid>" : ""}`;
+    const self = own(threadSelf ? "self" : proc!);
+    return `/proc/${self ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`;
   });
 
+/**
+ * A path as the summary keys it. `self` is the number of the process that made
+ * the access in its own PID namespace, where known; where not, its own
+ * directory shows as any other, spelled self or not.
+ */
 export function normalize(path: string, self?: number): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
-  return unnumbered(path.replace(/^\.\//, ""), self);
+  const own =
+    self === undefined ? () => false : (proc: string) => proc === "self" || proc === String(self);
+  return unnumbered(path.replace(/^\.\//, ""), own);
 }
 
 /** The workspace and $HOME, each as given and with symlinks resolved. */
