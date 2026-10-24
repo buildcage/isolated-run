@@ -75,8 +75,8 @@ function report(overrides: Partial<UniversalReportData> = {}): UniversalReportDa
 describe("reportTitle", () => {
   it("names the report, then the label", () => {
     expect(reportTitle(undefined)).toBe("Outbound Traffic Report");
-    expect(reportTitle("npm ci", "Process Activity Report")).toBe(
-      "Process Activity Report — npm ci",
+    expect(reportTitle("npm ci", "Filesystem Activity Report")).toBe(
+      "Filesystem Activity Report — npm ci",
     );
   });
 });
@@ -589,7 +589,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "build" }),
     );
     expect(markdown).toMatch(/^## Outbound Traffic Report — build\n\n### ✅ Allowed Hosts\n/);
-    // The step closes the summary after the process activity.
+    // The step closes the summary after the filesystem activity.
     expect(markdown).not.toMatch(/Reported by/);
   });
 

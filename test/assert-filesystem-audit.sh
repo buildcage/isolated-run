@@ -19,7 +19,7 @@ echo ""
 echo "=== Filesystem Audit Summary Assertions ==="
 echo ""
 
-assert_file_has "$f" "The summary has the Process Activity section" "^## Process Activity Report"
+assert_file_has "$f" "The summary has the Filesystem Activity section" "^## Filesystem Activity Report"
 # The tracer stopped on SIGTERM and wrote its whole record.
 assert_file_lacks "$f" "The record is not marked incomplete" "This record is incomplete"
 # The probe writes show as a flagged, command-tagged line under the
@@ -48,7 +48,7 @@ assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -
 assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | W | `./probe.txt` |'
 assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
 assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
-assert_file_has "$f" "The summary has the process details" '<summary>🔍 Process details</summary>'
+assert_file_has "$f" "The summary has the file access details" '<summary>🔍 File access details</summary>'
 assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3\.[0-9]+ +\./futimens\.txt$'
 assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3\.[0-9]+ +\./empty-name\.txt$'
 

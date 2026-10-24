@@ -395,10 +395,10 @@ describe("renderAuditSummaryBlocks: tables", () => {
   it("folds the per-command record into a details element after the tables", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
     expect(md.indexOf("<summary>Accessed Paths")).toBeLessThan(
-      md.indexOf("<summary>🔍 Process details"),
+      md.indexOf("<summary>🔍 File access details"),
     );
     expect(md).toMatch(
-      /<details>\n<summary>🔍 Process details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+      /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
     );
   });
 });

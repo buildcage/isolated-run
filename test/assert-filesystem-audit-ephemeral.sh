@@ -20,7 +20,7 @@ echo ""
 echo "=== Ephemeral Filesystem Audit Summary Assertions ==="
 echo ""
 
-assert_file_has "$f" "The summary has the Process Activity section" "^## Process Activity Report"
+assert_file_has "$f" "The summary has the Filesystem Activity section" "^## Filesystem Activity Report"
 assert_file_lacks "$f" "The record is not marked incomplete" "This record is incomplete"
 
 assert_one_row "An append to a lower-layer file has one row" ' W +bash +\./README\.md$'

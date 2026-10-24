@@ -66,7 +66,7 @@ describe("createAuditSummary: properties", () => {
     fc.assert(
       fc.property(jsonlArb, (jsonl) => {
         const md = renderFilesystemAuditSummary(jsonl, PREFIXES);
-        expect(md.startsWith("\n## Process Activity Report")).toBe(true);
+        expect(md.startsWith("\n## Filesystem Activity Report")).toBe(true);
         const block = md.match(/```\n([\s\S]*?)\n```/);
         if (block)
           for (const row of block[1].split("\n"))

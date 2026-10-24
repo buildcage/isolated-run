@@ -132,7 +132,7 @@ export function computeReportOutcomes(
     warning: [...wouldBlockVerdictItems(report.timeline), ...(verdictItems.warning ?? [])],
   });
   // What needs acting on first, then what got through, then the record. The
-  // step closes its summary itself, after the process activity.
+  // step closes its summary itself, after the filesystem activity.
   const blocks = stackTrafficBlocks(heading, [
     blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
     wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
