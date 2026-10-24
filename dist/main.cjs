@@ -72395,9 +72395,14 @@ const newAgg = () => ({
 }), flagBits = (a) => a.ok | a.failed;
 function mergeAgg(dst, src) {
 	dst.ok |= src.ok, dst.failed |= src.failed, dst.perm |= src.perm, dst.first = Math.min(dst.first, src.first), dst.last = Math.max(dst.last, src.last), dst.seq = Math.min(dst.seq, src.seq);
+	for (let [cmd, seq] of src.cmds ?? []) addCmd(dst, cmd, seq);
+}
+function addCmd(a, cmd, seq) {
+	let had = a.cmds?.get(cmd);
+	(a.cmds ??= new Map()).set(cmd, had === void 0 ? seq : Math.min(had, seq));
 }
 function apply(a, x) {
-	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
+	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, x.cmd !== void 0 && addCmd(a, x.cmd, x.seq), !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
 }
 function fmtSpan(a, originMs) {
 	if (a.first === Infinity) return "";
@@ -72737,10 +72742,12 @@ function unexpectedBlock(summary, { priorities }) {
 	};
 	let md = markdownRows([
 		"Program",
+		"Command",
 		"Access",
 		"Path"
 	], proposed.map((r) => [
 		pathCell(r.program),
+		r.commands.map(codeCell).join(", "),
 		r.flags,
 		pathCell(r.path)
 	]));
@@ -73428,12 +73435,13 @@ function createAuditSummary(prefixes) {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
 		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
-	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}, commsBefore = new Map(), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
 		if (r.kind === "fork") {
-			programs.set(r.pid, programOf(r.ppid, r.comm ?? ""));
+			let comm = r.comm ?? "";
+			programs.set(r.pid, programOf(r.ppid, comm)), tally && commsBefore.set(r.pid, comm);
 			let runName = runNames.get(r.ppid);
 			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
 		}
@@ -73458,8 +73466,8 @@ function createAuditSummary(prefixes) {
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
 		}
-		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0;
-		if (r.kind === "exec" && r.path) {
+		let runBy = r.kind === "exec" ? programOf(r.pid, r.comm ?? "") : void 0, runCmd = tally && r.kind === "exec" ? commandKey(r.pid, commsBefore.get(r.pid) ?? r.comm ?? "") : void 0;
+		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 			let run = escaped(p), runs = executed.get(run);
@@ -73484,7 +73492,10 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally && takeForRules(x, parts, runBy ?? program);
+				}, parts), tally && takeForRules({
+					...x,
+					cmd: runCmd ?? x.comm
+				}, parts, runBy ?? program);
 			}
 			return tally?.endLine();
 		}
@@ -73512,6 +73523,7 @@ function createAuditSummary(prefixes) {
 					...program,
 					deleted: !0
 				} : program,
+				commands: [...new Set([...agg.cmds].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd).text))],
 				flags: fmtFlags(agg),
 				path: shown(only?.path ? path + DELETED : path)
 			};
