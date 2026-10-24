@@ -73841,7 +73841,7 @@ function ruleSources(value, config) {
 function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	let rules = parseExpectedRules(ruleSources(value, config));
 	if (rules.lines.length !== 0) {
-		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+		if (rules.rules.length > 0 && filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 		return rules;
 	}
 }
@@ -77357,10 +77357,10 @@ function readStepInputs(env, deps) {
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), expectedFilesystemRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.rules.length ? givenRules : void 0, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set."), failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
