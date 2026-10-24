@@ -1513,6 +1513,26 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(again).toMatchObject({ matched: 2, unexpected: 0 });
   });
 
+  it("folds no directory sooner for the line it was read on the way to its files", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/a", "ls R ./d/b"]);
+  });
+
+  it("lists a walked directory beside the rows that remain unexpected", () => {
+    const { summary } = marked(
+      { rules: rulesOf("ls R ./d/a") },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/b"]);
+  });
+
   it("matches a memfd by its quoted name and a deleted file by its path", () => {
     const { summary } = marked(
       { rules: rulesOf('* W memfd:"m"\n* W ./gone') },

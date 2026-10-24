@@ -108,7 +108,7 @@ function* treeLines(
     part: string;
     up?: Entry;
   }
-  const walked = showWalked ? new Set<Node>() : walkedNodes(top);
+  const walked = walkedNodes(top);
   const pathTo = (e: Entry): string => {
     const parts: string[] = [];
     for (let at: Entry | undefined = e; at; at = at.up) parts.push(at.part);
@@ -120,14 +120,17 @@ function* treeLines(
     const e = stack.pop()!;
     const { folded, own, kids, kept } = e.node;
     if (folded && flagBits(folded)) yield [starred(pathTo(e)), folded];
-    const ownLine = own && flagBits(own) && !walked.has(e.node) ? own : undefined;
-    // Its own line counts toward a fold too. Whether that line prints can
-    // change until every access is in, so this fold waits for them.
+    const shown = own && flagBits(own) ? own : undefined;
+    const ownLine = shown && !walked.has(e.node) ? shown : undefined;
+    // Its own line counts toward a fold too, a walked one never, shown or
+    // not. Whether that line prints can change until every access is in, so
+    // this fold waits for them.
     if (kids?.size && !kept && kids.size + (ownLine ? 1 : 0) >= fanout) {
       yield [starred(pathTo(e)), treeAgg(e.node)];
       continue;
     }
-    if (ownLine) yield [pathTo(e), ownLine];
+    const line = showWalked ? shown : ownLine;
+    if (line) yield [pathTo(e), line];
     for (const [part, node] of [...(kids ?? [])].reverse()) stack.push({ node, part, up: e });
   }
 }

@@ -616,7 +616,8 @@ accessed paths table, where each has rows of its own.
   opened, under the first program to make them. A pipe or a socket is left out of the summary.
 - A directory has no row of its own where everything done to it was also done below it, as a read
   of `./d` on the way to reading `./d/f` shows only `./d/f`. **Unexpected Accesses** and the
-  proposed rules keep it, as a rule has to name it to take that access.
+  proposed rules keep it, as a rule has to name it to take that access, without counting it toward
+  a `dir/**` row's three.
 
 **Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
 command's paths on their own, so they often name it; the artifact always does.
