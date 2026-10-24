@@ -1543,6 +1543,48 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(rows(summary)).toStrictEqual(["cat r …/x"]);
   });
 
+  it("marks a row deleted by the accesses no rule took alone", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* R ./x\n* X **") },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed).toStrictEqual([
+      {
+        program: { path: "./tool", deleted: true },
+        flags: "W",
+        path: { path: "./x", deleted: true },
+      },
+    ]);
+  });
+
+  it("marks a row's program deleted by that row's accesses", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/y" },
+    );
+    expect(summary.proposed!.slice(0, 2).map((r) => r.program)).toStrictEqual([
+      { path: "./tool", deleted: true },
+      { path: "./tool" },
+    ]);
+  });
+
+  it("folds a relative name with the walks the summary spells it as", () => {
+    const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
+    const { summary } = marked(
+      { propose: true },
+      { ...missing, path: "dir/a" },
+      { ...missing, path: "…/dir/b" },
+      { ...missing, path: "…/dir/c" },
+    );
+    expect(rows(summary)).toStrictEqual(["cat r …/dir/**"]);
+  });
+
   it("shows a proposed row not deleted where any access was not", () => {
     const { summary } = marked(
       { propose: true },

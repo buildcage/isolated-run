@@ -27,8 +27,9 @@ export class RuleTally {
     private readonly names: RuleNames,
   ) {}
 
-  /** An access of the current line, by the program of rank `by`. */
-  take(x: Access, parts: string[], by: number): void {
+  /** An access of the current line, by the program of rank `by`. Returns the
+   *  actions no rule took. */
+  take(x: Access, parts: string[], by: number): number {
     let bit = x.bit;
     if (this.rules) {
       const m = this.rules.match(
@@ -43,6 +44,7 @@ export class RuleTally {
       else this.mark ??= { rule: m.ref! };
     }
     this.lines.add({ ...x, comm: String(by), bit }, parts);
+    return bit;
   }
 
   /** Ends the current line, counting it and returning its mark. */

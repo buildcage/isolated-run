@@ -8,7 +8,7 @@
 
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { fmtFlags, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
+import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
 import { escapeForDisplay } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
@@ -245,7 +245,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
   // A program's rank holds its path, a command name's none.
-  const ranks: { shown: Shown; bytes: number; program?: string; ruleName: string }[] = [];
+  // A rank's ruleId is the first rank of its rule's name: a program shown
+  // deleted and not is one rule.
+  const ranks: {
+    shown: Shown;
+    bytes: number;
+    program?: string;
+    ruleName: string;
+    ruleId: number;
+  }[] = [];
+  const ruleIds = new Map<string, number>();
   const rankOf = new Map<string, number>();
   const rank = (key: string, name: boolean): number => {
     const id = `${name ? "n" : "p"}${key}`;
@@ -255,12 +264,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       rankOf.set(id, r);
       const s = name ? { path: escapeForDisplay(key) } : shown(escaped(key));
       const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
-      ranks.push({
-        shown: s,
-        bytes,
-        ...(name ? {} : { program: key }),
-        ruleName: name ? s.path : ruleName(escaped(key)),
-      });
+      const rule = name ? s.path : ruleName(escaped(key));
+      const ruleId = ruleIds.get(rule) ?? r;
+      ruleIds.set(rule, ruleId);
+      ranks.push({ shown: s, bytes, ...(name ? {} : { program: key }), ruleName: rule, ruleId });
     }
     return r;
   };
@@ -306,33 +313,36 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         )
       : undefined;
   // The tally counts a program or a path shown deleted and not as the one rule
-  // it is, before anything folds: each program by the first rank of its rule's
-  // name, each path unmarked. Either shows deleted only where every access was.
-  const ruleRanks = new Map<string, number>();
-  const ruleIds = new Map<number, number>();
-  const liveRanks = new Map<number, number>();
-  // Whether every access of a rule's program and path was to a deleted file.
-  const deletedOnly = new Map<string, boolean>();
+  // it is, before anything folds: each program by its rule's id, each path
+  // unmarked and spelled as the summary spells it. Either shows deleted only
+  // where every access no rule took was, by row, or by program for a folded
+  // row.
+  const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
+  const programDeletedOnly = new Map<number, boolean>();
   const takeForRules = (x: Access, parts: string[], by: number): void => {
-    let id = ruleIds.get(by);
-    if (id === undefined) {
-      id = ruleRanks.get(ranks[by].ruleName) ?? by;
-      ruleRanks.set(ranks[by].ruleName, id);
-      ruleIds.set(by, id);
-      if (!ranks[by].shown.deleted) liveRanks.set(id, by);
-    }
-    const path = x.path.startsWith(MEMFD) ? x.path : unmarked(x.path);
+    const id = ranks[by].ruleId;
+    const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
+    let path = deletedPath ? unmarked(x.path) : x.path;
+    // A name still relative shows as a "…/" walk, as relativize spells it.
+    if (
+      !path.startsWith("/") &&
+      !path.startsWith("…/") &&
+      !path.startsWith(MEMFD) &&
+      !isRunnerFile(path)
+    )
+      path = `…/${path}`;
+    const same = path === x.path;
+    const left = tally!.take(same ? x : { ...x, path }, same ? parts : components(path), id);
     // Past the tally's limit, only the matching is left to do.
-    if (!tally!.givenUp) {
-      const key = keyOf(String(id), path);
-      if (path === x.path) deletedOnly.set(key, false);
-      else if (!deletedOnly.has(key)) deletedOnly.set(key, true);
-    }
-    tally!.take(
-      path === x.path ? x : { ...x, path },
-      path === x.path ? parts : components(path),
-      id,
-    );
+    if (!left || tally!.givenUp) return;
+    const program = Boolean(ranks[by].shown.deleted);
+    const key = keyOf(String(id), path);
+    const was = deletedOnly.get(key);
+    deletedOnly.set(key, {
+      program: (was?.program ?? true) && program,
+      path: (was?.path ?? true) && deletedPath,
+    });
+    programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
   };
   let ended = false;
   let lost = false;
@@ -470,27 +480,17 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return relativize(unmarked(path), shownPrefixes);
   }
 
-  // One row per rule: lines the tree keeps apart but the summary spells
-  // alike, as a relative name and a "…/" walk, are one rule too.
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {
-    const lines = tally.finish();
-    if (!lines) return undefined;
-    const rows = new Map<string, { rank: number; path: string; agg: Agg; deleted: boolean }>();
-    for (const { rank, path, agg } of lines) {
-      const deleted = deletedOnly.get(keyOf(String(rank), path)) ?? false;
-      const key = keyOf(ranks[rank].ruleName, ruleName(path));
-      const row = rows.get(key);
-      if (!row) rows.set(key, { rank, path, agg, deleted });
-      else {
-        mergeAgg(row.agg, agg);
-        row.deleted &&= deleted;
-      }
-    }
-    return [...rows.values()].map(({ rank, path, agg, deleted }) => ({
-      program: ranks[liveRanks.get(rank) ?? rank].shown,
-      flags: fmtFlags(agg),
-      path: shown(deleted ? path + DELETED : path),
-    }));
+    return tally.finish()?.map(({ rank, path, agg }) => {
+      const only = deletedOnly.get(keyOf(String(rank), path));
+      const { deleted: _, ...program } = ranks[rank].shown;
+      return {
+        program:
+          (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
+        flags: fmtFlags(agg),
+        path: shown(only?.path ? path + DELETED : path),
+      };
+    });
   }
 
   type Line = { comm: string; path: string; agg: Agg };
