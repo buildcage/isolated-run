@@ -6,6 +6,7 @@ import {
   renderFilesystemAuditBlocks,
   renderFilesystemAuditSummary,
 } from "../test/filesystem-audit.ts";
+import { expectedRulesFile } from "./proposed-rules.ts";
 import {
   createAuditSummary,
   reduceRecording,
@@ -1534,6 +1535,120 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
     expect(rows(summary)).toStrictEqual(["cat R /proc/sys/kernel/pid_max"]);
+  });
+
+  it("proposes one row for a program or a path shown both deleted and not", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x" },
+    );
+    expect(rows(summary)).toStrictEqual(["./tool RW ./x", "tool X ./tool"]);
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool" },
+      flags: "RW",
+      path: { path: "./x" },
+    });
+  });
+
+  it("folds a program and a path shown deleted and not as one, each rule once", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/dir/a", deleted: true },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/a" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/b" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/dir/c" },
+    );
+    expect(rows(summary)).toStrictEqual(["./tool R ./dir/**", "tool X ./tool"]);
+    const file = expectedRulesFile([], summary.proposed!)!;
+    const added = file.split("\n").slice(3, -1);
+    expect(added).toHaveLength(summary.proposed!.length);
+    expect(new Set(added).size).toBe(added.length);
+  });
+
+  it("proposes one rule for lines the summary spells alike", () => {
+    const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
+    const { summary } = marked(
+      { propose: true },
+      { ...missing, path: "x" },
+      { ...missing, path: "…/x" },
+    );
+    expect(rows(summary)).toStrictEqual(["cat r …/x"]);
+  });
+
+  it("marks a row deleted by the accesses no rule took alone", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* R ./x\n* X **") },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed).toStrictEqual([
+      {
+        program: { path: "./tool", deleted: true },
+        flags: "W",
+        path: { path: "./x", deleted: true },
+      },
+    ]);
+  });
+
+  it("marks a row's program deleted by that row's accesses", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 4, comm: "tool", path: "/work/y" },
+    );
+    expect(summary.proposed!.slice(0, 2).map((r) => r.program)).toStrictEqual([
+      { path: "./tool", deleted: true },
+      { path: "./tool" },
+    ]);
+  });
+
+  it("folds a relative name with the walks the summary spells it as", () => {
+    const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
+    const { summary } = marked(
+      { propose: true },
+      { ...missing, path: "dir/a" },
+      { ...missing, path: "…/dir/b" },
+      { ...missing, path: "…/dir/c" },
+    );
+    expect(rows(summary)).toStrictEqual(["cat r …/dir/**"]);
+  });
+
+  it("shows a proposed row not deleted where any access was not", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool" },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x" },
+      { kind: "exec", pid: 4, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "write", pid: 4, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool" },
+      flags: "RW",
+      path: { path: "./x" },
+    });
+  });
+
+  it("shows a proposed row deleted where every access was", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "exec", pid: 3, comm: "tool", path: "/work/tool", deleted: true },
+      { kind: "read", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+      { kind: "write", pid: 3, comm: "tool", path: "/work/x", deleted: true },
+    );
+    expect(summary.proposed![0]).toStrictEqual({
+      program: { path: "./tool", deleted: true },
+      flags: "RW",
+      path: { path: "./x", deleted: true },
+    });
   });
 
   it("matches a memfd by its quoted name and a deleted file by its path", () => {

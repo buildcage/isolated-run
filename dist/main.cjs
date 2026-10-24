@@ -72963,7 +72963,7 @@ function expectedRulesFile(written, proposed) {
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(r.path.path)
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = [...new Set(rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`))], lines = given.length === 0 ? added : added.length === 0 ? given : [
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",
 		NOT_MATCHED_HEADING,
@@ -73266,11 +73266,11 @@ var Lines = class {
 			let m = this.rules.match(this.names.program(by), this.names.path(x.path), bit, x.failed, x.perm);
 			bit = m.unmatched, bit ? this.mark = { unexpected: !0 } : this.mark ??= { rule: m.ref };
 		}
-		this.lines.add({
+		return this.lines.add({
 			...x,
 			comm: String(by),
 			bit
-		}, parts);
+		}, parts), bit;
 	}
 	endLine() {
 		let mark = this.mark;
@@ -73378,16 +73378,17 @@ function createAuditSummary(prefixes) {
 		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
-	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], rankOf = new Map(), rank = (key, name) => {
+	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], ruleIds = new Map(), rankOf = new Map(), rank = (key, name) => {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {
 			r = ranks.length, rankOf.set(id, r);
-			let s = name ? { path: escapeForDisplay(key) } : shown(escaped(key)), bytes = s.path.length + (s.deleted ? 10 : 0);
-			ranks.push({
+			let s = name ? { path: escapeForDisplay(key) } : shown(escaped(key)), bytes = s.path.length + (s.deleted ? 10 : 0), rule = name ? s.path : ruleName(escaped(key)), ruleId = ruleIds.get(rule) ?? r;
+			ruleIds.set(rule, ruleId), ranks.push({
 				shown: s,
 				bytes,
 				...name ? {} : { program: key },
-				ruleName: name ? s.path : ruleName(escaped(key))
+				ruleName: rule,
+				ruleId
 			});
 		}
 		return r;
@@ -73411,7 +73412,20 @@ function createAuditSummary(prefixes) {
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
-	}) : void 0, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by) => {
+		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
+		!path.startsWith("/") && !path.startsWith("…/") && !path.startsWith(MEMFD) && !isRunnerFile(path) && (path = `…/${path}`);
+		let same = path === x.path;
+		if (!tally.take(same ? x : {
+			...x,
+			path
+		}, same ? parts : components(path), id) || tally.givenUp) return;
+		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
+		deletedOnly.set(key, {
+			program: (was?.program ?? !0) && program,
+			path: (was?.path ?? !0) && deletedPath
+		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
+	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if (!counted) return;
@@ -73467,7 +73481,7 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally?.take(x, parts, runBy ?? program);
+				}, parts), tally && takeForRules(x, parts, runBy ?? program);
 			}
 			return tally?.endLine();
 		}
@@ -73486,6 +73500,19 @@ function createAuditSummary(prefixes) {
 	}
 	function ruleName(path) {
 		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
+	}
+	function ruleRowsOf(tally) {
+		return tally.finish()?.map(({ rank, path, agg }) => {
+			let only = deletedOnly.get(keyOf(String(rank), path)), { deleted: _, ...program } = ranks[rank].shown;
+			return {
+				program: only?.program ?? programDeletedOnly.get(rank) ? {
+					...program,
+					deleted: !0
+				} : program,
+				flags: fmtFlags(agg),
+				path: shown(only?.path ? path + DELETED : path)
+			};
+		});
 	}
 	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
@@ -73514,11 +73541,7 @@ function createAuditSummary(prefixes) {
 					...ranks[Number(comm)].shown,
 					rank: Number(comm)
 				}
-			})), log = byPath && rows(kept(details)), ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
-				program: ranks[rank].shown,
-				flags: fmtFlags(agg),
-				path: shown(path)
-			}));
+			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
 			return {
 				ended,
 				lost,
