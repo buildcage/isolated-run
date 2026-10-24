@@ -108,7 +108,7 @@
 </details>
 
 <details>
-<summary>🔍 Filesystem details</summary>
+<summary>🔍 File access details</summary>
 
 <sub>first-last access since the proxy started · flags · command · path</sub>
 

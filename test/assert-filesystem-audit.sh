@@ -48,7 +48,7 @@ assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -
 assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | W | `./probe.txt` |'
 assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
 assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
-assert_file_has "$f" "The summary has the filesystem details" '<summary>🔍 Filesystem details</summary>'
+assert_file_has "$f" "The summary has the file access details" '<summary>🔍 File access details</summary>'
 assert_file_has "$f" "futimens.txt has a details row" -E ' WA +python3\.[0-9]+ +\./futimens\.txt$'
 assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3\.[0-9]+ +\./empty-name\.txt$'
 

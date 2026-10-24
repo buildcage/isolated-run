@@ -72697,7 +72697,7 @@ function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, p
 		priority: priorities[FILESYSTEM_BLOCK.log],
 		level: 4,
 		section: SECTION,
-		open: "<details>\n<summary>🔍 Filesystem details</summary>\n\n",
+		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
 		close: DETAILS_CLOSE
 	};
 	if (!details) return {

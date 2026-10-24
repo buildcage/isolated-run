@@ -1100,7 +1100,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
         "| Program | Access | Path |\n| --- | --- | --- |\n| `node` | W | `./b` |\n\n",
     );
     expect(md).not.toContain("Accessed Paths");
-    expect(md).not.toContain("Filesystem details");
+    expect(md).not.toContain("File access details");
     expect(md).toContain(
       "`filesystem-audit-expected-rules-deadbeef.yml` in the `buildcage-filesystem-audit-deadbeef` artifact " +
         "holds the rules given, and one for each access they did not take.",

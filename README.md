@@ -730,7 +730,7 @@ follows it, cut at a line boundary with a note and a warning when it does not fi
 A note and a warning replace what the command wrote when it is over 1 MiB on its own, as GitHub
 would drop it whole; the step does not fail. When the report itself,
 with its Filesystem Activity section if the filesystem audit was on, would pass the limit, its parts
-give way in this order: the filesystem details, the timeline, the Filesystem Activity tables, the
+give way in this order: the file access details, the timeline, the Filesystem Activity tables, the
 AWS keys table, the allowed table, the blocked and failed table, the ⚠️ tables of requests `restrict`
 would block, and last the `restrict` example. A part that does not fit is cut at a line boundary
 with a note after what is kept, or replaced by the note when nothing of it fits; the example is only

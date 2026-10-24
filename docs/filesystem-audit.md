@@ -125,7 +125,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | `/usr/local/bin/node` | Rr!    | `/etc/**`             |
 | `/usr/local/bin/node` | w!     | `/usr/local/bin/node` |
 
-🔍 Filesystem details
+🔍 File access details
 first-last access since the proxy started · flags · command · path
 00:00.401-00:00.420: Xw! node /usr/local/bin/node
 00:00.412:           R   node ./package.json
@@ -151,7 +151,7 @@ From the top:
   action. Programs are in the order they first ran, and each one's paths in path order: the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
   directory; see [Paths](#paths).
-- **🔍 Filesystem details**, folded, has one row per command and path, in the order the rows were
+- **🔍 File access details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the file name of the program the process runs, followed in brackets
   by the name the process gave itself, as `ps` shows it, where that differs: npm renames its node
   process, which shows as `node[npm ls]`; see [How rows are grouped](#how-rows-are-grouped). The
@@ -716,7 +716,7 @@ itself can do to the record, and what the record can be trusted for.
 ## Limits
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
-  filesystem details give way first, and this section's tables after the traffic report's timeline;
+  file access details give way first, and this section's tables after the traffic report's timeline;
   [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
   does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
   of it fits. The note names the artifact, which still holds every access, or says how to ask for
