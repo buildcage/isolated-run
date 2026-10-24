@@ -217,6 +217,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/tmp",
     "/proc",
     "/proc/<pid>",
+    "/proc/self",
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
   ].map(components);
@@ -363,6 +364,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const comm = r.comm ?? "";
     return { program: programOf(r.pid, comm), cmd: commandKey(r.pid, before ?? comm) };
   };
+  // Each pid's number in its own PID namespace, which its /proc directory
+  // goes by in the sandbox.
+  const nsPids = new Map<number | undefined, number>();
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -373,6 +377,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const add = (r: unknown, counted = true): RuleMark | undefined => {
     if (!isRecord(r)) return undefined;
     const proc = procOf(added, r);
+    // Before the count: the step's shell is buildcage's until it runs the step.
+    if (r.kind === "fork" || r.kind === "exec") {
+      if (r.nspid) nsPids.set(r.pid, r.nspid);
+      else nsPids.delete(r.pid);
+    }
     if (!counted) return undefined;
     if (r.kind === "fork") {
       // The fork's comm is the parent's, copied to the child.
@@ -421,7 +430,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const runner = tally && r.kind === "exec" ? runnerOf(r) : undefined;
     if (tally) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
-      const p = normalize(marked(r, canonical(r.path, prefixes)));
+      const p = normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
       const run = escaped(p);
@@ -458,7 +467,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
-        path: escaped(normalize(path)),
+        path: escaped(normalize(path, nsPids.get(r.pid))),
         bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,

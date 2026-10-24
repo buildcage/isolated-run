@@ -267,8 +267,8 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name: "fork",
-			ev:   event{kind: filesystemAuditKindK_FORK, pid: 9, ppid: 7, comm: "bash"},
-			want: record{Kind: "fork", PID: 9, PPID: 7, Comm: "bash"},
+			ev:   event{kind: filesystemAuditKindK_FORK, pid: 9, ppid: 7, nspid: 3, comm: "bash"},
+			want: record{Kind: "fork", PID: 9, PPID: 7, NSPid: 3, Comm: "bash"},
 		},
 		{
 			name: "failed unlink, relative to a dirfd",
@@ -324,8 +324,8 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name: "exec",
-			ev:   event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: "true", data: []byte("/bin/true\x00")},
-			want: record{Kind: "exec", PID: 9, Comm: "true", Path: "/bin/true"},
+			ev:   event{kind: filesystemAuditKindK_EXEC, pid: 9, nspid: 2, comm: "true", data: []byte("/bin/true\x00")},
+			want: record{Kind: "exec", PID: 9, NSPid: 2, Comm: "true", Path: "/bin/true"},
 		},
 		{
 			name: "chown",

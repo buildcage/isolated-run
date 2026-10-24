@@ -42,6 +42,9 @@ func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 	b = strconv.AppendUint(b, uint64(r.PID), 10)
 	b = append(b, `,"ppid":`...)
 	b = strconv.AppendUint(b, uint64(r.PPID), 10)
+	if r.NSPid != 0 {
+		b = strconv.AppendUint(append(b, `,"nspid":`...), uint64(r.NSPid), 10)
+	}
 	b = append(b, `,"comm":`...)
 	b = appendString(b, r.Comm, true)
 	b = appendName(b, `,"program":`, r.Program)

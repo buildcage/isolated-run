@@ -213,8 +213,9 @@ From the top:
 | `./…`                      | Under `$GITHUB_WORKSPACE`                                                                                                                                        |
 | `~/…`                      | Under `$HOME`                                                                                                                                                    |
 | `dir/**`                   | `dir` and the entries touched directly under it would take three or more rows, so they are shown as one with the flags of everything at and under `dir` combined |
-| `/proc/<pid>/…`            | Under a process's own directory in `/proc`, every process's shown as one, `/proc/self` and `/proc/thread-self` included                                          |
-| `/proc/<pid>/task/<tid>/…` | Under a thread's directory within a process's, every thread's shown as one                                                                                       |
+| `/proc/self/…`             | Under the directory in `/proc` of the process that made the access                                                                                               |
+| `/proc/<pid>/…`            | Under another process's directory in `/proc`, every one shown as one                                                                                             |
+| `/proc/<pid>/task/<tid>/…` | Under a thread's directory within a process's, every thread's shown as one, as in `/proc/self/task/<tid>/…`                                                      |
 
 Some paths stay on rows of their own rather than fold into a `dir/**` row, such as the workspace,
 `$HOME` and a program run; [How rows are grouped](#how-rows-are-grouped) lists them, and
@@ -353,11 +354,12 @@ can be copied in:
   `memfd:"name"`. `*` matches within one component of a path, and `**` across them, as a whole
   component any number of them: `./dist/**` matches `./dist` and everything under it. A `*` in a
   name shows as `\*`, which matches only a star. Regular expressions are not supported.
-  `/proc/<pid>/` stands for the directory of any process, whatever its number, as the table shows
-  it, and `/proc/<pid>/task/<tid>/` for that of any of its threads; `/proc/*/` would also match
-  `/proc/sys/` and every other entry in `/proc`. A program or a path giving a number, as
-  `/proc/1/`, or naming `/proc/self/` or `/proc/thread-self/`, is refused, as the summary never
-  shows one.
+  `/proc/<pid>/` stands for the directory of any process, whatever its number, the one that made
+  the access included, and `/proc/self/` for that one alone; `/proc/<pid>/task/<tid>/` stands for
+  any of a process's threads. A process the recording has no `nspid` for shows its own directory as
+  `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match `/proc/sys/` and every other entry in
+  `/proc`. A program or a path giving a number, as `/proc/1/`, or naming `/proc/thread-self/`, is
+  refused, as the summary never shows one.
 - A field holding a space is quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names
   are written with the escapes the summary shows, `\"` and `\\` included, and are matched as the
   summary shows them.
@@ -490,6 +492,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `kind`       | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
 | `pid`        | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
 | `ppid`       | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
+| `nspid`      | `fork` and `exec`                                               | the process's number in its own PID namespace, which its `/proc` directory goes by in the sandbox                                                                                                          |
 | `comm`       | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
 | `program`    | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
 | `path`       | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
@@ -632,8 +635,8 @@ command's paths on their own, so they often name it; the artifact always does.
 
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
-- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them, and
-  `/proc/<pid>`.
+- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
+  `/proc/<pid>` and `/proc/self`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
