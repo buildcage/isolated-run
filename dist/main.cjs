@@ -73410,14 +73410,18 @@ function createAuditSummary(prefixes) {
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
-	}) : void 0, ruleRanks = new Map(), liveRanks = new Map(), deletedPaths = new Set(), livePaths = new Set(), takeForRules = (x, by) => {
-		let id = ruleRanks.get(ranks[by].ruleName);
-		id === void 0 && ruleRanks.set(ranks[by].ruleName, id = by), ranks[by].shown.deleted || liveRanks.set(id, by);
+	}) : void 0, ruleRanks = new Map(), ruleIds = new Map(), liveRanks = new Map(), deletedOnly = new Map(), takeForRules = (x, parts, by) => {
+		let id = ruleIds.get(by);
+		id === void 0 && (id = ruleRanks.get(ranks[by].ruleName) ?? by, ruleRanks.set(ranks[by].ruleName, id), ruleIds.set(by, id), ranks[by].shown.deleted || liveRanks.set(id, by));
 		let path = x.path.startsWith(MEMFD) ? x.path : unmarked(x.path);
-		tally.givenUp || (path === x.path ? livePaths : deletedPaths).add(keyOf(String(id), path)), tally.take({
+		if (!tally.givenUp) {
+			let key = keyOf(String(id), path);
+			path === x.path ? deletedOnly.set(key, !1) : deletedOnly.has(key) || deletedOnly.set(key, !0);
+		}
+		tally.take(path === x.path ? x : {
 			...x,
 			path
-		}, components(path), id);
+		}, path === x.path ? parts : components(path), id);
 	}, ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
@@ -73474,7 +73478,7 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(program),
 					bit: x.bit & ~BIT.X
-				}, parts), tally && takeForRules(x, runBy ?? program);
+				}, parts), tally && takeForRules(x, parts, runBy ?? program);
 			}
 			return tally?.endLine();
 		}
@@ -73495,14 +73499,23 @@ function createAuditSummary(prefixes) {
 		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
 	}
 	function ruleRowsOf(tally) {
-		return tally.finish()?.map(({ rank, path, agg }) => {
-			let key = keyOf(String(rank), path), deleted = deletedPaths.has(key) && !livePaths.has(key);
-			return {
-				program: ranks[liveRanks.get(rank) ?? rank].shown,
-				flags: fmtFlags(agg),
-				path: shown(deleted ? path + DELETED : path)
-			};
-		});
+		let lines = tally.finish();
+		if (!lines) return;
+		let rows = new Map();
+		for (let { rank, path, agg } of lines) {
+			let deleted = deletedOnly.get(keyOf(String(rank), path)) ?? !1, key = keyOf(ranks[rank].ruleName, ruleName(path)), row = rows.get(key);
+			row ? (mergeAgg(row.agg, agg), row.deleted &&= deleted) : rows.set(key, {
+				rank,
+				path,
+				agg,
+				deleted
+			});
+		}
+		return [...rows.values()].map(({ rank, path, agg, deleted }) => ({
+			program: ranks[liveRanks.get(rank) ?? rank].shown,
+			flags: fmtFlags(agg),
+			path: shown(deleted ? path + DELETED : path)
+		}));
 	}
 	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
