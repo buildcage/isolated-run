@@ -73046,8 +73046,8 @@ function walkedNodes(top) {
 	}
 	return walked;
 }
-function* treeLines(top, fanout) {
-	let walked = walkedNodes(top), pathTo = (e) => {
+function* treeLines(top, fanout, showWalked = !1) {
+	let walked = showWalked ? new Set() : walkedNodes(top), pathTo = (e) => {
 		let parts = [];
 		for (let at = e; at; at = at.up) parts.push(at.part);
 		return spell(parts.reverse());
@@ -73235,7 +73235,7 @@ var Lines = class {
 			path: pathOf(key),
 			agg
 		});
-		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout)) {
+		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout, this.opts.showWalked)) {
 			let run = this.climbing.get(keyOf(comm, path));
 			run ? mergeAgg(run, agg) : yield {
 				comm,
@@ -73406,7 +73406,8 @@ function createAuditSummary(prefixes) {
 		limit: Infinity,
 		loose: Infinity,
 		nodes: limits.nodes,
-		rowBytes: () => 0
+		rowBytes: () => 0,
+		showWalked: !0
 	}), {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
