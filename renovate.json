@@ -73,7 +73,7 @@
       "allowedVersions": "/^v?\\d+\\.\\d+\\.\\d+$/"
     },
     {
-      "description": "A job names an Ubuntu release only to test on that release: an older host than ubuntu-latest, or the kernel packages it installs into a VM. Moving it to a newer runner drops that coverage, so runner versions are never bumped.",
+      "description": "A job pins an Ubuntu runner to test on that release or its kernels, which a bump would drop.",
       "matchDatasources": ["github-runners"],
       "enabled": false
     }

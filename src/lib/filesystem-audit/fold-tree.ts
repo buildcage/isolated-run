@@ -122,9 +122,9 @@ function* treeLines(
     if (folded && flagBits(folded)) yield [starred(pathTo(e)), folded];
     const shown = own && flagBits(own) ? own : undefined;
     const ownLine = shown && !walked.has(e.node) ? shown : undefined;
-    // Its own line counts toward a fold too, a walked one never, shown or
-    // not. Whether that line prints can change until every access is in, so
-    // this fold waits for them.
+    // Its own line counts toward a fold too, unless it is only a walk, even
+    // where showWalked prints it. Whether that line prints can change until
+    // every access is in, so this fold waits for them.
     if (kids?.size && !kept && kids.size + (ownLine ? 1 : 0) >= fanout) {
       yield [starred(pathTo(e)), treeAgg(e.node)];
       continue;

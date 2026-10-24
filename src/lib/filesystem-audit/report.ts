@@ -379,7 +379,8 @@ export function readStepFilesystemAudit(
     : "none";
   const given = rules !== undefined;
   const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
-  // Both are cautions, as only fail_on_unexpected_file_access makes the check's.
+  // An incomplete check exists only under fail_on_unexpected_file_access, so
+  // the unexpected accesses are a caution then too.
   const verdictItems = incomplete.caution
     ? { caution: [...(unexpected.caution ?? []), ...incomplete.caution] }
     : unexpected;
@@ -443,8 +444,8 @@ export function readStepFilesystemAudit(
 
 /**
  * Annotates the accesses no rule took and returns the verdict's item for
- * them, a caution when they fail the step, counted as the Unexpected Accesses table lists them, which a table
- * given up does not.
+ * them, a caution when they fail the step. The count is the Unexpected
+ * Accesses table's rows, and absent when the table was given up.
  */
 function reportUnexpected(
   summary: AuditSummary | undefined,

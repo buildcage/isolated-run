@@ -317,11 +317,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           { program: (rank) => ranks[rank].ruleName, path: ruleName },
         )
       : undefined;
-  // The tally counts a program or a path shown deleted and not as the one rule
-  // it is, before anything folds: each program by its rule's id, each path
-  // unmarked and spelled as the summary spells it. Either shows deleted only
-  // where every access no rule took was, by row, or by program for a folded
-  // row.
+  // A rule never names the deleted mark, so the tally keys a program by its
+  // rule's id and a path without the mark. A proposed row shows the mark only
+  // where every unexpected access under it was to the deleted file: per row,
+  // or per program for a folded row.
   const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
   const programDeletedOnly = new Map<number, boolean>();
   const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
@@ -516,7 +515,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return {
         program:
           (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
-        // Once each: a program shown deleted and not names one command.
+        // A program seen both deleted and not is two command keys with one text.
         commands: [
           ...new Set(
             // Every access the tally takes names its command.

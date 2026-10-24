@@ -72421,7 +72421,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, SPELLED_SELF = (proc) => proc === "self", unnumbered = (path, own = SPELLED_SELF) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
 function normalize$2(path, self) {
 	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
 	return unnumbered(path.replace(/^\.\//, ""), own);
@@ -72583,7 +72583,7 @@ function parseExpectedRules(sources) {
 			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
 			return pattern;
 		};
-		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`);
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
@@ -72625,11 +72625,15 @@ var RuleMatcher = class {
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
+function firstOf(names, shown) {
+	let left = names.length - shown;
+	return `${names.slice(0, shown).join(", ")}${left > 0 ? ` and ${left} more` : ""}`;
+}
 function killedNote(rows) {
 	let killed = inRecordingOrder(rows);
 	if (!killed.length) return;
-	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan), left = comms.length - 3;
-	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${comms.slice(0, 3).join(", ")}${left > 0 ? ` and ${left} more` : ""}` : ""}.`;
+	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
+	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${firstOf(comms, 3)}` : ""}.`;
 }
 function skippedNote(count, url) {
 	let why = url ? ` [Why](${url})` : "";
@@ -72748,7 +72752,7 @@ function unexpectedBlock(summary, { priorities }) {
 		"Path"
 	], proposed.map((r) => [
 		pathCell(r.program),
-		r.commands.map(codeCell).join(", "),
+		firstOf(r.commands.map(codeCell), 3),
 		r.flags,
 		pathCell(r.path)
 	]));
@@ -72803,7 +72807,7 @@ ${intro}\n\n` + (steps ? useSteps(where, fileName) : `${where}\n\n`) + `[How to 
 `;
 }
 function useSteps(where, fileName) {
-	return `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\nOr copy the file's rules into the workflow:
+	return `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point \`config_file\` at it:\n\n\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\nOr copy its rules into the config file the step already uses, or into the workflow:
 
 \`\`\`yaml
 filesystem_audit: record
@@ -77484,7 +77488,7 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
 		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
-		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._" : void 0,
+		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_With upload_filesystem_audit_artifact: true, the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,

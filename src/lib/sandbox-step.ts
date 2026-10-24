@@ -469,7 +469,7 @@ export function filesystemExampleInputs(
 /** Said where the restrict example is too large to print while it lists the
  *  expected rules, when uploading the record would name them as a file. */
 export const EXAMPLE_RULES_FILE_NOTE =
-  "_Set upload_filesystem_audit_artifact: true to get expected_filesystem_rules as a file in the filesystem audit artifact, which the example then names under config_file instead of listing the rules._";
+  "_With upload_filesystem_audit_artifact: true, the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._";
 
 // config_file refuses pull_request_target, and workflow_run when a pull
 // request started it, which is not worth reading the payload for here.

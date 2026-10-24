@@ -443,4 +443,43 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
         "| `/usr/bin/node` | `node[npm ci]`, `a\\|b` | W | `./m/**` |\n",
     );
   });
+
+  it("names a row's first three commands and counts the rest", () => {
+    const summary: AuditSummary = {
+      ended: true,
+      lost: false,
+      hostMissed: 0,
+      executed: [],
+      paths: [],
+      details: [{ agg: newAgg(), flags: "W", comm: "sh", commField: "sh", path: "/tmp/a" }],
+      killed: [],
+      proposed: [
+        {
+          program: { path: "/bin/sh" },
+          commands: ["a", "b", "c", "d", "e"],
+          flags: "W",
+          path: { path: "/tmp/**" },
+        },
+        {
+          program: { path: "/bin/sh" },
+          commands: ["a", "b", "c"],
+          flags: "R",
+          path: { path: "/x" },
+        },
+      ],
+      matched: 0,
+      unexpected: 2,
+    };
+    const md = joinSummaryBlocks(
+      renderAuditSummaryBlocks(summary, {
+        title: "T",
+        startedAt: undefined,
+        priorities: FILESYSTEM_PRIORITIES,
+        cutNote: () => "",
+        expected: true,
+      }),
+    );
+    expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` and 2 more | W | `/tmp/**` |\n");
+    expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` | R | `/x` |\n");
+  });
 });

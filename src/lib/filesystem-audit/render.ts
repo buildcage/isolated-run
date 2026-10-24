@@ -21,16 +21,21 @@ const INCOMPLETE_NOTE =
   "> some accesses are missing from this summary and from the artifact.";
 // The note names this many commands; the details, where they fit, show the rest.
 const KILLED_COMMS_SHOWN = 3;
+// An Unexpected Accesses row names this many commands; the artifact has the rest.
+const UNEXPECTED_COMMS_SHOWN = 3;
+
+// The first `shown` names, then how many more there are.
+function firstOf(names: string[], shown: number): string {
+  const left = names.length - shown;
+  return `${names.slice(0, shown).join(", ")}${left > 0 ? ` and ${left} more` : ""}`;
+}
 
 // Each command killed for a 32-bit syscall, in the order killed.
 function killedNote(rows: KilledRow[]): string | undefined {
   const killed = inRecordingOrder(rows);
   if (!killed.length) return undefined;
   const comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
-  const left = comms.length - KILLED_COMMS_SHOWN;
-  const by = comms.length
-    ? `: ${comms.slice(0, KILLED_COMMS_SHOWN).join(", ")}${left > 0 ? ` and ${left} more` : ""}`
-    : "";
+  const by = comms.length ? `: ${firstOf(comms, KILLED_COMMS_SHOWN)}` : "";
   return `> 🚫 Killed for a 32-bit system call${by}.`;
 }
 
@@ -256,7 +261,7 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
     ["Program", "Command", "Access", "Path"],
     proposed.map((r: RuleRow) => [
       pathCell(r.program),
-      r.commands.map(codeCell).join(", "),
+      firstOf(r.commands.map(codeCell), UNEXPECTED_COMMS_SHOWN),
       r.flags,
       pathCell(r.path),
     ]),
@@ -386,9 +391,9 @@ export function rulesNote(
 // How to put the proposed file to use, after where it is.
 function useSteps(where: string, fileName: string): string {
   return (
-    `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n` +
+    `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point \`config_file\` at it:\n\n` +
     `\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\n` +
-    "Or copy the file's rules into the workflow:\n\n" +
+    "Or copy its rules into the config file the step already uses, or into the workflow:\n\n" +
     "```yaml\n" +
     "filesystem_audit: record\n" +
     "upload_filesystem_audit_artifact: true\n" +

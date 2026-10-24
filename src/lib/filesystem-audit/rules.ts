@@ -3,12 +3,11 @@
  * per line as `<program> <access> <path>`, the accessed-paths table's columns.
  * An access no rule names is unexpected.
  *
- * A rule names programs and paths as the summary shows them, escapes included,
- * and is matched against them so spelled: `./` the workspace, `~/` $HOME,
- * `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory, as
- * reduce.ts's ruleName spells them.
- * `*` matches within one path component, `**` across them, any number as a
- * whole component, and `*` alone as the program any program; `\*` is a star.
+ * Programs and paths are written and matched as the summary shows them,
+ * escapes included (see reduce.ts's ruleName): `./` the workspace, `~/` $HOME,
+ * `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory.
+ * `*` matches within one path component and `**` across components; `*` as
+ * the whole program matches any program, and `\*` is a literal star.
  * The access letters are the summary's: `R` a read, failed or not, `r` one
  * that failed, `r!` one that was refused or failed. `R` and `r` never take a
  * refusal.
@@ -138,8 +137,8 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
-// The summary shows every number in /proc, and thread-self, as <pid> or
-// <tid>, so a rule naming one would never match.
+// The summary never shows a /proc number or thread-self, so a rule naming one
+// would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
 
 // /proc/<pid>/ in a rule is any process's directory, the one that made the
@@ -206,7 +205,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (procByNumber(name))
           throw invalidRules(
             ref,
-            `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`,
+            `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`,
           );
       rules.push({
         ref,
@@ -232,7 +231,7 @@ const CACHE_MAX = 100_000;
 /** Matches accesses against the rules, remembering each program and path's rules. */
 export class RuleMatcher {
   private readonly cache = new Map<string, ExpectedRule[]>();
-  readonly rules: ExpectedRule[];
+  private readonly rules: ExpectedRule[];
 
   constructor(rules: ExpectedRule[]) {
     this.rules = rules;

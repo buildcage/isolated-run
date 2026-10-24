@@ -36,14 +36,14 @@ const PROC_NUMBERS =
   /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
 
 // As a rule spells it, self is the process's own directory.
-const SPELLED_SELF = (proc: string): boolean => proc === "self";
+const spelledSelf = (proc: string): boolean => proc === "self";
 
 /**
  * The path with its /proc numbers, which change from run to run, shown as
  * `<pid>` and `<tid>`, but for the accessing process's own directory, which
  * `own` picks out and which shows as `self`.
  */
-export const unnumbered = (path: string, own = SPELLED_SELF): string =>
+export const unnumbered = (path: string, own = spelledSelf): string =>
   path.replace(PROC_NUMBERS, (_, threadSelf?: string, proc?: string, task?: string) => {
     const self = own(threadSelf ? "self" : proc!);
     return `/proc/${self ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`;
