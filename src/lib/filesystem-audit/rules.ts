@@ -134,9 +134,16 @@ export function globPattern(glob: string): RegExp | undefined {
 }
 
 // A name the summary never shows, as it shows every number in /proc, and
-// self and thread-self, as <pid> or <tid>, so a rule naming one would never
-// match.
+// thread-self, as <pid> or <tid>, so a rule naming one would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
+
+// Any process's directory, the one that made the access as well, which the
+// summary shows as /proc/self.
+const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
+const anyProcess = (glob: string, pattern: RegExp): RegExp =>
+  ANY_PROCESS.test(glob)
+    ? new RegExp(pattern.source.replace("^\\/proc\\/<pid>", "^\\/proc\\/(?:<pid>|self)"))
+    : pattern;
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
@@ -188,12 +195,12 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (procByNumber(name))
           throw invalidRules(
             ref,
-            `${JSON.stringify(name)} names a process or a thread in /proc by its number or as self, which changes from run to run; write <pid> for the process and <tid> for the thread`,
+            `${JSON.stringify(name)} names a process or a thread in /proc by its number, which changes from run to run; write <pid> or self for the process and <tid> for the thread`,
           );
       rules.push({
         ref,
         program: program === "*" ? undefined : glob(program),
-        path: glob(path),
+        path: anyProcess(path, glob(path)),
         ...accessBits(access),
       });
     });

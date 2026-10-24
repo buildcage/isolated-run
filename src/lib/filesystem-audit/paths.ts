@@ -30,22 +30,28 @@ export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FI
 export const unfoldable = (parts: string[], path: string): boolean =>
   parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path);
 
-// A process's directory in /proc, and a thread's in it, by number, as self
-// or thread-self, which a failed access keeps as passed, or as shown already,
-// before any further name or a deleted file's mark.
+// A process's directory in /proc, by number, as self, or as shown already,
+// and a thread's in it, or thread-self, which a failed access keeps as
+// passed, before any further name or a deleted file's mark.
 const PROC_NUMBERS =
-  /^\/proc\/(?:thread-self|(?:\d+|<pid>|self)(?:\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
+  /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/;
 
-/** The path with its /proc numbers, which change from run to run, shown as `<pid>` and `<tid>`. */
-export const unnumbered = (path: string): string =>
-  path.replace(PROC_NUMBERS, (m) =>
-    m.includes("/task/") || m === "/proc/thread-self" ? "/proc/<pid>/task/<tid>" : "/proc/<pid>",
-  );
+/**
+ * The path with its /proc numbers, which change from run to run, shown as
+ * `<pid>` and `<tid>`, and the directory of the process `self` names, the one
+ * that made the access, as `self`.
+ */
+export const unnumbered = (path: string, self?: number): string =>
+  path.replace(PROC_NUMBERS, (_, threadSelf?: string, proc?: string, task?: string) => {
+    if (threadSelf) return "/proc/self/task/<tid>";
+    const own = proc === "self" || (self !== undefined && proc === String(self));
+    return `/proc/${own ? "self" : "<pid>"}${task ? "/task/<tid>" : ""}`;
+  });
 
-export function normalize(path: string): string {
+export function normalize(path: string, self?: number): string {
   // Unify a relative name's "./x" and "x" spellings before anything keys on
   // the path.
-  return unnumbered(path.replace(/^\.\//, ""));
+  return unnumbered(path.replace(/^\.\//, ""), self);
 }
 
 /** The workspace and $HOME, each as given and with symlinks resolved. */

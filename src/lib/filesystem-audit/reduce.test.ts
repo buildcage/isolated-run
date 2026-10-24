@@ -427,11 +427,11 @@ describe("createAuditSummary", () => {
       "R ps /proc/123x",
       "A ps /proc/<pid>",
       "W ps /proc/<pid> (deleted)",
-      "r! ps /proc/<pid>/a",
       "R ps /proc/<pid>/status",
       "R ps /proc/<pid>/task/124x",
-      "r! ps /proc/<pid>/task/<tid>/b",
       "R ps /proc/<pid>/task/<tid>/stat",
+      "r! ps /proc/self/a",
+      "r! ps /proc/self/task/<tid>/b",
       "R ps /proc/selfish",
     ]);
   });
@@ -1579,6 +1579,22 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
     );
     expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/b"]);
+  });
+
+  it("shows the directory of the process that made the access as /proc/self", () => {
+    const { summary } = marked(
+      { rules: rulesOf("* R /proc/self/status\n* X **") },
+      { kind: "fork", pid: 40, ppid: 3, nspid: 2, comm: "sh" },
+      { kind: "read", pid: 40, comm: "sh", path: "/proc/2/status" },
+      { kind: "read", pid: 40, comm: "sh", path: "/proc/7/status" },
+      { kind: "exec", pid: 40, nspid: 2, comm: "cat", path: "/usr/bin/cat" },
+      { kind: "read", pid: 40, comm: "cat", path: "/proc/2/task/2/stat" },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 2 });
+    expect(rows(summary)).toStrictEqual([
+      "/usr/bin/cat R /proc/self/task/<tid>/stat",
+      "sh R /proc/<pid>/status",
+    ]);
   });
 
   it("matches /proc/<pid>/ as any process's directory, and nothing else in /proc", () => {

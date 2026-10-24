@@ -9,7 +9,10 @@ type record struct {
 	Kind string `json:"kind"`
 	PID  uint32 `json:"pid"`
 	PPID uint32 `json:"ppid"`
-	Comm string `json:"comm"`
+	// NSPid is the process's number in its own PID namespace, on a fork or an
+	// exec, as /proc names its directory inside the sandbox.
+	NSPid uint32 `json:"nspid,omitempty"`
+	Comm  string `json:"comm"`
 	// Program is the file the process last ran, which a fork hands its child;
 	// empty for one that ran nothing since the recording started.
 	Program string `json:"program,omitempty"`

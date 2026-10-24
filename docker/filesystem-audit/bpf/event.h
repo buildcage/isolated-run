@@ -119,6 +119,7 @@ struct event {
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
 	u32 tid;   ///< The thread, on an event whose syscall's K_RESULT follows.
+	u32 nspid; ///< On fork and exec, the process's number in its own PID namespace.
 	u64 ts;    ///< CLOCK_BOOTTIME at the access; a failed syscall as it returned.
 	char data[DATA_SZ + NAME_LEN]; ///< Slack: masked offset + one component.
 };

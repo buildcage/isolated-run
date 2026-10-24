@@ -96,9 +96,22 @@ struct files_struct {
 	struct fdtable *fdt;
 } __attribute__((preserve_access_index));
 
+/** A PID's number in one PID namespace. */
+struct upid {
+	int nr;
+	struct pid_namespace *ns;
+} __attribute__((preserve_access_index));
+
+/** A PID, numbered once in each PID namespace from the host's down to @c level. */
+struct pid {
+	unsigned int level;
+	struct upid numbers[1];
+} __attribute__((preserve_access_index));
+
 struct task_struct {
 	struct task_struct *real_parent;
 	struct task_struct *group_leader;
+	struct pid *thread_pid;
 	u64 start_time;
 	u64 self_exec_id;
 	int tgid;

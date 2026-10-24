@@ -10,6 +10,30 @@
 #ifndef FILESYSTEM_AUDIT_PROCESS_H
 #define FILESYSTEM_AUDIT_PROCESS_H
 
+/** How deep the kernel nests PID namespaces (MAX_PID_NS_LEVEL). */
+#define PID_NS_LEVELS 32
+
+/**
+ * A process's number in the PID namespace it was made in, which that
+ * namespace's /proc names its directory by.
+ *
+ * @param t A thread of the process.
+ * @return The number, or 0 where it could not be read.
+ */
+static __always_inline u32 ns_tgid(struct task_struct *t)
+{
+	struct pid *pid = BPF_CORE_READ(t, group_leader, thread_pid);
+	unsigned int level = BPF_CORE_READ(pid, level);
+	int nr = 0;
+	if (!pid || level > PID_NS_LEVELS)
+		return 0;
+	// numbers[] holds one upid a level, so its stride is the kernel's upid.
+	void *at = (void *)pid + bpf_core_field_offset(struct pid, numbers) +
+		   level * bpf_core_type_size(struct upid) + bpf_core_field_offset(struct upid, nr);
+	bpf_probe_read_kernel(&nr, sizeof(nr), at);
+	return nr;
+}
+
 /**
  * The file being executed, resolved, while bprm->file is still the one named:
  * by sched_process_exec a script has been swapped for its interpreter, and
@@ -84,6 +108,7 @@ int BPF_PROG(on_exec, struct task_struct *p, int old_pid, struct linux_binprm *b
 		return 0;
 	e->path_len = bpf_probe_read_kernel_str(e->data, PATH_LEN, BPF_CORE_READ(bprm, filename));
 	e->data_len = e->path_len > 0 ? e->path_len : 0;
+	e->nspid = ns_tgid(p);
 	submit(e);
 	return 0;
 }
@@ -108,6 +133,7 @@ int BPF_PROG(on_fork, struct task_struct *parent, struct task_struct *child)
 	e->ppid = BPF_CORE_READ(parent, tgid);
 	// The child's own name, copied from the thread that forked it.
 	BPF_CORE_READ_STR_INTO(&e->comm, child, comm);
+	e->nspid = ns_tgid(child);
 	submit(e);
 	return 0;
 }
