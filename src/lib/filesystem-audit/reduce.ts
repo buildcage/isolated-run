@@ -245,7 +245,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
   // A program's rank holds its path, a command name's none.
-  const ranks: { shown: Shown; bytes: number; program?: string; ruleName: string }[] = [];
+  // A rank's ruleId is the first rank of its rule's name: a program shown
+  // deleted and not is one rule.
+  const ranks: {
+    shown: Shown;
+    bytes: number;
+    program?: string;
+    ruleName: string;
+    ruleId: number;
+  }[] = [];
+  const ruleIds = new Map<string, number>();
   const rankOf = new Map<string, number>();
   const rank = (key: string, name: boolean): number => {
     const id = `${name ? "n" : "p"}${key}`;
@@ -255,12 +264,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       rankOf.set(id, r);
       const s = name ? { path: escapeForDisplay(key) } : shown(escaped(key));
       const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
-      ranks.push({
-        shown: s,
-        bytes,
-        ...(name ? {} : { program: key }),
-        ruleName: name ? s.path : ruleName(escaped(key)),
-      });
+      const rule = name ? s.path : ruleName(escaped(key));
+      const ruleId = ruleIds.get(rule) ?? r;
+      ruleIds.set(rule, ruleId);
+      ranks.push({ shown: s, bytes, ...(name ? {} : { program: key }), ruleName: rule, ruleId });
     }
     return r;
   };
@@ -306,6 +313,38 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           { program: (rank) => ranks[rank].ruleName, path: ruleName },
         )
       : undefined;
+  // The tally counts a program or a path shown deleted and not as the one rule
+  // it is, before anything folds: each program by its rule's id, each path
+  // unmarked and spelled as the summary spells it. Either shows deleted only
+  // where every access no rule took was, by row, or by program for a folded
+  // row.
+  const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
+  const programDeletedOnly = new Map<number, boolean>();
+  const takeForRules = (x: Access, parts: string[], by: number): void => {
+    const id = ranks[by].ruleId;
+    const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
+    let path = deletedPath ? unmarked(x.path) : x.path;
+    // A name still relative shows as a "…/" walk, as relativize spells it.
+    if (
+      !path.startsWith("/") &&
+      !path.startsWith("…/") &&
+      !path.startsWith(MEMFD) &&
+      !isRunnerFile(path)
+    )
+      path = `…/${path}`;
+    const same = path === x.path;
+    const left = tally!.take(same ? x : { ...x, path }, same ? parts : components(path), id);
+    // Past the tally's limit, only the matching is left to do.
+    if (!left || tally!.givenUp) return;
+    const program = Boolean(ranks[by].shown.deleted);
+    const key = keyOf(String(id), path);
+    const was = deletedOnly.get(key);
+    deletedOnly.set(key, {
+      program: (was?.program ?? true) && program,
+      path: (was?.path ?? true) && deletedPath,
+    });
+    programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
+  };
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -412,7 +451,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The executed table lists what ran, so this one leaves it out.
       const program = programOf(r.pid, r.comm ?? "");
       paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      tally?.take(x, parts, runBy ?? program);
+      if (tally) takeForRules(x, parts, runBy ?? program);
     }
     return tally?.endLine();
   };
@@ -442,6 +481,19 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return relativize(unmarked(path), shownPrefixes);
   }
 
+  function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {
+    return tally.finish()?.map(({ rank, path, agg }) => {
+      const only = deletedOnly.get(keyOf(String(rank), path));
+      const { deleted: _, ...program } = ranks[rank].shown;
+      return {
+        program:
+          (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
+        flags: fmtFlags(agg),
+        path: shown(only?.path ? path + DELETED : path),
+      };
+    });
+  }
+
   type Line = { comm: string; path: string; agg: Agg };
   const rows = (lines: Line[] | undefined): Row[] | undefined =>
     lines?.map(({ comm, path, agg }) => {
@@ -466,11 +518,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
-    const ruleRows = tally?.finish()?.map(({ rank, path, agg }) => ({
-      program: ranks[rank].shown,
-      flags: fmtFlags(agg),
-      path: shown(path),
-    }));
+    const ruleRows = tally && ruleRowsOf(tally);
     return {
       ended,
       lost,
