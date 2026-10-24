@@ -1526,6 +1526,61 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
   });
 
+  it("proposes a directory a program read on its way to the files in it", () => {
+    const listing = [
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/f" },
+    ];
+    const { summary } = marked({ propose: true }, ...listing);
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/f"]);
+    const again = marked(
+      { rules: rulesOf(summary.proposed!.map((r) => `ls R ${r.path.path}`).join("\n")) },
+      ...listing,
+    ).summary;
+    expect(again).toMatchObject({ matched: 2, unexpected: 0 });
+  });
+
+  it("folds no directory sooner for the line it was read on the way to its files", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/a", "ls R ./d/b"]);
+  });
+
+  it("proposes the workspace itself read on the way to a file in it", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/f" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R .", "ls R ./f"]);
+  });
+
+  it("proposes a walked directory beside a folded one below it, unfolded itself", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/b" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/c" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/y" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/x/**", "ls R ./d/y"]);
+  });
+
+  it("lists a walked directory beside the rows that remain unexpected", () => {
+    const { summary } = marked(
+      { rules: rulesOf("ls R ./d/a") },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/b"]);
+  });
+
   it("matches /proc/<pid>/ as any process's directory, and nothing else in /proc", () => {
     const { summary } = marked(
       { rules: rulesOf("* R /proc/<pid>/**") },
