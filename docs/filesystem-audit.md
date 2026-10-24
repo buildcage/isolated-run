@@ -110,13 +110,13 @@ A shortened example:
 ```
 ## Filesystem Activity Report
 
-### Executed Programs
+### ⚙️ Executed Programs
 | Path                  | Count |
 | --------------------- | ----: |
 | `/usr/local/bin/node` |     1 |
 | `/usr/bin/dash`       |    12 |
 
-▶ Accessed Paths (4)
+▶ 📂 Accessed Paths (4)
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path                  |
 | --------------------- | ------ | --------------------- |
@@ -134,7 +134,7 @@ first-last access since the proxy started · flags · command · path
 00:00.531-00:40.982: X   dash /usr/bin/dash
 
 ./ workspace · ~/ $HOME · dir/** a folded directory · the full record is in the
-buildcage-filesystem-audit-<id> artifact · how to read this
+filesystem audit artifact · how to read this
 ```
 
 Where there is no artifact, the line closing the section says how to ask for one, or that the upload
@@ -151,7 +151,7 @@ From the top:
   action. Programs are in the order they first ran, and each one's paths in path order: the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
   directory; see [Paths](#paths).
-- **🔍 File access details**, folded, has one row per command and path, in the order the rows were
+- **File access details**, folded, has one row per command and path, in the order the rows were
   first touched. The command is the file name of the program the process runs, followed in brackets
   by the name the process gave itself, as `ps` shows it, where that differs: npm renames its node
   process, which shows as `node[npm ls]`; see [How rows are grouped](#how-rows-are-grouped). The
@@ -159,8 +159,8 @@ From the top:
   proxy, about when the step starts, on the same clock as the traffic report's Communication
   details, so a file access can be matched to a request. Where that start is unknown, it counts from
   the first access.
-- The closing line explains the `./`, `~/` and `dir/**` notations, names the artifact that holds the
-  full record and links to this section.
+- The closing line explains the `./`, `~/` and `dir/**` notations, links to the artifact that holds
+  the full record and links to this section.
 
 [How rows are grouped](#how-rows-are-grouped) covers which program and path a row is shown under.
 
@@ -265,7 +265,7 @@ then shows only what falls outside it:
 ```
 ## Filesystem Activity Report
 
-### Unexpected Accesses (1)
+### ⚠️ Unexpected Accesses (1)
 1,204 recorded operations matched `expected_filesystem_rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Access | Path        |
@@ -284,7 +284,7 @@ The rules only change what the summary shows: like the audit itself, they never 
 ### Getting the rules
 
 With `upload_filesystem_audit_artifact: true`, the artifact also holds
-`filesystem-audit-expected-rules-<id>.yml`, a [config file](./reference.md#config-file) with a rule
+`expected-filesystem-rules.yml`, a [config file](./reference.md#config-file) with a rule
 for each access the run made, folded as the accessed paths are:
 
 ```yaml
@@ -307,7 +307,7 @@ expected_filesystem_rules: |
    ```yaml
    - uses: buildcage/isolated-run@<sha>
      with:
-       config_file: ci/expected-filesystem-rules.yml
+       config_file: path/to/expected-filesystem-rules.yml
        run: npm ci
    ```
 
@@ -324,7 +324,7 @@ ends up over rules a later run matched.
 
 The traffic report's **Switch to restrict mode** example keeps the rules of a run that had them.
 Where that run's artifact holds the file, the example names it in `config_file` at
-`ci/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
+`path/to/expected-filesystem-rules.yml`, for you to commit there; on `pull_request_target` or
 `workflow_run`, or without the file, it lists the rules given under `with:`. It adds
 `fail_on_unexpected_file_access: true` when the step set it. When the listed rules make the example
 too large to print and the step did not upload its record, the summary says that
@@ -445,7 +445,7 @@ offers that mode.
 ## The artifact
 
 With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
-holds `filesystem-audit-<id>.step.jsonl`, and the proposed rules of
+holds `filesystem-audit.jsonl`, and the proposed rules of
 [Expected accesses](#expected-accesses) beside it. The record is one JSON object per line, in the order the
 tracer caught the accesses. Opens and path changes are written when their call returns, so lines
 from different threads can be slightly out of `t` order. It holds only the step's own accesses, as
@@ -461,13 +461,13 @@ jq -r 'select(.failed | not)
     elif .kind == "link" or .kind == "rename" then .to
     else empty end
   | select(. != null and (startswith("/") or startswith("…/") or startswith("memfd:")))' \
-  filesystem-audit-*.jsonl | sort -u
+  filesystem-audit.jsonl | sort -u
 
 # Who opened a credential file, and when
-jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit-*.jsonl
+jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit.jsonl
 
 # Every refused open
-jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit-*.jsonl
+jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit.jsonl
 ```
 
 The last `select` of the first example drops pipes and sockets, which the summary leaves out too.

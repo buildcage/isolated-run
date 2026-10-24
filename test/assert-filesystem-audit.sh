@@ -9,8 +9,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 f="$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"
 sections=$(mktemp -d)
 trap 'rm -rf "$sections"' EXIT
-sed -n '/^### Executed/,/^<summary>Accessed/p' "$f" > "$sections/executed.md"
-sed -n '/^<summary>Accessed/,/^<\/details>/p' "$f" > "$sections/accessed.md"
+sed -n '/^### ⚙️ Executed/,/^<summary>📂 Accessed/p' "$f" > "$sections/executed.md"
+sed -n '/^<summary>📂 Accessed/,/^<\/details>/p' "$f" > "$sections/accessed.md"
 
 # The line a row is first on, or nothing.
 line_of() { grep -nE -m1 "$1" "$f" | cut -d: -f1 || true; }
@@ -42,7 +42,7 @@ fi
 # touched. python3 is a symlink, so it shows as the versioned file it runs.
 assert_file_has "$f" "python3 is listed as the versioned file it runs" -E '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$'
 assert_file_has "$f" "run.sh is listed as run once" -F '| `./A/run.sh` | 1 |'
-assert_file_has "$f" "The accessed table is folded" -E '^<summary>Accessed Paths \([0-9]+\)</summary>$'
+assert_file_has "$f" "The accessed table is folded" -E '^<summary>📂 Accessed Paths \([0-9]+\)</summary>$'
 # Running a program is left to the executed table.
 assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -E '\| [A-Za-z!]*X[A-Za-z!]* \| `'
 assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | W | `./probe.txt` |'

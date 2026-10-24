@@ -25,15 +25,19 @@ afterEach(() => {
   process.exitCode = undefined;
 });
 
-// The stripped copy, written beside the recording and uploaded in its place.
-const CLEAN = "/var/tmp/buildcage-0/filesystem-audit-deadbeef.step.jsonl";
+// The step's own directory, uploaded as is.
+const UPLOAD_DIR = "/var/tmp/buildcage-0/filesystem-audit-deadbeef";
+
+// The stripped copy, uploaded in place of the recording.
+const CLEAN = `${UPLOAD_DIR}/filesystem-audit.jsonl`;
 
 // The proposed rules, uploaded beside it.
-const RULES = "/var/tmp/buildcage-0/filesystem-audit-expected-rules-deadbeef.yml";
+const RULES = `${UPLOAD_DIR}/expected-filesystem-rules.yml`;
 
 const AUDIT = {
   outPath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl",
   pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
+  uploadDir: UPLOAD_DIR,
   stepPath: CLEAN,
   rulesPath: RULES,
 };
@@ -77,6 +81,7 @@ function deps(overrides: Partial<FilesystemAuditReportDeps> & { raw?: string } =
       summaries,
       readLines: recording(raw),
       readFile: () => raw,
+      makeDir: () => {},
       openWriter: (path) => {
         const lines: string[] = [];
         return {
@@ -149,7 +154,16 @@ describe("readStepFilesystemAudit", () => {
   });
 
   it("renders, uploads and sets the output when a recording exists", async () => {
-    const { deps: d, summaries, uploads, outputs, writes } = deps();
+    const made: string[] = [];
+    const {
+      deps: d,
+      summaries,
+      uploads,
+      outputs,
+      writes,
+    } = deps({
+      makeDir: (path) => void made.push(path),
+    });
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
@@ -160,17 +174,28 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
     // The proposed rules' note follows the details.
     expect(summaries[0]).toContain(
-      "```\n\n</details>\n\n<details>\n<summary>Expected filesystem rules</summary>\n\n" +
-        "`filesystem-audit-expected-rules-deadbeef.yml` in the `buildcage-filesystem-audit-deadbeef` artifact",
+      "```\n\n</details>\n\n<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
+        "List the file accesses this step is expected to make in `expected_filesystem_rules`, " +
+        "and this section then shows only the ones outside them.\n\n" +
+        "`expected-filesystem-rules.yml` in this run's filesystem audit artifact " +
+        "(`buildcage-filesystem-audit-deadbeef`) holds a rule for each access this run made. " +
+        "Review it, using `**` for the paths that change between runs, commit it at a path of your choice, " +
+        "and point `config_file` at it, " +
+        "or copy its rules into the config file the step already uses:\n\n" +
+        "```yaml\nconfig_file: path/to/expected-filesystem-rules.yml\n```\n\n" +
+        "Or copy the file's rules into the workflow:\n\n" +
+        "```yaml\nfilesystem_audit: record\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n" +
+        "  # The reviewed rules from expected-filesystem-rules.yml, such as:\n",
     );
     // Below them, not under the heading.
     expect(summaries[0]).toContain(
       "</details>\n\n<sub>`./` workspace · `~/` $HOME · `dir/**` a folded directory · " +
-        "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact · " +
+        "the full record is in the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) · " +
         "[how to read this](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#reading-the-summary)</sub>",
     );
-    // The stripped copy is written beside the recording and uploaded; the
-    // root-owned recording itself is left untouched.
+    // The stripped copy is written to the step's own directory and uploaded;
+    // the root-owned recording itself is left untouched.
+    expect(made).toEqual([UPLOAD_DIR]);
     expect(writes).toEqual([
       {
         path: CLEAN,
@@ -368,10 +393,41 @@ describe("readStepFilesystemAudit", () => {
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
       Array(3).fill(
         "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
-          "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+          "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
       ),
     );
     expect(blocks.find((b) => b.cut === "keep")?.notice).toBeUndefined();
+  });
+
+  it("warns and uploads nothing when the step's directory cannot be made", async () => {
+    const note = annotation();
+    const opened: string[] = [];
+    const {
+      deps: d,
+      uploads,
+      ruleFiles,
+    } = deps({
+      makeDir: () => {
+        throw new Error("EEXIST");
+      },
+      openWriter: (path) => {
+        opened.push(path);
+        return { write: () => {}, close: () => {} };
+      },
+    });
+
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
+      d,
+    );
+
+    // One warning: neither file is attempted in a directory that is not there.
+    expect(note.warning.mock.calls).toEqual([
+      ["Failed to prepare the filesystem audit artifact: EEXIST"],
+    ]);
+    expect(opened).toEqual([]);
+    expect(ruleFiles).toEqual([]);
+    expect(uploads).toEqual([]);
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {
@@ -532,9 +588,9 @@ describe("readStepFilesystemAudit", () => {
 
     expect(notes).toEqual([
       "_…truncated: the filesystem audit touched too many distinct paths to summarize; " +
-        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+        "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
       "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
-        "the buildcage-filesystem-audit-deadbeef artifact uploaded for this run has every access._\n\n",
+        "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
     ]);
   });
 
@@ -955,7 +1011,7 @@ describe("readStepFilesystemAudit", () => {
     expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
     const text = joinSummaryBlocks(read.blocks(undefined, read.expected, "build"));
     expect(text).toContain(
-      "the full record is in the `buildcage-filesystem-audit-deadbeef` artifact",
+      "the full record is in the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`)",
     );
     expect(uploads).toEqual([]);
 
@@ -1095,15 +1151,17 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
     expect(process.exitCode).toBeUndefined();
     expect(md).toContain(
-      "### Unexpected Accesses (1)\n\n<sub>1 recorded operation matched `expected_filesystem_rules`.</sub>\n\n" +
+      "### ⚠️ Unexpected Accesses (1)\n\n<sub>1 recorded operation matched `expected_filesystem_rules`.</sub>\n\n" +
         "<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Access | Path |\n| --- | --- | --- |\n| `node` | W | `./b` |\n\n",
     );
     expect(md).not.toContain("Accessed Paths");
     expect(md).not.toContain("File access details");
     expect(md).toContain(
-      "`filesystem-audit-expected-rules-deadbeef.yml` in the `buildcage-filesystem-audit-deadbeef` artifact " +
-        "holds the rules given, and one for each access they did not take.",
+      "`expected_filesystem_rules` lists the file accesses this step is expected to make, " +
+        "and this section shows only the ones outside them.\n\n" +
+        "`expected-filesystem-rules.yml` in this run's filesystem audit artifact " +
+        "(`buildcage-filesystem-audit-deadbeef`) holds the rules given plus one for each access they did not take.",
     );
     expect(md).toContain(
       "[How to write the rules](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#expected-accesses)",
@@ -1352,10 +1410,12 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(uploads).toStrictEqual([[CLEAN]]);
-    expect(summaries[0]).toContain("No rules were proposed, as no file access was recorded.");
+    expect(summaries[0]).toContain(
+      "No rules were proposed, as no file access was recorded.\n\n[How to write the rules]",
+    );
   });
 
-  it("links the artifact's page where the upload gave one", async () => {
+  it("links the artifact's page, in the note and the legend, where the upload gave one", async () => {
     const { deps: d, summaries } = deps({
       raw,
       uploadArtifact: async () => ({
@@ -1367,9 +1427,12 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(summaries[0]).toContain(
-      "`filesystem-audit-expected-rules-deadbeef.yml` in the " +
-        "[`buildcage-filesystem-audit-deadbeef`](https://github.com/o/r/actions/runs/1/artifacts/2) " +
-        "artifact holds a rule for each access this run made.",
+      "`expected-filesystem-rules.yml` in this run's " +
+        "[filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) " +
+        "holds a rule for each access this run made.",
+    );
+    expect(summaries[0]).toContain(
+      "the full record is in the [filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) · ",
     );
   });
 
@@ -1383,10 +1446,10 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(ruleFiles).toStrictEqual([]);
-    expect(summaries[0]).toContain("### Unexpected Accesses (1)");
+    expect(summaries[0]).toContain("### ⚠️ Unexpected Accesses (1)");
     expect(summaries[0]).toContain(
-      "Set `upload_filesystem_audit_artifact: true` to get `filesystem-audit-expected-rules-deadbeef.yml`, " +
-        "with the rules given, and one for each access they did not take.",
+      "Set `upload_filesystem_audit_artifact: true` to get `expected-filesystem-rules.yml`, " +
+        "with the rules given plus one for each access they did not take.",
     );
   });
 
@@ -1396,7 +1459,8 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(summaries[0]).toContain(
-      "`filesystem-audit-expected-rules-deadbeef.yml` was not kept, as the artifact could not be uploaded.",
+      "This run's `expected-filesystem-rules.yml` was lost, as the artifact could not be uploaded.\n\n" +
+        "[How to write the rules]",
     );
   });
 });

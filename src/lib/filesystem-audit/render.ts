@@ -9,7 +9,7 @@ import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { ProposedRules } from "./proposed-rules.ts";
 import type { AuditSummary, Executed, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
-import { EXPECTED_RULES_INPUT } from "./rules.ts";
+import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
@@ -121,7 +121,7 @@ function executedBlock(executed: Executed[], { priorities }: RenderOptions): Sum
     priority: priorities[FILESYSTEM_BLOCK.executed],
     level: 2,
     section: SECTION,
-    text: `### Executed Programs\n\n${md}\n\n`,
+    text: `### ⚙️ Executed Programs\n\n${md}\n\n`,
     cut: "lines",
     head: 4,
   };
@@ -165,7 +165,7 @@ function pathsBlock(
     ...block,
     cut: "lines",
     head: 4,
-    open: `<details>\n<summary>Accessed Paths (${rows.length})</summary>\n\n`,
+    open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
     text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
     // A blank line apart from the details that follow.
     close: `${DETAILS_CLOSE}\n`,
@@ -261,7 +261,7 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
     cut: "lines",
     // The count of what matched stays when the table is cut.
     head: 8,
-    text: `### Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`,
+    text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`,
   };
 }
 
@@ -333,6 +333,10 @@ export function unreadableSummaryBlocks(title: string): SummaryBlock[] {
 /** The artifact the summary points the reader to, or why there is none. */
 export type RecordArtifact = UploadedArtifact | "not-requested" | "upload-failed";
 
+// Its page where the upload gave one; its name, which carries the step's id, only where not.
+const artifactLink = ({ name, url }: UploadedArtifact): string =>
+  url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
+
 /**
  * The folded note on the proposed rules: where the file is, or why there is
  * none, and how to use one.
@@ -343,36 +347,51 @@ export function rulesNote(
   { fileName, guideUrl, given }: { fileName: string; guideUrl: string; given: boolean },
 ): string {
   const file = `\`${fileName}\``;
+  const intro = given
+    ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.`
+    : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`;
   const holds = given
-    ? "the rules given, and one for each access they did not take"
+    ? "the rules given plus one for each access they did not take"
     : "a rule for each access this run made";
   let where: string;
-  if (artifact === "not-requested")
+  // How to use the file follows only where there is one, or the next run will have one.
+  let steps = false;
+  if (artifact === "not-requested") {
     where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`;
-  else if (artifact === "upload-failed")
-    where = `${file} was not kept, as the artifact could not be uploaded.`;
+    steps = true;
+  } else if (artifact === "upload-failed")
+    where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
   else if (rules === "too-many-paths")
     where = "No rules were proposed: the accesses touched too many distinct paths.";
   else if (rules === "write-failed") where = "The proposed rules could not be written.";
   else if (rules === "none") where = "No rules were proposed, as no file access was recorded.";
   else {
-    const name = artifact.url ? `[\`${artifact.name}\`](${artifact.url})` : `\`${artifact.name}\``;
-    where = `${file} in the ${name} artifact holds ${holds}.`;
+    where = `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`;
+    steps = true;
   }
   return (
-    "<details>\n<summary>Expected filesystem rules</summary>\n\n" +
-    `${where} Review the rules, widen with \`**\` the paths that change between runs, and commit the file as a config file, or add its key to the one the step already has:\n\n` +
-    "```yaml\nconfig_file: ci/expected-filesystem-rules.yml\n```\n\n" +
-    "Or set the rules in the workflow:\n\n" +
+    "<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
+    `${intro}\n\n` +
+    (steps ? useSteps(where, fileName) : `${where}\n\n`) +
+    `[How to write the rules](${guideUrl})\n\n` +
+    "</details>\n"
+  );
+}
+
+// How to put the proposed file to use, after where it is.
+function useSteps(where: string, fileName: string): string {
+  return (
+    `${where} Review it, using \`**\` for the paths that change between runs, commit it at a path of your choice, and point \`config_file\` at it, or copy its rules into the config file the step already uses:\n\n` +
+    `\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\n` +
+    "Or copy the file's rules into the workflow:\n\n" +
     "```yaml\n" +
     "filesystem_audit: record\n" +
     "upload_filesystem_audit_artifact: true\n" +
     `${EXPECTED_RULES_INPUT}: |\n` +
+    `  # The reviewed rules from ${fileName}, such as:\n` +
     "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
     "  /usr/local/bin/node  R    ~/.npmrc\n" +
-    "```\n\n" +
-    `The summary then lists only the accesses outside them. [How to write the rules](${guideUrl})\n\n` +
-    "</details>\n"
+    "```\n\n"
   );
 }
 
@@ -386,7 +405,7 @@ export function filesystemLegendNote(artifact: RecordArtifact, guideUrl: string)
       ? "set `upload_filesystem_audit_artifact: true` for the full record"
       : artifact === "upload-failed"
         ? "the full record could not be uploaded"
-        : `the full record is in the \`${artifact.name}\` artifact`;
+        : `the full record is in the ${artifactLink(artifact)}`;
   return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 
@@ -404,7 +423,7 @@ export function filesystemTruncationNote(
       ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact"
       : artifact === "upload-failed"
         ? "the recording could not be uploaded as an artifact, so the rest is not kept"
-        : `the ${artifact.name} artifact uploaded for this run has every access`;
+        : `the ${artifactLink(artifact)} uploaded for this run has every access`;
   const why =
     cause === "paths"
       ? "the filesystem audit touched too many distinct paths to summarize"

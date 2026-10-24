@@ -1,7 +1,7 @@
 
 ## Filesystem Activity Report
 
-### Executed Programs
+### ⚙️ Executed Programs
 
 | Path | Count |
 | --- | ---: |
@@ -23,7 +23,7 @@
 | `./int80` | 1 |
 
 <details>
-<summary>Accessed Paths (75)</summary>
+<summary>📂 Accessed Paths (75)</summary>
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 

@@ -122,7 +122,7 @@ function lines(md: string): string[] {
 // The "Accessed Paths" table's rows, verbatim.
 function programRows(md: string): string[] {
   const m = md.match(
-    /<summary>Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /<summary>📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }
@@ -281,13 +281,13 @@ describe("createAuditSummary", () => {
     // after it would be read as part of.
     expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
     // Below the executed table, which shows no flags.
-    expect(md.indexOf("<summary>Accessed Paths")).toBeGreaterThan(
-      md.indexOf("### Executed Programs"),
+    expect(md.indexOf("<summary>📂 Accessed Paths")).toBeGreaterThan(
+      md.indexOf("### ⚙️ Executed Programs"),
     );
     expect(md.split("<sub>R read")).toHaveLength(2);
     // With no accessed paths table, the details are the first to show flags.
     const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
-    expect(ran).not.toContain("<summary>Accessed Paths");
+    expect(ran).not.toContain("<summary>📂 Accessed Paths");
     expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
   });
 
@@ -1279,7 +1279,7 @@ describe("createAuditSummary: limits", () => {
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    expect(section(md, "<summary>Accessed Paths", "🔍")).toContain(CUT);
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -1290,9 +1290,9 @@ describe("createAuditSummary: limits", () => {
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
-    expect(section(md, "### Executed Programs", CUT)).toContain("`/usr/bin/c`");
+    expect(section(md, "### ⚙️ Executed Programs", CUT)).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
-    expect(md).not.toContain("<summary>Accessed Paths");
+    expect(md).not.toContain("<summary>📂 Accessed Paths");
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -1359,7 +1359,7 @@ describe("createAuditSummary: limits", () => {
     );
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
-    expect(md).not.toContain("<summary>Accessed Paths");
+    expect(md).not.toContain("<summary>📂 Accessed Paths");
     expect(md).not.toContain("<details>");
   });
 
@@ -1390,7 +1390,7 @@ describe("createAuditSummary: limits", () => {
       { kind: "read", pid: 1, comm: "b", path: "/x/f" },
       { kind: "read", pid: 1, comm: "b", path: "/y/g" },
     );
-    expect(section(md, "<summary>Accessed Paths", "🔍")).toContain("`/x/f`");
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain("`/x/f`");
     expect(section(md, "🔍")).toContain("too many distinct paths to summarize");
   });
 

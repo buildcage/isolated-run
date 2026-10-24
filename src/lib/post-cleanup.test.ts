@@ -32,18 +32,21 @@ function deps(overrides: PostCleanupDeps = {}): {
   released: string[];
   killed: number[];
   removedFiles: string[];
+  removedDirs: string[];
   removedRunnerFiles: string[];
 } {
   const removed: { dir: string; ephemeralRoots?: string[] }[] = [];
   const released: string[] = [];
   const killed: number[] = [];
   const removedFiles: string[] = [];
+  const removedDirs: string[] = [];
   const removedRunnerFiles: string[] = [];
   return {
     removed,
     released,
     killed,
     removedFiles,
+    removedDirs,
     removedRunnerFiles,
     deps: {
       readOwner: () => OWNER,
@@ -58,6 +61,7 @@ function deps(overrides: PostCleanupDeps = {}): {
       readFile: (p) => (p === AUDIT.pidFilePath ? "4321\n" : "filesystem-audi\n"),
       killTracer: (pid) => killed.push(pid),
       removeFile: (p) => removedFiles.push(p),
+      removeDir: (p) => removedDirs.push(p),
       removeRunnerFilesDir: (dir) => removedRunnerFiles.push(dir),
       ...overrides,
     },
@@ -281,12 +285,13 @@ describe("planPostCleanup", () => {
   });
 
   it("only clears the audit output when the tracer was already stopped", () => {
-    const { deps: d, killed, removedFiles } = deps();
+    const { deps: d, killed, removedFiles, removedDirs } = deps();
 
     planPostCleanup(STATE, ENV, annotation(), d);
 
     expect(killed).toStrictEqual([]);
-    expect(removedFiles).toStrictEqual([AUDIT.outPath, AUDIT.stepPath, AUDIT.rulesPath]);
+    expect(removedFiles).toStrictEqual([AUDIT.outPath]);
+    expect(removedDirs).toStrictEqual([AUDIT.uploadDir]);
   });
 
   it("warns but carries on when a pidfile holds no usable pid", () => {

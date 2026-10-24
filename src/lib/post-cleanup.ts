@@ -24,6 +24,7 @@ export interface PostCleanupDeps {
   readFile?: (path: string) => string;
   killTracer?: (pid: number) => void;
   removeFile?: (path: string) => void;
+  removeDir?: (path: string) => void;
   removeRunnerFilesDir?: (dir: string) => void;
 }
 
@@ -38,6 +39,9 @@ function defaultReadFile(path: string): string {
 }
 function defaultRemoveFile(path: string): void {
   rmSync(path, { force: true });
+}
+function defaultRemoveDir(path: string): void {
+  rmSync(path, { recursive: true, force: true });
 }
 /* v8 ignore stop */
 
@@ -55,9 +59,10 @@ function cleanupLeftoverAudit(
     readFile = defaultReadFile,
     killTracer = defaultKillTracer,
     removeFile = defaultRemoveFile,
+    removeDir = defaultRemoveDir,
   }: PostCleanupDeps,
 ): void {
-  const { outPath, pidFilePath, stepPath, rulesPath } = filesystemAuditPaths(
+  const { outPath, pidFilePath, uploadDir } = filesystemAuditPaths(
     containerName,
     SANDBOX_SCRATCH_BASE,
   );
@@ -73,8 +78,7 @@ function cleanupLeftoverAudit(
     removeFile(pidFilePath);
   }
   removeFile(outPath);
-  removeFile(stepPath);
-  removeFile(rulesPath);
+  removeDir(uploadDir);
 }
 
 /**

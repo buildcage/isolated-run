@@ -18,7 +18,7 @@ function lines(md: string): string[] {
 // The "Accessed Paths" table's rows, verbatim.
 function programRows(md: string): string[] {
   const m = md.match(
-    /<summary>Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /<summary>📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }
@@ -173,7 +173,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "exec", comm: "sh", path: "/usr/bin/sh" },
     );
     expect(md).toContain(
-      "### Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
+      "### ⚙️ Executed Programs\n\n| Path | Count |\n| --- | ---: |\n| `/usr/bin/sh` | 2 |\n| `./bin/node` | 1 |\n\n",
     );
   });
 
@@ -266,7 +266,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("leaves the accessed-paths table out when the step only ran programs", () => {
     const md = render({ kind: "exec", comm: "sh", path: "/usr/bin/sh" });
-    expect(md).not.toContain("<summary>Accessed Paths");
+    expect(md).not.toContain("<summary>📂 Accessed Paths");
     expect(lines(md)).toEqual(["X sh /usr/bin/sh"]);
   });
 
@@ -283,7 +283,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("leaves the executed table out when nothing was run", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
-    expect(md).not.toContain("### Executed Programs");
+    expect(md).not.toContain("### ⚙️ Executed Programs");
   });
 
   it("gives each program one row per path, folded under the flags' legend", () => {
@@ -294,7 +294,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "read", pid: 1, comm: "node", path: "/work/a" },
     );
     expect(md).toContain(
-      "<details>\n<summary>Accessed Paths (3)</summary>\n\n" +
+      "<details>\n<summary>📂 Accessed Paths (3)</summary>\n\n" +
         "<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
         "lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Access | Path |\n| --- | --- | --- |\n" +
@@ -394,7 +394,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("folds the per-command record into a details element after the tables", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
-    expect(md.indexOf("<summary>Accessed Paths")).toBeLessThan(
+    expect(md.indexOf("<summary>📂 Accessed Paths")).toBeLessThan(
       md.indexOf("<summary>🔍 File access details"),
     );
     expect(md).toMatch(

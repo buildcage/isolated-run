@@ -401,12 +401,13 @@ function parseEphemeralRoots(raw) {
 //#endregion
 //#region src/lib/sandbox/filesystem-audit-paths.ts
 function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1);
+	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
 	return {
 		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		stepPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.step.jsonl`),
-		rulesPath: (0, node_path.join)(scratchBase, `filesystem-audit-expected-rules-${suffix}.yml`)
+		uploadDir,
+		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules.yml")
 	};
 }
 function readPid(readFile, pidFilePath) {
@@ -728,8 +729,14 @@ function defaultReadFile(path) {
 function defaultRemoveFile(path) {
 	(0, node_fs.rmSync)(path, { force: !0 });
 }
-function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile }) {
-	let { outPath, pidFilePath, stepPath, rulesPath } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
+function defaultRemoveDir(path) {
+	(0, node_fs.rmSync)(path, {
+		recursive: !0,
+		force: !0
+	});
+}
+function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile, removeDir = defaultRemoveDir }) {
+	let { outPath, pidFilePath, uploadDir } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {
 			let pid = readPid(readFile, pidFilePath);
@@ -739,7 +746,7 @@ function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.
 		}
 		removeFile(pidFilePath);
 	}
-	removeFile(outPath), removeFile(stepPath), removeFile(rulesPath);
+	removeFile(outPath), removeDir(uploadDir);
 }
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
