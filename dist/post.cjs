@@ -726,13 +726,16 @@ function defaultKillTracer(pid) {
 function defaultReadFile(path) {
 	return (0, node_fs.readFileSync)(path, "utf8");
 }
-function defaultRemovePath(path) {
+function defaultRemoveFile(path) {
+	(0, node_fs.rmSync)(path, { force: !0 });
+}
+function defaultRemoveDir(path) {
 	(0, node_fs.rmSync)(path, {
 		recursive: !0,
 		force: !0
 	});
 }
-function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removePath = defaultRemovePath }) {
+function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.existsSync, readFile = defaultReadFile, killTracer = defaultKillTracer, removeFile = defaultRemoveFile, removeDir = defaultRemoveDir }) {
 	let { outPath, pidFilePath, uploadDir } = filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE);
 	if (fileExists(pidFilePath)) {
 		try {
@@ -741,9 +744,9 @@ function cleanupLeftoverAudit(containerName, annotation, { fileExists = node_fs.
 		} catch (e) {
 			annotation.warning(`run post-cleanup: failed to stop the file-audit tracer: ${errorMessage(e)}`);
 		}
-		removePath(pidFilePath);
+		removeFile(pidFilePath);
 	}
-	removePath(outPath), removePath(uploadDir);
+	removeFile(outPath), removeDir(uploadDir);
 }
 function startedByThisStep(containerName, env, readOwner) {
 	let owner = readOwner(containerName);
