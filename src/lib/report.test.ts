@@ -589,7 +589,7 @@ describe("computeReportOutcomes", () => {
       options({ stepLabel: "build" }),
     );
     expect(markdown).toMatch(/^## Outbound Traffic Report — build\n\n### ✅ Allowed Hosts\n/);
-    // The step closes the summary after the process activity.
+    // The step closes the summary after the filesystem activity.
     expect(markdown).not.toMatch(/Reported by/);
   });
 
