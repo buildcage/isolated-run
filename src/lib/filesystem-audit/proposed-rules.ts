@@ -14,9 +14,9 @@ import { EXPECTED_RULES_INPUT } from "./rules.ts";
 /** What became of the proposed rules file. */
 export type ProposedRules = "written" | "none" | "too-many-paths" | "write-failed";
 
-// As the details quote a field, and one that is empty, as a process's name
-// can be, or would read as a comment too, but for a memfd's, quoted already.
-// Its quotes and backslashes are escaped already, as the summary shows them.
+// Quoted as the details quote a field, and also when empty, as a process's
+// name can be, or when it would start a comment. A memfd's is quoted already,
+// and the name's own quotes and backslashes are escaped already.
 const ruleField = (text: string): string => {
   if (text.startsWith(`${MEMFD_PREFIX}"`)) return text;
   return text === "" || text.startsWith("#") ? `"${text}"` : field(text);

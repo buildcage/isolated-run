@@ -234,7 +234,7 @@ describe("createAuditSummary", () => {
     const many = render(
       ...["a", "b", "c", "d", "e"].map((comm) => ({ kind: "syscall", comm, killed: true })),
     );
-    expect(many).toContain("> 🚫 Killed for a 32-bit system call: `a`, `b`, `c` and 2 more.");
+    expect(many).toContain("> 🚫 Killed for a 32-bit system call: `a`, `b` and 3 more.");
     expect(render({ kind: "syscall", comm: "x", syscall: "mount" })).not.toContain("🚫");
     expect(lines(md)).toEqual(["! syscall:32-bit ? (killed)", "! a.out syscall:32-bit ? (killed)"]);
   });
