@@ -335,6 +335,10 @@ type RoleRules = ReturnType<typeof roleRules>;
  * proxy verified, so a build cannot put its own key there. The role ARN is
  * AWS's own, not the caller's. A body larger than the buffer is read only in
  * part, so a key past it is not learned and its requests are blocked.
+ *
+ * The answer is read as XML. STS does not compress its answers, so the
+ * request's Accept-Encoding is left alone; a compressed or JSON answer
+ * teaches no key and names no account.
  */
 export function awsKeyResponseRules(check: AwsKeyCheck): string[] {
   return [

@@ -1,293 +1,157 @@
 # Development Guide
 
-This document covers local development, testing, and the project structure of isolated-run.
+This page is for working on isolated-run itself: setting up, finding your way around the
+repository, running and testing it locally, and what to keep in mind when changing it. What the
+action does is in the [README](../README.md), the [Reference](./reference.md) and the
+[Security Details](./security.md).
 
 ## Contents
 
-- [Local Usage](#local-usage)
+- [Getting set up](#getting-set-up)
+- [Repository layout](#repository-layout)
+- [Running it locally](#running-it-locally)
 - [Testing](#testing)
-- [Local Development](#local-development)
-- [Formatting & Linting](#formatting--linting)
-- [Viewing Logs](#viewing-logs)
-- [Makefile Commands](#makefile-commands)
-- [The process environment](#the-process-environment)
-- [The sandbox's PID 1](#the-sandboxs-pid-1)
-- [Pinning `docker` and `sudo`](#pinning-docker-and-sudo)
-- [Chromium's NSS database](#chromiums-nss-database)
-- [Directory Structure](#directory-structure)
-- [Troubleshooting](#troubleshooting)
+- [Rules when changing code](#rules-when-changing-code)
+- [Debugging](#debugging)
 
-## Local Usage
+## Getting set up
 
-You can run isolated-run's proxy locally without GitHub Actions using Docker Compose and Make.
-
-GitHub Actions inputs are lowercase (`proxy_mode`); the environment variables for local usage are
-the uppercase form of the same names (`PROXY_MODE`).
-
-### Sandbox Dev Loop (mac-friendly)
-
-The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primitives (`ip netns`,
-`nsenter`, `runc`) that can't run natively on macOS. `make setup_sandbox_dev` /
-`make test_sandbox_dev` instead drive it from inside a container with `pid: host` and
-`/var/run/docker/netns` mounted in (see `dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`),
-which is enough to reach the proxy container's `SandboxKey` netns the same way production does. That
-is close enough to the real "runner host + separate proxy container" arrangement for day-to-day
-iteration, though it can't validate the container-boundary parts of production. `runc`,
-`gen-seccomp-profile` and `filesystem-audit` are built directly into the dev-loop image (mirroring
-`docker/universal/Dockerfile`) rather than `docker cp`-extracted from the proxy image at runtime, so
-the dev loop doesn't need the Docker socket mounted in just to reach a sibling container;
-`dev/build-test-bundle.sh` stands in for `lib/sandbox/oci-config.ts`'s `buildOciConfig` to build a
-minimal OCI bundle for the smoke test. CI's `test_sandbox_*` e2e jobs run `run-isolated.sh` directly
-on the runner host instead, matching production exactly. Treat those jobs, not this dev loop, as the
-final word on whether a change works.
-
-```bash
-make setup_sandbox_dev  # start the proxy + dev-loop runner container
-make test_sandbox_dev   # run a sample isolated command and verify allow/block + capability drop
-```
-
-## Testing
-
-```bash
-make test_unit_core      # core library unit tests (src/core)
-make test_unit_sandbox   # action's own unit tests (src/lib, src/main.ts)
-make test_unit_qjs       # dual-runs the acl module's tests under real QuickJS in a throwaway image
-make test_unit           # all of the above
-make test_unit_coverage  # every Node test in one run, with a coverage report in coverage/
-```
-
-CI runs `make test_unit_coverage` and pastes `coverage/summary.txt` into the job summary. The
-threshold is 100% on all four counters, so anything added without a test fails the run. Code that is
-deliberately not tested carries a `/* v8 ignore */` comment saying why, which keeps that decision in
-the source rather than buried in a percentage. Only two things qualify: code whose body lives
-outside the process, and the default implementation behind a seam whose callers are already tested.
-The QuickJS run is not measured separately, since it executes the same `.test.ts` files as the Node
-run.
-
-`make test_sandbox_dev` is the dev-loop end-to-end check described above; `make
-test_integration_sandbox_linux` drives `dist/main.cjs` directly for checks that don't depend on
-the real action wrapper (see `test/integration-test-*.sh`) and is what CI's `test_sandbox` job in
-`test-integration.yml` runs. The ones that need the fixture origin live in
-`test_integration_sandbox_universal` instead, whether they need it for what only a fixture can
-cover or just to keep off the real internet. The CI-only `test_sandbox_*` end-to-end jobs run on a real
-runner host with no nested container, and are the final word on whether a change works.
-
-The filesystem audit tracer's Go tests run while the proxy image is built, so every job that builds
-it runs them.
-
-The kernels on GitHub-hosted runners never preempt the tracer's programs mid-run, so no job there
-can catch two of them sharing a buffer. After changing the BPF program, run "Test / Filesystem audit
-under preemption" by hand: it boots Ubuntu's 7.0 and 6.8 `generic` kernels in a VM, lets three
-processes on one CPU make changes under names of their own, and fails on a record mixing two of
-them (`test/filesystem-audit-preemption/`).
-
-### Refreshing the filesystem audit fixtures
-
-The filesystem audit's golden test strips and renders a real recording from the
-`test_sandbox_filesystem_audit` e2e job, kept in `src/lib/__fixtures__/filesystem-audit/`. When the
-tracer's output changes, take a new one from a passing run of that job:
-
-```bash
-dev/update-filesystem-audit-fixture.sh <run id of "Test / E2E">
-```
-
-It pulls the raw recording out of the run's log, normalizes the runner's uid in the scratch base to
-0, and regenerates the stripped recording and the summary through the golden test. Read the diff
-before committing: it is the change in what the audit records and shows.
-
-### Running the integration tests from several git worktrees
-
-`test_integration_sandbox_universal` and `test_integration_sandbox_inspect` use the fixture origins
-in `compose.test-*.yaml`, whose network name is global to the daemon, so two worktrees would
-otherwise fight over it and over the fixtures' `10.200.0.x` addresses.
-
-Nothing has to be configured. The Makefile takes the worktree's name from `git rev-parse
---git-dir`, suffixes the network name with it and derives the network's own subnet from it, and
-exports both so the test scripts and the proxy the action starts agree. The main checkout gets the
-unsuffixed name and the subnet CI uses.
-
-The fixtures' addresses are not part of that. Each assigns its own `10.200.0.x` inside its own
-network namespace instead of taking one from Compose IPAM (see each fixture's entrypoint, and
-`test/test-net-addr` for the proxy's side of it), so the daemon never allocates `10.200.0.0/24` and
-every worktree uses the same addresses. That is why the assertions name those addresses literally.
-
-A fresh worktree needs `vp install` first: `node_modules` is per checkout, and these tests run
-`dist/main.cjs` with the repo's own dependencies.
-
-Each `test/integration-test-*.sh` script cleans up only the proxy containers it started itself, read
-back from its own `GITHUB_STATE` (`main.ts` writes the name there before creating the container). A
-`buildcage-proxy-*` sweep would otherwise remove, or call a leak, whatever another worktree has
-running. `integration-test-listener-scope.sh` is the one script with fixed Compose and container
-names of its own, and those carry the suffix too.
-
-## Local Development
-
-### Local testing of the action
-
-Sigstore verification requires a real, published GHCR image, so the action normally can't run
-against an unpublished branch or local changes. This repo's own CI (the `test_sandbox_*` jobs in
-`.github/workflows/test-e2e.yml`) tests the real action end-to-end against a locally built image
-instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles
-`dist/main.cjs` where the `BUILDCAGE_LOCAL_IMAGE_REF` override is reachable. The override logic
-lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
-dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
-build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle, so the
-override code is absent from `dist/` rather than unreachable in it. A CI check (`unit_test` job) and
-the pre-commit hook also confirm a normal build's `dist/` never mentions
-`BUILDCAGE_BUILD_TEST_HOOKS`, `BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or
-`BUILDCAGE_RUN_DEBUG_*` name (such as `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step
-summary the e2e assertions read).
-
-To exercise it locally:
-
-1. Build the image: `docker compose build proxy`.
-2. `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
-3. Run it with `BUILDCAGE_LOCAL_IMAGE_REF=<image ref from step 1>` set (e.g. via `act`, or by
-   invoking `node dist/main.cjs` directly with the relevant `INPUT_*` env vars; note the action's
-   own isolation step still needs a real Linux host, so this only gets you past image verification,
-   not a full local run on macOS). Never commit a `dist/main.cjs` built this way: run
-   `vp run build` again (without the flag) before committing.
-
-See [security.md](./security.md#verification-limitations) for more details.
-
-## Formatting & Linting
-
-Formatting, linting, and type-aware linting are handled by [vp (Vite+)](https://viteplus.dev/),
-installed globally on your machine like `pnpm`/`corepack` rather than through `pnpm exec`:
+The toolchain is [vp (Vite+)](https://viteplus.dev/), installed globally:
 
 ```bash
 curl -fsSL https://vite.plus | bash   # macOS/Linux
 # Windows: irm https://viteplus.dev/install.ps1 | iex
 ```
 
-The project pins its own toolchain version via the `vite-plus` devDependency in `package.json`
-(the same way `packageManager` pins `pnpm`), and the globally installed `vp` binary detects and
-delegates to that pinned version automatically, so plain `vp ...` commands are reproducible without
-going through `pnpm exec`.
+`vp` delegates to the version the `vite-plus` devDependency in `package.json` pins, so plain
+`vp …` commands are reproducible. Run `vp install`, not `pnpm install`, in each checkout: it
+installs `node_modules` and sets up a pre-commit hook that formats and lints the staged files
+(`vite.config.ts`'s `staged` config), fixing and re-staging what it can. The proxy, the QuickJS
+unit tests and the integration tests also need Docker, and the sandbox itself needs Linux; on
+macOS, use the [dev loop](#the-sandbox-dev-loop).
 
 ```bash
-vp check       # format + lint + type-aware lint (read-only; what CI runs)
-vp check --fix # same, but auto-fixes format/lint issues in place
-vp lint --fix
-vp fmt --write
+vp check          # format, lint and type-aware lint, read-only (what CI runs)
+vp check --fix    # the same, fixing what it can
+vp run typecheck  # tsc, the authoritative type check
+vp run build      # rolldown → the committed dist/ bundles
 ```
 
-`vp run typecheck` (`tsc`) remains the authoritative full type check; `vp check`'s type-aware
-linting (via `oxlint-tsgolint`) catches a subset of type-driven issues fast but doesn't replace it.
+`vp check`'s type-aware lint catches a subset of type errors quickly but does not replace
+`vp run typecheck`. Build with `vp run build`, never `vp build`.
 
-Running `vp install` (in place of `pnpm install`) automatically sets up a pre-commit hook, via the
-`prepare` script, that formats and lints your staged files (`vite.config.ts`'s `staged` config)
-before each commit, auto-fixing and re-staging what it can.
+## Repository layout
 
-## Viewing Logs
+```text
+.
+├── action.yml               # Action entry (node24 → dist/main.cjs, dist/post.cjs)
+├── src/                     # Source (ESM)
+│   ├── main.ts / post.ts    # Start the proxy, run the isolated command, report, stop
+│   ├── lib/                 # The action's own modules; sandbox/ builds the OCI bundle and mounts,
+│   │                        # filesystem-audit/ turns the tracer's recording into the summary
+│   ├── proxy/               # The AWS access key check, built for both runtimes
+│   └── core/
+│       ├── lib/             # acl/ and its imports also run under QuickJS; the rest is Node-only
+│       └── scripts/         # QuickJS only: the config generators, the test runner, qjs's types
+├── dist/                    # Bundled output (rolldown → CommonJS), committed
+├── docker/
+│   ├── common/              # Image files every engine shares: s6 services, init-iptables
+│   ├── universal/           # proxy_engine: universal
+│   ├── inspect/             # proxy_engine: inspect
+│   ├── gen-seccomp-profile/ # Go: derives the seccomp filter from Docker's default profile
+│   ├── filesystem-audit/    # Go and eBPF: the filesystem audit tracer
+│   ├── compose.*.yaml       # The compose files the action, its tests and the dev loop run
+│   └── *-licenses.sh        # License collection and checks run at image build time
+├── scripts/
+│   ├── run-isolated.sh      # netns, veth and rootfs setup around `runc run`, via `sudo -n`
+│   └── buildcage-init.sh    # The sandbox's PID 1
+├── test/                    # integration-test-*.sh drivers, assert-*.sh/.mjs, *-scenarios.sh
+├── dev/                     # The macOS dev-loop image and scripts, and the fixture refresh
+├── compose.yaml             # Local compose config, also what CI's sandbox jobs build from
+├── compose.test-*.yaml      # Fixture origins for the integration tests
+├── licenses/                # License texts copied into the images, and the npm license generator
+├── docs/
+└── Makefile
+```
+
+Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
+`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
+check to core's. Each runs under QuickJS when the proxy container starts and writes haproxy.cfg and
+the Corefile from the rules, through the generators in `src/core/lib/acl/` (`haproxy-config.ts`
+for `inspect`, `haproxy-universal-config.ts` for `universal`). The AWS access key check's rules are
+built in `src/proxy/haproxy-aws-keys.ts`, from the hosts and parameter names in
+`src/proxy/aws-hosts.ts`.
+
+Each engine's image also carries runc, `gen-seccomp-profile` and `filesystem-audit`. The action
+copies them out of the image onto the runner host at startup and runs them there, outside the
+container: runc runs the isolated command, `gen-seccomp-profile` writes the seccomp filter for the
+running kernel, and `filesystem-audit` is the tracer.
+
+## Running it locally
+
+Action inputs become uppercase environment variables locally (`proxy_mode` is `PROXY_MODE`).
+
+### The sandbox dev loop
+
+The isolation (`scripts/run-isolated.sh`) uses Linux-only primitives (`ip netns`, `nsenter`,
+`runc`). `make setup_sandbox_dev` and `make test_sandbox_dev` drive it from inside a container
+with `pid: host` and `/var/run/docker/netns` mounted in (`dev/Dockerfile`,
+`docker/compose.sandbox-dev.yaml`), which reaches the proxy container's network namespace the way
+the action does:
 
 ```bash
-# Communication logs from the locally-built proxy
-docker compose logs proxy
-
-# Real-time log monitoring
-docker compose logs -f proxy
+make setup_sandbox_dev   # start the proxy and the dev-loop container
+make test_sandbox_dev    # run a sample command and check allow, block and the capability drop
+make clean_sandbox_dev   # stop and remove both
+PROXY_MODE=audit make setup_sandbox_dev
 ```
 
-**Log format (`universal`):**
+The dev-loop image has `runc`, `gen-seccomp-profile` and `filesystem-audit` built in rather than
+extracted from the proxy image, and `dev/build-test-bundle.sh` stands in for `buildOciConfig` in
+`src/lib/sandbox/oci-config.ts`. It cannot check what depends on the real runner host, so CI's
+`test_sandbox_*` jobs, which run `run-isolated.sh` on the runner itself, are the final word on
+whether a change works.
 
-```
-buildcage 1787471970500 [ALLOWED] (HTTPS) "github.com:443" - 1024
-buildcage 1787471971200 [BLOCKED] (HTTPS) "malicious.com:443" not-allowed 0
-buildcage 1787471972000 [AUDIT] (HTTP) "npmjs.org:80" - 812 ts=-- dst=104.16.0.35:80
-buildcage 1787471973000 [-] (HTTP) "-" - 0 ts=PR dst=198.19.255.1:22
-```
+### The action against an unpublished image
 
-Fields: `buildcage <epoch-ms> [status] (rule) "domain:port" reason bytes`. The
-millisecond epoch orders the timeline and times each line against the startup
-marker; `bytes` is `%B`, the only per-connection detail a passthrough sees.
-The log keeps `domain` as sent; the report lowercases it, as the rules ignore
-case when matching it.
+Sigstore verification needs a real, published GHCR image, so the action cannot normally run
+against local changes. A test-hook build lets it: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
+produces a `dist/main.cjs` that honors `BUILDCAGE_LOCAL_IMAGE_REF`. CI's `test_sandbox_*` jobs in
+`.github/workflows/test-e2e.yml` run the real action this way.
 
-A plaintext connection made through a name is relayed to a second frontend,
-`http_in`, whose lines also carry `ts`, HAProxy's termination state, and `dst`.
-Where no request parsed, no rule ran and the fields read `[-] (HTTP) "-" -`.
-What the report makes of those is in
-[Requests that never arrived whole](./reference.md#requests-that-never-arrived-whole).
+1. Build the image: `docker compose build proxy`.
+2. `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
+3. Run it with `BUILDCAGE_LOCAL_IMAGE_REF=<image ref from step 1>` set, through `act` or by
+   invoking `node dist/main.cjs` with the relevant `INPUT_*` variables. On macOS this gets only as
+   far as image verification, since the isolation itself needs Linux.
 
-`universal` also reads the resolver's log (`/var/log/coredns`), since a name CoreDNS blocked never
-reaches HAProxy at all: it is the only trace of a name looked up but never connected to.
+Run `vp run build` again, without the flag, before committing; see
+[Rules when changing code](#rules-when-changing-code).
 
-**`inspect`'s proxy log is richer**, since it terminates TLS and sees each request whole; it reads the
-same resolver log alongside it:
+## Testing
+
+`make help` lists every target with its own description.
+
+### Unit tests and coverage
 
 ```bash
-docker compose exec proxy cat /var/log/haproxy/current
-docker compose exec proxy cat /var/log/coredns/current
+make test_unit               # core, the action's own, and the QuickJS run
+make test_unit_coverage      # every Node unit test in one run, with a report in coverage/
+vp test run src/core/lib/acl # the Node tests whose path contains the argument
 ```
 
-HAProxy's log carries one line per request, oldest first, with its method, status, size, the `Host`
-header it carried, and its request target last:
+The threshold is 100% on all four counters, so anything added without a test fails CI, which
+pastes `coverage/summary.txt` into the job summary. Code that is deliberately not tested carries a
+`/* v8 ignore */` comment saying why, which keeps that decision in the source rather than buried in
+a percentage. Only two things qualify: code whose body lives outside the process, and the default
+implementation behind a seam whose callers are already tested. The QuickJS run
+(`make test_unit_qjs`) is not measured separately, since it executes the same `.test.ts` files as
+the Node run.
 
-```
-buildcage 1787471975123 https GET 200 708 ts=-- reason=- tlserr=- dst=104.16.1.34:443 fcerr=- sni=registry.npmjs.org host=registry.npmjs.org /express
-buildcage 1787471976000 pass tls 3421 ts=-- reason=- dst=10.200.0.100:5432 sni=db.example.com
-```
+### Integration tests
 
-`host` and the target are two fields rather than one URL because a request target need not be a
-path: `OPTIONS *` and a `CONNECT`'s authority are both legal, and both leave the target as `-`, so a
-reader splitting a URL back apart would take the host for `registry.npmjs.org-`. A missing `Host`
-prints as `-` too. The log keeps the `Host` as sent; the report lowercases it and drops one trailing
-dot, as the rules do before matching it.
-
-With the AWS access key check on, both request lines carry `wb=<reason|->` after `dst=`: in `audit`,
-the reason `restrict` would have blocked the request for (`aws-key-not-allowed`,
-`aws-no-credential`, `aws-ambiguous-credential`, `aws-unsupported-credential`, `aws-unreadable` or
-`aws-role-not-allowed`), and
-`-` otherwise. `restrict` logs the same reasons as `reason=`. Then come `aws.key=`,
-`aws.accountId=`, `aws.assumedAccount=`, `aws.keyRef=` and `aws.issuedKeyRef=`, which the parser
-reads back as the traffic artifact's `aws` object, each `-` where it has no value. See
-[AWS access key check](./aws.md).
-
-`ts` is HAProxy's termination state and `reason` the block reason where the rule that blocked
-knew one the line could not otherwise show. `tlserr` carries HAProxy's own error from the handshake
-with the origin, which is what tells a connection the proxy would not make from one it could not
-make; the passthrough stage terminates no TLS and logs no such field. `fcerr` is HAProxy's error
-on the client connection; an `SSL_*` one on a line with no request is shown as `client-tls-failed`,
-except `SSL_FATAL`, a broken record after the handshake.
-
-What the report makes of those is in
-[Requests that never arrived whole](./reference.md#requests-that-never-arrived-whole), for a
-connection that never delivered a whole request, and in
-[Connections that failed](./reference.md#connections-that-failed), for one the rules allowed that
-then came to nothing.
-
-Each log is an s6-log directory rather than a single file: `current` rotates into a timestamped
-archive once it crosses 1MB, up to 100 archives kept. A line from HAProxy is split only past 32KB,
-and one from CoreDNS past s6-log's default of 8KB. The report reads every archive, oldest first,
-then `current`, so early traffic is never dropped just because a later part of the same run pushed
-the log past a rotation. Reading `current` by hand, as above, only shows what has accumulated since
-the most recent one.
-
-HAProxy writes to s6-log through a pipe without blocking, so a line it cannot write at once is
-dropped rather than delayed, and nothing in the log marks where. A thread that keeps finding another
-mid-write on the pipe drops its line, so HAProxy runs one thread (`nbthread 1`). A stalled s6-log
-can still fill the pipe, so `pipesz` widens it from 64KB to 1MB before HAProxy starts. HAProxy
-counts the lines it drops itself: its `health` socket serves the Prometheus exporter, and the report
-reads `haproxy_process_dropped_logs_total` from it. A nonzero count, or one the report cannot read,
-marks the report incomplete. To read it by hand:
-
-```bash
-docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
-  'http://localhost/metrics?scope=global' | grep dropped_logs
-```
-
-## Makefile Commands
-
-`make help` lists every target with its own description. The ones you type most:
-
-| Command                                          | Description                                                                |
+| Command                                          | What it runs                                                               |
 | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| `make setup_sandbox_dev`                         | Start the proxy and the mac-friendly dev-loop runner                       |
-| `make test_sandbox_dev`                          | Run a sample isolated command in the dev loop and verify isolation         |
-| `make clean_sandbox_dev`                         | Stop and remove the dev-loop containers                                    |
-| `make test_unit`                                 | Every unit test: core, the action's own, and the QuickJS run               |
-| `make test_unit_coverage`                        | Every Node unit test in one run, with a coverage report                    |
 | `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
 | `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
 | `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
@@ -299,192 +163,116 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
 | `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
 | `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
 
-The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
-`dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same
-image: the inspect group needs one built from `docker/inspect`, and `test_integration_listener_scope`
-builds both images itself and wants the variable unset. So `make test_integration` records what CI
-runs rather than running it in one go; build the image a group needs, then run that group.
+They drive `dist/main.cjs` directly (`test/integration-test-*.sh`). The first three groups need
+`BUILDCAGE_LOCAL_IMAGE_REF` and a [test-hook build](#the-action-against-an-unpublished-image).
+They do not all want the same image: the inspect group needs one built from `docker/inspect`, and
+`test_integration_listener_scope` builds both images itself and wants the variable unset. So
+`make test_integration` records what CI runs rather than running it in one go; build the image a
+group needs, then run that group.
 
-## The process environment
+A test that needs a fixture origin, whether for what only a fixture can cover or just to keep off
+the real internet, goes in `test_integration_sandbox_universal` or
+`test_integration_sandbox_inspect`. The CI-only `test_sandbox_*` end-to-end jobs run on a real
+runner host with no nested container.
 
-`runc spec`'s defaults are written for containers, not for a step on the runner's own machine, so
-the OCI spec carries the runner's own `RLIMIT_NOFILE` (read from the process that started the
-action, since Node raises its own soft limit before any JavaScript runs), a `/dev/shm` sized from
-the host's rather than runc's 64MB cap, and the runner's hostname. Both runc's default spec and the
-`sudo` on the way to it would otherwise pin `RLIMIT_NOFILE` at 1024 against a runner's 65536, which
-surfaces as `EMFILE` in webpack and jest, and Chromium crashes under a 64MB `/dev/shm`.
+### Several worktrees at once
 
-## The sandbox's PID 1
+`test_integration_sandbox_universal` and `test_integration_sandbox_inspect` use the fixture origins
+in `compose.test-*.yaml`, whose network name is global to the daemon. The Makefile takes the
+worktree's name from `git rev-parse --git-dir`, suffixes the network name with it and derives the
+network's subnet from it, and exports both so the test scripts and the proxy the action starts
+agree. The main checkout gets the unsuffixed name and the subnet CI uses.
 
-The kernel drops any signal a PID namespace's PID 1 has no handler for, SIGKILL from inside
-included, and hands it every orphan to reap. `buildcage-init` stays PID 1 and runs the command as
-its child, so `kill -TERM $$` works and a python or node shebang leaves no zombies. It forwards
-`SIGTERM` and `SIGINT` to every other process in the sandbox, one the command moved out of its
-process group with `setsid` included, and `SIGHUP`, `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that
-process group, so what the command runs gets them too. It exits with the command's status, `128+n`
-if a signal killed it. After forwarding `SIGTERM` or `SIGINT`, it waits for every process in the
-sandbox to exit before it exits itself.
+The fixtures' addresses need no suffix. Each fixture assigns its own `10.200.0.x` inside its own
+network namespace (see each fixture's entrypoint, and `test/test-net-addr` for the proxy's side),
+so every worktree uses the same addresses, and the assertions name them literally.
 
-## Pinning `docker` and `sudo`
+Each `test/integration-test-*.sh` script cleans up only the proxy containers it started, read back
+from its own `GITHUB_STATE`, so it never removes, or calls a leak, what another worktree has
+running. `integration-test-listener-scope.sh` is the one script with fixed Compose and container
+names of its own, and those carry the suffix too. A fresh worktree needs `vp install` first, since
+these tests run `dist/main.cjs` with the repo's own dependencies.
 
-Before either first runs, and again in the post step, `docker` and `sudo` are pinned to a binary
-outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:` (see
-[What it can write](./security.md#what-it-can-write)). One reached through a symlink in those
-paths, such as Ubuntu 26.04's `/usr/bin/sudo` through `/etc/alternatives` under
-`write_through: /etc`, is pinned to the file that symlink leads to at the time, if that file bears
-the command's name. One in a `$PATH` directory that is itself in those paths, or reached through a
-symlink in them, is passed over even when it is a symlink to a file outside them, and the next
-`$PATH` entry is tried.
+### The filesystem audit tracer
 
-Both run with `PATH` stripped of those paths and of any entry through a symlink in them. `sudo`
-gets the system directories and `docker` the step's own `$PATH`, so a helper installed only under
-those paths is not found.
+The tracer's Go tests run while the proxy image is built, so every job that builds it runs them.
+GitHub-hosted runners' kernels never preempt the tracer's programs mid-run, so no job there can
+catch two of them sharing a buffer. After changing the BPF program, run "Test / Filesystem audit
+under preemption" by hand: it boots Ubuntu's 7.0 and 6.8 `generic` kernels in a VM, lets three
+processes on one CPU make changes under names of their own, and fails on a record mixing two of
+them (`test/filesystem-audit-preemption/`).
 
-## Chromium's NSS database
+The golden test renders a real recording from the `test_sandbox_filesystem_audit` e2e job, kept in
+`src/lib/__fixtures__/filesystem-audit/`. When the tracer's output changes, take a new one from a
+passing run of that job:
 
-Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What the user sees is in
-[Reference](./reference.md#chromium).
-
-- The database is copied into the step's scratch directory. The copy's `pkcs11.txt` gains a second,
-  read-only softoken slot on a database holding only the CA, mounted at `/dev/buildcage-nssdb`, and
-  the copy is mounted read-write over the database. NSS loads every module `pkcs11.txt` names.
-- After the command, if it changed the copy, the slot's bytes are taken back out of `pkcs11.txt` and
-  the copy is written back over the database. A copy whose database path no longer resolves where it
-  did is not written back. The write-back syncs the tree: a directory the database already has is
-  entered rather than replaced, a changed file or symlink is renamed over the old one, a directory
-  the command made is created with its mode, and what the command removed is removed last. A file
-  that already matches the copy is not touched. A write-back that fails partway leaves entries
-  behind rather than losing them, except an entry whose type the command changed, which is removed
-  just before its replacement goes in.
-- Write-backs to the same database take turns under a lock, so a step never copies the database
-  halfway through another's write-back.
-- Which directories Buildcage made and which steps use them is recorded in
-  `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from the sandbox. Removing a directory
-  detaches every mount on it, so a directory another step still uses is never removed. A directory
-  is identified by its birth time, so on a filesystem without one, created directories stay.
-
-## Directory Structure
-
-```text
-.
-├── action.yml                 # Action entry (node24 → dist/main.cjs, dist/post.cjs)
-├── src/                       # Source (ESM)
-│   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
-│   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
-│   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers),
-│   │                          # filesystem-audit/ (the recording's reduction, summary and artifact)
-│   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
-│   │                          # built for both runtimes; scripts/ holds this action's inspect
-│   │                          # config generator, core's plus the check
-│   └── core/                  # Code shared with the proxy image's QuickJS scripts
-│       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
-│       │                      # both runtimes, and so is anything it imports (errors.ts,
-│       │                      # line-comments.ts, log/proxy-address.ts). actions/, docker/,
-│       │                      # provenance/, report/ and the rest of log/ are Node-only, and
-│       │                      # test/test-shim.ts is the node:test-alike shim *.test.ts uses
-│       │                      # under either runtime
-│       └── scripts/           # QuickJS only: each engine's config generator, the test runner
-│                              # and qjs's type declarations
-├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
-│                              # dist/qjs-test are gitignored scratch
-├── docker/                    # Proxy image build contexts, one per proxy_engine
-│   ├── common/                # Image files the engines share: s6 services, init-iptables
-│   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile + filesystem-audit
-│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
-│   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
-│   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
-│   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links
-│   ├── check-alpine-licenses.sh # Fails the image build on an Alpine package that
-│   │                          # licenses/alpine-packages.txt does not cover
-│   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
-│   │                          # image ref), distinct from the top-level compose.yaml below
-│   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
-│   └── compose.sandbox-dev.yaml          # Mac dev-loop overlay (see dev/)
-├── scripts/
-│   ├── run-isolated.sh        # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
-│   └── buildcage-init.sh      # The sandbox's PID 1: applies the step environment from stdin,
-│                              # runs the step's script, forwards signals and reaps orphans
-├── test/                      # integration-test-*.sh driving dist/main.cjs, assert-*.sh/.mjs
-│                              # checking what the e2e steps reported, and *-scenarios.sh run
-│                              # inside the sandbox as a step's own `run:`. helpers.sh carries
-│                              # what they share, driver-helpers.sh the drivers' own setup and
-│                              # run_step, helpers.mjs the pass/fail of the .mjs ones
-├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
-│                              # refresh; not used in production or CI
-├── docs/                      # reference.md, development.md, security.md, aws.md,
-│                              # filesystem-audit.md, plus the rules.md/inspect-engine.md
-│                              # link stubs
-├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
-│                              # during `vp run build`, and what .glf.jsonc substitutes in.
-│                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
-│                              # QuickJS-ng, the s6-overlay family and the Alpine packages in
-│                              # alpine/) are copied into both images, with alpine-packages.txt
-│                              # mapping each installed Alpine package to them
-├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
-│                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
-└── Makefile                   # Operational commands
+```bash
+dev/update-filesystem-audit-fixture.sh <run id of "Test / E2E">
 ```
 
-Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
-`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
-check to core's. Each runs under
-QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
-through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
-`haproxy-universal-config.ts` for `universal`). rolldown bundles it into
-`/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
+It pulls the raw recording out of the run's log, normalizes the runner's uid in the scratch base to
+0, and regenerates the stripped recording and the summary through the golden test. Read the diff
+before committing: it is the change in what the audit records and shows.
 
-The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`, from the
-hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left out of
-[AWS access key check](./aws.md):
+## Rules when changing code
 
-- SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
-  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body, or in the query under any
-  spelling but the exact one, are blocked as `aws-unsupported-credential` without their key being
-  read.
-- A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
-  the body can be 4 MiB less the headers, and a larger one is `aws-unreadable`. Matching stops at a
-  NUL byte, so a body holding one is `aws-unreadable` too.
-- The proxy reads an STS answer as XML, up to its buffer size (16 KB). STS does not compress its
-  answers, so the request's `Accept-Encoding` is left alone. A compressed or JSON answer, or one
-  past the buffer, teaches no key and names no account.
+- **`dist/` is committed.** After changing anything under `src/`, run `vp run build` and commit
+  the bundles with the change; CI's "Check dist is up to date" step rebuilds and compares them.
+  The bundles are never formatted or linted.
+- **A test-hook build never ships.** The `BUILDCAGE_LOCAL_IMAGE_REF` override lives in
+  `src/core/lib/provenance/local-image-override.ts`, reached only through a dynamic `import()`
+  gated by `BUILDCAGE_BUILD_TEST_HOOKS` at build time, so a normal build tree-shakes it out. CI and
+  the pre-commit hook fail a `dist/` that names `BUILDCAGE_BUILD_TEST_HOOKS`,
+  `BUILDCAGE_LOCAL_IMAGE_REF`, or any `BUILDCAGE_TEST_*` or `BUILDCAGE_RUN_DEBUG_*` name. A new
+  test hook goes behind the same gate.
+- **`acl/` runs under QuickJS too.** `src/core/lib/acl/`, everything it imports,
+  `src/core/lib/test/`, `src/core/scripts/` and `src/proxy/` also run inside the image under
+  QuickJS (`tsconfig.qjs.json`), so they cannot use Node's APIs. `make test_unit_qjs` runs the
+  tests under `src/core/lib/acl/` and `src/proxy/` there.
+- **An engine keeps only what differs.** Each Dockerfile copies `docker/common/files/` first and
+  the engine's own `files/` on top. A path in both would be settled silently by copy order, so
+  `src/core/lib/docker/engine-files.test.ts` rejects one.
+- **Pinned downloads move together.** runc and CoreDNS are downloaded at a pinned version and
+  checked against one SHA256 per architecture, set as `ARG`s in each engine's Dockerfile (runc also
+  in `dev/Dockerfile`). Renovate updates the version and the SHA256 lines together, taking the
+  digests from the release's own checksum files; the `digestVersion` in the comment above each
+  SHA256 line tells it which release that digest belongs to. A bump by hand changes all of them.
 
-Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
-keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
-configs. A path in both would be settled silently by copy order, so
-`src/core/lib/docker/engine-files.test.ts` rejects one.
+## Debugging
 
-runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per architecture,
-both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`). Renovate updates the
-version and the SHA256 lines together, taking the digests from the release's own checksum files; the
-`digestVersion` in the comment above each SHA256 line tells it which release that digest belongs to.
-A bump by hand changes all of them: the version line, each SHA256 line and each `digestVersion`.
+### Logs
 
-## Troubleshooting
+```bash
+docker compose logs proxy    # the proxy's output; -f to follow
+docker compose exec proxy cat /var/log/haproxy/current
+docker compose exec proxy cat /var/log/coredns/current
+```
 
-If you encounter issues, try reproducing the problem locally to get detailed logs:
+The proxy's line formats are the `log-format` lines the generators in `src/core/lib/acl/` write,
+and `src/core/lib/log/` parses them back. A line from each engine looks like this:
 
-1. **Check logs:**
+```
+buildcage 1787471970500 [ALLOWED] (HTTPS) "github.com:443" - 1024
+buildcage 1787471975123 https GET 200 708 ts=-- reason=- tlserr=- dst=104.16.1.34:443 fcerr=- sni=registry.npmjs.org host=registry.npmjs.org /express
+```
 
-   ```bash
-   docker compose logs proxy
-   ```
+Each log is an s6-log directory: `current` rotates into a timestamped archive at 1MB, up to 100
+archives kept. The report reads every archive, so `current` alone shows only what came after the
+last rotation.
 
-2. **Run in audit mode** to understand your command's network behavior:
+HAProxy drops a log line it cannot write at once rather than wait, and counts the lines it drops;
+the report reads that count and marks itself incomplete when it is not zero. To read it by hand:
 
-   ```bash
-   PROXY_MODE=audit make setup_sandbox_dev
-   # or drive the action directly, see README.md
-   ```
+```bash
+docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
+  'http://localhost/metrics?scope=global' | grep dropped_logs
+```
 
-3. **The step fails with "never became ready"**: the proxy came up but one of its services never
-   answered its own readiness check. The step prints the container log; locally:
+### The step fails with "never became ready"
 
-   ```bash
-   docker inspect --format '{{json .State.Health}}' buildcage-proxy
-   ```
+The proxy came up but one of its services never answered its own readiness check. The step prints
+the container log; locally:
 
-4. **Open an issue** at [github.com/buildcage/isolated-run/issues](https://github.com/buildcage/isolated-run/issues) with:
-   - The Job Summary report (audit or restrict mode)
-   - The relevant `docker compose logs proxy` output
-   - Your workflow YAML (with secrets redacted)
+```bash
+docker inspect --format '{{json .State.Health}}' buildcage-proxy
+```
