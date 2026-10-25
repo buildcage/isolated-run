@@ -431,7 +431,7 @@ If you encounter issues, try reproducing the problem locally to get detailed log
 2. **Run in audit mode** to understand your command's network behavior:
 
    ```bash
-   make setup_sandbox_dev
+   PROXY_MODE=audit make setup_sandbox_dev
    # or drive the action directly, see README.md
    ```
 

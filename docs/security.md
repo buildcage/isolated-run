@@ -836,7 +836,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   `MemoryMax=` and `TasksMax=` on the runner's systemd unit or a slice around it.
 - **Reading a step's staging directory from outside any sandbox.** `/var/tmp/buildcage-<uid>` is
   hidden from every sandbox, which sees only its own read-only `exec/` there, but a process running
-  as the same user outside one can still read it. That is the same accepted limitation as credential retrieval above.
+  as the same user outside one can still read it.
 - **`filesystem_audit` records, it does not enforce.** It never blocks an access. See
   [Filesystem audit](#filesystem-audit) for what its record can be trusted for.
 
