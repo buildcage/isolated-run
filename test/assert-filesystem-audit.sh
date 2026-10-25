@@ -36,6 +36,7 @@ if [ -n "$w" ] && [ -n "$m" ] && [ -n "$d" ] && [ "$w" -lt "$m" ] && [ "$m" -lt 
 else
   fail "The probe's write, move and delete rows run in that order -- lines: '$w' '$m' '$d'"
 fi
+assert_file_has "$f" "The move's new name is written" -E ' W +(gnu)?mv +\./probe2\.txt$'
 
 # The table lists, open, what each program touched, and what it ran as an X
 # under the program that ran it. python3 is a symlink, so it shows as the

@@ -77,8 +77,10 @@ export function classify(r: AuditRecord): Classified[] {
   const perm = failed && PERM_ERRNO.has(r.err ?? 0);
   if (r.kind === "link") return classifyLink(r, letter, failed, perm);
   const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm }] : [];
-  // An exchange moves each path to the other.
-  if (r.kind === "rename" && r.exchange && r.to) out.push({ letter, path: r.to, failed, perm });
+  // An exchange moves each path to the other; any other rename writes its
+  // new name, as a link does, so a file moved somewhere shows up there.
+  if (r.kind === "rename" && r.to)
+    out.push({ letter: r.exchange ? letter : "W", path: r.to, failed, perm });
   return out;
 }
 

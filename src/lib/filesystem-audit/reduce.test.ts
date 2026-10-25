@@ -949,13 +949,13 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R node /proc/<pid>/status"]);
   });
 
-  it("renders a rename's source and an open that creates", () => {
+  it("renders a rename's source as moved and its new name as written, and an open that creates", () => {
     const md = render(
       { kind: "rename", comm: "node", path: "/work/a", to: "/work/b" },
       { kind: "open", comm: "node", path: "/work/c", access: "wct" },
       { kind: "open", comm: "node", path: "/work/d", access: "r" },
     );
-    expect(lines(md)).toEqual(["M node ./a", "W node ./c"]);
+    expect(lines(md)).toEqual(["M node ./a", "W node ./b", "W node ./c"]);
   });
 
   it("shows the file a hard link names, so a read through the link leads back to it", () => {
@@ -1574,6 +1574,30 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(rows(summary)).toStrictEqual(["cat r!w! ./a"]);
   });
 
+  it("leaves a move's new name unexpected where only its source is expected", () => {
+    const { lines, summary } = marked(
+      { rules: rulesOf("mv MW ./build/**") },
+      { kind: "rename", pid: 3, comm: "mv", path: "/work/build/x", to: "/home/u/.bashrc" },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { unexpected?: boolean }).unexpected)).toStrictEqual([
+      true,
+    ]);
+    expect(rows(summary)).toStrictEqual(["mv W ~/.bashrc"]);
+  });
+
+  it("takes an exchange as a move of both paths, and a failed move as failed on both", () => {
+    const { lines, summary } = marked(
+      { rules: rulesOf("mv M ./a\nmv W ./c") },
+      { kind: "rename", pid: 3, comm: "mv", path: "/work/a", to: "/work/b", exchange: true },
+      { kind: "rename", pid: 3, comm: "mv", path: "/work/c", to: "/work/d", failed: true, err: 18 },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { unexpected?: boolean }).unexpected)).toStrictEqual([
+      true,
+      true,
+    ]);
+    expect(rows(summary)).toStrictEqual(["mv M ./b", "mv m ./c", "mv w ./d"]);
+  });
+
   it("expects a run of the program that ran it", () => {
     const { summary } = marked(
       { rules: rulesOf("bash X /usr/bin/curl") },
@@ -1749,7 +1773,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(rows(summary)).toStrictEqual(["./tool R ./dir/**", "tool X ./tool"]);
     const file = expectedRulesFile([], summary.proposed!)!;
-    const added = file.split("\n").slice(3, -1);
+    const added = file.split("\n").slice(4, -1);
     expect(added).toHaveLength(summary.proposed!.length);
     expect(new Set(added).size).toBe(added.length);
   });

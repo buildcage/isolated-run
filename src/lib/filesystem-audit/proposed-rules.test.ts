@@ -1,7 +1,33 @@
 import { describe, it, expect } from "vitest";
 
-import { expectedRulesFile } from "./proposed-rules.ts";
+import { expectedRulesFile, givenRules, UPLOAD_NOTE } from "./proposed-rules.ts";
 import { parseExpectedRules } from "./rules.ts";
+
+describe("givenRules", () => {
+  const heading = "# Not matched in this run";
+
+  it("drops the heading wherever it stands, with the blank lines around it", () => {
+    expect(givenRules([heading, "* R ./a"])).toStrictEqual(["* R ./a"]);
+    expect(givenRules(["* R ./a", "", heading])).toStrictEqual(["* R ./a"]);
+    expect(givenRules(["* R ./a", heading, "* R ./b"])).toStrictEqual(["* R ./a", "* R ./b"]);
+    expect(givenRules(["* R ./a", "", heading, "", "", "* R ./b"])).toStrictEqual([
+      "* R ./a",
+      "* R ./b",
+    ]);
+  });
+
+  it("drops each heading when the workflow's and the config file's rules both carry one", () => {
+    expect(givenRules(["* R ./a", heading, "* R ./b", "", heading, "* R ./c"])).toStrictEqual([
+      "* R ./a",
+      "* R ./b",
+      "* R ./c",
+    ]);
+  });
+
+  it("keeps blank lines that stand between rules", () => {
+    expect(givenRules(["* R ./a", "", "* R ./b"])).toStrictEqual(["* R ./a", "", "* R ./b"]);
+  });
+});
 
 describe("expectedRulesFile", () => {
   const row = (program: string, flags: string, path: string) => ({
@@ -29,6 +55,7 @@ describe("expectedRulesFile", () => {
     ).toBe(
       [
         "filesystem_audit: record",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  /usr/bin/node   RW   ./node_modules/**",
@@ -42,7 +69,7 @@ describe("expectedRulesFile", () => {
 
   it("leaves a memfd's name holding a blank as it is quoted already, so the rule reads back", () => {
     const file = expectedRulesFile([], [row('memfd:"a b"', "X", 'memfd:"a b"')])!;
-    const line = file.split("\n")[3];
+    const line = file.split("\n")[4];
     expect(line).toBe('  memfd:"a b"  X  memfd:"a b"');
     const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
     expect(rule.program!.test('memfd:"a b"')).toBe(true);
@@ -51,7 +78,7 @@ describe("expectedRulesFile", () => {
 
   it("quotes a process's empty name, so the rule reads back", () => {
     const file = expectedRulesFile([], [row("", "R", "./x")])!;
-    const line = file.split("\n")[3];
+    const line = file.split("\n")[4];
     expect(line).toBe('  ""  R  ./x');
     const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
     expect(rule.program!.test("")).toBe(true);
@@ -61,6 +88,7 @@ describe("expectedRulesFile", () => {
     expect(expectedRulesFile(["# npm", "* R ./a", "", "* W ./b"], [row("bash", "R", "./c")])).toBe(
       [
         "filesystem_audit: record",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  # npm",
@@ -75,15 +103,14 @@ describe("expectedRulesFile", () => {
     );
   });
 
-  it("leaves out an earlier run's heading among the rules given", () => {
-    const given = ["* R ./a", "", "# Not matched in this run", "bash R ./c"];
+  it("leaves out an earlier run's heading, and the blank lines around it, among the rules given", () => {
+    const given = ["* R ./a", "", "", "# Not matched in this run", "", "bash R ./c"];
     expect(
       expectedRulesFile(given, [row("bash", "W", "./d")])
         ?.split("\n")
-        .slice(3),
+        .slice(4),
     ).toStrictEqual([
       "  * R ./a",
-      "",
       "  bash R ./c",
       "",
       "  # Not matched in this run",
@@ -96,6 +123,7 @@ describe("expectedRulesFile", () => {
     expect(expectedRulesFile(["* R ./a"], [])).toBe(
       [
         "filesystem_audit: record",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  * R ./a",

@@ -70823,6 +70823,356 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
+//#region src/core/lib/report/render/markdown-table.ts
+const ALIGN_MARKERS = {
+	left: "---",
+	right: "---:",
+	center: ":---:"
+}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
+function escapeCell(value) {
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function codeSpan(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(value) {
+	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
+}
+function markdownTable(formats, rows) {
+	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
+	for (let row of rows) {
+		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
+		lines.push(`| ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
+}
+//#endregion
+//#region src/lib/filesystem-audit/paths.ts
+const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
+function marked(r, path) {
+	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
+}
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
+function normalize$2(path, self) {
+	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
+	return unnumbered(path.replace(/^\.\//, ""), own);
+}
+function relativize(path, prefixes) {
+	if (isRunnerFile(path)) return `$${path.slice(2)}`;
+	for (let ws of prefixes.workspace) {
+		if (path === ws) return ".";
+		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
+	}
+	for (let home of prefixes.home) {
+		if (path === home) return "~";
+		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	}
+	return hasKnownStart(path) ? path : `…/${path}`;
+}
+function canonical(path, prefixes) {
+	let variable = prefixes.runnerFiles?.get(path);
+	if (variable) return "\0$" + variable;
+	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
+		if (path === alt) return first;
+		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	}
+	return path;
+}
+function sortKey(path) {
+	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
+}
+function components(p) {
+	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
+}
+function spell(parts) {
+	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
+}
+//#endregion
+//#region src/lib/filesystem-audit/escape.ts
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
+	"\n": "\\n",
+	"\r": "\\r",
+	"	": "\\t",
+	"\\": "\\\\",
+	"\"": "\\\"",
+	"*": "\\*",
+	"[": "\\[",
+	"]": "\\]"
+};
+function escapeForDisplay(name) {
+	return escapeWith(UNSAFE_CHARS, name);
+}
+function escapeCommandName(name) {
+	return escapeWith(UNSAFE_COMMAND_CHARS, name);
+}
+function escapeWith(unsafe, name) {
+	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+}
+function escapeChar(c) {
+	let named = NAMED_ESCAPES[c];
+	if (named !== void 0) return named;
+	let cp = Number(c.codePointAt(0));
+	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
+}
+const UNESCAPES = Object.fromEntries(Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]));
+function unescapeDisplay(text) {
+	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
+		if (cp !== void 0) {
+			let n = parseInt(cp, 16);
+			if (n <= 1114111) return String.fromCodePoint(n);
+		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
+		else if (UNESCAPES[c] !== void 0) return UNESCAPES[c];
+		return bad = !0, "";
+	});
+	return bad ? void 0 : out;
+}
+function field(text) {
+	return text.includes(" ") ? `"${text}"` : text;
+}
+function pathCell({ path, deleted }) {
+	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
+}
+function markdownRows(header, rows) {
+	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map(() => "---");
+	return [
+		line(header),
+		line(rule),
+		...rows.map(line)
+	].join("\n");
+}
+//#endregion
+//#region src/lib/filesystem-audit/record.ts
+const LETTER = {
+	read: "R",
+	write: "W",
+	exec: "X",
+	mkdir: "W",
+	mknod: "W",
+	truncate: "W",
+	symlink: "W",
+	link: "W",
+	rename: "M",
+	unlink: "D",
+	rmdir: "D",
+	chmod: "A",
+	chown: "A",
+	attr: "A"
+}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
+	1,
+	13,
+	30
+]);
+function classify(r) {
+	let letter, failed = !1;
+	if (r.failed && r.kind === "open") {
+		let access = r.access ?? "r";
+		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
+	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
+	if (!letter) return [];
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
+	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+	let out = r.path ? [{
+		letter,
+		path: r.path,
+		failed,
+		perm
+	}] : [];
+	return r.kind === "rename" && r.to && out.push({
+		letter: r.exchange ? letter : "W",
+		path: r.to,
+		failed,
+		perm
+	}), out;
+}
+function classifyLink(r, letter, failed, perm) {
+	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
+	return r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm: perm && !fileRefused
+	}), file && out.push({
+		letter: "L",
+		path: file,
+		failed,
+		perm: fileRefused
+	}), out;
+}
+const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
+function bitsOf(letter) {
+	let bits = letterBits.get(letter);
+	return bits === void 0 && (bits = letter.split("").reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
+}
+function procOf(gens, r) {
+	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+	let gen = gens.get(r.pid) ?? 0;
+	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
+}
+const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
+function parseLine(line) {
+	try {
+		return JSON.parse(line);
+	} catch {
+		return;
+	}
+}
+//#endregion
+//#region src/lib/filesystem-audit/rules.ts
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+function fields(line, ref) {
+	let out = [], i = 0;
+	for (; i < line.length;) {
+		if (line[i] === " " || line[i] === "	") {
+			i++;
+			continue;
+		}
+		let raw, memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
+		if (line[i] === "\"" || memfd) {
+			let end = line.indexOf("\"", i) + 1;
+			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
+			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
+			if (raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
+		} else {
+			let end = line.slice(i).search(/[ \t]/);
+			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
+		}
+		out.push(raw);
+	}
+	return out;
+}
+const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
+function globPattern(glob) {
+	let out = "", i = 0;
+	for (; i < glob.length;) {
+		if (glob.startsWith("**", i)) {
+			let atStart = i === 0 || glob[i - 1] === "/";
+			for (; glob[i] === "*";) i++;
+			if (atStart && i === glob.length) {
+				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
+				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
+			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
+			continue;
+		}
+		if (glob[i] === "*") {
+			out += "[^/]*", i++;
+			continue;
+		}
+		let c = glob[i];
+		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
+		i += c.length, out += c.replace(SPECIAL, "\\$&");
+	}
+	return RegExp(`^${out}$`);
+}
+const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+function accessBits(access) {
+	let bits = {
+		ok: 0,
+		failed: 0,
+		perm: 0
+	};
+	for (let i = 0; i < access.length; i++) {
+		let c = access[i], bit = BIT[c.toUpperCase()];
+		c === c.toUpperCase() ? bits.ok |= bit : access[i + 1] === "!" ? (bits.perm |= bit, i++) : bits.failed |= bit;
+	}
+	return bits;
+}
+function parseExpectedRules(sources) {
+	let rules = [], lines = [];
+	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
+		let line = raw.trim();
+		if (lines.push(line), line === "" || line.startsWith("#")) return;
+		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
+		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
+		let [program, access, path] = parts;
+		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
+		let glob = (field) => {
+			let pattern = globPattern(field);
+			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
+			return pattern;
+		};
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
+		rules.push({
+			ref,
+			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
+			path: anyProcess(path, glob(path)),
+			...accessBits(access)
+		});
+	});
+	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
+	return {
+		rules,
+		lines
+	};
+}
+function takes(rule, bit, failed, perm) {
+	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
+}
+var RuleMatcher = class {
+	cache = new Map();
+	rules;
+	constructor(rules) {
+		this.rules = rules;
+	}
+	match(program, path, bits, failed, perm) {
+		let key = `${program}\0${path}`, candidates = this.cache.get(key);
+		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
+		let unmatched = 0, ref;
+		for (let c of ORDER) {
+			let bit = BIT[c];
+			if (!(bits & bit)) continue;
+			let rule = candidates.find((r) => takes(r, bit, failed, perm));
+			rule ? ref ??= rule.ref : unmatched |= bit;
+		}
+		return ref === void 0 ? { unmatched } : {
+			unmatched,
+			ref
+		};
+	}
+};
+//#endregion
+//#region src/lib/filesystem-audit/proposed-rules.ts
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
+function givenRules(written) {
+	let out = [], afterHeading = !1;
+	for (let line of written) if (line === "# Not matched in this run") {
+		for (; out.at(-1) === "";) out.pop();
+		afterHeading = !0;
+	} else (!afterHeading || line !== "") && (out.push(line), afterHeading = !1);
+	return out;
+}
+function expectedRulesFile(written, proposed) {
+	let given = givenRules(written), rows = proposed.map((r) => [
+		ruleField(r.program.path),
+		r.flags,
+		ruleField(r.path.path)
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
+		...given,
+		"",
+		"# Not matched in this run",
+		...added
+	];
+	if (lines.length !== 0) return [
+		"filesystem_audit: record",
+		UPLOAD_NOTE,
+		"upload_filesystem_audit_artifact: true",
+		`${EXPECTED_RULES_INPUT}: |`,
+		...lines.map((line) => line ? `  ${line}` : ""),
+		""
+	].join("\n");
+}
+function writeProposedRules(summary, given, path, annotation, writeFile) {
+	if (!summary) return "write-failed";
+	if (summary.proposedCut) return "too-many-paths";
+	let file = expectedRulesFile(given, summary.proposed);
+	if (file === void 0) return "none";
+	try {
+		return writeFile(path, file), "written";
+	} catch (e) {
+		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
+	}
+}
+//#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
@@ -71109,31 +71459,6 @@ function toRow(group) {
 		expectedBy: group.rule,
 		note: `(${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
-}
-//#endregion
-//#region src/core/lib/report/render/markdown-table.ts
-const ALIGN_MARKERS = {
-	left: "---",
-	right: "---:",
-	center: ":---:"
-}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
-function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
-	return `${fence}${pad}${text}${pad}${fence}`;
-}
-function codeCell(value) {
-	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
-}
-function markdownTable(formats, rows) {
-	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
-	for (let row of rows) {
-		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
-		lines.push(`| ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
 }
 //#endregion
 //#region src/core/lib/report/render/host-table.ts
@@ -72308,82 +72633,6 @@ function runnerFilesDirFor(containerName) {
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
-//#region src/lib/filesystem-audit/record.ts
-const LETTER = {
-	read: "R",
-	write: "W",
-	exec: "X",
-	mkdir: "W",
-	mknod: "W",
-	truncate: "W",
-	symlink: "W",
-	link: "W",
-	rename: "M",
-	unlink: "D",
-	rmdir: "D",
-	chmod: "A",
-	chown: "A",
-	attr: "A"
-}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
-	1,
-	13,
-	30
-]);
-function classify(r) {
-	let letter, failed = !1;
-	if (r.failed && r.kind === "open") {
-		let access = r.access ?? "r";
-		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
-	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
-	if (!letter) return [];
-	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
-	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-	let out = r.path ? [{
-		letter,
-		path: r.path,
-		failed,
-		perm
-	}] : [];
-	return r.kind === "rename" && r.exchange && r.to && out.push({
-		letter,
-		path: r.to,
-		failed,
-		perm
-	}), out;
-}
-function classifyLink(r, letter, failed, perm) {
-	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
-	return r.to && out.push({
-		letter,
-		path: r.to,
-		failed,
-		perm: perm && !fileRefused
-	}), file && out.push({
-		letter: "L",
-		path: file,
-		failed,
-		perm: fileRefused
-	}), out;
-}
-const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
-function bitsOf(letter) {
-	let bits = letterBits.get(letter);
-	return bits === void 0 && (bits = letter.split("").reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
-}
-function procOf(gens, r) {
-	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-	let gen = gens.get(r.pid) ?? 0;
-	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
-}
-const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
-function parseLine(line) {
-	try {
-		return JSON.parse(line);
-	} catch {
-		return;
-	}
-}
-//#endregion
 //#region src/lib/filesystem-audit/agg.ts
 const newAgg = () => ({
 	ok: 0,
@@ -72415,213 +72664,6 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-//#endregion
-//#region src/lib/filesystem-audit/paths.ts
-const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
-function marked(r, path) {
-	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
-}
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
-function normalize$2(path, self) {
-	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
-	return unnumbered(path.replace(/^\.\//, ""), own);
-}
-function relativize(path, prefixes) {
-	if (isRunnerFile(path)) return `$${path.slice(2)}`;
-	for (let ws of prefixes.workspace) {
-		if (path === ws) return ".";
-		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-	}
-	for (let home of prefixes.home) {
-		if (path === home) return "~";
-		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
-	}
-	return hasKnownStart(path) ? path : `…/${path}`;
-}
-function canonical(path, prefixes) {
-	let variable = prefixes.runnerFiles?.get(path);
-	if (variable) return "\0$" + variable;
-	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
-		if (path === alt) return first;
-		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
-	}
-	return path;
-}
-function sortKey(path) {
-	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
-}
-function components(p) {
-	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
-}
-function spell(parts) {
-	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
-}
-//#endregion
-//#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
-	"\n": "\\n",
-	"\r": "\\r",
-	"	": "\\t",
-	"\\": "\\\\",
-	"\"": "\\\"",
-	"*": "\\*",
-	"[": "\\[",
-	"]": "\\]"
-};
-function escapeForDisplay(name) {
-	return escapeWith(UNSAFE_CHARS, name);
-}
-function escapeCommandName(name) {
-	return escapeWith(UNSAFE_COMMAND_CHARS, name);
-}
-function escapeWith(unsafe, name) {
-	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
-}
-function escapeChar(c) {
-	let named = NAMED_ESCAPES[c];
-	if (named !== void 0) return named;
-	let cp = Number(c.codePointAt(0));
-	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-}
-const UNESCAPES = Object.fromEntries(Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]));
-function unescapeDisplay(text) {
-	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
-		if (cp !== void 0) {
-			let n = parseInt(cp, 16);
-			if (n <= 1114111) return String.fromCodePoint(n);
-		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
-		else if (UNESCAPES[c] !== void 0) return UNESCAPES[c];
-		return bad = !0, "";
-	});
-	return bad ? void 0 : out;
-}
-function field(text) {
-	return text.includes(" ") ? `"${text}"` : text;
-}
-function pathCell({ path, deleted }) {
-	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
-}
-function markdownRows(header, rows) {
-	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map(() => "---");
-	return [
-		line(header),
-		line(rule),
-		...rows.map(line)
-	].join("\n");
-}
-//#endregion
-//#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
-function fields(line, ref) {
-	let out = [], i = 0;
-	for (; i < line.length;) {
-		if (line[i] === " " || line[i] === "	") {
-			i++;
-			continue;
-		}
-		let raw, memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
-		if (line[i] === "\"" || memfd) {
-			let end = line.indexOf("\"", i) + 1;
-			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
-			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
-			if (raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
-		} else {
-			let end = line.slice(i).search(/[ \t]/);
-			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
-		}
-		out.push(raw);
-	}
-	return out;
-}
-const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
-function globPattern(glob) {
-	let out = "", i = 0;
-	for (; i < glob.length;) {
-		if (glob.startsWith("**", i)) {
-			let atStart = i === 0 || glob[i - 1] === "/";
-			for (; glob[i] === "*";) i++;
-			if (atStart && i === glob.length) {
-				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
-				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
-			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
-			continue;
-		}
-		if (glob[i] === "*") {
-			out += "[^/]*", i++;
-			continue;
-		}
-		let c = glob[i];
-		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
-		i += c.length, out += c.replace(SPECIAL, "\\$&");
-	}
-	return RegExp(`^${out}$`);
-}
-const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
-function accessBits(access) {
-	let bits = {
-		ok: 0,
-		failed: 0,
-		perm: 0
-	};
-	for (let i = 0; i < access.length; i++) {
-		let c = access[i], bit = BIT[c.toUpperCase()];
-		c === c.toUpperCase() ? bits.ok |= bit : access[i + 1] === "!" ? (bits.perm |= bit, i++) : bits.failed |= bit;
-	}
-	return bits;
-}
-function parseExpectedRules(sources) {
-	let rules = [], lines = [];
-	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
-		let line = raw.trim();
-		if (lines.push(line), line === "" || line.startsWith("#")) return;
-		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
-		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
-		let [program, access, path] = parts;
-		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
-		let glob = (field) => {
-			let pattern = globPattern(field);
-			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
-			return pattern;
-		};
-		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
-		rules.push({
-			ref,
-			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
-			path: anyProcess(path, glob(path)),
-			...accessBits(access)
-		});
-	});
-	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
-	return {
-		rules,
-		lines
-	};
-}
-function takes(rule, bit, failed, perm) {
-	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
-}
-var RuleMatcher = class {
-	cache = new Map();
-	rules;
-	constructor(rules) {
-		this.rules = rules;
-	}
-	match(program, path, bits, failed, perm) {
-		let key = `${program}\0${path}`, candidates = this.cache.get(key);
-		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
-		let unmatched = 0, ref;
-		for (let c of ORDER) {
-			let bit = BIT[c];
-			if (!(bits & bit)) continue;
-			let rule = candidates.find((r) => takes(r, bit, failed, perm));
-			rule ? ref ??= rule.ref : unmatched |= bit;
-		}
-		return ref === void 0 ? { unmatched } : {
-			unmatched,
-			ref
-		};
-	}
-};
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
@@ -72792,7 +72834,7 @@ function useSteps(where, fileName) {
 
 \`\`\`yaml
 filesystem_audit: record
-upload_filesystem_audit_artifact: true
+${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true
 ${EXPECTED_RULES_INPUT}: |\n  # The reviewed rules from ${fileName}, such as:\n  /usr/local/bin/node  RWD  ./node_modules/**
   /usr/local/bin/node  R    ~/.npmrc
 \`\`\`
@@ -72946,39 +72988,6 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
-}
-//#endregion
-//#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), NOT_MATCHED_HEADING = "# Not matched in this run";
-function expectedRulesFile(written, proposed) {
-	let given = written.filter((line) => line !== NOT_MATCHED_HEADING), rows = proposed.map((r) => [
-		ruleField(r.program.path),
-		r.flags,
-		ruleField(r.path.path)
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
-		...given,
-		"",
-		NOT_MATCHED_HEADING,
-		...added
-	];
-	if (lines.length !== 0) return [
-		"filesystem_audit: record",
-		"upload_filesystem_audit_artifact: true",
-		`${EXPECTED_RULES_INPUT}: |`,
-		...lines.map((line) => line ? `  ${line}` : ""),
-		""
-	].join("\n");
-}
-function writeProposedRules(summary, given, path, annotation, writeFile) {
-	if (!summary) return "write-failed";
-	if (summary.proposedCut) return "too-many-paths";
-	let file = expectedRulesFile(given, summary.proposed);
-	if (file === void 0) return "none";
-	try {
-		return writeFile(path, file), "written";
-	} catch (e) {
-		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
-	}
 }
 //#endregion
 //#region src/lib/filesystem-audit/command.ts
@@ -77409,7 +77418,7 @@ function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystem
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...expectedRulesLines.map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...givenRules(expectedRulesLines).map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {

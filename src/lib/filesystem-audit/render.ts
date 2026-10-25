@@ -7,7 +7,7 @@ import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import type { ProposedRules } from "./proposed-rules.ts";
+import { UPLOAD_NOTE, type ProposedRules } from "./proposed-rules.ts";
 import type { AuditSummary, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
 import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
 
@@ -374,6 +374,7 @@ function useSteps(where: string, fileName: string): string {
     "Or copy its rules into the config file the step already uses, or into the workflow:\n\n" +
     "```yaml\n" +
     "filesystem_audit: record\n" +
+    `${UPLOAD_NOTE}\n` +
     "upload_filesystem_audit_artifact: true\n" +
     `${EXPECTED_RULES_INPUT}: |\n` +
     `  # The reviewed rules from ${fileName}, such as:\n` +

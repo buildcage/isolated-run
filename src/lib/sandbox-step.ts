@@ -31,6 +31,7 @@ import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
+import { givenRules } from "./filesystem-audit/proposed-rules.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
 import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
@@ -460,7 +461,7 @@ export function filesystemExampleInputs(
   else if (expectedRulesLines.length)
     lines.push(
       `${EXPECTED_RULES_INPUT}: |`,
-      ...expectedRulesLines.map((line) => (line ? `  ${line}` : "")),
+      ...givenRules(expectedRulesLines).map((line) => (line ? `  ${line}` : "")),
     );
   if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
   return lines;
