@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, it, expect, vi } from "vitest";
+
+import { PROXY_ADDRESS, PROXY_SUBNET } from "#core/lib/log/proxy-address.ts";
 
 import { SandboxError } from "../errors.ts";
 import { CANCEL_GRACE_MS, runIsolated, type Exit, type RunIsolatedOptions } from "./run.ts";
+import { SANDBOX_IP } from "./sandboxed-command.ts";
 
 // run-isolated.sh is the process under `sudo` here, so what this module can be
 // held to is the argument list it builds, how it reads the child's exit, and
@@ -205,5 +210,19 @@ describe("runIsolated", () => {
       new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN"),
     );
     expect(calls).toStrictEqual([]);
+  });
+});
+
+describe("run-isolated.sh's veth link", () => {
+  // The internal-address guard blocks PROXY_SUBNET; a link outside it would
+  // leave the sandbox's own address reachable by name.
+  it("puts both ends on PROXY_SUBNET", () => {
+    const script = readFileSync(
+      new URL("../../../scripts/run-isolated.sh", import.meta.url),
+      "utf8",
+    );
+    expect(script.match(/ip addr add "\$2\/24"/g)).toHaveLength(2);
+    const prefix = PROXY_SUBNET.replace(/0\/24$/, "");
+    for (const ip of [PROXY_ADDRESS, SANDBOX_IP]) expect(ip.startsWith(prefix)).toBe(true);
   });
 });
