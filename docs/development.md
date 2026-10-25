@@ -162,17 +162,21 @@ the Node run.
 | `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
 | `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
 | `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
+| `make test_integration_haproxy_configs`          | Every HAProxy config the generators write loads in its engine's image      |
 
 They drive `dist/main.cjs` directly (`test/integration-test-*.sh`). The first three groups need
 `BUILDCAGE_LOCAL_IMAGE_REF` and a [test-hook build](#the-action-against-an-unpublished-image).
 They do not all want the same image: the inspect group needs one built from `docker/inspect`. The
-last takes both engines' images at once, in `BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL` and
+last two take a universal and an inspect image at once, in `BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL` and
 `BUILDCAGE_LOCAL_IMAGE_REF_INSPECT`. So `make test_integration` records what CI runs rather than
 running it in one go; build the images a group needs, then run that group.
 
 The fixture groups start the proxy with `docker/compose.action.test-<engine>.yaml` layered on the
 shipped `docker/compose.action.yaml` (`BUILDCAGE_TEST_COMPOSE_OVERLAY`), so they run what ships
-plus the fixture network and nothing in place of it.
+plus the fixture network and nothing in place of it. The config check loads the golden configs
+under `src/core/lib/acl/__fixtures__/` and `src/proxy/__fixtures__/`, and one the image's own
+generator writes from a large rule set, with `haproxy -c`. CoreDNS has no way to check a Corefile
+without serving it, so the Corefile is not checked.
 
 A test that needs a fixture origin, whether for what only a fixture can cover or just to keep off
 the real internet, goes in `test_integration_sandbox_universal` or

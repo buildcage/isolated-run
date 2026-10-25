@@ -105,9 +105,9 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 # under BUILDCAGE_LOCAL_IMAGE_REF: universal for the first two, an inspect
 # image built with BUILDCAGE_TEST_HOOKS=1 for the third, and both at once, under
 # BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT, for
-# the last. Build the images a group needs, then run that group.
+# the last two. Build the images a group needs, then run that group.
 .PHONY: test_integration
-test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the groups need different proxy images, so build each one's image first
+test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope test_integration_haproxy_configs ## Every integration test CI runs; the groups need different proxy images, so build each one's image first
 
 # Drives dist/main.cjs directly (a host command, not a Docker build). Two
 # halves, which CI runs as separate jobs; here they run one after the other,
@@ -188,3 +188,15 @@ test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NS
 .PHONY: test_integration_listener_scope
 test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0 (needs BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT)
 	@./test/integration-test-listener-scope.sh
+
+# Every fixture directory holding golden HAProxy configs, so a new golden test
+# is checked without editing this. haproxy-universal/ holds the universal
+# engine's; the rest are the inspect engine's.
+HAPROXY_FIXTURE_DIRS = $(patsubst %/,%,$(sort $(dir $(shell find src -path '*/__fixtures__/*.cfg'))))
+HAPROXY_UNIVERSAL_FIXTURE_DIRS = $(filter %/haproxy-universal,$(HAPROXY_FIXTURE_DIRS))
+
+# Needs the images, not a running proxy.
+.PHONY: test_integration_haproxy_configs
+test_integration_haproxy_configs: ## Check every HAProxy config the generators write loads in each engine's image (needs BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT)
+	@./test/assert-haproxy-configs.sh universal "$${BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL:?}" $(HAPROXY_UNIVERSAL_FIXTURE_DIRS)
+	@./test/assert-haproxy-configs.sh inspect "$${BUILDCAGE_LOCAL_IMAGE_REF_INSPECT:?}" $(filter-out $(HAPROXY_UNIVERSAL_FIXTURE_DIRS),$(HAPROXY_FIXTURE_DIRS))

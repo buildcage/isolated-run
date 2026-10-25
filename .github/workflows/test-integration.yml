@@ -109,18 +109,19 @@ jobs:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         run: make test_integration_sandbox_linux_${{ matrix.part }}
 
-  # Three groups side by side, each under its own Compose project and test-net
+  # Four groups side by side, each under its own Compose project and test-net
   # subnet (the names a linked worktree gets): the universal engine's fixture
-  # tests, the inspect engine's CA half, and the listener check, which attaches
-  # no sandbox. The CA half cannot share a job with the rules half: its cleanup
-  # checks wait for every inspect step of the user to end.
+  # tests, the inspect engine's CA half, the listener check, which attaches no
+  # sandbox, and the HAProxy config check, which starts no proxy. The CA half
+  # cannot share a job with the rules half: its cleanup checks wait for every
+  # inspect step of the user to end.
   test_sandbox_universal:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    name: "integration: test (sandbox, universal engine fixture, inspect CA, listener scope)"
+    name: "integration: test (sandbox, universal engine fixture, inspect CA, listener scope, HAProxy configs)"
 
     # The cleanup step below tears these down by the same names.
     env:
@@ -172,6 +173,12 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF_INSPECT: buildcage-local-proxy:inspect-release
               BUILDCAGE_WORKTREE_SUFFIX: -listener
             run: make test_integration_listener_scope
+
+          - name: Check the generated HAProxy configs load
+            env:
+              BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL: ${{ steps.local_proxy.outputs.universal }}
+              BUILDCAGE_LOCAL_IMAGE_REF_INSPECT: ${{ steps.local_proxy.outputs.inspect }}
+            run: make test_integration_haproxy_configs
 
       - name: Verify no leftover fixture/proxy containers or networks
         if: always()
