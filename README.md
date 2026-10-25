@@ -29,14 +29,13 @@ Docker build's `RUN` steps rather than a workflow step, use
 
 - [Requirements](#requirements)
 - [Usage](#usage)
+- [How `run` is executed](#how-run-is-executed)
 - [Engines](#engines)
 - [Inputs](#inputs)
 - [The report](#the-report)
-- [AWS access key check](#aws-access-key-check)
-- [How `run` is executed](#how-run-is-executed)
-- [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
 - [Filesystem audit](#filesystem-audit)
+- [AWS access key check](#aws-access-key-check)
 - [How it works](#how-it-works)
 - [CA trust and compatibility](#ca-trust-and-compatibility)
 - [Scope](#scope)
@@ -144,6 +143,49 @@ install touches. The AWS access key check runs against a real AWS account
 [restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and blocking a
 key the step was not given.
 
+## How `run` is executed
+
+`run` runs under `bash -e`, the same as a native `run:` step without `shell:`. To use another
+interpreter, start `run` with a shebang line; the script is then run as written, with no `set -e`
+added:
+
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    run: |
+      #!/usr/bin/env python3
+      print("hello")
+```
+
+`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
+they have no effect here. Use a shebang and `cd` instead.
+
+### Passing values to `run`
+
+Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
+`run:` step. The action forwards its process environment into the isolated command, so anything set
+via `env:` is available there too:
+
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  with:
+    run: |
+      echo "Building for: $PR_TITLE"
+      npm test
+```
+
+Avoid interpolating `${{ }}` expressions directly into `run` itself (e.g.
+`run: echo "${{ github.event.pull_request.title }}"`). GitHub substitutes them into the script text
+before any shell runs, so an attacker-controlled value (a PR title, branch name, issue body) can
+inject arbitrary commands. Passing the same value through `env:` instead means it reaches the
+isolated command as a single environment variable, never interpreted as shell syntax. This is the
+same
+[script injection guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections)
+GitHub gives for any workflow, and applies to this action's `run` input exactly as it would to a
+native `run:` step.
+
 ## Engines
 
 `proxy_engine` selects how closely the command's traffic is examined.
@@ -175,6 +217,10 @@ job.
 
 The inputs can also be kept in a YAML file in the repository, named by `config_file`. See
 [Config file](./docs/reference.md#config-file).
+
+A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
+heading or a rule can carry its reason. It works the same in every rule input. `write_through` takes
+only whole-line `#` comments, since a path may contain a `#`.
 
 ### Operation modes
 
@@ -249,10 +295,6 @@ allowed_ip_rules: |
   192.168.1.10:443
 ```
 
-A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
-heading or a rule can carry its reason. It works the same in every rule input. `write_through` takes
-only whole-line `#` comments, since a path may contain a `#`.
-
 ### Destinations you expect to stay blocked
 
 A noisy dependency, or a domain you are deliberately keeping off the allowlist to confirm it stays
@@ -307,79 +349,6 @@ uploaded even when the step fails. Under `universal` it omits the method, URL, s
 address that only `inspect` sees. The fields are listed in
 [Reference](./docs/reference.md#traffic-artifact).
 
-## AWS access key check
-
-> [!WARNING]
-> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
-> error messages may still change in a future release without following semver.
-
-Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
-account signs the request, so a compromised dependency could sign with its own key and send data to
-its author's account. `aws_key_check: true` accepts only the key the step was given in
-`AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts you
-name:
-
-```yaml
-- uses: aws-actions/configure-aws-credentials@<sha>
-  with:
-    role-to-assume: arn:aws:iam::111111111111:role/deploy
-    aws-region: us-east-1
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    proxy_mode: audit # shows what restrict would block
-    aws_key_check: true
-    run: aws ecs update-service --cluster app --service web --force-new-deployment
-```
-
-Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
-step that assumes roles of its own, as the CDK does, also names the roles' accounts in
-`allowed_aws_role_accounts`. The check needs the `inspect` engine.
-[AWS access key check](./docs/aws.md) covers adopting it, the block reasons, and the IAM settings
-for what it cannot see.
-
-## How `run` is executed
-
-`run` runs under `bash -e`, the same as a native `run:` step without `shell:`. To use another
-interpreter, start `run` with a shebang line; the script is then run as written, with no `set -e`
-added:
-
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    run: |
-      #!/usr/bin/env python3
-      print("hello")
-```
-
-`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
-they have no effect here. Use a shebang and `cd` instead.
-
-## Passing values to `run`
-
-Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
-`run:` step. The action forwards its process environment into the isolated command, so anything set
-via `env:` is available there too:
-
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  env:
-    PR_TITLE: ${{ github.event.pull_request.title }}
-  with:
-    run: |
-      echo "Building for: $PR_TITLE"
-      npm test
-```
-
-Avoid interpolating `${{ }}` expressions directly into `run` itself (e.g.
-`run: echo "${{ github.event.pull_request.title }}"`). GitHub substitutes them into the script text
-before any shell runs, so an attacker-controlled value (a PR title, branch name, issue body) can
-inject arbitrary commands. Passing the same value through `env:` instead means it reaches the
-isolated command as a single environment variable, never interpreted as shell syntax. This is the
-same
-[script injection guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections)
-GitHub gives for any workflow, and applies to this action's `run` input exactly as it would to a
-native `run:` step.
-
 ## Filesystem access
 
 <img src="assets/diagram-filesystem.png" alt="The layers the run command's filesystem is made of" width="1000">
@@ -410,30 +379,22 @@ file ownership. The sandboxed command runs as the runner's own user with every c
 and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the runner user
 could not write outside the sandbox stays unwritable inside it.
 
-`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
-under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
+If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
+directory for example, list it under `write_through:`:
 
-The runner's install directory, the runner's `_actions` directory holding every action's checkout,
-and the docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only, since
-the runner and this action run code from them after the command exits. The exceptions are a
-`write_through:` entry naming the directory itself, and `uses: ./`, whose checkout is the
-workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
-needs a step of its own. On a self-hosted runner whose work directory is inside its install
-directory, as `_work` is by default, the rest of `_work`, such as the tool cache in `_work/_tool`,
-is read-only too; the workspace, `$RUNNER_TEMP` and `write_through:` entries stay writable. A
-directory reached through a symlink the command could replace, such as a `~/.docker` that links
-elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the runner's work
-directory at the real path instead.
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    write_through: |
+      /opt/some-tool/cache
+    run: some-tool build
+```
 
-Under `write_through: /`, the step fails only on a symlink in one of the four always-writable paths
-or another `write_through:` entry, though the command could replace one anywhere.
+How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
+to the old `writable:` and `allow_write:` inputs are all in
+[Reference](./docs/reference.md#write_through-paths).
 
-> [!WARNING]
-> `write_through: /` is for trusted code only. Against a compromised command it gives up the
-> outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
-> reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
-> commands this action runs on the host after the command are not kept out of writable paths either.
-> See [The `/` opt-out](./docs/reference.md#the--opt-out).
+### `filesystem_mode: ephemeral`
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -477,20 +438,32 @@ exposed as in `persistent` mode, since a later step may run or ship what lands t
 set through `$GITHUB_OUTPUT` is untrusted as in
 [Passing values to `run`](#passing-values-to-run) above.
 
-If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
-directory for example, list it under `write_through:`:
+### What stays read-only
 
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    write_through: |
-      /opt/some-tool/cache
-    run: some-tool build
-```
+`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
+under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
 
-How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
-to the old `writable:` and `allow_write:` inputs are all in
-[Reference](./docs/reference.md#write_through-paths).
+The runner's install directory, the runner's `_actions` directory holding every action's checkout,
+and the docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only, since
+the runner and this action run code from them after the command exits. The exceptions are a
+`write_through:` entry naming the directory itself, and `uses: ./`, whose checkout is the
+workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
+needs a step of its own. On a self-hosted runner whose work directory is inside its install
+directory, as `_work` is by default, the rest of `_work`, such as the tool cache in `_work/_tool`,
+is read-only too; the workspace, `$RUNNER_TEMP` and `write_through:` entries stay writable. A
+directory reached through a symlink the command could replace, such as a `~/.docker` that links
+elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the runner's work
+directory at the real path instead.
+
+Under `write_through: /`, the step fails only on a symlink in one of the four always-writable paths
+or another `write_through:` entry, though the command could replace one anywhere.
+
+> [!WARNING]
+> `write_through: /` is for trusted code only. Against a compromised command it gives up the
+> outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
+> reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
+> commands this action runs on the host after the command are not kept out of writable paths either.
+> See [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 ## Filesystem audit
 
@@ -524,6 +497,36 @@ Once a step's accesses are known, `expected_filesystem_rules` lists them, one
 `<program> <access> <path>` rule per line, and the section then shows only the accesses outside
 them. Each uploaded artifact holds a proposed set to start from; see
 [Expected accesses](./docs/filesystem-audit.md#expected-accesses).
+
+## AWS access key check
+
+> [!WARNING]
+> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
+> error messages may still change in a future release without following semver.
+
+Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
+account signs the request, so a compromised dependency could sign with its own key and send data to
+its author's account. `aws_key_check: true` accepts only the key the step was given in
+`AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts you
+name:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@<sha>
+  with:
+    role-to-assume: arn:aws:iam::111111111111:role/deploy
+    aws-region: us-east-1
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    proxy_mode: audit # shows what restrict would block
+    aws_key_check: true
+    run: aws ecs update-service --cluster app --service web --force-new-deployment
+```
+
+Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
+step that assumes roles of its own, as the CDK does, also names the roles' accounts in
+`allowed_aws_role_accounts`. The check needs the `inspect` engine.
+[AWS access key check](./docs/aws.md) covers adopting it, the block reasons, and the IAM settings
+for what it cannot see.
 
 ## How it works
 
