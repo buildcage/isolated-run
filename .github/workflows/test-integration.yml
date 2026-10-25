@@ -19,6 +19,7 @@ permissions: {}
 jobs:
   changes:
     runs-on: ubuntu-slim
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -76,6 +77,9 @@ jobs:
     # only on pull_request); a skipped need otherwise skips the job unevaluated.
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
     runs-on: ${{ matrix.runner }}
+    # Well above a normal run; without a limit a hung builder holds a runner
+    # for six hours.
+    timeout-minutes: 15
     permissions:
       contents: read
     # Split by part: as one job it would be the longest here.
@@ -119,6 +123,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     name: "integration: test (sandbox, universal engine fixture, inspect CA, listener scope, HAProxy configs)"
@@ -203,6 +208,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     name: "integration: test (sandbox, inspect engine)"
@@ -242,6 +248,7 @@ jobs:
 
   targets:
     runs-on: ubuntu-slim
+    timeout-minutes: 5
     permissions:
       contents: read
     name: "integration: every test script has a make target"
@@ -265,7 +272,8 @@ jobs:
   # Single, stably-named required status check for branch protection.
   integration-tests-passed:
     name: Integration tests passed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
     needs: [changes, targets, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
     if: always()
     permissions: {}
