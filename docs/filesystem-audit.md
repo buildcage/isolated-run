@@ -146,15 +146,12 @@ From the top:
 
 - A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
   any; see [What changes in the step](#what-changes-in-the-step).
-- **Accessed Paths** has one row per program and path, with the commands that made its accesses
-  and a [flag](#flags) for each action. Running a program is an `X` row under the program that ran
-  it. Programs are in the order they first ran, and each one's paths in path order: the workspace,
-  then `$HOME`, then the rest. A `dir/**` row combines several paths under one directory; see
-  [Paths](#paths).
-- **Command** names each command by its program's file name, followed in brackets by the name the
-  process gave itself where that differs, as `node[npm ci]` for npm; see
-  [How rows are grouped](#how-rows-are-grouped). A row lists its commands in the order they first
-  made its accesses, and past three, the first two and how many more, as `and 2 more`.
+- **Accessed Paths** has one row per program and path, with a [flag](#flags) for each action.
+  Running a program is an `X` row under the program that ran it. Programs are in the order they
+  first ran, and each one's paths in path order: the workspace, then `$HOME`, then the rest. A
+  `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
+  lists the commands that made the row's accesses, in the order they first did, and past three, the
+  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped).
 - **File access details**, folded, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A run is the row of the
   command that started it, as in the table. Times count from the start of the step's proxy, on the
@@ -300,9 +297,6 @@ reads:
 - A pipe or a socket.
 - A refused system call that did not kill its program; see
   [Refused system calls](#refused-system-calls).
-- All but the first read and the first write through an open file by each program, and through a
-  device such as `/dev/null` all but the first after each open, so the last time in the details can
-  be earlier than the file's last write.
 
 ### Refused system calls
 
@@ -418,9 +412,9 @@ Like the audit itself, the rules never block an access.
 
 A run with rules proposes a file too: the rules given, each line trimmed, then, under a
 `# Not matched in this run` line, a rule for each access they did not take; where they took every
-access, the file holds only the rules given. When the summary shows unexpected accesses, download the file and
-compare it with the committed one: commit the rules a change you know of explains, such as a
-dependency update, and look into the rest.
+access, the file holds only the rules given. When the summary shows unexpected accesses, download
+the file and compare it with the committed one: commit the rules a change you know of explains, such
+as a dependency update, and look into the rest.
 
 Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
 your own rules already take. A new `dir/**` that covers one of your narrower rules is left beside
@@ -552,8 +546,7 @@ The summary can also open with a warning, or be missing:
 
 With `fail_on_unexpected_file_access: true`, an incomplete record, a recording that could not be
 read and one that could not be summarized also fail the step, but not a summary that could not be
-written; see
-[What the summary shows](#what-the-summary-shows).
+written; see [What the summary shows](#what-the-summary-shows).
 
 ### Skipped hooks
 
@@ -597,6 +590,9 @@ where the kernel offers that mode.
   incomplete.
 - What the kernel writes into a core dump when a process crashes, where `core_pattern` names a
   path. The file's open is recorded, and so is reading it afterwards.
+- All but the first read and the first write through an open file by each program, and through a
+  device such as `/dev/null` all but the first after each open, so the last time in the details can
+  be earlier than the file's last write.
 
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.
@@ -608,11 +604,10 @@ itself can do to the record, and what the record can be trusted for.
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
   file access details give way first, and this section's table after the traffic report's timeline
-  and known blocked hosts;
-  [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
-  does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
-  of it fits. The note names the artifact, which still holds every access, or says how to ask for
-  one, or, when the upload failed, that the record was not kept.
+  and known blocked hosts; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the
+  full order. A part that does not fit is cut at a line, with a note after what is kept, or replaced
+  by the note when none of it fits. The note names the artifact, which still holds every access, or
+  says how to ask for one, or, when the upload failed, that the record was not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
   keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is
