@@ -36,8 +36,24 @@ describe("classify", () => {
     expect(classify({ kind: "mmap", path: "/a", access: "w" })).toStrictEqual([ok("W", "/a")]);
   });
 
-  it("moves both paths of an exchange, and only the source of a plain rename", () => {
-    expect(classify({ kind: "rename", path: "/a", to: "/b" })).toStrictEqual([ok("M", "/a")]);
+  it("moves a rename's source and writes its new name, and moves both paths of an exchange", () => {
+    expect(classify({ kind: "rename", path: "/a", to: "/b" })).toStrictEqual([
+      ok("M", "/a"),
+      ok("W", "/b"),
+    ]);
+    expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 30 })).toStrictEqual(
+      [
+        { letter: "M", path: "/a", failed: true, perm: true },
+        { letter: "W", path: "/b", failed: true, perm: true },
+      ],
+    );
+    // Across mounts, which mv then copies instead.
+    expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 18 })).toStrictEqual(
+      [
+        { letter: "M", path: "/a", failed: true, perm: false },
+        { letter: "W", path: "/b", failed: true, perm: false },
+      ],
+    );
     expect(classify({ kind: "rename", path: "/a", to: "/b", exchange: true })).toStrictEqual([
       ok("M", "/a"),
       ok("M", "/b"),
