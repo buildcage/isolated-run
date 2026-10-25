@@ -199,7 +199,7 @@ reaches allowed names over IPv4 only, so a name with no A record never resolves 
 
 ## Isolation mechanisms
 
-<img src="../assets/diagram-architecture-universal.png" alt="isolated-run sandbox architecture" width="620" height="544">
+<img src="../assets/diagram-architecture-universal.png" alt="isolated-run sandbox architecture" width="620" height="634">
 
 The isolated command runs as an [OCI](https://github.com/opencontainers/runtime-spec) container
 under [runc](https://github.com/opencontainers/runc) rather than being wrapped directly by
@@ -450,7 +450,7 @@ on a separate code path, and `allowed_ip_rules` is what decides it.
 
 ### Inspect proxy engine
 
-<img src="../assets/diagram-architecture-inspect.png" alt="Inspect proxy engine architecture" width="620" height="832">
+<img src="../assets/diagram-architecture-inspect.png" alt="Inspect proxy engine architecture" width="620" height="850">
 
 The default engine. The same sandbox and the same network boundary, but the proxy terminates TLS
 instead of only reading the SNI, so a rule can check the method and the full URL rather than only the
