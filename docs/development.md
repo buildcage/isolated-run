@@ -202,6 +202,18 @@ under preemption" by hand: it boots Ubuntu's 7.0 and 6.8 `generic` kernels in a 
 processes on one CPU make changes under names of their own, and fails on a record mixing two of
 them (`test/filesystem-audit-preemption/`).
 
+`docker/filesystem-audit/testdata/contract.jsonl` holds a line of each form the tracer writes, made
+by running a sample of each through its decoder and recorder. Its Go tests fail when the file no
+longer matches, and the summary's tests read it to check that every field and kind is handled.
+After changing what the tracer writes, rewrite it. The Go tests need `go generate` first, which
+compiles the BPF program with clang and libbpf's headers, so run both in the image's build stage:
+
+```bash
+docker run --rm -v "$PWD/docker/filesystem-audit:/src" -w /src golang:1.27-alpine sh -c \
+  'apk add -q clang llvm libbpf-dev linux-headers && go generate ./... &&
+   go test -run TestRecordingContractIsUpToDate -update .'
+```
+
 The golden test renders a real recording from the `test_sandbox_filesystem_audit` e2e job, kept in
 `src/lib/__fixtures__/filesystem-audit/`. When the tracer's output changes, take a new one from a
 passing run of that job:
