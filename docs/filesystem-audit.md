@@ -18,8 +18,8 @@ Job Summary:
 
 It watches from the kernel, so a static binary or a tool that bypasses libc is seen like any other,
 and it works the same whatever `proxy_mode` and `proxy_engine` are set to. It records and never
-blocks an access: what the step may write is decided by
-[`filesystem_mode` and `write_through`](../README.md#filesystem-access).
+blocks an access: [`filesystem_mode` and `write_through`](../README.md#filesystem-access) decide
+what the step may write.
 
 - [What it is for](#what-it-is-for)
 - [Before you turn it on](#before-you-turn-it-on)
@@ -72,9 +72,9 @@ A host that falls short fails the step before the command runs, with the reason;
   program in a step without the audit.
 - **A small cost to the whole host.** A typical build, which spends little of its time in system
   calls, barely slows down. While the step runs, though, the tracer's hooks run on every system call
-  on the runner host, since a hook has to run to tell whose call it is, adding roughly 60 to 250
-  nanoseconds to each, the most to opening and closing a file. A GitHub-hosted runner runs one job,
-  so only that job pays. On a self-hosted runner shared by several jobs, they all do.
+  on the runner host, since a hook has to run to tell whose call it is. Each call takes roughly 60
+  to 250 nanoseconds longer, opening and closing a file the most. A GitHub-hosted runner runs one
+  job, so only that job pays. On a self-hosted runner shared by several jobs, they all do.
 
 ## Getting started
 
@@ -176,8 +176,8 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
   `$GITHUB_PATH` is refused (`w!`) unless `write_through` names it, since both are read-only in the
-  sandbox otherwise, but the attempt is just as telling. `filesystem_mode: ephemeral` discards such
-  writes; see the [README](../README.md#filesystem-access).
+  sandbox otherwise, but the attempt is still worth looking into. `filesystem_mode: ephemeral`
+  discards such writes; see the [README](../README.md#filesystem-access).
 - **A program you did not expect.** An `X` row names every program the step started, under the
   program that started it, so a `postinstall` script that runs `curl` or a binary it just downloaded
   shows up there.
@@ -471,8 +471,9 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
   `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match
   `/proc/sys/` and every other entry in `/proc`.
 - Fields are separated by spaces or tabs. A field holding a space, an empty one, and one starting
-  with `#` are quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names are written with
-  the escapes the summary shows, `\"` and `\\` included, and are matched as the summary shows them.
+  with `#` are quoted, `"./my file"`, except `memfd:"name"`, which is quoted already. Names are
+  written with the escapes the summary shows, `\"` and `\\` included, and are matched as the summary
+  shows them.
 - A line starting with `#` is a comment, and a blank line is skipped. A `#` anywhere else is part
   of the field it is in, as a path may hold one. A value holding only comments and blank lines
   counts as unset, with a warning.
