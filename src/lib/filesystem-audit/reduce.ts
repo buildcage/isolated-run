@@ -227,7 +227,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     loose,
     nodes: limits.nodes,
     // A command is named at least by its program's file name.
-    rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + ranks[Number(rank)].leaf + 21,
+    rowBytes: (p, rank, agg) =>
+      relLength(p) +
+      ranks[Number(rank)].bytes +
+      16 +
+      (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5),
   });
   const details = new Lines({
     fanout,
@@ -522,6 +526,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     });
   }
 
+  // The Command cell, as COMMANDS_SHOWN in render.ts cuts it: a code span and
+  // a separator each, and the count of the rest.
+  const commandsBytes = (agg: Agg): number => {
+    const texts = commandsOf(agg);
+    const shown = texts.length > 3 ? texts.slice(0, 2) : texts;
+    return shown.reduce((n, t) => n + t.length + 4, 0) + (texts.length > 3 ? 14 : 0);
+  };
+
   // A program seen both deleted and not is two command keys with one text.
   const commandsOf = (agg: Agg): string[] => [
     ...new Set(
@@ -574,7 +586,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   return { observe, add, finish };
 }
 
-// By program, then path as the tables order paths, each by its text.
+// By program, then path as the table orders paths, each by its text.
 function byProgramThenPath(rows: RuleRow[]): RuleRow[] {
   const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   return rows

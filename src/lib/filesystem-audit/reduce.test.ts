@@ -1391,7 +1391,7 @@ describe("createAuditSummary: limits", () => {
     expect(section(md, "🔍")).toContain(CUT);
   });
 
-  it("keeps the program runs when it cuts the table short", () => {
+  it("keeps the rows that came first when it cuts the table short", () => {
     const execs = Array.from({ length: 20 }, (_, i) => ({
       kind: "exec",
       pid: i + 1,
@@ -1402,6 +1402,18 @@ describe("createAuditSummary: limits", () => {
     expect(tableRows(md)).toEqual([0, 1, 2, 3, 4].map((i) => `| \`/usr/bin/tool-${i}\` | X |`));
     expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(md).not.toContain("tool-19");
+  });
+
+  it("counts a row's commands toward the size limit", () => {
+    // One process renaming itself: the row names three long commands.
+    const records = ["a", "b", "c"].map((c) => ({
+      kind: "read",
+      pid: 1,
+      comm: c.repeat(15),
+      path: "/tmp/x",
+    }));
+    expect(programRows(limited({ bytes: 90 }, ...records))).toEqual([]);
+    expect(programRows(limited({ bytes: 100 }, ...records))).toHaveLength(1);
   });
 
   it("prints nothing after the part a size cut reaches, its note standing for the rest", () => {
@@ -1680,6 +1692,23 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
     expect(rows(summary)).toStrictEqual(["cat R /proc/sys/kernel/pid_max"]);
+  });
+
+  it("proposes a run as the program that started it, past the image the exec maps first", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "cat" },
+      // The kernel maps the new image under the new name before the exec's record.
+      { kind: "mmap", pid: 4, comm: "curl", path: "/usr/bin/curl", access: "x", image: true },
+      { kind: "exec", pid: 4, comm: "curl", path: "/usr/bin/curl" },
+    );
+    expect(summary.proposed!.find((r) => r.path.path === "/usr/bin/curl")).toStrictEqual({
+      program: { path: "cat" },
+      commands: ["cat"],
+      flags: "X",
+      path: { path: "/usr/bin/curl" },
+    });
   });
 
   it("proposes one row for a program or a path shown both deleted and not", () => {

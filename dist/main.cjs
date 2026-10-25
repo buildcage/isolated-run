@@ -72657,6 +72657,19 @@ function inRecordingOrder(rows) {
 function byProgramAndPath(paths) {
 	return keyed(paths).sort(byRecording).sort((a, b) => a.row.program.rank - b.row.program.rank || a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
 }
+function accessRows(rows) {
+	return markdownRows([
+		"Program",
+		"Command",
+		"Access",
+		"Path"
+	], rows.map((r) => [
+		pathCell(r.program),
+		firstOf(r.commands.map(codeCell), 3),
+		r.flags,
+		pathCell(r.path)
+	]));
+}
 function pathsBlock(rows, cause, { priorities, cutNote }) {
 	let block = {
 		id: FILESYSTEM_BLOCK.paths,
@@ -72669,17 +72682,10 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 		cut: "atomic",
 		text: cutNote(cause)
 	};
-	let md = markdownRows([
-		"Program",
-		"Command",
-		"Access",
-		"Path"
-	], rows.map((r) => [
-		pathCell(r.program),
-		firstOf(r.commands.map(codeCell), 3),
-		r.flags,
-		pathCell(r)
-	]));
+	let md = accessRows(rows.map((r) => ({
+		...r,
+		path: r
+	})));
 	return {
 		...block,
 		cut: "lines",
@@ -72731,17 +72737,7 @@ function unexpectedBlock(summary, { priorities }) {
 		cut: "atomic",
 		text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`
 	};
-	let md = markdownRows([
-		"Program",
-		"Command",
-		"Access",
-		"Path"
-	], proposed.map((r) => [
-		pathCell(r.program),
-		firstOf(r.commands.map(codeCell), 3),
-		r.flags,
-		pathCell(r.path)
-	]));
+	let md = accessRows(proposed);
 	return {
 		...block,
 		cut: "lines",
@@ -73214,7 +73210,7 @@ var Lines = class {
 	within() {
 		let lines = [], bytes = 0;
 		for (let line of this.lines()) {
-			let size = this.opts.rowBytes(line.path, line.comm);
+			let size = this.opts.rowBytes(line.path, line.comm, line.agg);
 			if (bytes + size > this.opts.limit) return {
 				lines,
 				bytes,
@@ -73228,25 +73224,22 @@ var Lines = class {
 			cut: !1
 		};
 	}
-	*lines() {
-		for (let [key, agg] of this.climbing) ran(agg) && (yield {
-			comm: commOf(key),
-			path: pathOf(key),
-			agg
-		});
+	lines() {
+		let out = [];
 		for (let [comm, top] of this.trees) for (let [path, agg] of treeLines(top, this.opts.fanout, this.opts.showWalked)) {
 			let run = this.climbing.get(keyOf(comm, path));
-			run ? mergeAgg(run, agg) : yield {
+			run ? mergeAgg(run, agg) : out.push({
 				comm,
 				path,
 				agg
-			};
+			});
 		}
-		for (let [key, agg] of this.climbing) ran(agg) || (yield {
+		for (let [key, agg] of this.climbing) out.push({
 			comm: commOf(key),
 			path: pathOf(key),
 			agg
 		});
+		return out.sort((a, b) => a.agg.seq - b.agg.seq);
 	}
 }, RuleTally = class {
 	rules;
@@ -73371,7 +73364,7 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + ranks[Number(rank)].leaf + 21
+		rowBytes: (p, rank, agg) => relLength(p) + ranks[Number(rank)].bytes + 16 + (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5)
 	}), details = new Lines({
 		fanout,
 		keep,
@@ -73525,7 +73518,10 @@ function createAuditSummary(prefixes) {
 			};
 		});
 	}
-	let commandsOf = (agg) => [...new Set([...agg.cmds].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd).text))], rows = (lines) => lines?.map(({ comm, path, agg }) => {
+	let commandsBytes = (agg) => {
+		let texts = commandsOf(agg);
+		return (texts.length > 3 ? texts.slice(0, 2) : texts).reduce((n, t) => n + t.length + 4, 0) + (texts.length > 3 ? 14 : 0);
+	}, commandsOf = (agg) => [...new Set([...agg.cmds].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd).text))], rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
 		return {
 			agg,

@@ -44,8 +44,9 @@ function addCmd(a: Agg, cmd: string, seq: number): void {
   (a.cmds ??= new Map()).set(cmd, had === undefined ? seq : Math.min(had, seq));
 }
 
-// One access, as a line records it. bit is 0 where it prints nothing, as a run
-// does in the paths table, and so does not count toward a directory's fold.
+// One access, as a line records it. bit is 0 where it prints nothing, as an
+// access the rules took does in the proposed rules, and so does not count
+// toward a directory's fold.
 export interface Access {
   comm: string;
   path: string;

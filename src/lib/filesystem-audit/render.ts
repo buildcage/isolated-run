@@ -129,6 +129,19 @@ function byProgramAndPath(paths: PathRow[]): PathRow[] {
     .map((k) => k.row);
 }
 
+// The rows of Accessed Paths and of Unexpected Accesses, which share their columns.
+function accessRows(rows: Pick<RuleRow, "program" | "commands" | "flags" | "path">[]): string {
+  return markdownRows(
+    ["Program", "Command", "Access", "Path"],
+    rows.map((r) => [
+      pathCell(r.program),
+      firstOf(r.commands.map(codeCell), COMMANDS_SHOWN),
+      r.flags,
+      pathCell(r.path),
+    ]),
+  );
+}
+
 // Each part sits a level below the one before it, so once one is cut the
 // parts after it print nothing and its note stands for them all. The flags
 // are explained where they first appear.
@@ -144,15 +157,7 @@ function pathsBlock(
     section: SECTION,
   };
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
-  const md = markdownRows(
-    ["Program", "Command", "Access", "Path"],
-    rows.map((r) => [
-      pathCell(r.program),
-      firstOf(r.commands.map(codeCell), COMMANDS_SHOWN),
-      r.flags,
-      pathCell(r),
-    ]),
-  );
+  const md = accessRows(rows.map((r) => ({ ...r, path: r })));
   // A table cut short says so after the rows it kept.
   return {
     ...block,
@@ -242,15 +247,7 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
       cut: "atomic",
       text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`,
     };
-  const md = markdownRows(
-    ["Program", "Command", "Access", "Path"],
-    proposed.map((r: RuleRow) => [
-      pathCell(r.program),
-      firstOf(r.commands.map(codeCell), COMMANDS_SHOWN),
-      r.flags,
-      pathCell(r.path),
-    ]),
-  );
+  const md = accessRows(proposed);
   return {
     ...block,
     cut: "lines",

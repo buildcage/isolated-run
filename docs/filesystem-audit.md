@@ -615,10 +615,10 @@ itself can do to the record, and what the record can be trusted for.
   one, or, when the upload failed, that the record was not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
-  keeps the rows that fit in it and ends with a note. It is left out whole, under a note that says
-  why, when not one row fits, or once it holds more than 200,000 paths after folding. When the
-  table is left out, the details go with it. The Unexpected Accesses table and the proposed rules
-  count paths the same way, but do not fold more past 300 KB.
+  keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is
+  left out whole, under a note that says why, when not one row fits, or once it holds more than
+  200,000 paths after folding. When the table is left out, the details go with it. The Unexpected
+  Accesses table and the proposed rules count paths the same way, but do not fold more past 300 KB.
 - **Many libraries.** Once the step's processes have loaded 200,000 files between them, each
   process's counted apart, its program and `/etc/ld.so.cache` included, a file loaded after that
   shows as a read.
