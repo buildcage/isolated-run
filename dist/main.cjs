@@ -73064,6 +73064,42 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
+//#region src/lib/filesystem-audit/line-file.ts
+const CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = [];
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
+		}
+		onLine(Buffer.concat(carry).toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
+}
+//#endregion
 //#region src/lib/filesystem-audit/command.ts
 const utf8 = new TextEncoder();
 function bytesOf(s) {
@@ -73700,41 +73736,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 }
 //#endregion
 //#region src/lib/filesystem-audit/report.ts
-const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", CHUNK_BYTES = 1 << 20;
-function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(chunkBytes), carry = [];
-		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
-			start < n && carry.push(Buffer.from(chunk.subarray(start)));
-		}
-		onLine(Buffer.concat(carry).toString("utf8"));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function openWriter(path, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		let data = Buffer.from(pending.join(""));
-		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
-		pending = [], size = 0;
-	};
-	return {
-		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
-		},
-		close: () => {
-			try {
-				flush();
-			} finally {
-				(0, node_fs.closeSync)(fd);
-			}
-		}
-	};
-}
-const realDeps$3 = {
+const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
