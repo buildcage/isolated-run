@@ -70868,7 +70868,7 @@ function relativize(path, prefixes) {
 		if (path === home) return "~";
 		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
 	}
-	return hasKnownStart(path) ? path : `…/${path}`;
+	return path;
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);

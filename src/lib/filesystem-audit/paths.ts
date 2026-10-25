@@ -88,8 +88,7 @@ export function relativize(path: string, prefixes: Prefixes): string {
     if (path === home) return "~";
     if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   }
-  // Like a truncated walk, a name still relative starts somewhere unknown.
-  return hasKnownStart(path) ? path : `…/${path}`;
+  return path;
 }
 
 // The workspace and $HOME may each be reached by two spellings (as given and
