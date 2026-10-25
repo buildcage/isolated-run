@@ -255,10 +255,11 @@ connection that never delivered a whole request, and in
 then came to nothing.
 
 Each log is an s6-log directory rather than a single file: `current` rotates into a timestamped
-archive once it crosses 1MB, up to 100 archives kept, and a line is only ever split past 32KB. The
-report reads every archive, oldest first, then `current`, so early traffic is never dropped just
-because a later part of the same run pushed the log past a rotation. Reading `current` by hand, as
-above, only shows what has accumulated since the most recent one.
+archive once it crosses 1MB, up to 100 archives kept. A line from HAProxy is split only past 32KB,
+and one from CoreDNS past s6-log's default of 8KB. The report reads every archive, oldest first,
+then `current`, so early traffic is never dropped just because a later part of the same run pushed
+the log past a rotation. Reading `current` by hand, as above, only shows what has accumulated since
+the most recent one.
 
 HAProxy writes to s6-log through a pipe without blocking, so a line it cannot write at once is
 dropped rather than delayed, and nothing in the log marks where. A thread that keeps finding another
@@ -372,8 +373,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │                              # run_step, helpers.mjs the pass/fail of the .mjs ones
 ├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
 │                              # refresh; not used in production or CI
-├── docs/                      # development.md, security.md, aws.md, filesystem-audit.md, plus
-│                              # the reference.md/rules.md/inspect-engine.md link stubs
+├── docs/                      # reference.md, development.md, security.md, aws.md,
+│                              # filesystem-audit.md, plus the rules.md/inspect-engine.md
+│                              # link stubs
 ├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
 │                              # during `vp run build`, and what .glf.jsonc substitutes in.
 │                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
