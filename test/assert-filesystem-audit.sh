@@ -9,8 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 f="$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"
 sections=$(mktemp -d)
 trap 'rm -rf "$sections"' EXIT
-sed -n '/^### ⚙️ Executed/,/^<summary>📂 Accessed/p' "$f" > "$sections/executed.md"
-sed -n '/^<summary>📂 Accessed/,/^<\/details>/p' "$f" > "$sections/accessed.md"
+sed -n '/^### 📂 Accessed/,/^<details>/p' "$f" > "$sections/accessed.md"
 
 # The line a row is first on, or nothing.
 line_of() { grep -nE -m1 "$1" "$f" | cut -d: -f1 || true; }
@@ -38,16 +37,15 @@ else
   fail "The probe's write, move and delete rows run in that order -- lines: '$w' '$m' '$d'"
 fi
 
-# The tables list what ran and how often, and, folded, what each program
-# touched. python3 is a symlink, so it shows as the versioned file it runs.
-assert_file_has "$f" "python3 is listed as the versioned file it runs" -E '^\| `/usr/bin/python3[.0-9]*` \| [0-9]+ \|$'
-assert_file_has "$f" "run.sh is listed as run once" -F '| `./A/run.sh` | 1 |'
-assert_file_has "$f" "The accessed table is folded" -E '^<summary>📂 Accessed Paths \([0-9]+\)</summary>$'
-# Running a program is left to the executed table.
-assert_file_lacks "$sections/accessed.md" "The accessed table has no run flag" -E '\| [A-Za-z!]*X[A-Za-z!]* \| `'
-assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | W | `./probe.txt` |'
-assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
-assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
+# The table lists, open, what each program touched, and what it ran as an X
+# under the program that ran it. python3 is a symlink, so it shows as the
+# versioned file it runs.
+assert_file_has "$f" "The accessed table is open" -E '^### 📂 Accessed Paths \([0-9]+\)$'
+assert_file_has "$sections/accessed.md" "python3 is run by bash as the versioned file it runs" -E '^\| `bash` \| `bash` \| X \| `/usr/bin/python3[.0-9]*` \|$'
+assert_file_has "$sections/accessed.md" "run.sh is written and run by bash" -F '| `bash` | `bash` | WX | `./A/run.sh` |'
+assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | `bash` | W | `./probe.txt` |'
+assert_file_has "$sections/accessed.md" "futimens.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| `python3[.0-9]*` \| WA \| `\./futimens\.txt` \|$'
+assert_file_has "$sections/accessed.md" "empty-name.txt is under python3 in the accessed table" -E '^\| `/usr/bin/python3[.0-9]*` \| `python3[.0-9]*` \| WA \| `\./empty-name\.txt` \|$'
 assert_file_has "$f" "The summary has the file access details" '<summary>🔍 File access details</summary>'
 assert_file_has "$f" "A process's own /proc directory shows as /proc/self" -E ' R +cat +/proc/self/status$'
 assert_file_has "$f" "Another process's /proc directory shows as /proc/<pid>" -E ' R +cat +/proc/<pid>/stat$'
@@ -58,7 +56,7 @@ assert_file_has "$f" "empty-name.txt has a details row" -E ' WA +python3\.[0-9]+
 # new file's times through the descriptor; uutils' does not.
 a=
 if [[ "$(touch --version)" == *'GNU coreutils'* ]]; then a=A; fi
-assert_file_has "$sections/accessed.md" "A subshell's write is under touch in the accessed table" -E "^\\| \`[^\`]*/touch\` \\| W$a \\| \`\\./subshell\\.txt\` \\|$"
+assert_file_has "$sections/accessed.md" "A subshell's write is under touch in the accessed table" -E "^\\| \`[^\`]*/touch\` \\| \`[^\`]*\` \\| W$a \\| \`\\./subshell\\.txt\` \\|$"
 assert_file_has "$f" "A subshell's write has a details row" -E " W$a +touch +\./subshell\.txt$"
 
 # Relative names show under the directory they resolved against.
@@ -99,8 +97,8 @@ assert_file_lacks "$f" "Shared anonymous memory names no file" '/dev/zero'
 assert_file_lacks "$f" "run.sh's interpreter, mapped by its exec, is not a read" -E ' [A-Z]*R[A-Z!]* +.+ +/usr/bin/dash$'
 
 # Run without a path: a memfd by its quoted name, a deleted file marked.
-assert_file_has "$sections/executed.md" "A memfd runs under its quoted name" -F '| `memfd:"probe-memfd"` |'
-assert_file_has "$sections/executed.md" "A deleted program is marked" -F '| `./gone-bin` (deleted) |'
+assert_file_has "$sections/accessed.md" "A memfd runs under its quoted name" -E '\| W?X \| `memfd:"probe-memfd"` \|$'
+assert_file_has "$sections/accessed.md" "A deleted program is marked" -E '\| X \| `\./gone-bin` \(deleted\) \|$'
 # buildcage's own wrappers must never reach the summary.
 assert_file_lacks "$f" "buildcage's own wrappers are left out" -E ' (setpriv|buildcage-init|run-script\.sh) '
 

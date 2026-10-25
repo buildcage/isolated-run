@@ -2,7 +2,7 @@
  * The order the Job Summary's parts are given room in when the step's summary
  * would pass GitHub's size limit, lowest first: the traffic report's example,
  * its table of requests restrict would block, its host tables and its AWS
- * keys, the filesystem audit's tables, the known blocked hosts, then the
+ * keys, the filesystem audit's table, the known blocked hosts, then the
  * communication log and the filesystem audit's full record. The frames
  * (headings, notes, footers) are always kept.
  */
@@ -27,7 +27,6 @@ export const AWS_KEYS_PRIORITY = 5;
 
 export const FILESYSTEM_PRIORITIES: FilesystemPriorities = {
   [FILESYSTEM_BLOCK.unexpected]: 6,
-  [FILESYSTEM_BLOCK.executed]: 6,
-  [FILESYSTEM_BLOCK.paths]: 7,
+  [FILESYSTEM_BLOCK.paths]: 6,
   [FILESYSTEM_BLOCK.log]: 10,
 };

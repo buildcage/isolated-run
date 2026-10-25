@@ -18,6 +18,7 @@ import {
   DELETED,
   DELETED_MARK,
   isRunnerFile,
+  leaf,
   marked,
   MEMFD,
   MEMFD_PREFIX,
@@ -29,7 +30,7 @@ import {
   type Prefixes,
   type Shown,
 } from "./paths.ts";
-import { BIT, bitsOf, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
+import { bitsOf, classify, isRecord, parseLine, procOf, type AuditRecord } from "./record.ts";
 import { RuleTally, type RuleMark } from "./rule-tally.ts";
 import type { RuleMatcher } from "./rules.ts";
 import { createStripper } from "./strip.ts";
@@ -78,10 +79,6 @@ const LIMITS: Limits = {
   loads: 200_000,
 };
 
-export interface Executed extends Shown {
-  runs: number;
-}
-
 export interface Row extends Shown {
   agg: Agg;
   flags: string;
@@ -91,9 +88,11 @@ export interface Row extends Shown {
 }
 
 /** An accessed path's row, with the program that made the accesses and its
- *  place in the order programs first ran. */
+ *  place in the order programs first ran, and the commands that made them, as
+ *  the details name them, in the order they first did. */
 export interface PathRow extends Row {
   program: Shown & { rank: number };
+  commands: string[];
 }
 
 // Each name on its own, so a blank leading or ending one is escaped wherever
@@ -123,8 +122,6 @@ export interface AuditSummary {
   lost: boolean;
   /** Hooks the kernel skipped anywhere on the host while the step ran. */
   hostMissed: number;
-  /** Up to the size limit, past which fitStepSummary cuts it. */
-  executed: Executed[];
   /** Each part, or undefined where it was given up (see pathsCut). */
   paths: PathRow[] | undefined;
   details: Row[] | undefined;
@@ -229,7 +226,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     limit,
     loose,
     nodes: limits.nodes,
-    rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16,
+    // A command is named at least by its program's file name.
+    rowBytes: (p, rank, agg) =>
+      relLength(p) +
+      ranks[Number(rank)].bytes +
+      16 +
+      (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5),
   });
   const details = new Lines({
     fanout,
@@ -239,9 +241,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     nodes: limits.nodes,
     rowBytes: (p, key) => relLength(p) + commands.get(key)!.field.length + 3,
   });
-  // Each program run, with how many times it ran.
-  const executed = new Map<string, number>();
-  let executedBytes = 0;
   // Each pid's program, by its rank in the order programs first ran. An exec
   // sets it, naming a script rather than its interpreter, and a fork hands
   // the parent's on; a process with no exec in the step's records, such as
@@ -254,6 +253,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const ranks: {
     shown: Shown;
     bytes: number;
+    leaf: number;
     program?: string;
     ruleName: string;
     ruleId: number;
@@ -271,7 +271,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const rule = name ? s.path : ruleName(escaped(key));
       const ruleId = ruleIds.get(rule) ?? r;
       ruleIds.set(rule, ruleId);
-      ranks.push({ shown: s, bytes, ...(name ? {} : { program: key }), ruleName: rule, ruleId });
+      ranks.push({
+        shown: s,
+        bytes,
+        leaf: leaf(s.path).length,
+        ...(name ? {} : { program: key }),
+        ruleName: rule,
+        ruleId,
+      });
     }
     return r;
   };
@@ -426,19 +433,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return undefined;
     }
     // A run is expected of the program that ran it, not of what it ran.
-    const runner = tally && r.kind === "exec" ? runnerOf(r) : undefined;
-    if (tally) commsBefore.set(r.pid, r.comm ?? "");
+    const runner = r.kind === "exec" ? runnerOf(r) : undefined;
+    // The exec maps its image under the name it gives, before its own record.
+    if (!r.image) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
       const p = normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
-      const run = escaped(p);
-      const runs = executed.get(run);
-      if (runs !== undefined) executed.set(run, runs + 1);
-      else if (executedBytes <= limit) {
-        executed.set(run, 1);
-        executedBytes += relLength(run) + 11;
-      }
     } else if (r.kind === "exec") {
       // What it runs now is unknown, as the artifact has it.
       programs.delete(r.pid);
@@ -452,9 +453,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target, or
       // an attribute change whose directory descriptor closed meanwhile, which
-      // is lost; a failed one may keep the relative name it was given.
+      // is lost; a failed one may keep the relative name it was given, and so
+      // may a run whose file the tracer did not see.
       if (
         !c.failed &&
+        r.kind !== "exec" &&
         !r.memfd &&
         !isRunnerFile(path) &&
         !path.startsWith("/") &&
@@ -474,11 +477,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         seq: Number.isNaN(t) ? Infinity : seq++,
       };
       const parts = components(x.path);
-      details.add(x, parts);
-      // The executed table lists what ran, so this one leaves it out.
-      const program = programOf(r.pid, r.comm ?? "");
-      paths.add({ ...x, comm: String(program), bit: x.bit & ~BIT.X }, parts);
-      if (tally) takeForRules(x, parts, runner?.program ?? program, runner?.cmd ?? x.comm);
+      const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
+      const cmd = runner?.cmd ?? x.comm;
+      // A run is the command's that started it, as in the table.
+      details.add({ ...x, comm: cmd }, parts);
+      paths.add({ ...x, comm: String(by), cmd }, parts);
+      if (tally) takeForRules(x, parts, by, cmd);
     }
     return tally?.endLine();
   };
@@ -515,18 +519,28 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       return {
         program:
           (only?.program ?? programDeletedOnly.get(rank)) ? { ...program, deleted: true } : program,
-        // A program seen both deleted and not is two command keys with one text.
-        commands: [
-          ...new Set(
-            // Every access the tally takes names its command.
-            [...agg.cmds!].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd)!.text),
-          ),
-        ],
+        commands: commandsOf(agg),
         flags: fmtFlags(agg),
         path: shown(only?.path ? path + DELETED : path),
       };
     });
   }
+
+  // The Command cell, as COMMANDS_SHOWN in render.ts cuts it: a code span and
+  // a separator each, and the count of the rest.
+  const commandsBytes = (agg: Agg): number => {
+    const texts = commandsOf(agg);
+    const shown = texts.length > 3 ? texts.slice(0, 2) : texts;
+    return shown.reduce((n, t) => n + t.length + 4, 0) + (texts.length > 3 ? 14 : 0);
+  };
+
+  // A program seen both deleted and not is two command keys with one text.
+  const commandsOf = (agg: Agg): string[] => [
+    ...new Set(
+      // Every access either table takes names its command.
+      [...agg.cmds!].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd)!.text),
+    ),
+  ];
 
   type Line = { comm: string; path: string; agg: Agg };
   const rows = (lines: Line[] | undefined): Row[] | undefined =>
@@ -549,6 +563,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       commField: "",
       ...shown(path),
       program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
+      commands: commandsOf(agg),
     }));
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
@@ -557,7 +572,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       ended,
       lost,
       hostMissed,
-      executed: [...executed].map(([path, runs]) => ({ ...shown(path), runs })),
       paths: byPath,
       details: log,
       killed: [...killed.values()],
@@ -572,7 +586,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   return { observe, add, finish };
 }
 
-// By program, then path as the tables order paths, each by its text.
+// By program, then path as the table orders paths, each by its text.
 function byProgramThenPath(rows: RuleRow[]): RuleRow[] {
   const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   return rows

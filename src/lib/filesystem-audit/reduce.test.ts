@@ -123,7 +123,7 @@ function lines(md: string): string[] {
 // The "Accessed Paths" table's rows, verbatim.
 function programRows(md: string): string[] {
   const m = md.match(
-    /<summary>📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /### 📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }
@@ -131,7 +131,7 @@ function programRows(md: string): string[] {
 // The same rows as path and access alone, for a test of the paths.
 function tableRows(md: string): string[] {
   return programRows(md).map((row) =>
-    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
+    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| (?:[^|\\]|\\.)* \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
   );
 }
 
@@ -281,15 +281,19 @@ describe("createAuditSummary", () => {
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
     expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
-    // Below the executed table, which shows no flags.
-    expect(md.indexOf("<summary>📂 Accessed Paths")).toBeGreaterThan(
-      md.indexOf("### ⚙️ Executed Programs"),
-    );
+    expect(md).toContain("### 📂 Accessed Paths (2)\n\n<sub>R read");
     expect(md.split("<sub>R read")).toHaveLength(2);
     // With no accessed paths table, the details are the first to show flags.
-    const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
-    expect(ran).not.toContain("<summary>📂 Accessed Paths");
-    expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
+    const killed = render({
+      kind: "syscall",
+      comm: "a.out",
+      syscall: "socketcall",
+      compat: true,
+      killed: true,
+      failed: true,
+    });
+    expect(killed).not.toContain("### 📂 Accessed Paths");
+    expect(killed.slice(killed.indexOf("<details>"))).toContain("<sub>R read");
   });
 
   it("escapes control, format and separator characters so a name cannot close the code block", () => {
@@ -484,6 +488,7 @@ describe("createAuditSummary", () => {
       "| `./libx.so` | R |",
       "| `/etc/ld.so.cache` | R |",
       "| `/usr/bin/tool` | R |",
+      "| `/usr/bin/tool` | X |",
     ]);
   });
 
@@ -507,15 +512,22 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R x /opt/lib/x.conf"]);
   });
 
-  it("keeps one row for a command that writes a file and then runs it", () => {
+  it("keeps one row for a program that writes a file and then runs it", () => {
     // As rustup updating itself does.
     const md = render(
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
-    expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
-    expect(tableRows(md)).toEqual(["| `~/.cargo/bin/rustup` | W |"]);
+    // The first run is the one of a process the recording names only, which
+    // the table tells from rustup itself.
+    expect(lines(md)).toEqual(["X rustup ~/.cargo/bin/rustup", "WX rustup ~/.cargo/bin/rustup"]);
+    // The table names each run by the program that ran it: first the one
+    // the recording knows only by name, then rustup itself.
+    expect(programRows(md)).toEqual([
+      "| `rustup` | `rustup` | X | `~/.cargo/bin/rustup` |",
+      "| `~/.cargo/bin/rustup` | `rustup` | WX | `~/.cargo/bin/rustup` |",
+    ]);
   });
 
   it("never folds a program run, nor lets one fold its directory", () => {
@@ -531,13 +543,19 @@ describe("createAuditSummary", () => {
       { kind: "read", pid: 9, comm: "sh", path: "/usr/share/y" },
     );
     expect(lines(md)).toEqual([
-      "X a /usr/bin/a",
-      "X b /usr/bin/b",
-      "X c /usr/bin/c",
+      "X sh /usr/bin/a",
+      "X sh /usr/bin/b",
+      "X sh /usr/bin/c",
       "w! sh /usr/local/x",
       "R sh /usr/share/y",
     ]);
-    expect(tableRows(md)).toEqual(["| `/usr/local/x` | w! |", "| `/usr/share/y` | R |"]);
+    expect(tableRows(md)).toEqual([
+      "| `/usr/bin/a` | X |",
+      "| `/usr/bin/b` | X |",
+      "| `/usr/bin/c` | X |",
+      "| `/usr/local/x` | w! |",
+      "| `/usr/share/y` | R |",
+    ]);
   });
 
   it("tells a process from a later one given the same pid", () => {
@@ -564,7 +582,7 @@ describe("createAuditSummary", () => {
           { kind: "exec", pid: 4, comm: "z" },
         ),
       ),
-    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X tool /usr/bin/tool"]);
+    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X y /usr/bin/tool"]);
   });
 
   it("leaves out the program and interpreter an exec maps, and their reads", () => {
@@ -586,7 +604,7 @@ describe("createAuditSummary", () => {
           { kind: "exec", pid: 2, comm: "run.sh", path: "/work/run.sh" },
         ),
       ),
-    ).toEqual(["X run.sh ./run.sh"]);
+    ).toEqual(["X sh ./run.sh"]);
   });
 
   it("starts a process's loads afresh when it runs a new program", () => {
@@ -602,7 +620,7 @@ describe("createAuditSummary", () => {
           { kind: "read", pid: 2, comm: "cp", path: "/usr/bin/cp" },
         ),
       ),
-    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X cp /usr/bin/cp"]);
+    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X bash /usr/bin/cp"]);
   });
 
   it("merges two spellings of one relative name into a row", () => {
@@ -639,11 +657,11 @@ describe("createAuditSummary", () => {
     );
     expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
     expect(programRows(md)).toEqual([
-      "| `b` | R | `/etc/x` |",
-      "| `a` | R | `/etc/x` |",
-      "| `c` | R | `./a` |",
-      "| `c` | R | `./b` |",
-      "| `c` | R | `~/y` |",
+      "| `b` | `b` | R | `/etc/x` |",
+      "| `a` | `a` | R | `/etc/x` |",
+      "| `c` | `c` | R | `./a` |",
+      "| `c` | `c` | R | `./b` |",
+      "| `c` | `c` | R | `~/y` |",
     ]);
   });
 
@@ -819,7 +837,7 @@ describe("createAuditSummary", () => {
       { kind: "mmap", comm: "node", path: "/work/shared", access: "w" },
       { kind: "exec", comm: "tool", path: "/work/tool" },
     );
-    expect(lines(md)).toEqual(["W node ./shared", "X tool ./tool"]);
+    expect(lines(md)).toEqual(["W node ./shared", "X node ./tool"]);
   });
 
   it("collapses a directory past the fanout and folds its bare parents", () => {
@@ -1129,6 +1147,9 @@ describe("createAuditSummary", () => {
 
 describe("createAuditSummary: commands", () => {
   const byte = (b: number): string => String.fromCharCode(0xdc00 + b);
+  // A run goes by the command that started it, so a command's own name shows
+  // on what it does after.
+  const reads = (md: string): string[] => lines(md).filter((l) => !l.startsWith("X "));
 
   it("names a command by its program, and the name it gave itself where that differs", () => {
     const md = render(
@@ -1142,20 +1163,24 @@ describe("createAuditSummary: commands", () => {
       "R node[npm ls] ./.npmrc",
       "R node[npm ls] ./package-lock.json",
       "R node[npm] ./package.json",
-      "X node[npm] /usr/bin/node",
+      // Run by a process the recording names only.
+      "X npm /usr/bin/node",
     ]);
   });
 
   it("takes a name cut to 15 bytes, or the one an exec was run by, as the program's", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "unattended-upgr", path: "/usr/bin/unattended-upgrade" },
+      { kind: "read", pid: 2, comm: "unattended-upgr", path: "/work/a" },
       { kind: "exec", pid: 3, comm: "sh", path: "/usr/bin/dash", name: "sh" },
+      { kind: "read", pid: 3, comm: "sh", path: "/work/b" },
       { kind: "exec", pid: 4, comm: "unattended-upg", path: "/usr/bin/unattended-upgrade" },
+      { kind: "read", pid: 4, comm: "unattended-upg", path: "/work/c" },
     );
-    expect(lines(md)).toEqual([
-      "X dash /usr/bin/dash",
-      "X unattended-upgrade /usr/bin/unattended-upgrade",
-      "X unattended-upgrade[unattended-upg] /usr/bin/unattended-upgrade",
+    expect(reads(md)).toEqual([
+      "R unattended-upgrade ./a",
+      "R dash ./b",
+      "R unattended-upgrade[unattended-upg] ./c",
     ]);
   });
 
@@ -1168,53 +1193,65 @@ describe("createAuditSummary: commands", () => {
         comm: `abcdefghijklm${byte(0xe3)}${byte(0x81)}`,
         path: "/x/abcdefghijklmあ",
       },
+      { kind: "read", pid: 2, comm: `abcdefghijklm${byte(0xe3)}${byte(0x81)}`, path: "/work/a" },
       { kind: "exec", pid: 3, comm: `p${byte(0xff)}`, path: `/x/p${byte(0xff)}` },
+      { kind: "read", pid: 3, comm: `p${byte(0xff)}`, path: "/work/b" },
     );
-    expect(lines(md)).toEqual(["X abcdefghijklmあ /x/abcdefghijklmあ", "X p\\xff /x/p\\xff"]);
+    expect(reads(md)).toEqual(["R abcdefghijklmあ ./a", "R p\\xff ./b"]);
   });
 
   it("escapes brackets in either name, so neither passes for the other, quoting a name with a space", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "node[npm ls]", path: "/tmp/node[npm ls]" },
+      { kind: "read", pid: 2, comm: "node[npm ls]", path: "/work/b" },
       { kind: "exec", pid: 3, comm: "x", path: "/tmp/node[npm ls]" },
+      { kind: "read", pid: 3, comm: "x", path: "/work/c" },
       { kind: "exec", pid: 4, comm: "a] /etc/passwd", path: "/usr/bin/node" },
+      { kind: "read", pid: 4, comm: "a] /etc/passwd", path: "/work/d" },
       // A shell's subshell renames itself without running anything.
       { kind: "read", pid: 5, comm: "node[npm ls]", path: "/work/a" },
     );
-    expect(lines(md)).toEqual([
+    expect(reads(md)).toEqual([
       'R "node\\[npm ls\\]" ./a',
-      'X "node\\[npm ls\\]" "/tmp/node[npm ls]"',
-      'X "node\\[npm ls\\]"[x] "/tmp/node[npm ls]"',
-      "X node[a\\] /etc/passwd] /usr/bin/node",
+      'R "node\\[npm ls\\]" ./b',
+      'R "node\\[npm ls\\]"[x] ./c',
+      "R node[a\\] /etc/passwd] ./d",
     ]);
   });
 
   it("quotes a program's name holding a space, but not the name it gave itself", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "a b", path: "/work/a b" },
+      { kind: "read", pid: 2, comm: "a b", path: "/work/x" },
       { kind: "exec", pid: 3, comm: "c d", path: "/work/a b" },
+      { kind: "read", pid: 3, comm: "c d", path: "/work/y" },
     );
-    expect(lines(md)).toEqual(['X "a b" "./a b"', 'X "a b"[c d] "./a b"']);
+    expect(reads(md)).toEqual(['R "a b" ./x', 'R "a b"[c d] ./y']);
   });
 
   it("names a memfd or deleted program by its file", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "3", path: "memfd:x", memfd: true, name: "/dev/fd/3" },
+      { kind: "read", pid: 2, comm: "3", path: "/work/m" },
       { kind: "exec", pid: 3, comm: "gone", path: "/work/gone", deleted: true },
+      { kind: "read", pid: 3, comm: "gone", path: "/work/n" },
     );
-    expect(lines(md)).toEqual(["X gone ./gone (deleted)", 'X memfd:"x" memfd:"x"']);
+    expect(reads(md)).toEqual(['R memfd:"x" ./m', "R gone ./n"]);
   });
 
   it("takes a memfd's whole name, a slash included, as the program's", () => {
-    const md = render({
-      kind: "exec",
-      pid: 2,
-      comm: "memfd:a/b",
-      path: "memfd:a/b",
-      memfd: true,
-      name: "/dev/fd/3",
-    });
-    expect(lines(md)).toEqual(['X memfd:"a/b" memfd:"a/b"']);
+    const md = render(
+      {
+        kind: "exec",
+        pid: 2,
+        comm: "memfd:a/b",
+        path: "memfd:a/b",
+        memfd: true,
+        name: "/dev/fd/3",
+      },
+      { kind: "read", pid: 2, comm: "memfd:a/b", path: "/work/m" },
+    );
+    expect(reads(md)).toEqual(['R memfd:"a/b" ./m']);
   });
 
   it("forgets a program once an exec's file is unknown", () => {
@@ -1295,19 +1332,19 @@ describe("createAuditSummary: limits", () => {
       path: `memfd:m${i}`,
       memfd: true,
     }));
-    // Each line counts 20 bytes, so the fifth passes 90 and folds them.
-    expect(tableRows(limited({ bytes: 90 }, ...memfds))).toEqual(["| `memfd:**` | W |"]);
+    // Each line counts 26 bytes, so the fifth passes 120 and folds them.
+    expect(tableRows(limited({ bytes: 120 }, ...memfds))).toEqual(["| `memfd:**` | W |"]);
   });
 
   it("keeps the rows that fit and notes the cut, rather than drop the table and the details", () => {
     // Paths with ".." under different directories, which no fold joins. A
-    // table row counts 25 bytes and a details row 12.
+    // table row counts 31 bytes and a details row 12.
     const md = limited(
       { bytes: 40 },
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -1318,9 +1355,8 @@ describe("createAuditSummary: limits", () => {
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
-    expect(section(md, "### ⚙️ Executed Programs", CUT)).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
-    expect(md).not.toContain("<summary>📂 Accessed Paths");
+    expect(md).not.toContain("### 📂 Accessed Paths");
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -1349,19 +1385,35 @@ describe("createAuditSummary: limits", () => {
       path: "/tmp/x",
     }));
     const md = limited({ bytes: 200 }, ...records);
-    expect(programRows(md)).toEqual(["| `command-0` | R | `/tmp/x` |"]);
+    expect(programRows(md)).toEqual([
+      "| `command-0` | `command-0`, `command-1` and 18 more | R | `/tmp/x` |",
+    ]);
     expect(section(md, "🔍")).toContain(CUT);
   });
 
-  it("stops listing new programs once the executed table outgrows the limit, still counting runs", () => {
+  it("keeps the rows that came first when it cuts the table short", () => {
     const execs = Array.from({ length: 20 }, (_, i) => ({
       kind: "exec",
+      pid: i + 1,
       comm: "c",
       path: `/usr/bin/tool-${i}`,
     }));
-    const md = limited({ bytes: 200 }, ...execs, execs[0]);
-    expect(md).toContain("| `/usr/bin/tool-0` | 2 |");
+    const md = limited({ bytes: 200 }, ...execs, ...tmpFiles(2));
+    expect(tableRows(md)).toEqual([0, 1, 2, 3, 4].map((i) => `| \`/usr/bin/tool-${i}\` | X |`));
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(md).not.toContain("tool-19");
+  });
+
+  it("counts a row's commands toward the size limit", () => {
+    // One process renaming itself: the row names three long commands.
+    const records = ["a", "b", "c"].map((c) => ({
+      kind: "read",
+      pid: 1,
+      comm: c.repeat(15),
+      path: "/tmp/x",
+    }));
+    expect(programRows(limited({ bytes: 90 }, ...records))).toEqual([]);
+    expect(programRows(limited({ bytes: 100 }, ...records))).toHaveLength(1);
   });
 
   it("prints nothing after the part a size cut reaches, its note standing for the rest", () => {
@@ -1375,9 +1427,8 @@ describe("createAuditSummary: limits", () => {
       PREFIXES,
       {
         "filesystem-unexpected": 1,
-        "filesystem-executed": 1,
-        "filesystem-paths": 2,
-        "filesystem-log": 3,
+        "filesystem-paths": 1,
+        "filesystem-log": 2,
       },
       () => "unused",
     );
@@ -1387,7 +1438,7 @@ describe("createAuditSummary: limits", () => {
     );
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
-    expect(md).not.toContain("<summary>📂 Accessed Paths");
+    expect(md).not.toContain("/tmp/f0");
     expect(md).not.toContain("<details>");
   });
 
@@ -1418,7 +1469,7 @@ describe("createAuditSummary: limits", () => {
       { kind: "read", pid: 1, comm: "b", path: "/x/f" },
       { kind: "read", pid: 1, comm: "b", path: "/y/g" },
     );
-    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain("`/x/f`");
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain("`/x/f`");
     expect(section(md, "🔍")).toContain("too many distinct paths to summarize");
   });
 
@@ -1641,6 +1692,23 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(summary).toMatchObject({ matched: 2, unexpected: 1 });
     expect(rows(summary)).toStrictEqual(["cat R /proc/sys/kernel/pid_max"]);
+  });
+
+  it("proposes a run as the program that started it, past the image the exec maps first", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+      { kind: "fork", pid: 4, ppid: 3, comm: "cat" },
+      // The kernel maps the new image under the new name before the exec's record.
+      { kind: "mmap", pid: 4, comm: "curl", path: "/usr/bin/curl", access: "x", image: true },
+      { kind: "exec", pid: 4, comm: "curl", path: "/usr/bin/curl" },
+    );
+    expect(summary.proposed!.find((r) => r.path.path === "/usr/bin/curl")).toStrictEqual({
+      program: { path: "cat" },
+      commands: ["cat"],
+      flags: "X",
+      path: { path: "/usr/bin/curl" },
+    });
   });
 
   it("proposes one row for a program or a path shown both deleted and not", () => {

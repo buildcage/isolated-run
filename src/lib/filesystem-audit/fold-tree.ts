@@ -162,8 +162,9 @@ interface LinesOptions {
   /** The size past which it folds what it otherwise keeps whole; at most `limit`. */
   loose: number;
   nodes: number;
-  /** The fewest bytes the line of a path prints in. */
-  rowBytes: (path: string, comm: string) => number;
+  /** The fewest bytes the line of a path prints in, closer once its accesses
+   *  are all in. */
+  rowBytes: (path: string, comm: string, agg?: Agg) => number;
   /** Whether a directory keeps its own line where it only walks to the lines
    *  below it, as a rule must name it to take its access. */
   showWalked?: boolean;
@@ -455,7 +456,7 @@ export class Lines {
     const lines: { comm: string; path: string; agg: Agg }[] = [];
     let bytes = 0;
     for (const line of this.lines()) {
-      const size = this.opts.rowBytes(line.path, line.comm);
+      const size = this.opts.rowBytes(line.path, line.comm, line.agg);
       if (bytes + size > this.opts.limit) return { lines, bytes, cut: true };
       lines.push(line);
       bytes += size;
@@ -463,18 +464,18 @@ export class Lines {
     return { lines, bytes, cut: false };
   }
 
-  // Program runs first, so a part cut short keeps them.
-  private *lines(): Generator<{ comm: string; path: string; agg: Agg }> {
-    for (const [key, agg] of this.climbing)
-      if (ran(agg)) yield { comm: commOf(key), path: pathOf(key), agg };
+  // In recording order, so a part cut short keeps what came first, a program
+  // run no sooner than any other line.
+  private lines(): { comm: string; path: string; agg: Agg }[] {
+    const out: { comm: string; path: string; agg: Agg }[] = [];
     for (const [comm, top] of this.trees)
       for (const [path, agg] of treeLines(top, this.opts.fanout, this.opts.showWalked)) {
         // A command that also ran the file keeps one row for it.
         const run = this.climbing.get(keyOf(comm, path));
         if (run) mergeAgg(run, agg);
-        else yield { comm, path, agg };
+        else out.push({ comm, path, agg });
       }
-    for (const [key, agg] of this.climbing)
-      if (!ran(agg)) yield { comm: commOf(key), path: pathOf(key), agg };
+    for (const [key, agg] of this.climbing) out.push({ comm: commOf(key), path: pathOf(key), agg });
+    return out.sort((a, b) => a.agg.seq - b.agg.seq);
   }
 }

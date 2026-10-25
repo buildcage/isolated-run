@@ -84,8 +84,21 @@ describe("Lines", () => {
     for (const p of ["/a/1", "/a/2", "/a/3"]) l.add(access(p));
     l.add(access("/a/run", BIT.X));
     l.add(access("/a/../b"));
-    // Program runs come first, so a part cut short keeps them.
-    expect(printed(l)).toStrictEqual(["X c /a/run", "R c /a/**", "R c /a/../b"]);
+    // In recording order, a program run no sooner than the rest.
+    expect(printed(l)).toStrictEqual(["R c /a/**", "X c /a/run", "R c /a/../b"]);
+  });
+
+  it("keeps what came first when cut, a program run no sooner, with all its flags", () => {
+    const l = lines({ limit: 2, fanout: 9 });
+    l.add(access("/a/run", BIT.W));
+    l.add(access("/b"));
+    l.add(access("/a/run", BIT.X));
+    l.add(access("/c"));
+    expect(printed(l)).toStrictEqual(["WX c /a/run", "R c /b"]);
+    const runLast = lines({ limit: 2, fanout: 9 });
+    for (const p of ["/b", "/c"]) runLast.add(access(p));
+    runLast.add(access("/a/run", BIT.X));
+    expect(printed(runLast)).toStrictEqual(["R c /b", "R c /c"]);
   });
 
   it("keeps each command's tree apart", () => {
@@ -137,7 +150,7 @@ describe("Lines", () => {
       // A child already folded at the usual fanout folds in with the rest.
       for (const p of ["/a/1", "/a/2", "/a/3", "/b", "/c", "/d", "/e"]) l.add(access(p));
       expect(l.stopped).toBeUndefined();
-      expect(printed(l)).toStrictEqual(["R c /**", "R c /home/u/x", "R d /home/u"]);
+      expect(printed(l)).toStrictEqual(["R c /home/u/x", "R d /home/u", "R c /**"]);
     });
 
     it("then sends a new child to the fold, the kept directory itself and kept ones past it", () => {
@@ -189,9 +202,9 @@ describe("Lines", () => {
       l.add(access(`${MEMFD}m5`, BIT.W));
       expect(printed(l)).toStrictEqual([
         "X c /w/a/../run",
+        "R c /w/a/../**",
         `X c ${MEMFD}stage2`,
         `WX c ${MEMFD}m0`,
-        "R c /w/a/../**",
         `W c ${MEMFDS}`,
       ]);
     });
@@ -274,9 +287,9 @@ describe("Lines", () => {
       l.add(access("/j/../1"));
       expect(printed(l)).toStrictEqual([
         "R c /**",
+        "R c /g/../**",
         "R c /h/../1",
         "R c /i/../1",
-        "R c /g/../**",
         "R c /j/../1",
       ]);
       expect(l.cut).toBeUndefined();
