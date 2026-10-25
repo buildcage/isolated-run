@@ -46,10 +46,10 @@ Four things sit outside the model by design.
   whatever the workflow checked out, so whoever can write that copy sets the rules.
 - **Another step in the same job.** A compromised or untrustworthy action running as another step
   can use `docker exec` or `docker cp`, or the host root a passwordless-sudo runner grants by
-  default, to tamper with the proxy container's state, most notably its traffic log. Sigstore proves
+  default, to tamper with the proxy container's state, its traffic log above all. Sigstore proves
   the image was genuine at startup, not afterwards. The report refuses a log that doesn't start
-  where a real proxy run would, which catches wholesale erasure, but not a format-aware forgery.
-  The defense here is procedural: don't place an untrusted step immediately around this action.
+  where a real proxy run would, which catches wholesale erasure, but not a format-aware forgery. The
+  defense here is procedural: don't place an untrusted step immediately around this action.
 - **What the command reads.** It restricts where the command can send data, not what it can open, so
   a compromised dependency can still read `~/.aws/credentials` or `~/.docker/config.json`; it just
   cannot send them anywhere outside the allowlist. See
@@ -156,7 +156,7 @@ invocation, so no step inherits anything another one left behind.
   `/var/tmp` bind-mounted onto `/tmp`, a common hardening step, `/tmp/buildcage-<uid>` would
   otherwise hand the sandbox the directory through a writable path.
 - **No list of the sandboxes beside it.** `ip netns add` leaves each namespace's name under the
-  host's `/run/netns`, which the `/run` tmpfs hides with the rest. Defense in depth rather than a
+  host's `/run/netns`, which the `/run` tmpfs hides with the rest. This is defense in depth, not a
   boundary anything rests on.
 
 ### What it can write
@@ -275,9 +275,9 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   stays PID 1 and runs the command as its child, so `kill -TERM $$` works and a python or node
   shebang leaves no zombies. It forwards `SIGTERM` and `SIGINT` to every other process in the
   sandbox, one the command moved out of its process group with `setsid` included, and `SIGHUP`,
-  `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that process group, so what the command runs gets them
-  too. It exits with the command's status, `128+n` if a signal killed it. After forwarding
-  `SIGTERM` or `SIGINT`, it first waits for all of them to exit.
+  `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that process group, so what the command runs gets them too.
+  It exits with the command's status, `128+n` if a signal killed it. After forwarding `SIGTERM` or
+  `SIGINT`, it waits for every process in the sandbox to exit before it exits itself.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
 rather than written into `config.json`, so an `env:` secret never reaches the runner's disk.
@@ -295,10 +295,11 @@ first, a fallback step reads the container's identity back from job state, stops
 deletes the scratch directory, but nothing stops the sandbox. `sudo`, `run-isolated.sh` and the
 command are left running, still confined and with no network once the proxy is gone, and the command
 can go on writing to the host's files while an `if: always()` step or a post step runs: every
-writable path in `persistent` mode, the `write_through:` ones in `ephemeral`. That takes the action
-being killed within those 5 seconds, before it kills the sandbox itself. The command's own life is tied to `run-isolated.sh`'s by a two-hop
-`setpriv --pdeathsig=KILL` chain, so an out-of-memory kill on the script takes the whole sandboxed
-process tree with it rather than leaving orphans.
+writable path in `persistent` mode, the `write_through:` ones in `ephemeral`. That happens only if
+the action is killed within those 5 seconds, before it kills the sandbox itself. The command's own
+life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chain, so an
+out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
+orphans.
 
 ## The network boundary
 
@@ -329,9 +330,8 @@ whatever name it carries. A name with anything but letters, digits,
 blocks such a `Host` (`invalid-host`).
 A `:` in the name could otherwise let a `~` rule's port pattern match a name the proxy then looks up.
 
-That order is an invariant, not an optimisation. Reversed, resolution would become the exfiltration
-channel the resolver below exists to prevent, so a name a request would be blocked for never
-triggers a real DNS query.
+That order is an invariant. Reversed, resolution would become the exfiltration channel the resolver
+below exists to prevent, so a name a request would be blocked for never triggers a real DNS query.
 
 Where the proxy resolves is the proxy container's own `/etc/resolv.conf`. On a runner that is
 Docker's embedded DNS forwarding to the runner's own resolvers, so a name only an internal resolver
@@ -369,12 +369,12 @@ address on that network, which Docker's DNS returns for the proxy's service and 
 a request naming them cannot loop the proxy into itself. A published container port is DNAT'd, so
 it answers on every one of them.
 
-Two consequences worth knowing:
+This has two consequences:
 
-- **An internal mirror running on the runner itself is no longer reachable by name.** Name it with
-  `allowed_ip_rules` instead, which skips this guard. The same applies to a public name
-  that resolves to the runner's own public address, which a self-hosted runner may well have.
-- The list is read once at startup, and on a containerised runner it holds that container's
+- **An internal mirror running on the runner itself is not reachable by name.** Name it with
+  `allowed_ip_rules` instead, which skips this guard. The same applies to a public name that
+  resolves to the runner's own public address, which a self-hosted runner may well have.
+- The list is read once at startup, and on a containerized runner it holds that container's
   addresses rather than the real host's.
 
 This guard is about a _name_ landing somewhere it never should. Under `inspect`, a rule whose host
@@ -461,7 +461,7 @@ Three mechanisms make that enforceable:
 A wide host rule paired with a narrow path or method does not narrow the DNS side. DNS has no notion
 of a path, so a name under an allowed `*.example.com` is logged as allowed the moment it is looked
 up, before any path is known. The request that follows is still blocked and still never reaches an
-origin; only the log line reflects the host-only nature of that decision. See
+origin; only the log line shows a decision made on the host alone. See
 [Rule syntax](./reference.md#rule-syntax) for how to write a host pattern that doesn't widen this
 more than intended.
 
@@ -488,7 +488,7 @@ before it ends, and the key with it.
 | Asks for any name, on or off the allowlist                                                                         | Answered locally with the proxy's own address; the query is never forwarded, allowed or not                                                                                                                                                                                                                                                                                  |
 | Requests a host no rule covers                                                                                     | Blocked, origin never contacted; `inspect` records the URL it asked for                                                                                                                                                                                                                                                                                                      |
 | Requests a path or method no rule covers                                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                                                                                                                                                                                                                           |
-| Walks out of an allowed path with `..` or `%2e%2e`                                                                 | **403**: the path is normalised before the rules see it, and a `..` joined to an encoded separator or `;` is blocked, as is any backslash                                                                                                                                                                                                                                    |
+| Walks out of an allowed path with `..` or `%2e%2e`                                                                 | **403**: the path is normalized before the rules see it, and a `..` joined to an encoded separator or `;` is blocked, as is any backslash                                                                                                                                                                                                                                    |
 | Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing                 | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                                                                                                                                                                                                                                     |
 | Puts an address in the `Host` header                                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                                                                                                                                                                                                                          |
 | Allowlists a name that resolves to an internal address                                                             | Blocked if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                                                                                                                                                                                                                                    |
@@ -750,7 +750,7 @@ bigger commitment than anything else in this section.
 ### Keep the rest of your supply chain practice
 
 Pinning versions, lockfiles, review, least-privilege tokens, and a dependency cooldown each cover
-something an allowlist does not. Buildcage is one layer among them, not a replacement for any.
+something an allowlist does not. Buildcage adds a layer to these and replaces none of them.
 
 ## Known Limitations
 
@@ -787,11 +787,11 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
   discards a payload planted elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in
   `persistent` mode.
 
-  That decides how the step is set up. Wrapping every untrusted step is not the way out: a payload
-  left in `$HOME`, such as a `core.fsmonitor` in `~/.gitconfig` or a script in `~/.gradle/init.d`,
-  runs inside the next step's sandbox with that step's secrets and the hosts it allows. Making it
-  the last step in the job does not close it off either: every action's post step runs after the
-  last step, outside any sandbox, with whatever it left in `$HOME`. What holds is
+  That limit shapes how to set up the step. Wrapping every untrusted step does not close it: a
+  payload left in `$HOME`, such as a `core.fsmonitor` in `~/.gitconfig` or a script in
+  `~/.gradle/init.d`, runs inside the next step's sandbox with that step's secrets and the hosts it
+  allows. Making it the last step in the job does not close it off either: every action's post step
+  runs after the last step, outside any sandbox, with whatever it left in `$HOME`. What holds is
   `filesystem_mode: ephemeral` with `write_through:` narrowed to the outputs the step really has to
   produce, leaving out `$HOME`.
 
@@ -920,7 +920,7 @@ something an allowlist does not. Buildcage is one layer among them, not a replac
 
 ## Image Provenance Verification
 
-isolated-run decides what a step can reach, so it is fair to ask what says the isolated-run image is
+isolated-run decides what a step can reach, so the action has to establish that the image it runs is
 the one this repository published.
 
 Each release's image is bound to the CI workflow that built it by [Sigstore](https://sigstore.dev)
@@ -980,7 +980,7 @@ OIDC token issued during a real workflow run on the real repository.
 
 ### Verification Limitations
 
-Verification establishes where the image came from. Here is what it leaves uncovered.
+Verification establishes where the image came from, and leaves the following uncovered:
 
 - **The run before signing is a smoke test, not the test suite.** It proves the released image
   starts and enforces on a single allowed and a single blocked host, per engine and per
@@ -994,10 +994,10 @@ Verification establishes where the image came from. Here is what it leaves uncov
 - **A floating tag is a pointer someone else moves.** Under `@v2` or `@v2.0` the signing identity
   accepts any release in that series, so the tag can also be moved back to an older one. Both the
   registry tag and the git tag are writable by whoever publishes releases, which is the reason to
-  prefer a commit SHA: it puts you in charge of when you move.
+  prefer a commit SHA: the image changes only when you change the pin.
 - **The registry decides which signed image gets verified.** Everything after the tag lookup is
   bound to the digest it returned, so content substituted later makes verification **fail** rather
-  than falsely pass, leaving no time-of-check/time-of-use gap. What remains is the tag lookup
+  than falsely pass, and there is no time-of-check/time-of-use gap. What remains is the tag lookup
   itself: an attacker with write access to the registry could repoint the tag, but only at an image
   this repository's release workflow genuinely signed.
 - **Sigstore has to be reachable.** Verification depends on the Rekor transparency log and the
