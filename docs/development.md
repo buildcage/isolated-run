@@ -66,6 +66,7 @@ vp run build      # rolldown → the committed dist/ bundles
 │   ├── run-isolated.sh      # netns, veth and rootfs setup around `runc run`, via `sudo -n`
 │   └── buildcage-init.sh    # The sandbox's PID 1
 ├── test/                    # integration-test-*.sh drivers, assert-*.sh/.mjs, *-scenarios.sh
+│   └── scenarios/           # Each engine's restrict-mode cases, in POSIX sh
 ├── dev/                     # The macOS dev-loop image and scripts, and the fixture refresh
 ├── compose.yaml             # The action's compose file plus a build from source; CI builds through it
 ├── compose.test-*.yaml      # Fixture origins for the integration tests

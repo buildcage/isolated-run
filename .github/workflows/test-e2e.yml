@@ -406,7 +406,7 @@ jobs:
       # wiring end-to-end: an allowed host reaches its origin, a blocked one does
       # not, and both verdicts reach the report.
       # Which names, ports and protocols are judged which way, and the log-line
-      # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
+      # sanitizing behind that, live in test/scenarios/universal-restrict.sh,
       # which needs a fixture network this job deliberately does not set up.
       - name: Run an isolated command via the real action
         if: matrix.enforcement
