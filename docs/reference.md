@@ -905,8 +905,11 @@ the proxy CA; the step warns, naming the database, and writes nothing back to it
 `filesystem_mode: ephemeral`, when `$HOME` is an overlay of its own and `~/.pki/nssdb` is not
 written through, a missing `~/.pki/nssdb` is made in that overlay, not on the runner.
 
-How the slot is added and taken back out is in
-[Development Guide](./development.md#chromiums-nss-database).
+What the command changed is written back after the step, with the slot taken back out first. A
+file that already matches is not touched, and a write-back that fails partway leaves entries
+behind rather than losing them, except an entry whose type the command changed, which is removed
+just before its replacement goes in. Write-backs to the same database take turns, so a step never
+copies the database halfway through another's write-back.
 
 ## `ephemeral` overlays
 

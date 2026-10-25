@@ -2,7 +2,7 @@
 
 This document is the threat model behind Buildcage for `run:` steps: what the sandbox confines, how
 a command is kept to its allowlist, and where it stops short. For how to configure the action, see
-the [README](../README.md); for implementation internals, see the
+the [README](../README.md); for working on isolated-run itself, see the
 [Development Guide](./development.md).
 
 ## Contents
@@ -333,8 +333,6 @@ sandbox down, so what it runs is kept out of those paths:
   resolves what it runs there when sudoers sets no `secure_path`, and `docker` finds its
   `docker-credential-*` helpers there. A helper that is a symlink into them is not caught.
   `write_through: /` turns all of this off, since no path is left outside them.
-  [Pinning `docker` and `sudo`](./development.md#pinning-docker-and-sudo) covers symlinks and
-  `$PATH` directories.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
@@ -379,9 +377,8 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
 - **Not the host's devices.** `/dev` is a fresh minimal device set, so host device nodes such as
   `/dev/kvm`, `/dev/fuse` and `/dev/dri` are absent; each needs a capability the sandbox has dropped
   or a group the GID substitution replaces, and bind-mounting the host's `/dev` would expose raw
-  block devices. The open-file limit, `/dev/shm` size and hostname do follow the runner's, as
-  [The process environment](./development.md#the-process-environment) explains; none of them is a
-  boundary anything rests on.
+  block devices. The open-file limit, `/dev/shm` size and hostname do follow the runner's; none of
+  them is a boundary anything rests on.
 - **Not the runner-only credentials.** This is a JavaScript action, and the runner hands one
   variables it does not hand a `run:` step: `ACTIONS_RUNTIME_TOKEN`, which reaches the run's
   artifacts and cache, plus the `ACTIONS_*` endpoint variables it is spent against. Those are
@@ -478,11 +475,10 @@ Three mechanisms make that enforceable:
   blocked. Encodings HAProxy does not decode, such as a double-encoded `%252e`, `%00` or an
   overlong UTF-8 dot, reach the origin as written and matter only to an origin that decodes them
   again.
-- **The CA is mounted, never written to the host.** This is where the engine differs most from
-  `buildcage/docker`'s, whose runc wrapper can write the CA into a disposable rootfs layer. Here the
-  sandbox rootfs is a bind-mount of the real host root, so the CA, and where relevant an augmented
-  copy of the system CA store, is written into this run's own scratch directory and mounted _over_
-  the sandbox's view of the relevant paths: a mount-namespace-scoped overlay, not a host write.
+- **The CA is mounted, never written to the host.** The sandbox rootfs is a bind-mount of the real
+  host root, so the CA, and where relevant an augmented copy of the system CA store, is written
+  into this run's own scratch directory and mounted _over_ the sandbox's view of the relevant paths:
+  a mount-namespace-scoped overlay, not a host write.
   Teardown removes it with the rest of the mount namespace, and the real host files those paths
   would resolve to are never touched. See [CA trust variables](./reference.md#ca-trust-variables)
   for which variables are set and what that does not cover.
@@ -840,7 +836,7 @@ Verification establishes where the image came from, and leaves the following unc
   development. Tree-shaking drops that module out of every normal build, and a CI check inspects the
   published `dist/` to confirm it names none of the test-hook variables, so no `env:` a consumer
   sets can reach it.
-  See [development.md](./development.md#local-development).
+  See [development.md](./development.md#the-action-against-an-unpublished-image).
 
 Tampering with the proxy container after startup is a separate question, and is covered under
 [Threat model](#threat-model) above.
