@@ -173,7 +173,7 @@ default, allows only what the rules match and blocks and logs everything else. S
 when you first adopt Buildcage or when a dependency changes, and keep `restrict` for everyday runs.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
-destination named, which is why it is worth running `audit` first.
+destination named. Run `audit` first to find those domains.
 
 `audit` also lets a connection made straight to an address through. Under `universal` that includes
 cloud metadata (`169.254.169.254`) and the runner's own addresses; `inspect` still blocks those
@@ -395,10 +395,10 @@ paths that opt out of whichever default applies:
 | `ephemeral`       | Exempts the path from the overlay, so writes to it survive the step.     |
 
 `filesystem_mode` only decides what happens to writes the sandbox is already allowed to make. It
-never widens that set: `ephemeral` does not make a read-only path writable. Nor does either mode
-change file ownership, and the sandboxed command runs as the runner's own user with every capability
-dropped and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the
-runner user could not write outside the sandbox stays unwritable inside it.
+never widens that set: `ephemeral` does not make a read-only path writable. Neither mode changes
+file ownership. The sandboxed command runs as the runner's own user with every capability dropped
+and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the runner user
+could not write outside the sandbox stays unwritable inside it.
 
 `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
 under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
@@ -414,16 +414,16 @@ is read-only too; the workspace, `$RUNNER_TEMP` and `write_through:` entries sta
 directory reached through a symlink the command could replace, such as a `~/.docker` that links
 elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the runner's work
 directory at the real path instead.
-Under `write_through: /`, only a symlink in one of the four always-writable paths or another
-`write_through:` entry is refused, though the command could replace one anywhere.
+
+Under `write_through: /`, the step fails only on a symlink in one of the four always-writable paths
+or another `write_through:` entry, though the command could replace one anywhere.
 
 > [!WARNING]
-> `write_through: /` is for trusted code only. Against a compromised command it gives up the outbound
-> restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are reachable
-> again, a `systemd --user` bus included, which starts a process outside the sandbox. The commands
-> this action runs on the host after the command are no longer kept out of writable paths either.
-> See
-> [The `/` opt-out](./docs/reference.md#the--opt-out).
+> `write_through: /` is for trusted code only. Against a compromised command it gives up the
+> outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
+> reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
+> commands this action runs on the host after the command are not kept out of writable paths either.
+> See [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -547,13 +547,13 @@ read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT
 store already. On a RHEL, Fedora or SUSE runner, where GnuTLS reads a directory of certificates
 instead of the store (`wget` on RHEL uses GnuTLS), the CA also goes into a copy of that directory
 mounted over it. A JVM already on the runner reads none of those, only its own keystore, so the CA
-is added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH` and
-of `$JAVA_HOME` with the runner's own `keytool` and mounted over it, letting `mvn`/`gradle`/`java`
-reach the proxy without `proxy_engine: universal`. Chromium, including the
-`chrome-headless-shell` that Puppeteer, Playwright and Remotion download, reads neither the store
-nor any variable, only its compiled-in root store and the NSS database in `$HOME`, so that
-database's `pkcs11.txt` gains, for the step, a read-only slot on a database holding only the CA. The
-database itself stays the runner's own, with whatever the command writes to it.
+is added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH` and of
+`$JAVA_HOME` with the runner's own `keytool` and mounted over it. `mvn`, `gradle` and `java` then
+reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell`
+that Puppeteer, Playwright and Remotion download, reads neither the store nor any variable, only its
+compiled-in root store and the NSS database in `$HOME`, so for the step, that database's
+`pkcs11.txt` gains a read-only slot on a second database that holds only the CA. The database itself
+stays the runner's own, with whatever the command writes to it.
 
 The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
 in [Limitations](#limitations), below.
@@ -561,9 +561,8 @@ in [Limitations](#limitations), below.
 ## Scope
 
 Buildcage controls _where_ your command can connect, not _what code_ it runs. A malicious package
-delivered through an allowed domain still runs. Treat it as one layer in a defense-in-depth
-strategy, a last line of defense so that if something slips through your other measures, at least it
-can't call home.
+delivered through an allowed domain still runs. Treat it as one layer among your other measures: if
+something gets past them, it still cannot reach a destination outside the allowlist.
 
 This action isolates the step it wraps, not the job. An output the command sets reaches later steps
 unchanged, and so does anything it writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`, or
@@ -577,10 +576,10 @@ paths stay open in `persistent` mode:
 a `~/.npmrc` the command leaves still runs code in a later npm step. `filesystem_mode: ephemeral`
 with a narrow `write_through:` prevents that.
 
-An allowlist also cannot stop anything leaving through a service you had to allow anyway. That is a
-structural limit. What it does stop is traffic to a destination that is not on the list, and
-infrastructure an attacker set up is normally not on it, because the command has no reason to reach
-it. That is also the hardest kind of leak to find afterwards.
+An allowlist also cannot stop anything leaving through a service you had to allow anyway. What it
+does stop is traffic to a destination that is not on the list, and infrastructure an attacker set up
+is normally not on it, because the command has no reason to reach it. That is also the hardest kind
+of leak to find afterwards.
 
 An allowlist generated from an audit run already blocks every destination the audit did not record.
 Whether to go further depends on what the step has access to:

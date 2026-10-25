@@ -3,8 +3,8 @@
 > [!WARNING]
 > `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver. Without them,
-> nothing on this page applies and the action behaves as before. Try them in a non-critical workflow
-> first, and pin this action to a commit SHA rather than a version tag if you adopt it.
+> nothing on this page applies. Try them in a non-critical workflow first, and pin this action to a
+> commit SHA rather than a version tag if you adopt it.
 
 `aws_key_check: true` blocks a request to an AWS API unless it is signed with the key the step
 was given. `allowed_aws_role_accounts` names the accounts whose roles the step may assume, so the
@@ -168,8 +168,8 @@ Then, with the report described in [Reading the report](#reading-the-report):
    one `restrict` would block.
 3. Read **⚠️ Restrict Would Block** in the report; see [In `audit`](#in-audit).
    [Troubleshooting](#troubleshooting) gives the usual causes of each reason.
-4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
-   rules, `aws_key_check: true` and the accounts you named over.
+4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries over the
+   URL rules, `aws_key_check: true` and the accounts you named.
 
 ## Reading the report
 
@@ -177,9 +177,9 @@ The report is the step's section in the workflow run's Job Summary.
 
 ### 🔑 AWS Keys
 
-This table follows the allowed hosts and has one row per access key a request was signed with or an
-STS or ECR answer issued, so it shows what the check made of each key even in a run it blocked
-nothing in:
+This table follows the allowed hosts and has one row per access key that signed a request or that an
+STS or ECR answer issued, so it shows what the check made of each key even in a run where it blocked
+nothing:
 
 | Key   | Check                                         | Source                            | Requests | Hosts                                                                  | keyRef             |
 | ----- | --------------------------------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
@@ -206,9 +206,9 @@ report uses the same numbers.
 - **Hosts** names up to three of the hosts its requests went to.
 - **keyRef** is the key's `keyRef` in the [traffic artifact](#in-the-traffic-artifact).
 
-**Communication details** ends each line signed with a key in `[aws key N]`, and the line of a call
-whose answer issued a key names that key too. An unsigned call that issued one, such as a web
-identity's, ends in `[issued aws key N]`:
+**Communication details** ends the line of each request signed with a key in `[aws key N]`, and the
+line of a call whose answer issued a key names that key too. An unsigned call that issued one, such
+as a web identity's, ends in `[issued aws key N]`:
 
 ```
 ✅ 00:01.234: POST https://sts.us-east-1.amazonaws.com/ -> 200 (1.4KB) [aws key 1 → issued key 3]
@@ -249,10 +249,10 @@ The report's **Switch to restrict mode** example includes `aws_key_check: true` 
 `allowed_aws_role_accounts`. The accounts it lists are the ones you gave, plus each account the run
 assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
 block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
-step can assume a role, in an account of its own too, so each added account is left commented out,
-and so is the input itself when you gave none. Its comment says what naming that account alone lets
-through: the keys in **⚠️ Restrict Would Block** from its roles or from ECR registry requests they
-signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
+step can assume a role, including one in an account its author controls, so each added account is
+left commented out, and so is the input itself when you gave none. Its comment says what naming that
+account alone lets through: the keys in **⚠️ Restrict Would Block** from its roles or from ECR
+registry requests they signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
 
 ```yaml
 aws_key_check: true
@@ -380,8 +380,8 @@ A form body the proxy could not read through (see
 ### `aws-ambiguous-credential`
 
 More than one credential on one request: two `Authorization` headers, a header and a presigned URL
-credential, or one repeated. Or an `AssumeRoleWithWebIdentity` form naming its role twice, or
-naming `Action` or `RoleArn` in the query too. Send one credential, and the role in the body only; a
+credential, or one repeated; or an `AssumeRoleWithWebIdentity` form naming its role twice, or naming
+`Action` or `RoleArn` in the query too. Send one credential, and the role in the body only; a
 current SDK does.
 
 ## What it does not protect against
@@ -466,12 +466,12 @@ is the exception: it passes only as the credential of a presigned URL to S3, and
 `aws-key-not-allowed` anywhere else. What happens to a request with no AWS signature depends on the
 host:
 
-| Host                                                                                     | No credential              | Non-AWS token, such as `Bearer` or `Basic` |
-| ---------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------ |
-| Serves every account, such as STS or CloudFormation                                      | `aws-no-credential`¹       | `aws-unsupported-credential`               |
-| A [public host](#which-hosts), which reaches no account, such as `checkip.amazonaws.com` | allowed                    | `aws-unsupported-credential`               |
-| Names its resource, such as an S3 bucket or ECR                                          | allowed                    | allowed                                    |
-| CodeCommit                                                                               | allowed, as Git asks first | `Basic`: see²                              |
+| Host                                                                                     | No credential                               | Non-AWS token, such as `Bearer` or `Basic` |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------ |
+| Serves every account, such as STS or CloudFormation                                      | `aws-no-credential`¹                        | `aws-unsupported-credential`               |
+| A [public host](#which-hosts), which reaches no account, such as `checkip.amazonaws.com` | allowed                                     | `aws-unsupported-credential`               |
+| Names its resource, such as an S3 bucket or ECR                                          | allowed                                     | allowed                                    |
+| CodeCommit                                                                               | allowed, as Git's first request is unsigned | `Basic`: see²                              |
 
 1. `AssumeRoleWithWebIdentity` sent as a form, as the SDKs send it, for a role in an account in
    `allowed_aws_role_accounts` is allowed, and for one in any other account is
@@ -573,10 +573,10 @@ the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
 Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com`,
 `sqs.us-east-1.amazonaws.com` or `s3-control.us-east-1.amazonaws.com`. The account a request to one
 of those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
-request there is blocked, `GET` included, `AssumeRoleWithWebIdentity` excepted (see
+request there is blocked, `GET` included; the exception is `AssumeRoleWithWebIdentity` (see
 [Host and credential](#host-and-credential)). A host missing from the lists above is treated the
-same way; if a legitimate request is blocked for that reason, as `aws-no-credential` or, carrying a
-token, `aws-unsupported-credential`, report it.
+same way; if a legitimate request is blocked for that reason, as `aws-no-credential`, or as
+`aws-unsupported-credential` when it carries a token, report it.
 
 An interface VPC endpoint's own names, such as `vpce-<id>.sts.us-east-1.vpce.amazonaws.com`, are
 hosts of this kind too. The check recognizes STS, EC2 and CodeCommit under them as under their
@@ -603,9 +603,9 @@ and its `reason` or `wouldBlock` says why.
 | Field            | When                                                                                                          | Notes                                                                                                                                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `key`            | on every request the check let through, and on one it blocked that a key it knows signed                      | `env` for the key the step started with, `assumed` for one STS issued, `issued` for one ECR signed a layer's presigned URL with, `none` for a request carrying no access key |
-| `accountId`      | when the check confirmed an account, and for an `assumed` key whatever the verdict                            | the one an `assumed` key came from, a static CodeCommit Git credential names, or the role of an `AssumeRoleWithWebIdentity` call is in                                       |
-| `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it go                                  | the account of that role, whether or not it is named                                                                                                                         |
-| `keyRef`         | on every request signed with an access key, whether or not the check let it go                                | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
+| `accountId`      | when the check confirmed an account, and for an `assumed` key whatever the verdict                            | the account an `assumed` key came from, the one a static CodeCommit Git credential names, or the one the role of an `AssumeRoleWithWebIdentity` call is in                   |
+| `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it through                             | the account of that role, whether or not it is named                                                                                                                         |
+| `keyRef`         | on every request signed with an access key, whether or not the check let it through                           | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
 | `issuedKeyRef`   | on an STS call or an ECR registry redirect that issued a key                                                  | the `keyRef` of the requests signed with that key                                                                                                                            |
 | `roleAccount`    | on an unsigned `AssumeRoleWithWebIdentity` form naming `Action` and `RoleArn` once each, whatever the verdict | the account of the role in `RoleArn`, whether or not it is named; the call is judged by it unless another reason, such as `aws-unreadable`, blocks it first                  |
 

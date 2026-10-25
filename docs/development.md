@@ -27,17 +27,16 @@ The action's own isolation mechanism (`run-isolated.sh`) uses Linux-only primiti
 `nsenter`, `runc`) that can't run natively on macOS. `make setup_sandbox_dev` /
 `make test_sandbox_dev` instead drive it from inside a container with `pid: host` and
 `/var/run/docker/netns` mounted in (see `dev/Dockerfile` and `docker/compose.sandbox-dev.yaml`),
-which is enough to reach the proxy container's `SandboxKey` netns the same way production does.
-That is close enough to the real "runner host + separate proxy container"
-arrangement for day-to-day iteration, though it can't validate the container-boundary parts of
-production. `runc`, `gen-seccomp-profile` and `filesystem-audit` are
-built directly into the dev-loop image (mirroring `docker/universal/Dockerfile`) rather than
-`docker cp`-extracted from the proxy image at runtime, so the dev loop doesn't need the Docker
-socket mounted in just to reach a sibling container; `dev/build-test-bundle.sh` stands in for
-`lib/sandbox/oci-config.ts`'s `buildOciConfig` to build a minimal OCI bundle for the smoke test.
-CI's `test_sandbox_*` e2e jobs run `run-isolated.sh` directly on the runner host instead, matching
-production exactly. Treat those as the final word on whether a change actually works, not this dev
-loop.
+which is enough to reach the proxy container's `SandboxKey` netns the same way production does. That
+is close enough to the real "runner host + separate proxy container" arrangement for day-to-day
+iteration, though it can't validate the container-boundary parts of production. `runc`,
+`gen-seccomp-profile` and `filesystem-audit` are built directly into the dev-loop image (mirroring
+`docker/universal/Dockerfile`) rather than `docker cp`-extracted from the proxy image at runtime, so
+the dev loop doesn't need the Docker socket mounted in just to reach a sibling container;
+`dev/build-test-bundle.sh` stands in for `lib/sandbox/oci-config.ts`'s `buildOciConfig` to build a
+minimal OCI bundle for the smoke test. CI's `test_sandbox_*` e2e jobs run `run-isolated.sh` directly
+on the runner host instead, matching production exactly. Treat those jobs, not this dev loop, as the
+final word on whether a change works.
 
 ```bash
 make setup_sandbox_dev  # start the proxy + dev-loop runner container
@@ -112,11 +111,11 @@ every worktree uses the same addresses. That is why the assertions name those ad
 A fresh worktree needs `vp install` first: `node_modules` is per checkout, and these tests run
 `dist/main.cjs` with the repo's own dependencies.
 
-The rest of `test/integration-test-*.sh` clean up only the proxy containers they started
-themselves, read back from their own `GITHUB_STATE` (`main.ts` writes the name there before
-creating the container). A `buildcage-proxy-*` sweep would otherwise remove, or call a leak,
-whatever another worktree has running. `integration-test-listener-scope.sh` is the one script with
-fixed Compose and container names of its own, and those carry the suffix too.
+Each `test/integration-test-*.sh` script cleans up only the proxy containers it started itself, read
+back from its own `GITHUB_STATE` (`main.ts` writes the name there before creating the container). A
+`buildcage-proxy-*` sweep would otherwise remove, or call a leak, whatever another worktree has
+running. `integration-test-listener-scope.sh` is the one script with fixed Compose and container
+names of its own, and those carry the suffix too.
 
 ## Local Development
 
@@ -129,11 +128,12 @@ instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run 
 `dist/main.cjs` where the `BUILDCAGE_LOCAL_IMAGE_REF` override is reachable. The override logic
 lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
 dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
-build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle. It is
-physically absent, not just unreachable. A CI check (`unit_test` job) and the pre-commit hook
-additionally confirm a normal build's `dist/` never mentions `BUILDCAGE_BUILD_TEST_HOOKS`,
-`BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or `BUILDCAGE_RUN_DEBUG_*` name (such as
-`BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step summary the e2e assertions read).
+build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle, so the
+override code is absent from `dist/` rather than unreachable in it. A CI check (`unit_test` job) and
+the pre-commit hook also confirm a normal build's `dist/` never mentions
+`BUILDCAGE_BUILD_TEST_HOOKS`, `BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or
+`BUILDCAGE_RUN_DEBUG_*` name (such as `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step
+summary the e2e assertions read).
 
 To exercise it locally:
 
@@ -242,9 +242,9 @@ reads back as the traffic artifact's `aws` object, each `-` where it has no valu
 [AWS access key check](./aws.md).
 
 `ts` is HAProxy's termination state and `reason` the block reason where the rule that blocked
-knew one the line could not otherwise show. `tlserr` carries haproxy's own error from the handshake
+knew one the line could not otherwise show. `tlserr` carries HAProxy's own error from the handshake
 with the origin, which is what tells a connection the proxy would not make from one it could not
-make; the passthrough stage terminates no TLS and logs no such field. `fcerr` is haproxy's error
+make; the passthrough stage terminates no TLS and logs no such field. `fcerr` is HAProxy's error
 on the client connection; an `SSL_*` one on a line with no request is shown as `client-tls-failed`,
 except `SSL_FATAL`, a broken record after the handshake.
 
@@ -293,7 +293,7 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
 | `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
 | `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
 | `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
-| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, both engines         |
+| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
 
 The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
 `dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same
@@ -314,9 +314,9 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
   did is not written back. The write-back syncs the tree: a directory the database already has is
   entered rather than replaced, a changed file or symlink is renamed over the old one, a directory
   the command made is created with its mode, and what the command removed is removed last. A file
-  that already matches the copy is not touched. Except for an entry whose type the command changed,
-  which is removed just before its replacement goes in, a write-back that fails partway leaves
-  entries behind rather than losing them.
+  that already matches the copy is not touched. A write-back that fails partway leaves entries
+  behind rather than losing them, except an entry whose type the command changed, which is removed
+  just before its replacement goes in.
 - Write-backs to the same database take turns under a lock, so a step never copies the database
   halfway through another's write-back.
 - Which directories Buildcage made and which steps use them is recorded in
@@ -339,7 +339,7 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   │                          # config generator, core's plus the check
 │   └── core/                  # Code shared with the proxy image's QuickJS scripts
 │       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
-│       │                      # both runtimes, and so is anything it imports — errors.ts today.
+│       │                      # both runtimes, and so is anything it imports (errors.ts).
 │       │                      # actions/, docker/, provenance/, report/ and log/ are Node-only,
 │       │                      # and test/test-shim.ts is the node:test-alike shim *.test.ts uses
 │       │                      # under either runtime
@@ -348,7 +348,7 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 ├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
 │                              # dist/qjs-test are gitignored scratch
 ├── docker/                    # Proxy image build contexts, one per proxy_engine
-│   ├── common/                # Image files both engines share: s6 services, init-iptables
+│   ├── common/                # Image files the engines share: s6 services, init-iptables
 │   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
 │   │                          # gen-seccomp-profile + filesystem-audit
 │   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
@@ -398,11 +398,12 @@ hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left ou
 [AWS access key check](./aws.md):
 
 - SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
-  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body or spelled other than
-  exactly in the query are blocked as `aws-unsupported-credential` without their key being read.
+  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body, or in the query under any
+  spelling but the exact one, are blocked as `aws-unsupported-credential` without their key being
+  read.
 - A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
-  the body can be 4 MiB less the headers. Matching stops at a NUL byte, so a body holding one is
-  `aws-unreadable` as well.
+  the body can be 4 MiB less the headers, and a larger one is `aws-unreadable`. Matching stops at a
+  NUL byte, so a body holding one is `aws-unreadable` too.
 - The proxy reads an STS answer as XML, up to its buffer size (16 KB). STS does not compress its
   answers, so the request's `Accept-Encoding` is left alone. A compressed or JSON answer, or one
   past the buffer, teaches no key and names no account.

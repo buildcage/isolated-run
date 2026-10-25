@@ -138,7 +138,7 @@ certificate fails there exactly as it would under `restrict`. `universal`'s audi
 nothing and breaks nothing.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
-destination named, which is why it is worth running `audit` first.
+destination named. Run `audit` first to find those domains.
 
 ## Rule syntax
 
@@ -150,7 +150,7 @@ either engine.
 A rule is a method list, a space, then a URL pattern. Because a rule contains a space, this input is
 newline-separated. The method is required, so a rule always states what it permits. A `#` at the
 start of a line, or after whitespace, begins a comment that runs to the end of the line, and a blank
-line is ignored, which helps once the list gets long. A `#` with no space before it is not a
+line is ignored, so a long list can be split into groups. A `#` with no space before it is not a
 comment: since `#` never legitimately appears in a rule (it is part of no host or URL, and a
 fragment never travels with a request), it is reported as a mistake rather than silently trimmed.
 
@@ -175,11 +175,11 @@ allowed_url_rules: |
 ```
 
 Methods are separated by `|` or `,`, and `*` means any method. The port may be left out when it is
-the scheme's default, and a pattern with no path allows any path on that host. A `#` fragment is
-refused: it never travels with a request, so a rule carrying one could only match nothing. So is a
-query string (a `?` followed by text holding `=` or `&`), since a rule matches the path alone and
-the query is never compared, and a user name before an `@` in the host, which no request's Host
-carries.
+the scheme's default, and a pattern with no path allows any path on that host. A pattern may not
+carry a `#` fragment, which never travels with a request, so a rule carrying one would match
+nothing; a query string (a `?` followed by text holding `=` or `&`), since a rule matches the path
+alone and the query is never compared; or a user name before an `@` in the host, which no request's
+Host carries.
 
 | Pattern | In a domain                                       | In a path                     |
 | ------- | ------------------------------------------------- | ----------------------------- |
@@ -272,9 +272,9 @@ resolver blocked has no port at all, nothing having been connected to. `telemetr
 ### Blocked rules: `known_blocked_rules`
 
 `known_blocked_rules` lists traffic that is expected to be blocked, so a run isn't failed over a
-block you already know about. It does not allow anything: the traffic stays blocked. That is the
-point for a telemetry endpoint you want blocked but not treated as an error, where allowing it would
-let the request through.
+block you already know about. It does not allow anything: the traffic stays blocked. Use it for a
+telemetry endpoint you want blocked but not treated as an error, where an allow rule would let the
+request through.
 
 Unlike the allow inputs it is newline-separated, one rule per line, because a line can be either
 form:
@@ -325,13 +325,13 @@ allowed_ip_rules: |
 
 A rule is matched against the address the connection goes to, never a name the connection carries,
 so a rule naming a host is refused at setup. A `~` rule is not checked for this: write it against
-the address and port as digits, since one that names a host matches nothing. A range that covers the
-proxy's own address, which every name resolves to inside the cage, still leaves a connection made
-through a name to the domain rules. Either way the connection is tunnelled without inspection: once
-an `ip:port` pair is allowed, any TCP-based protocol can use that path. It is connected as soon as
-it arrives, without waiting for the client to send anything, so a protocol where the server speaks
-first (SMTP, MySQL) works too. It goes to the address the client connected to whatever name it
-carries (under `inspect`, even one an `allowed_tls_rules` entry names), and the report lists it
+the address and port as digits, since one that names a host matches nothing. A connection made
+through a name stays under the domain rules even when a range covers the proxy's own address, which
+every name resolves to inside the cage. Either way the connection is tunnelled without inspection:
+once an `ip:port` pair is allowed, any TCP-based protocol can use that path. It is connected as soon
+as it arrives, without waiting for the client to send anything, so a protocol where the server
+speaks first (SMTP, MySQL) works too. It goes to the address the client connected to, whatever name
+it carries (under `inspect`, even one an `allowed_tls_rules` entry names), and the report lists it
 under the `IP` rule type. Prefer a domain rule where the destination has a stable name.
 
 A connection passed through this way or by `allowed_tls_rules`, any allowed HTTPS connection under
@@ -456,7 +456,7 @@ A name the step looked up and never connected to gets a row of its own, with `DN
 and no port (folded like any other row when a `known_blocked_rules` rule matches it). Under
 `inspect` that is the only trace of a name the step reached for and did not use, which is how a rule
 wider than the step needs shows up. A name that was connected to has no such row: the connection is
-already there. One whose every connection ended before a request keeps it, as the
+already there. A name whose every connection ended before a request keeps that row, since the
 [ones nobody decided](#the-ones-nobody-decided) reach no table.
 
 ## Blocked service names
@@ -561,11 +561,11 @@ annotation, and they fail the step under `fail_on_blocked: true` like any other 
 | `sni-not-allowed`     | the same, with an SNI naming a host no rule allows (`inspect`, `restrict` only)                             |
 
 `bad-request` is most often a protocol that is not HTTP at all and where the client speaks first,
-such as PostgreSQL or `git://`, on a port no `allowed_ip_rules` or `allowed_tls_rules` entry
-covers: anything that is not a TLS handshake is handed to the plain-HTTP stage, which reads it as a
-request and blocks it. Both are
-blocked in `audit` mode too, as the same check is under `universal`, since a request naming no host
-has nothing to connect to whatever the rules say.
+such as PostgreSQL or `git://`, on a port no `allowed_ip_rules` or `allowed_tls_rules` entry covers:
+anything that is not a TLS handshake is handed to the plain-HTTP stage, which reads it as a request
+and blocks it. `bad-request` and `missing-host-header` are blocked in `audit` mode too, as the same
+check is under `universal`, since a request naming no host has nothing to connect to, whatever the
+rules say.
 
 `ip-not-allowed` is a connection to an address such as `203.0.113.9:8443` that ended before its
 request: a client that does not trust the CA, or one waiting for the server to speak first. A client
@@ -582,11 +582,11 @@ undecrypted instead of being read as a request. `known_blocked_rules` can mark a
 name from the SNI or an address; a row reading `(unknown)` names nothing a rule can be written
 against, so the passthrough rule is the only way to clear that one.
 
-`sni-not-allowed` is the same kind of connection carrying an SNI. The name is judged as the
-resolver judges one looked up through DNS, against the host of every rule except `allowed_ip_rules`
-on any port, except that a trailing dot is kept. Through DNS, the same attempt is blocked as
-`dns-not-allowed`. A name the rules allow stays one nobody decided, as it does through DNS: usually a
-client that does not trust the CA, pointed at an address by `/etc/hosts` or `curl --resolve`.
+`sni-not-allowed` is the same kind of connection carrying an SNI. The name is judged as the resolver
+judges one looked up through DNS, against the host of every rule but `allowed_ip_rules`, on any
+port; the one difference is that a trailing dot is kept. Through DNS, the same attempt is blocked as
+`dns-not-allowed`. A name the rules allow stays one nobody decided, as it does through DNS: usually
+a client that does not trust the CA, pointed at an address by `/etc/hosts` or `curl --resolve`.
 `audit` blocks no name, so it blocks no SNI. A rule allowing the host clears one, as does a
 `known_blocked_rules` entry.
 
@@ -623,10 +623,9 @@ passthrough has a certificate of Buildcage's behind it: the first is carried as 
 second is relayed for the step to judge rather than decrypted.
 
 `universal` writes its decision before the connection is made and never sees what became of it, so
-`dns-failed` is the only one of the four it can report. `audit` reports them the same way, though
-nothing there was allowed by a rule either: what the table says is that the rules are not what
-stopped these. The rules `audit` suggests for `restrict` include these hosts too, since the next run
-will ask for them again.
+`dns-failed` is the only one of the four it can report. `audit` reports them the same way, though no
+rule allowed anything there either: the table says only that the rules did not stop these. The rules
+`audit` suggests for `restrict` include these hosts too, since the next run will ask for them again.
 
 **A connection Buildcage never completed is not here.** It is blocked, it is in Blocked Hosts, and
 it does fail the step:
@@ -813,10 +812,10 @@ short form.
 command has to trust that CA. The CA is valid for two days from when it is generated and carries a
 random `serialNumber` in its subject, so no two runs share one. The CA, and where relevant an
 augmented copy of the system CA store, is mounted over the sandbox's own view of those paths. The
-store copy goes back over the path it was read from, which is what the tools going by their own
-compiled-in path read, so it is whichever of the well-known store paths this runner actually has.
-Some tools read a directory of certificates rather than the bundle, so each of these the runner has
-is also covered by a copy holding the CA as well:
+store copy goes back over the path it was read from, whichever of the well-known store paths this
+runner has, since that is the path a tool with a compiled-in store path reads. Some tools read a
+directory of certificates rather than the bundle, so each of these directories the runner has is
+covered by a copy holding the CA too:
 
 - `/etc/pki/ca-trust/source/anchors`, p11-kit's anchors on RHEL and Fedora, read by GnuTLS there
   through p11-kit
@@ -844,9 +843,9 @@ one points depends on what it means to the tool that reads it:
 A variable that is already set is left alone rather than appended to, and the step warns about it
 unless it points at the system store. `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `npm_config_cafile` (in
 any case), `AWS_CA_BUNDLE`, `CARGO_HTTP_CAINFO` and `BUNDLE_SSL_CA_CERT` are never set, but warned
-about the same way when the step sets them. The CA is added to a store that already exists rather than
-creating one. Both are in
-[Limitations](../README.md#limitations), with what they mean for a command that needs TLS trust.
+about the same way when the step sets them. The CA goes only into a store that already exists; none
+is created. Both limits are in [Limitations](../README.md#limitations), with what they mean for a
+command that needs TLS trust.
 
 ### Chromium
 
@@ -1007,9 +1006,9 @@ and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`; see
 `write_through: /` makes every path writable but those that stay read-only under any writable
 parent: `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, the docker CLI's config directory, the
 runner's install directory, its `_actions` directory and the reserved paths above. It only means
-anything under `persistent` and is rejected under `ephemeral`, where it would persist every write,
-the one thing that mode exists to prevent. The sentinel is the literal `/` only: an entry that merely _resolves_ to `/` (a miscounted
-`../`, say) is an error rather than a silent full opt-out.
+anything under `persistent` and is rejected under `ephemeral`, since that mode discards writes and
+`/` would persist every one. The sentinel is the literal `/` only: an entry that merely _resolves_
+to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
 
 > [!WARNING]
 > Use `write_through: /` only for code you trust. Against a compromised command it removes more
@@ -1029,8 +1028,8 @@ the one thing that mode exists to prevent. The sentinel is the literal `/` only:
 > - Symlinks are refused only in the four always-writable paths and other `write_through:` entries,
 >   though the command could replace one anywhere.
 >
-> What still holds is the read-only paths named at the start of this section, the `/proc` masks and
-> the command's own network namespace. The step warns about all this when `write_through: /` is set.
+> The read-only paths named at the start of this section, the `/proc` masks and the command's own
+> network namespace still hold. The step warns about all this when `write_through: /` is set.
 
 ### The former input names
 
