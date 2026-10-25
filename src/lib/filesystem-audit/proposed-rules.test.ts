@@ -1,7 +1,33 @@
 import { describe, it, expect } from "vitest";
 
-import { expectedRulesFile, UPLOAD_NOTE } from "./proposed-rules.ts";
+import { expectedRulesFile, givenRules, UPLOAD_NOTE } from "./proposed-rules.ts";
 import { parseExpectedRules } from "./rules.ts";
+
+describe("givenRules", () => {
+  const heading = "# Not matched in this run";
+
+  it("drops the heading wherever it stands, with the blank lines around it", () => {
+    expect(givenRules([heading, "* R ./a"])).toStrictEqual(["* R ./a"]);
+    expect(givenRules(["* R ./a", "", heading])).toStrictEqual(["* R ./a"]);
+    expect(givenRules(["* R ./a", heading, "* R ./b"])).toStrictEqual(["* R ./a", "* R ./b"]);
+    expect(givenRules(["* R ./a", "", heading, "", "", "* R ./b"])).toStrictEqual([
+      "* R ./a",
+      "* R ./b",
+    ]);
+  });
+
+  it("drops each heading when the workflow's and the config file's rules both carry one", () => {
+    expect(givenRules(["* R ./a", heading, "* R ./b", "", heading, "* R ./c"])).toStrictEqual([
+      "* R ./a",
+      "* R ./b",
+      "* R ./c",
+    ]);
+  });
+
+  it("keeps blank lines that stand between rules", () => {
+    expect(givenRules(["* R ./a", "", "* R ./b"])).toStrictEqual(["* R ./a", "", "* R ./b"]);
+  });
+});
 
 describe("expectedRulesFile", () => {
   const row = (program: string, flags: string, path: string) => ({
@@ -77,8 +103,8 @@ describe("expectedRulesFile", () => {
     );
   });
 
-  it("leaves out an earlier run's heading, and the blank lines before it, among the rules given", () => {
-    const given = ["* R ./a", "", "", "# Not matched in this run", "bash R ./c"];
+  it("leaves out an earlier run's heading, and the blank lines around it, among the rules given", () => {
+    const given = ["* R ./a", "", "", "# Not matched in this run", "", "bash R ./c"];
     expect(
       expectedRulesFile(given, [row("bash", "W", "./d")])
         ?.split("\n")

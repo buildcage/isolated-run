@@ -71132,11 +71132,13 @@ var RuleMatcher = class {
 };
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; drop this key once the baseline holds.";
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
 function givenRules(written) {
-	let out = [];
-	for (let line of written) if (line !== "# Not matched in this run") out.push(line);
-	else for (; out.at(-1) === "";) out.pop();
+	let out = [], afterHeading = !1;
+	for (let line of written) if (line === "# Not matched in this run") {
+		for (; out.at(-1) === "";) out.pop();
+		afterHeading = !0;
+	} else (!afterHeading || line !== "") && (out.push(line), afterHeading = !1);
 	return out;
 }
 function expectedRulesFile(written, proposed) {

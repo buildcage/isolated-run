@@ -25,21 +25,27 @@ const ruleField = (text: string): string => {
 /** Over the upload key, as the artifact holds every path the step touched and a
  *  file committed as is should say what keeps it coming. */
 export const UPLOAD_NOTE =
-  "# Uploads the full record and the next proposed rules each run; drop this key once the baseline holds.";
+  "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
 
 /** The heading over the rules a run with rules adds for what they did not take. */
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
 
 /**
- * The rules as given, less an earlier run's heading and the blank lines before
+ * The rules as given, less an earlier run's heading and the blank lines around
  * it, which a file proposed before and committed would otherwise keep over
  * rules this run matched.
  */
 export function givenRules(written: string[]): string[] {
   const out: string[] = [];
+  let afterHeading = false;
   for (const line of written) {
-    if (line !== NOT_MATCHED_HEADING) out.push(line);
-    else while (out.at(-1) === "") out.pop();
+    if (line === NOT_MATCHED_HEADING) {
+      while (out.at(-1) === "") out.pop();
+      afterHeading = true;
+    } else if (!afterHeading || line !== "") {
+      out.push(line);
+      afterHeading = false;
+    }
   }
   return out;
 }
