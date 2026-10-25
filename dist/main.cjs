@@ -71277,6 +71277,15 @@ function sniHost(sni) {
 }
 //#endregion
 //#region src/core/lib/log/traffic-event.ts
+const FAILURE_REASONS$1 = new Set([
+	"origin-unreachable",
+	"origin-no-response",
+	"origin-aborted",
+	"dns-failed"
+]);
+function actionFor(reason, isAudit) {
+	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
+}
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
@@ -76880,6 +76889,74 @@ function readActionVersion$1(docker, containerId, proxyEngine) {
 	}
 }
 //#endregion
+//#region src/core/lib/log/dns.ts
+const DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/;
+function timeOf(stamp) {
+	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
+	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
+}
+async function scanDnsLog(lines, isAudit = !1) {
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let trimmed = line.trim();
+		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
+		let match = DNS.exec(trimmed);
+		if (match) {
+			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
+			existing ? existing.allowed ||= allowed : seen.set(match[3], {
+				time,
+				allowed
+			});
+			continue;
+		}
+		let lookup = DNS_DISCOVERY.exec(trimmed);
+		if (lookup) {
+			let key = `${lookup[2]}\t${lookup[3]}`;
+			discovery.has(key) || discovery.set(key, {
+				time: timeOf(lookup[1]),
+				host: lookup[2],
+				queryType: lookup[3]
+			});
+			continue;
+		}
+		let blockedService = DNS_SERVICE_DENIED.exec(trimmed);
+		blockedService ? service.has(blockedService[2]) || service.set(blockedService[2], {
+			time: timeOf(blockedService[1]),
+			host: blockedService[2],
+			queryType: blockedService[3]
+		}) : DNS_LINE.test(trimmed) && unparsed++;
+	}
+	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
+		let reason = allowed ? void 0 : "dns-not-allowed", event = {
+			time,
+			action: actionFor(reason, isAudit),
+			protocol: "dns",
+			host
+		};
+		return reason !== void 0 && (event.reason = reason), event;
+	});
+	for (let { time, host, queryType } of discovery.values()) events.push({
+		time,
+		action: "discovery",
+		protocol: "dns",
+		host,
+		queryType
+	});
+	for (let { time, host, queryType } of service.values()) events.push({
+		time,
+		action: actionFor("dns-service-not-allowed", isAudit),
+		protocol: "dns",
+		host,
+		queryType,
+		reason: "dns-service-not-allowed"
+	});
+	return {
+		events,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
 //#region src/core/lib/log/start-marker.ts
 const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
 function incompleteReason(terminationState, method) {
@@ -76888,11 +76965,7 @@ function incompleteReason(terminationState, method) {
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
-function timeOf(stamp) {
-	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
-	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
-}
+const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function isBlock(terminationState) {
 	let cause = terminationState[0];
 	if (cause === "P" || cause === "S") return !0;
@@ -76910,15 +76983,7 @@ function reasonFor(logged, terminationState, tlsError, method) {
 		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
 	}
 }
-const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
-	"origin-unreachable",
-	"origin-no-response",
-	"origin-aborted",
-	"dns-failed"
-]);
-function actionFor(reason, isAudit) {
-	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
-}
+const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]);
 function urlOf(scheme, authority, target) {
 	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
 }
@@ -77010,67 +77075,6 @@ function blockUnpassedAddresses(events) {
 function blockUnallowedNames(events, allowsName) {
 	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
-async function scanInspectDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let trimmed = line.trim();
-		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
-		let match = DNS.exec(trimmed);
-		if (match) {
-			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
-			existing ? existing.allowed ||= allowed : seen.set(match[3], {
-				time,
-				allowed
-			});
-			continue;
-		}
-		let lookup = DNS_DISCOVERY.exec(trimmed);
-		if (lookup) {
-			let key = `${lookup[2]}\t${lookup[3]}`;
-			discovery.has(key) || discovery.set(key, {
-				time: timeOf(lookup[1]),
-				host: lookup[2],
-				queryType: lookup[3]
-			});
-			continue;
-		}
-		let blockedService = DNS_SERVICE_DENIED.exec(trimmed);
-		blockedService ? service.has(blockedService[2]) || service.set(blockedService[2], {
-			time: timeOf(blockedService[1]),
-			host: blockedService[2],
-			queryType: blockedService[3]
-		}) : DNS_LINE.test(trimmed) && unparsed++;
-	}
-	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
-		let reason = allowed ? void 0 : "dns-not-allowed", event = {
-			time,
-			action: actionFor(reason, isAudit),
-			protocol: "dns",
-			host
-		};
-		return reason !== void 0 && (event.reason = reason), event;
-	});
-	for (let { time, host, queryType } of discovery.values()) events.push({
-		time,
-		action: "discovery",
-		protocol: "dns",
-		host,
-		queryType
-	});
-	for (let { time, host, queryType } of service.values()) events.push({
-		time,
-		action: actionFor("dns-service-not-allowed", isAudit),
-		protocol: "dns",
-		host,
-		queryType,
-		reason: "dns-service-not-allowed"
-	});
-	return {
-		events,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
@@ -77084,7 +77088,7 @@ function resolverAllows(parameters) {
 }
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
@@ -77143,7 +77147,7 @@ async function scanHaproxyLog(lines, isAudit) {
 //#region src/core/lib/report/build/universal.ts
 async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/lib/report-fetch.ts
