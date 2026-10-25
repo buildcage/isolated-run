@@ -1315,7 +1315,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(read(early, false)).toStrictEqual({});
   });
 
-  it("fails the step with fail_on_unexpected_file_access when the kernel skipped the tracer's hooks", async () => {
+  it("leaves the step alone when the kernel skipped hooks, which counts the whole host", () => {
     const note = annotation();
     const { deps: d } = deps({
       raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
@@ -1326,11 +1326,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       d,
     );
 
-    expect(note.error).toHaveBeenCalledWith(
-      "Not every file access may have been checked against expected_filesystem_rules, as the kernel skipped the tracer's hooks; failing the step, as fail_on_unexpected_file_access is true.",
-    );
-    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(process.exitCode).toBe(1);
+    expect(note.error).not.toHaveBeenCalled();
+    expect(read.verdictItems).toStrictEqual({});
+    expect(process.exitCode).toBeUndefined();
   });
 
   it("says so when the rules took every access, and still writes them", async () => {
