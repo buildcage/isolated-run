@@ -315,7 +315,8 @@ as a `syscall` line; the summary leaves it out, since many programs try a system
 without it, as Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it
 either way. A program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step
 fails with `EPERM`, set `upload_filesystem_audit_artifact: true` and look for a `syscall` line in
-the artifact.
+the artifact. One the profile allows only for some arguments, as `clone`, is not recorded even when
+refused, since the kernel's own `EPERM` for it would read the same.
 
 A program killed for a 32-bit system call is noted under the heading and shows in the details as
 `syscall:32-bit <name> (killed)`; a thread killed while others run on is not recorded.
@@ -369,9 +370,9 @@ and the section then shows only what falls outside it:
 ### ⚠️ Unexpected Accesses (1)
 1,204 recorded operations matched `expected_filesystem_rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
-| Program               | Command             | Access | Path        |
-| --------------------- | ------------------- | ------ | ----------- |
-| `/usr/local/bin/node` | `node[npm]`, `node` | R      | `~/.npmrc`  |
+| Program               | Command                | Access | Path       |
+| --------------------- | ---------------------- | ------ | ---------- |
+| `/usr/local/bin/node` | `node[npm ci]`, `node` | R      | `~/.npmrc` |
 ```
 
 The baseline shows a new path or a new program. It cannot tell which code inside a program made an
@@ -430,14 +431,16 @@ it: the comparison shows both, and you decide which to keep. A `# Not matched in
 committed with the file is dropped from the next one.
 
 No file is proposed when the run recorded no access, when the accesses touched too many distinct
-paths, or when the artifact could not be prepared or uploaded; the **Expected filesystem rules**
-element says which.
+paths, when the file could not be written, or when the artifact could not be prepared or uploaded;
+the **Expected filesystem rules** element says which.
 
 The traffic report's **Switch to restrict mode** example keeps the rules. Where the run's artifact
 holds the file, the example names it in `config_file` at `path/to/expected-filesystem-rules.yml`,
 for you to commit there. On `pull_request_target` or `workflow_run`, or without the file, it lists
-the rules under `with:`, without `upload_filesystem_audit_artifact`, so add that back to keep
-getting proposed files. It adds `fail_on_unexpected_file_access: true` when the step set it.
+the rules under `with:`, or, where that is too large to print, says that uploading the artifact
+would name the file instead. Neither form sets `upload_filesystem_audit_artifact`, so add it back
+to keep getting proposed files. It adds `fail_on_unexpected_file_access: true` when the step set
+it.
 
 ### What the summary shows
 
@@ -476,7 +479,9 @@ can be copied in:
   Regular expressions are not supported.
 - **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
   included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
-  process's threads. `/proc/*/` would also match `/proc/sys/` and every other entry in `/proc`.
+  process's threads. A process the recording has no `nspid` for shows its own directory as
+  `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match
+  `/proc/sys/` and every other entry in `/proc`.
 - Fields are separated by spaces or tabs. A field holding a space, an empty one, and one starting
   with `#` are quoted, `"./my file"`, but for `memfd:"name"`, quoted already. Names are written with
   the escapes the summary shows, `\"` and `\\` included, and are matched as the summary shows them.
@@ -486,10 +491,10 @@ can be copied in:
 
 The step fails before the command runs when the rules are set without `filesystem_audit: record`,
 and on a line that is not a rule, with `Invalid expected_filesystem_rules at <where>: <reason>`:
-other than three fields, a quote not closed, an access of other letters, an escape the summary
-never writes, or a number or `thread-self` in a `/proc` path. `<where>` is `input:<n>` for the
-`n`th line of the workflow's value, `config:<n>` for line `n` of the config file, or `config` where
-YAML may have joined the value's lines, as outside a `|` block.
+other than three fields, a quote not closed or not ending its field, an access of other letters,
+an escape the summary never writes, or a number or `thread-self` in a `/proc` path. `<where>` is
+`input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of the config
+file, or `config` where YAML may have joined the value's lines, as outside a `|` block.
 
 ### How rules match
 
@@ -552,7 +557,8 @@ The summary can also open with a warning, or be missing:
   audit refuses; see [What changes in the step](#what-changes-in-the-step).
 
 With `fail_on_unexpected_file_access: true`, an incomplete record, a recording that could not be
-read and a summary that could not be built also fail the step; see
+read and one that could not be summarized also fail the step, but not a summary that could not be
+written; see
 [What the summary shows](#what-the-summary-shows).
 
 ### Skipped hooks
@@ -589,7 +595,12 @@ where the kernel offers that mode.
   `symlink` or `link` on a name already there (`EEXIST`), as `mkdir -p` meets at every level it
   keeps, and one made by `bind(2)` that the kernel refuses before reaching its file. A failed `exec`
   can still show the file it opened as an `open` with `x`.
-- The sandbox's own setup, and the step's shell reading its script.
+- An `open` refused before the kernel looked its name up, as one a seccomp filter stopped or one
+  with no free descriptor, unless it failed with `ENAMETOOLONG`.
+- A call through a descriptor that the kernel refused before reaching its file, unless the
+  descriptor is still open on a regular file or a directory when the call returns.
+- The sandbox's own setup, and the step's shell reading its script, unless the record is
+  incomplete.
 - What the kernel writes into a core dump when a process crashes, where `core_pattern` names a
   path. The file's open is recorded, and so is reading it afterwards.
 
@@ -624,7 +635,8 @@ holds `filesystem-audit.jsonl`, and the proposed rules of [Expected accesses](#e
 beside it. The record is one JSON object per line, in the order the tracer caught the accesses.
 Opens and path changes are written when their call returns, so lines from different threads can be
 slightly out of `t` order. It holds only the step's own accesses, as the summary does: the sandbox's
-setup is left out, and the step's shell is named `bash`, with no `program`. A few examples:
+setup is left out, and the step's shell is named `bash`, with no `program`. A record marked
+incomplete can hold the setup too, in the summary as well. A few examples:
 
 ```sh
 # Every path written, made or moved to
