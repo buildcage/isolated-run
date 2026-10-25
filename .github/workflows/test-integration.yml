@@ -240,11 +240,33 @@ jobs:
             exit 1
           fi
 
+  targets:
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+    name: "integration: every test script has a make target"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only recipe lines that start with the script count, so a comment or a
+      # help text naming one does not.
+      - name: Compare test/integration-test-*.sh with the scripts the Makefile runs
+        run: |
+          if ! diff \
+            <(find test -maxdepth 1 -name 'integration-test-*.sh' | sed 's|^test/||' | sort) \
+            <(grep -oE $'^\t+@?\\./test/integration-test-[a-z0-9-]+\\.sh' Makefile | sed 's|.*/||' | sort -u); then
+            echo "::error::< lines are scripts no Makefile target runs; > lines are scripts the Makefile names that do not exist."
+            exit 1
+          fi
+
   # Single, stably-named required status check for branch protection.
   integration-tests-passed:
     name: Integration tests passed
     runs-on: ubuntu-latest
-    needs: [changes, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
+    needs: [changes, targets, test_sandbox, test_sandbox_universal, test_sandbox_inspect]
     if: always()
     permissions: {}
     steps:

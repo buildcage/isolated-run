@@ -168,13 +168,15 @@ They drive `dist/main.cjs` directly (`test/integration-test-*.sh`). The first th
 `BUILDCAGE_LOCAL_IMAGE_REF` and a [test-hook build](#the-action-against-an-unpublished-image).
 They do not all want the same image: the inspect group needs one built from `docker/inspect`. The
 last two take a universal and an inspect image at once, in `BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL` and
-`BUILDCAGE_LOCAL_IMAGE_REF_INSPECT`. So `make test_integration` records what CI runs rather than
-running it in one go; build the images a group needs, then run that group.
+`BUILDCAGE_LOCAL_IMAGE_REF_INSPECT`; the listener check's inspect image is built without test hooks,
+as it ships. So `make test_integration` records what CI runs rather than
+running it in one go; build the images a group needs, then run that group. CI also checks that every
+`test/integration-test-*.sh` is run by a target.
 
 The fixture groups start the proxy with `docker/compose.action.test-<engine>.yaml` layered on the
 shipped `docker/compose.action.yaml` (`BUILDCAGE_TEST_COMPOSE_OVERLAY`), so they run what ships
-plus the fixture network and nothing in place of it. The config check loads the golden configs
-under `src/core/lib/acl/__fixtures__/` and `src/proxy/__fixtures__/`, and one the image's own
+plus the fixture network and nothing in place of it. The config check loads every golden config
+(`src/**/__fixtures__/*.cfg`), and one the image's own
 generator writes from a large rule set, with `haproxy -c`. CoreDNS has no way to check a Corefile
 without serving it, so the Corefile is not checked.
 
