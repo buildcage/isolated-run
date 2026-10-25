@@ -1,6 +1,6 @@
 #!/bin/bash
 # Verifies the run action's report output for the proxy_engine: inspect e2e
-# job (test-e2e.yml's test_sandbox_concurrency_inspect). Reads
+# job (test-e2e.yml's test_sandbox_inspect). Reads
 # BUILDCAGE_RUN_DEBUG_SUMMARY_FILE for the same reason as assert-sandbox.sh.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
