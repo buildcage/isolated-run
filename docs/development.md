@@ -4,18 +4,144 @@ This document covers local development, testing, and the project structure of is
 
 ## Contents
 
-- [Local Usage](#local-usage)
-- [Testing](#testing)
-- [Local Development](#local-development)
 - [Formatting & Linting](#formatting--linting)
-- [Viewing Logs](#viewing-logs)
+- [Directory Structure](#directory-structure)
+- [Local Usage](#local-usage)
+- [Local Development](#local-development)
+- [Testing](#testing)
 - [Makefile Commands](#makefile-commands)
+- [Viewing Logs](#viewing-logs)
 - [The process environment](#the-process-environment)
 - [The sandbox's PID 1](#the-sandboxs-pid-1)
 - [Pinning `docker` and `sudo`](#pinning-docker-and-sudo)
 - [Chromium's NSS database](#chromiums-nss-database)
-- [Directory Structure](#directory-structure)
 - [Troubleshooting](#troubleshooting)
+
+## Formatting & Linting
+
+Formatting, linting, and type-aware linting are handled by [vp (Vite+)](https://viteplus.dev/),
+installed globally on your machine like `pnpm`/`corepack` rather than through `pnpm exec`:
+
+```bash
+curl -fsSL https://vite.plus | bash   # macOS/Linux
+# Windows: irm https://viteplus.dev/install.ps1 | iex
+```
+
+The project pins its own toolchain version via the `vite-plus` devDependency in `package.json`
+(the same way `packageManager` pins `pnpm`), and the globally installed `vp` binary detects and
+delegates to that pinned version automatically, so plain `vp ...` commands are reproducible without
+going through `pnpm exec`.
+
+```bash
+vp check       # format + lint + type-aware lint (read-only; what CI runs)
+vp check --fix # same, but auto-fixes format/lint issues in place
+vp lint --fix
+vp fmt --write
+```
+
+`vp run typecheck` (`tsc`) remains the authoritative full type check; `vp check`'s type-aware
+linting (via `oxlint-tsgolint`) catches a subset of type-driven issues fast but doesn't replace it.
+
+Running `vp install` (in place of `pnpm install`) automatically sets up a pre-commit hook, via the
+`prepare` script, that formats and lints your staged files (`vite.config.ts`'s `staged` config)
+before each commit, auto-fixing and re-staging what it can.
+
+## Directory Structure
+
+```text
+.
+├── action.yml                 # Action entry (node24 → dist/main.cjs, dist/post.cjs)
+├── src/                       # Source (ESM)
+│   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
+│   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
+│   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers),
+│   │                          # filesystem-audit/ (the recording's reduction, summary and artifact)
+│   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
+│   │                          # built for both runtimes; scripts/ holds this action's inspect
+│   │                          # config generator, core's plus the check
+│   └── core/                  # Code shared with the proxy image's QuickJS scripts
+│       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
+│       │                      # both runtimes, and so is anything it imports (errors.ts,
+│       │                      # line-comments.ts, log/proxy-address.ts). actions/, docker/,
+│       │                      # provenance/, report/ and the rest of log/ are Node-only, and
+│       │                      # test/test-shim.ts is the node:test-alike shim *.test.ts uses
+│       │                      # under either runtime
+│       └── scripts/           # QuickJS only: each engine's config generator, the test runner
+│                              # and qjs's type declarations
+├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
+│                              # dist/qjs-test are gitignored scratch
+├── docker/                    # Proxy image build contexts, one per proxy_engine
+│   ├── common/                # Image files the engines share: s6 services, init-iptables
+│   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
+│   │                          # gen-seccomp-profile + filesystem-audit
+│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
+│   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
+│   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
+│   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links
+│   ├── check-alpine-licenses.sh # Fails the image build on an Alpine package that
+│   │                          # licenses/alpine-packages.txt does not cover
+│   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
+│   │                          # image ref), distinct from the top-level compose.yaml below
+│   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
+│   └── compose.sandbox-dev.yaml          # Mac dev-loop overlay (see dev/)
+├── scripts/
+│   ├── run-isolated.sh        # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
+│   └── buildcage-init.sh      # The sandbox's PID 1: applies the step environment from stdin,
+│                              # runs the step's script, forwards signals and reaps orphans
+├── test/                      # integration-test-*.sh driving dist/main.cjs, assert-*.sh/.mjs
+│                              # checking what the e2e steps reported, and *-scenarios.sh run
+│                              # inside the sandbox as a step's own `run:`. helpers.sh carries
+│                              # what they share, driver-helpers.sh the drivers' own setup and
+│                              # run_step, helpers.mjs the pass/fail of the .mjs ones
+├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
+│                              # refresh; not used in production or CI
+├── docs/                      # reference.md, development.md, security.md, aws.md,
+│                              # filesystem-audit.md, plus the rules.md/inspect-engine.md
+│                              # link stubs
+├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
+│                              # during `vp run build`, and what .glf.jsonc substitutes in.
+│                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
+│                              # QuickJS-ng, the s6-overlay family and the Alpine packages in
+│                              # alpine/) are copied into both images, with alpine-packages.txt
+│                              # mapping each installed Alpine package to them
+├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
+│                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
+└── Makefile                   # Operational commands
+```
+
+Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
+`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
+check to core's. Each runs under
+QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
+through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
+`haproxy-universal-config.ts` for `universal`). rolldown bundles it into
+`/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
+
+The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`, from the
+hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left out of
+[AWS access key check](./aws.md):
+
+- SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
+  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body, or in the query under any
+  spelling but the exact one, are blocked as `aws-unsupported-credential` without their key being
+  read.
+- A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
+  the body can be 4 MiB less the headers, and a larger one is `aws-unreadable`. Matching stops at a
+  NUL byte, so a body holding one is `aws-unreadable` too.
+- The proxy reads an STS answer as XML, up to its buffer size (16 KB). STS does not compress its
+  answers, so the request's `Accept-Encoding` is left alone. A compressed or JSON answer, or one
+  past the buffer, teaches no key and names no account.
+
+Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
+keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
+configs. A path in both would be settled silently by copy order, so
+`src/core/lib/docker/engine-files.test.ts` rejects one.
+
+runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per architecture,
+both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`). Renovate updates the
+version and the SHA256 lines together, taking the digests from the release's own checksum files; the
+`digestVersion` in the comment above each SHA256 line tells it which release that digest belongs to.
+A bump by hand changes all of them: the version line, each SHA256 line and each `digestVersion`.
 
 ## Local Usage
 
@@ -45,6 +171,36 @@ final word on whether a change works.
 make setup_sandbox_dev  # start the proxy + dev-loop runner container
 make test_sandbox_dev   # run a sample isolated command and verify allow/block + capability drop
 ```
+
+## Local Development
+
+### Local testing of the action
+
+Sigstore verification requires a real, published GHCR image, so the action normally can't run
+against an unpublished branch or local changes. This repo's own CI (the `test_sandbox_*` jobs in
+`.github/workflows/test-e2e.yml`) tests the real action end-to-end against a locally built image
+instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles
+`dist/main.cjs` where the `BUILDCAGE_LOCAL_IMAGE_REF` override is reachable. The override logic
+lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
+dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
+build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle, so the
+override code is absent from `dist/` rather than unreachable in it. A CI check (`unit_test` job) and
+the pre-commit hook also confirm a normal build's `dist/` never mentions
+`BUILDCAGE_BUILD_TEST_HOOKS`, `BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or
+`BUILDCAGE_RUN_DEBUG_*` name (such as `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step
+summary the e2e assertions read).
+
+To exercise it locally:
+
+1. Build the image: `docker compose build proxy`.
+2. `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
+3. Run it with `BUILDCAGE_LOCAL_IMAGE_REF=<image ref from step 1>` set (e.g. via `act`, or by
+   invoking `node dist/main.cjs` directly with the relevant `INPUT_*` env vars; note the action's
+   own isolation step still needs a real Linux host, so this only gets you past image verification,
+   not a full local run on macOS). Never commit a `dist/main.cjs` built this way: run
+   `vp run build` again (without the flag) before committing.
+
+See [security.md](./security.md#verification-limitations) for more details.
 
 ## Testing
 
@@ -120,64 +276,33 @@ back from its own `GITHUB_STATE` (`main.ts` writes the name there before creatin
 running. `integration-test-listener-scope.sh` is the one script with fixed Compose and container
 names of its own, and those carry the suffix too.
 
-## Local Development
+## Makefile Commands
 
-### Local testing of the action
+`make help` lists every target with its own description. The ones you type most:
 
-Sigstore verification requires a real, published GHCR image, so the action normally can't run
-against an unpublished branch or local changes. This repo's own CI (the `test_sandbox_*` jobs in
-`.github/workflows/test-e2e.yml`) tests the real action end-to-end against a locally built image
-instead, via a build-time-gated mechanism: `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build` compiles
-`dist/main.cjs` where the `BUILDCAGE_LOCAL_IMAGE_REF` override is reachable. The override logic
-lives in its own module (`src/core/lib/provenance/local-image-override.ts`), loaded only via a
-dynamic `import()` gated by that build-time flag. Without the flag (i.e. every normal/committed
-build), rolldown's own module-graph tree-shaking excludes that entire file from the bundle, so the
-override code is absent from `dist/` rather than unreachable in it. A CI check (`unit_test` job) and
-the pre-commit hook also confirm a normal build's `dist/` never mentions
-`BUILDCAGE_BUILD_TEST_HOOKS`, `BUILDCAGE_LOCAL_IMAGE_REF` or any `BUILDCAGE_TEST_*` or
-`BUILDCAGE_RUN_DEBUG_*` name (such as `BUILDCAGE_RUN_DEBUG_SUMMARY_FILE`, the copy of the step
-summary the e2e assertions read).
+| Command                                          | Description                                                                |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| `make setup_sandbox_dev`                         | Start the proxy and the mac-friendly dev-loop runner                       |
+| `make test_sandbox_dev`                          | Run a sample isolated command in the dev loop and verify isolation         |
+| `make clean_sandbox_dev`                         | Stop and remove the dev-loop containers                                    |
+| `make test_unit`                                 | Every unit test: core, the action's own, and the QuickJS run               |
+| `make test_unit_coverage`                        | Every Node unit test in one run, with a coverage report                    |
+| `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
+| `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
+| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
+| `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
+| `make test_integration_sandbox_linux_signals`    | The second half's cancel tests alone, which CI runs on 22.04 too           |
+| `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
+| `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
+| `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
+| `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
+| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
 
-To exercise it locally:
-
-1. Build the image: `docker compose build proxy`.
-2. `BUILDCAGE_BUILD_TEST_HOOKS=1 vp run build`
-3. Run it with `BUILDCAGE_LOCAL_IMAGE_REF=<image ref from step 1>` set (e.g. via `act`, or by
-   invoking `node dist/main.cjs` directly with the relevant `INPUT_*` env vars; note the action's
-   own isolation step still needs a real Linux host, so this only gets you past image verification,
-   not a full local run on macOS). Never commit a `dist/main.cjs` built this way: run
-   `vp run build` again (without the flag) before committing.
-
-See [security.md](./security.md#verification-limitations) for more details.
-
-## Formatting & Linting
-
-Formatting, linting, and type-aware linting are handled by [vp (Vite+)](https://viteplus.dev/),
-installed globally on your machine like `pnpm`/`corepack` rather than through `pnpm exec`:
-
-```bash
-curl -fsSL https://vite.plus | bash   # macOS/Linux
-# Windows: irm https://viteplus.dev/install.ps1 | iex
-```
-
-The project pins its own toolchain version via the `vite-plus` devDependency in `package.json`
-(the same way `packageManager` pins `pnpm`), and the globally installed `vp` binary detects and
-delegates to that pinned version automatically, so plain `vp ...` commands are reproducible without
-going through `pnpm exec`.
-
-```bash
-vp check       # format + lint + type-aware lint (read-only; what CI runs)
-vp check --fix # same, but auto-fixes format/lint issues in place
-vp lint --fix
-vp fmt --write
-```
-
-`vp run typecheck` (`tsc`) remains the authoritative full type check; `vp check`'s type-aware
-linting (via `oxlint-tsgolint`) catches a subset of type-driven issues fast but doesn't replace it.
-
-Running `vp install` (in place of `pnpm install`) automatically sets up a pre-commit hook, via the
-`prepare` script, that formats and lints your staged files (`vite.config.ts`'s `staged` config)
-before each commit, auto-fixing and re-staging what it can.
+The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
+`dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same
+image: the inspect group needs one built from `docker/inspect`, and `test_integration_listener_scope`
+builds both images itself and wants the variable unset. So `make test_integration` records what CI
+runs rather than running it in one go; build the image a group needs, then run that group.
 
 ## Viewing Logs
 
@@ -277,34 +402,6 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
   'http://localhost/metrics?scope=global' | grep dropped_logs
 ```
 
-## Makefile Commands
-
-`make help` lists every target with its own description. The ones you type most:
-
-| Command                                          | Description                                                                |
-| ------------------------------------------------ | -------------------------------------------------------------------------- |
-| `make setup_sandbox_dev`                         | Start the proxy and the mac-friendly dev-loop runner                       |
-| `make test_sandbox_dev`                          | Run a sample isolated command in the dev loop and verify isolation         |
-| `make clean_sandbox_dev`                         | Stop and remove the dev-loop containers                                    |
-| `make test_unit`                                 | Every unit test: core, the action's own, and the QuickJS run               |
-| `make test_unit_coverage`                        | Every Node unit test in one run, with a coverage report                    |
-| `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
-| `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
-| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
-| `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
-| `make test_integration_sandbox_linux_signals`    | The second half's cancel tests alone, which CI runs on 22.04 too           |
-| `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
-| `make test_integration_sandbox_inspect`          | The same for the inspect engine, round trip included                       |
-| `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
-| `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
-| `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
-
-The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-hook build of
-`dist/main.cjs`; see [Local Development](#local-development) above. They do not all want the same
-image: the inspect group needs one built from `docker/inspect`, and `test_integration_listener_scope`
-builds both images itself and wants the variable unset. So `make test_integration` records what CI
-runs rather than running it in one go; build the image a group needs, then run that group.
-
 ## The process environment
 
 `runc spec`'s defaults are written for containers, not for a step on the runner's own machine, so
@@ -362,103 +459,6 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
   `/var/tmp/buildcage-<uid>/nssdb-ledger.json`, hidden from the sandbox. Removing a directory
   detaches every mount on it, so a directory another step still uses is never removed. A directory
   is identified by its birth time, so on a filesystem without one, created directories stay.
-
-## Directory Structure
-
-```text
-.
-├── action.yml                 # Action entry (node24 → dist/main.cjs, dist/post.cjs)
-├── src/                       # Source (ESM)
-│   ├── main.ts / post.ts      # Start proxy, run isolated command, report, stop
-│   ├── lib/                   # Action-specific implementation: container, report, sudo-preflight,
-│   │                          # sandbox/ (OCI config, runc bootstrap, netns/mountinfo helpers),
-│   │                          # filesystem-audit/ (the recording's reduction, summary and artifact)
-│   ├── proxy/                 # The AWS access key check, an extension to core's inspect config,
-│   │                          # built for both runtimes; scripts/ holds this action's inspect
-│   │                          # config generator, core's plus the check
-│   └── core/                  # Code shared with the proxy image's QuickJS scripts
-│       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
-│       │                      # both runtimes, and so is anything it imports (errors.ts,
-│       │                      # line-comments.ts, log/proxy-address.ts). actions/, docker/,
-│       │                      # provenance/, report/ and the rest of log/ are Node-only, and
-│       │                      # test/test-shim.ts is the node:test-alike shim *.test.ts uses
-│       │                      # under either runtime
-│       └── scripts/           # QuickJS only: each engine's config generator, the test runner
-│                              # and qjs's type declarations
-├── dist/                      # Bundled output (rolldown → CommonJS), committed. dist/qjs and
-│                              # dist/qjs-test are gitignored scratch
-├── docker/                    # Proxy image build contexts, one per proxy_engine
-│   ├── common/                # Image files the engines share: s6 services, init-iptables
-│   ├── universal/             # alpine + haproxy/CoreDNS/iptables/s6-overlay + pinned runc +
-│   │                          # gen-seccomp-profile + filesystem-audit
-│   ├── inspect/               # alpine + haproxy/CoreDNS/s6-overlay
-│   ├── gen-seccomp-profile/   # Go module: derives a seccomp filter from Docker's default profile
-│   ├── filesystem-audit/      # Go+eBPF module: records a sandboxed step's file accesses (experimental)
-│   ├── collect-go-licenses.sh # Copies the license files of what a Go binary links
-│   ├── check-alpine-licenses.sh # Fails the image build on an Alpine package that
-│   │                          # licenses/alpine-packages.txt does not cover
-│   ├── compose.action.yaml    # Runtime compose file the action uses (verified, digest-pinned
-│   │                          # image ref), distinct from the top-level compose.yaml below
-│   ├── compose.action.test-inspect.yaml  # Same, for the inspect-engine integration tests
-│   └── compose.sandbox-dev.yaml          # Mac dev-loop overlay (see dev/)
-├── scripts/
-│   ├── run-isolated.sh        # netns/veth/rootfs-bind setup around `runc run`, via `sudo -n`
-│   └── buildcage-init.sh      # The sandbox's PID 1: applies the step environment from stdin,
-│                              # runs the step's script, forwards signals and reaps orphans
-├── test/                      # integration-test-*.sh driving dist/main.cjs, assert-*.sh/.mjs
-│                              # checking what the e2e steps reported, and *-scenarios.sh run
-│                              # inside the sandbox as a step's own `run:`. helpers.sh carries
-│                              # what they share, driver-helpers.sh the drivers' own setup and
-│                              # run_step, helpers.mjs the pass/fail of the .mjs ones
-├── dev/                       # Mac dev-loop image and scripts, and the filesystem audit fixture
-│                              # refresh; not used in production or CI
-├── docs/                      # reference.md, development.md, security.md, aws.md,
-│                              # filesystem-audit.md, plus the rules.md/inspect-engine.md
-│                              # link stubs
-├── licenses/                  # gen-license-file.mjs, which regenerates THIRD_PARTY_LICENSES_NPM
-│                              # during `vp run build`, and what .glf.jsonc substitutes in.
-│                              # Its license texts (GPL, LGPL, MPL, Apache, and those of curl,
-│                              # QuickJS-ng, the s6-overlay family and the Alpine packages in
-│                              # alpine/) are copied into both images, with alpine-packages.txt
-│                              # mapping each installed Alpine package to them
-├── compose.yaml               # Local-dev compose config (builds docker/universal/Dockerfile;
-│                              # also what CI's test_sandbox/test_sandbox_* jobs build from)
-└── Makefile                   # Operational commands
-```
-
-Each engine's config generator is `src/core/scripts/gen-configs-<engine>.qjs.ts`, except that the
-`inspect` image takes `src/proxy/scripts/gen-configs-inspect.qjs.ts`, which adds the AWS access key
-check to core's. Each runs under
-QuickJS when the proxy container starts and writes haproxy.cfg and the Corefile from the rules,
-through the generators in `src/core/lib/acl/` (`haproxy-config.ts` for `inspect`,
-`haproxy-universal-config.ts` for `universal`). rolldown bundles it into
-`/opt/buildcage/scripts/gen-configs.js` at image build time, and `tsconfig.qjs.json` type-checks it.
-
-The AWS access key check's HAProxy rules are built in `src/proxy/haproxy-aws-keys.ts`, from the
-hosts and parameter names in `src/proxy/aws-hosts.ts`. These details are left out of
-[AWS access key check](./aws.md):
-
-- SigV2 (`Authorization: AWS <key>:<signature>`, or `AWSAccessKeyId` in the query or a form body),
-  SigV3's `X-Amzn-Authorization`, and `X-Amz-Credential` in a form body, or in the query under any
-  spelling but the exact one, are blocked as `aws-unsupported-credential` without their key being
-  read.
-- A form body is read into HAProxy's large buffer, 4 MiB, which holds the request's headers too, so
-  the body can be 4 MiB less the headers, and a larger one is `aws-unreadable`. Matching stops at a
-  NUL byte, so a body holding one is `aws-unreadable` too.
-- The proxy reads an STS answer as XML, up to its buffer size (16 KB). STS does not compress its
-  answers, so the request's `Accept-Encoding` is left alone. A compressed or JSON answer, or one
-  past the buffer, teaches no key and names no account.
-
-Each Dockerfile copies `docker/common/files/` first and the engine's own `files/` on top. An engine
-keeps only what differs: `THIRD_PARTY_LICENSES` and the `init-cfg` script that generates its
-configs. A path in both would be settled silently by copy order, so
-`src/core/lib/docker/engine-files.test.ts` rejects one.
-
-runc and CoreDNS are downloaded at a pinned version and checked against one SHA256 per architecture,
-both set as `ARG`s in each engine's Dockerfile (runc also in `dev/Dockerfile`). Renovate updates the
-version and the SHA256 lines together, taking the digests from the release's own checksum files; the
-`digestVersion` in the comment above each SHA256 line tells it which release that digest belongs to.
-A bump by hand changes all of them: the version line, each SHA256 line and each `digestVersion`.
 
 ## Troubleshooting
 
