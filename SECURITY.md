@@ -8,7 +8,8 @@ I welcome reports about:
   the allowlist proxy (other than the [known domain fronting limitation](./docs/security.md#domain-fronting))
 - **Network isolation escape**: bypassing the network namespace/iptables setup to reach the
   internet directly
-- **DNS filtering bypass**: bypassing the DNS redirect mechanism
+- **DNS filtering bypass**: getting a DNS query, or what it carries, out past the proxy's own
+  resolver
 - **Sandbox escape**: privilege escalation, capability re-acquisition, or reaching the Docker
   socket from inside the isolated command
 - **GitHub Actions setup**: vulnerabilities in the action itself (e.g., injection, credential

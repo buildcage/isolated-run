@@ -47,9 +47,10 @@ Four things sit outside the model by design.
 - **Another step in the same job.** A compromised or untrustworthy action running as another step
   can use `docker exec` or `docker cp`, or the host root a passwordless-sudo runner grants by
   default, to tamper with the proxy container's state, its traffic log above all. Sigstore proves
-  the image was genuine at startup, not afterwards. The report refuses a log that doesn't start
-  where a real proxy run would, which catches wholesale erasure, but not a format-aware forgery. The
-  defense here is procedural: don't place an untrusted step immediately around this action.
+  the image was genuine at startup, not afterwards. The report marks a log that doesn't start where
+  a real proxy run would as incomplete, and fails the step for it under `restrict` with
+  `fail_on_blocked`, which catches wholesale erasure but not a format-aware forgery. The defense
+  here is procedural: don't place an untrusted step immediately around this action.
 - **What the command reads.** It restricts where the command can send data, not what it can open, so
   a compromised dependency can still read `~/.aws/credentials` or `~/.docker/config.json`; it just
   cannot send them anywhere outside the allowlist. See
