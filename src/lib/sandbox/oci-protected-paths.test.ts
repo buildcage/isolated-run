@@ -162,9 +162,16 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).not.toContain("/tmp/runtime-runner/");
   });
 
-  it("lifts the mask under `write_through: /`", () => {
-    const { maskedPaths } = resolveProtectedPaths({ ...base, writablePaths: new Set(["/"]) });
+  it("lifts the mask under `write_through: /`, but never the /proc info-leak masks", () => {
+    const { maskedPaths } = resolveProtectedPaths({
+      ...base,
+      writablePaths: new Set(["/"]),
+      disableReadonly: true,
+    });
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
+    expect(maskedPaths).toEqual(
+      expect.arrayContaining(["/proc/kcore", "/proc/kallsyms", "/proc/kmsg"]),
+    );
   });
 
   it("skips the host-mount sweep under `write_through: /`, still masking what it masks", () => {
