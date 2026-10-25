@@ -94,8 +94,8 @@ jobs:
           - { runner: ubuntu-24.04-arm, filesystem_mode: persistent, runner_read_only: true }
           - { runner: ubuntu-26.04, filesystem_mode: ephemeral }
     runs-on: ${{ matrix.runner }}
-    # Well above a normal run; without a limit a hung builder holds a runner
-    # for six hours.
+    # Well above a normal run; without a limit a hang holds a runner for six
+    # hours.
     timeout-minutes: 15
     permissions:
       contents: read
