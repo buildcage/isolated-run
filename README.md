@@ -56,6 +56,16 @@ runner with passwordless `sudo` and a working Docker installation:
     daemon
 - **Self-hosted**
   - Docker Engine 25.0 or later, with Compose v2.20.2 or later
+  - Rootful Docker. The sandbox joins the proxy container's network namespace through the path
+    Docker reports for it (`NetworkSettings.SandboxKey`), which under rootless Docker or
+    `userns-remap` may live in a mount namespace of its own, out of the host's reach.
+  - `/var/tmp` reached without a symlink, since runc refuses a sandbox root whose path goes through
+    one. Otherwise the step fails before writing anything there, saying where `/var/tmp` resolves.
+  - For `filesystem_mode: ephemeral`, overlayfs support on the runner's own filesystem, checked by
+    a probe before the step. It fails where the runner itself runs in a container whose root
+    filesystem is overlayfs, since an overlay's `upperdir` cannot sit on overlayfs. The probe's
+    leftovers are removed with `sudo rm -rf`, which the mode's own cleanup needs later anyway, so a
+    sudoers scope too narrow for it fails the probe as well.
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
     the runner as root (`RUNNER_ALLOW_RUNASROOT`).
@@ -644,6 +654,13 @@ reported as blocked; see
 - In `persistent` mode `/tmp` and `$RUNNER_TEMP` are the same real directories for every invocation
   in the job, so two concurrent steps can reach each other's scratch files there. `ephemeral` gives
   each invocation its own overlay.
+- `$XDG_RUNTIME_DIR` is missing or empty: under `/run` it does not exist, and anywhere else it is
+  masked with an empty directory. A tool expecting a session keyring or its own scratch state there
+  fails outright rather than landing on the host's real directory. Only naming it in
+  `write_through:` brings it back.
+- Each step starts and stops its own proxy container, which keeps allowlists independent and the
+  report's step-to-container mapping unambiguous, at the cost of startup time on jobs with many
+  isolated steps.
 
 ### Under the `inspect` engine
 

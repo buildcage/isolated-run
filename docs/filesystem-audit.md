@@ -29,6 +29,7 @@ what the step may write.
 - [Expected accesses](#expected-accesses)
 - [Troubleshooting](#troubleshooting)
 - [What it does not record](#what-it-does-not-record)
+- [What the step can do to the record](#what-the-step-can-do-to-the-record)
 - [Limits](#limits)
 - [The artifact](#the-artifact)
 
@@ -598,8 +599,82 @@ where the kernel offers that mode.
 io_uring is not among them: the sandbox refuses `io_uring_setup`, so no access goes through it, and
 the refusal is recorded as a `syscall`.
 
-[Filesystem audit](./security.md#filesystem-audit) in the security details covers what the step
-itself can do to the record, and what the record can be trusted for.
+## What the step can do to the record
+
+The audit never blocks an access, so it is a visibility aid, not a control, and the step it watches
+can act on the record in the ways below.
+
+**Altering the record.** The tracer runs as root on the runner host, outside the sandbox, and is
+watching the sandbox's cgroup before the step starts. It writes under `/var/tmp/buildcage-<uid>`,
+which every sandbox sees only as a tmpfs it cannot write to, holding nothing but its own read-only
+`exec/`, even under `write_through: /`. The step cannot signal or trace the tracer, which is outside
+its PID namespace, and the report is rendered on the host after the step exits. A process running
+as the same user outside any sandbox can still replace the recording before it is read, the same
+accepted limitation as the staging directory under
+[What the sandbox does not stop](./security.md#what-the-sandbox-does-not-stop).
+
+**Reading another step's record.** No sandbox can, a concurrent one included. A process running as
+the same user outside any sandbox can, as can a job sharing the machine and the user, which
+[Where it will not run](./security.md#where-it-will-not-run) rules out. An artifact uploaded under
+`upload_filesystem_audit_artifact: true` can be downloaded by any job in the run and anyone who can
+read the repository until it expires. It leaves out each program's arguments, but not the names
+commands pass for files: a secret a command tries to open, or uses as a symlink's target, is kept.
+
+**Falsifying what it says.** A successful access and a program the step ran are recorded with the
+path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate
+counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed
+record means only that the call returned an error: the step can install its own seccomp filter to
+fail a call before the kernel looks at the file. An open refused after the kernel reached its file
+is recorded as failed with the path it resolved. Any other failed call, and an attribute change
+through `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under
+the name the command passed, joined to its working directory or directory descriptor without
+resolving `..`; the artifact keeps that name as `name` where it differs from `path`. These names are
+best-effort: they are read from the command's memory when the call returns, so another thread can
+rewrite one first, or change directory so that a relative one is joined to another, and a process
+tracing the command can change the call's arguments. A failed open's flags are read the same way,
+but its name is the kernel's copy, unless the kernel refused the name as too long, when it is read
+like the others; rewriting the command's own copy can only leave a relative name without its
+directory. A change through a descriptor alone that fails before the kernel reaches its file,
+as `fchmod` on a read-only mount, and an `fsetxattr`, are recorded under the file the descriptor
+held when the call returned. Another thread can swap the descriptor first for another file, or close
+it or swap it for a pipe, which leaves no record. A path too deep to record in full is shown cut,
+with `…/`. A failed open's name too long to record in full is shown cut at its end, with `…`. A
+row's command name is the one the process gave itself, not a thread's, so it says which process
+acted, not which binary, and a process named `run-script.sh` is shown as the step's shell, `bash`. A
+memfd's name is whatever its creator chose, so it is quoted after `memfd:` and never reads as a
+path. A control, format, separator, invisible or blank character, a space at either end, a quote, a
+backslash or a byte that is not UTF-8 in a name is shown escaped, and the details quote a name
+holding a space, so no name can rewrite the Job Summary or pass for another.
+
+On a kernel that [skips the tracer's hooks](#skipped-hooks), a skipped hook drops the access it was
+following rather than report it against the wrong call, except that an open may carry an earlier
+open's path, and a path change whose own hook was skipped too an earlier path change's.
+
+**Going unrecorded.** The step cannot leave the cgroup: it sees the cgroup filesystem read-only and
+holds no capability. Nor can it make a system call through a 32-bit ABI, numbered apart from the
+calls the tracer reads: under the audit the sandbox's seccomp filter refuses those. Nor can it
+change which records count as its own: after its shell starts, everything is the step's except the
+sandbox init's records and the shell reading its script, however the step arranges its processes or
+spells a path. Besides what [What it does not record](#what-it-does-not-record) lists, it can:
+
+- Have the sandbox init act for it, on a self-hosted runner with `kernel.yama.ptrace_scope=0`: the
+  init runs as the step's user, so the step can trace it, and the init's own records are left out.
+  GitHub-hosted runners only let a process trace its descendants.
+- Crash a process where the host's `core_pattern` names a path: the kernel writes the core file
+  itself, outside any system call. Its open is recorded, with the flags the kernel opens it with
+  (`wc`), but what the kernel writes is not, nor its removal of an old core file first, which it
+  does only for a setuid program when `suid_dumpable` is 2. Setting `core_pattern` needs host
+  privilege, but a relative one, as the default `core` is, puts the file in the crashing process's
+  working directory, which the step chooses.
+- Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
+  record is incomplete. Flooding can hide which accesses happened, not that some are missing.
+- Touch more paths than the Job Summary has room for; [Limits](#limits) says what is kept. Every
+  access stays in the artifact when one was uploaded.
+
+Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2, BTF
+or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep a partial
+record. A tracer that exits during the step, as one does when the step fills the disk it writes to,
+also fails the step, after the command, with the record cut where it stopped.
 
 ## Limits
 

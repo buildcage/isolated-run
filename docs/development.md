@@ -10,6 +10,9 @@ This document covers local development, testing, and the project structure of is
 - [Formatting & Linting](#formatting--linting)
 - [Viewing Logs](#viewing-logs)
 - [Makefile Commands](#makefile-commands)
+- [The process environment](#the-process-environment)
+- [The sandbox's PID 1](#the-sandboxs-pid-1)
+- [Pinning `docker` and `sudo`](#pinning-docker-and-sudo)
 - [Chromium's NSS database](#chromiums-nss-database)
 - [Directory Structure](#directory-structure)
 - [Troubleshooting](#troubleshooting)
@@ -301,6 +304,41 @@ The first three integration groups need `BUILDCAGE_LOCAL_IMAGE_REF` and a test-h
 image: the inspect group needs one built from `docker/inspect`, and `test_integration_listener_scope`
 builds both images itself and wants the variable unset. So `make test_integration` records what CI
 runs rather than running it in one go; build the image a group needs, then run that group.
+
+## The process environment
+
+`runc spec`'s defaults are written for containers, not for a step on the runner's own machine, so
+the OCI spec carries the runner's own `RLIMIT_NOFILE` (read from the process that started the
+action, since Node raises its own soft limit before any JavaScript runs), a `/dev/shm` sized from
+the host's rather than runc's 64MB cap, and the runner's hostname. Both runc's default spec and the
+`sudo` on the way to it would otherwise pin `RLIMIT_NOFILE` at 1024 against a runner's 65536, which
+surfaces as `EMFILE` in webpack and jest, and Chromium crashes under a 64MB `/dev/shm`.
+
+## The sandbox's PID 1
+
+The kernel drops any signal a PID namespace's PID 1 has no handler for, SIGKILL from inside
+included, and hands it every orphan to reap. `buildcage-init` stays PID 1 and runs the command as
+its child, so `kill -TERM $$` works and a python or node shebang leaves no zombies. It forwards
+`SIGTERM` and `SIGINT` to every other process in the sandbox, one the command moved out of its
+process group with `setsid` included, and `SIGHUP`, `SIGQUIT`, `SIGUSR1` and `SIGUSR2` to that
+process group, so what the command runs gets them too. It exits with the command's status, `128+n`
+if a signal killed it. After forwarding `SIGTERM` or `SIGINT`, it waits for every process in the
+sandbox to exit before it exits itself.
+
+## Pinning `docker` and `sudo`
+
+Before either first runs, and again in the post step, `docker` and `sudo` are pinned to a binary
+outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:` (see
+[What it can write](./security.md#what-it-can-write)). One reached through a symlink in those
+paths, such as Ubuntu 26.04's `/usr/bin/sudo` through `/etc/alternatives` under
+`write_through: /etc`, is pinned to the file that symlink leads to at the time, if that file bears
+the command's name. One in a `$PATH` directory that is itself in those paths, or reached through a
+symlink in them, is passed over even when it is a symlink to a file outside them, and the next
+`$PATH` entry is tried.
+
+Both run with `PATH` stripped of those paths and of any entry through a symlink in them. `sudo`
+gets the system directories and `docker` the step's own `$PATH`, so a helper installed only under
+those paths is not found.
 
 ## Chromium's NSS database
 
