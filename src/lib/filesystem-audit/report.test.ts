@@ -390,7 +390,7 @@ describe("readStepFilesystemAudit", () => {
     );
 
     expect(blocks.filter((b) => b.cut !== "keep").map((b) => b.notice)).toEqual(
-      Array(3).fill(
+      Array(2).fill(
         "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
           "the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._\n\n",
       ),

@@ -8,7 +8,7 @@ import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
 import type { ProposedRules } from "./proposed-rules.ts";
-import type { AuditSummary, Executed, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
+import type { AuditSummary, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
 import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
@@ -21,8 +21,8 @@ const INCOMPLETE_NOTE =
   "> some accesses are missing from this summary and from the artifact.";
 // The note names up to this many commands; the details, where they fit, show the rest.
 const KILLED_COMMS_SHOWN = 3;
-// An Unexpected Accesses row names up to this many commands.
-const UNEXPECTED_COMMS_SHOWN = 3;
+// An Accessed Paths or Unexpected Accesses row names up to this many commands.
+const COMMANDS_SHOWN = 3;
 
 // Every name if there are at most `shown`, else one fewer and how many more
 // there are, so the count never stands for a single name.
@@ -61,7 +61,6 @@ const DETAILS_CLOSE = "</details>\n";
 /** The ids renderAuditSummaryBlocks gives its blocks. */
 export const FILESYSTEM_BLOCK = {
   unexpected: "filesystem-unexpected",
-  executed: "filesystem-executed",
   paths: "filesystem-paths",
   log: "filesystem-log",
 } as const;
@@ -115,24 +114,6 @@ export interface RenderOptions {
   rulesNote?: string;
 }
 
-// Each part sits a level below the one before it, so once one is cut the
-// parts after it print nothing and its note stands for them all.
-function executedBlock(executed: Executed[], { priorities }: RenderOptions): SummaryBlock {
-  const md = markdownRows(
-    ["Path", "Count"],
-    executed.map((e) => [pathCell(e), String(e.runs)]),
-  );
-  return {
-    id: FILESYSTEM_BLOCK.executed,
-    priority: priorities[FILESYSTEM_BLOCK.executed],
-    level: 2,
-    section: SECTION,
-    text: `### ⚙️ Executed Programs\n\n${md}\n\n`,
-    cut: "lines",
-    head: 4,
-  };
-}
-
 // By program, in the order each first ran, and by path within each. Two
 // paths can print alike ("x" and "…/x"), so they keep their recording order
 // between them.
@@ -148,8 +129,9 @@ function byProgramAndPath(paths: PathRow[]): PathRow[] {
     .map((k) => k.row);
 }
 
-// Folded, as its rows run long; a table given up leaves its note in the open.
-// The flags are explained where they first appear.
+// Each part sits a level below the one before it, so once one is cut the
+// parts after it print nothing and its note stands for them all. The flags
+// are explained where they first appear.
 function pathsBlock(
   rows: PathRow[] | undefined,
   cause: CutCause | undefined,
@@ -158,23 +140,25 @@ function pathsBlock(
   const block = {
     id: FILESYSTEM_BLOCK.paths,
     priority: priorities[FILESYSTEM_BLOCK.paths],
-    level: 3,
+    level: 2,
     section: SECTION,
   };
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
   const md = markdownRows(
-    ["Program", "Access", "Path"],
-    rows.map((r) => [pathCell(r.program), r.flags, pathCell(r)]),
+    ["Program", "Command", "Access", "Path"],
+    rows.map((r) => [
+      pathCell(r.program),
+      firstOf(r.commands.map(codeCell), COMMANDS_SHOWN),
+      r.flags,
+      pathCell(r),
+    ]),
   );
   // A table cut short says so after the rows it kept.
   return {
     ...block,
     cut: "lines",
-    head: 4,
-    open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
-    text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
-    // A blank line apart from the details that follow.
-    close: `${DETAILS_CLOSE}\n`,
+    head: 6,
+    text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
   };
 }
 
@@ -190,7 +174,7 @@ function detailsBlock(
   const log = {
     id: FILESYSTEM_BLOCK.log,
     priority: priorities[FILESYSTEM_BLOCK.log],
-    level: 4,
+    level: 3,
     section: SECTION,
     open: DETAILS_OPEN,
     close: DETAILS_CLOSE,
@@ -262,7 +246,7 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
     ["Program", "Command", "Access", "Path"],
     proposed.map((r: RuleRow) => [
       pathCell(r.program),
-      firstOf(r.commands.map(codeCell), UNEXPECTED_COMMS_SHOWN),
+      firstOf(r.commands.map(codeCell), COMMANDS_SHOWN),
       r.flags,
       pathCell(r.path),
     ]),
@@ -282,17 +266,17 @@ const operations = (n: number): string =>
 
 /**
  * The summary as blocks for fitStepSummary, in print order: a frame (heading
- * and notes) kept whole, the executed table, the accessed-paths table under
- * the flag legend, the full per-command record folded into a details element,
- * the proposed rules' note, and the legend note, also kept whole. With
- * expected_filesystem_rules, only what they did not take takes the tables'
- * place.
+ * and notes) kept whole, the accessed-paths table under the flag legend, the
+ * full per-command record folded into a details element, the proposed rules'
+ * note, and the legend note, also kept whole. With
+ * expected_filesystem_rules, what they did not take replaces the table and
+ * the details.
  */
 export function renderAuditSummaryBlocks(
   summary: AuditSummary,
   opts: RenderOptions,
 ): SummaryBlock[] {
-  const { ended, lost, hostMissed, executed, paths, details, killed, pathsCut } = summary;
+  const { ended, lost, hostMissed, paths, details, killed, pathsCut } = summary;
   const killedLine = killedNote(killed);
   const top = [
     heading(opts.title),
@@ -313,13 +297,11 @@ export function renderAuditSummaryBlocks(
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
   if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
   else {
-    if (executed.length !== 0) blocks.push(executedBlock(executed, opts));
     const rows = paths && byProgramAndPath(paths);
-    // Empty when the step only ran programs, which the executed table lists.
+    // Empty when the step was only killed for a syscall, which the details list.
     if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
-    // The table's note stands for the details too. A step that only ran
-    // programs has no accessed paths table, so the details are the first to
-    // show flags.
+    // The table's note stands for the details too. Without the table, the
+    // details are the first to show flags.
     if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
   }
   if (opts.rulesNote) blocks.push(frame(`\n${opts.rulesNote}`));

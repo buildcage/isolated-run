@@ -118,28 +118,23 @@ A shortened example:
 ```
 ## Filesystem Activity Report
 
-### ⚙️ Executed Programs
-| Path                  | Count |
-| --------------------- | ----: |
-| `/usr/local/bin/node` |     1 |
-| `/usr/bin/dash`       |    12 |
-
-▶ 📂 Accessed Paths (4)
+### 📂 Accessed Paths (5)
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
-| Program               | Access | Path                  |
-| --------------------- | ------ | --------------------- |
-| `/usr/local/bin/node` | RWD    | `./node_modules/**`   |
-| `/usr/local/bin/node` | R      | `./package.json`      |
-| `/usr/local/bin/node` | Rr!    | `/etc/**`             |
-| `/usr/local/bin/node` | w!     | `/usr/local/bin/node` |
+| Program               | Command        | Access | Path                  |
+| --------------------- | -------------- | ------ | --------------------- |
+| `bash`                | `bash`         | X      | `/usr/local/bin/node` |
+| `/usr/local/bin/node` | `node[npm ci]` | RWD    | `./node_modules/**`   |
+| `/usr/local/bin/node` | `node[npm ci]` | R      | `./package.json`      |
+| `/usr/local/bin/node` | `node[npm ci]` | Rr!    | `/etc/**`             |
+| `/usr/local/bin/node` | `node[npm ci]` | X      | `/usr/bin/dash`       |
 
 ▶ 🔍 File access details
 first-last access since the proxy started · flags · command · path
-00:00.401-00:00.420: Xw! node /usr/local/bin/node
-00:00.412:           R   node ./package.json
-00:00.415-00:00.418: Rr! node /etc/**
-00:00.530-00:41.207: RWD node ./node_modules/**
-00:00.531-00:40.982: X   dash /usr/bin/dash
+00:00.401:           X   node         /usr/local/bin/node
+00:00.412:           R   node[npm ci] ./package.json
+00:00.415-00:00.418: Rr! node[npm ci] /etc/**
+00:00.530-00:41.207: RWD node[npm ci] ./node_modules/**
+00:00.531-00:40.982: X   dash         /usr/bin/dash
 
 ▶ 📝 Expected filesystem rules
 
@@ -151,16 +146,18 @@ From the top:
 
 - A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
   any; see [What changes in the step](#what-changes-in-the-step).
-- **Executed Programs** lists each program once, in the order it first ran, with how many times it
-  ran.
-- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
-  action. Programs are in the order they first ran, and each one's paths in path order: the
-  workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one
-  directory; see [Paths](#paths).
+- **Accessed Paths** has one row per program and path, with the commands that made its accesses
+  and a [flag](#flags) for each action. Running a program is an `X` row under the program that ran
+  it. Programs are in the order they first ran, and each one's paths in path order: the workspace,
+  then `$HOME`, then the rest. A `dir/**` row combines several paths under one directory; see
+  [Paths](#paths).
+- **Command** names each command by its program's file name, followed in brackets by the name the
+  process gave itself where that differs, as `node[npm ci]` for npm; see
+  [How rows are grouped](#how-rows-are-grouped). A row lists its commands in the order they first
+  made its accesses, and past three, the first two and how many more, as `and 2 more`.
 - **File access details**, folded, has one row per command and path, in the order the rows were
-  first touched, with when that command first and last touched the path. The command is the
-  program's file name, followed in brackets by the name the process gave itself where that differs,
-  as `node[npm ls]` for npm; see [How rows are grouped](#how-rows-are-grouped). Times count from the
+  first touched, with when that command first and last touched the path. A run shows there under
+  the command it started, as `X dash` above. Times count from the
   start of the step's proxy, on the same clock as the traffic report's Communication details, so a
   file access can be matched to a request.
 - **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
@@ -169,24 +166,24 @@ From the top:
   the full record and links to this section. Where there is no artifact, it says how to ask for
   one, or that the upload failed.
 
-A step that touched no file shows `No file access was recorded.` instead of all of these. One that
-only ran programs has no accessed paths table, and the flag legend opens the details instead.
+A step that touched no file shows `No file access was recorded.` instead of all of these.
 
 ### What to look for
 
 - **A credential file read by something other than its tool.** A row such as `R ~/.npmrc`,
   `R ~/.ssh/**` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
   every run, and npm and a package's install script both show as `node`, so the program alone does
-  not tell them apart. The details do: npm names itself after its command, such as `npm ci`, while
-  a script it starts shows under its own name, such as `node`. The artifact, if uploaded, also gives
-  each read's parent process.
+  not tell them apart. The Command column does: npm renames itself after what it runs, as
+  `node[npm ci]`, while a script it starts shows as plain `node`. The artifact, if uploaded, also
+  gives each read's parent process.
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
   `$GITHUB_PATH` is refused (`w!`) unless `write_through` names it, since both are read-only in the
   sandbox otherwise, but the attempt is just as telling. `filesystem_mode: ephemeral` discards such
   writes; see the [README](../README.md#filesystem-access).
-- **A program you did not expect.** **Executed Programs** lists every program the step started, so
-  a `postinstall` script that runs `curl` or a binary it just downloaded shows up there.
+- **A program you did not expect.** An `X` row names every program the step started, under the
+  program that started it, so a `postinstall` script that runs `curl` or a binary it just downloaded
+  shows up there.
 - **A refusal.** A flag followed by `!`, such as `w!`, is an access the sandbox, a file's
   permissions or a read-only location refused: a write to `/usr/local/bin`, which the sandbox makes
   read-only, or a read of `/etc/shadow`. A system call the sandbox refused, such as `unshare`, is
@@ -198,7 +195,7 @@ only ran programs has no accessed paths table, and the flag legend opens the det
 | ---- | ---------------------------------------------------------------------------------------------- |
 | `R`  | Read, or mapped for reading or to run                                                          |
 | `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program; shown in the details only, as the executed table lists every program         |
+| `X`  | Run as a program, on the row of the program that ran it                                        |
 | `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
 | `L`  | Given a second name by a hard link; the new name shows `W`                                     |
 | `D`  | Deleted                                                                                        |
@@ -243,20 +240,20 @@ have notations of their own, listed next.
 
 ### How rows are grouped
 
-**Which program.** A program is named by its path, as in the executed table, and a script run
-through its `#!` line by its own path; a script starting `#!/usr/bin/env node` runs `node` in turn,
-and what follows shows under `node`. A process that forks without running anything counts as its
-parent's program, and the step's own shell, which runs the `run` script, shows as `bash`.
+**Which program.** A program is named by its path, and a script run through its `#!` line by its
+own path; a script starting `#!/usr/bin/env node` runs `node` in turn, and what follows shows under
+`node`. A process that forks without running anything counts as its parent's program, and the
+step's own shell, which runs the `run` script, shows as `bash`.
 
-**Which command.** A details row names its program by file name, and adds the name the process gave
+**Which command.** A command is named by its program's file name, and adds the name the process gave
 itself in brackets unless that is a name its exec gave it: the program's file name or the name it
 was run by, cut to 15 bytes as the kernel keeps it. So `/usr/bin/dash` run as `sh` shows as `dash`.
 A process with no program in the record, the step's shell and what it forks without running
 anything, shows its own name alone. A `[` or `]` in either name is escaped with `\`.
 
 Any process can give itself any name, and a file name says nothing about where the file is: a file
-named `node` anywhere shows as `node`. Tell programs apart by their path in the executed table or the
-accessed paths table, where each has rows of its own.
+named `node` anywhere shows as `node`. Tell programs apart by their path in the Program column, where
+each has rows of its own.
 
 **Which path.**
 
@@ -444,10 +441,8 @@ it.
 
 ### What the summary shows
 
-- **Unexpected Accesses** takes the place of the executed table, the accessed paths and the
-  details; the artifact still has every access. Each row is one rule the proposed file adds, and
-  **Command** names the commands that made its accesses, as the details name them, in the order
-  they first did. Past three, it names the first two and how many more, as `and 2 more`.
+- **Unexpected Accesses** takes the place of Accessed Paths and the details, with the same columns;
+  the artifact still has every access. Each row is one rule the proposed file adds.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
 - `fail_on_unexpected_file_access: true` fails the step instead, in `audit` mode too, with the
@@ -460,8 +455,7 @@ it.
 
 ### Rules
 
-Each rule is one line of three fields, the accessed paths table's columns, so a row of that table
-can be copied in:
+Each rule is one line of three fields, the Program, Access and Path columns of Accessed Paths:
 
 ```
 <program> <access> <path>
@@ -469,7 +463,7 @@ can be copied in:
 
 - **Program**: the file the process runs, as the table names it, with `*` for any program. A
   process that ran nothing goes by its own name, as the step's shell does as `bash`. Running a
-  program, which only the details show, counts as an `X` access of the program that ran it:
+  program is an `X` access of the program that ran it, as the table shows it:
   `bash X /usr/bin/curl`.
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
@@ -613,7 +607,7 @@ itself can do to the record, and what the record can be trusted for.
 ## Limits
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
-  file access details give way first, and this section's tables after the traffic report's timeline
+  file access details give way first, and this section's table after the traffic report's timeline
   and known blocked hosts;
   [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
   does not fit is cut at a line, with a note after what is kept, or replaced by the note when none

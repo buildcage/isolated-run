@@ -11,14 +11,13 @@ import {
 } from "./summary-priorities.ts";
 
 describe("summary priorities", () => {
-  it("keeps room for the traffic tables, then the audit's tables, then the two logs", () => {
+  it("keeps room for the traffic tables, then the audit's table, then the two logs", () => {
     const order = [
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.example],
       WOULD_BLOCK_PRIORITY,
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.blocked],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.passed],
       AWS_KEYS_PRIORITY,
-      FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.executed],
       FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.paths],
       TRAFFIC_PRIORITIES[TRAFFIC_BLOCK.log],
       FILESYSTEM_PRIORITIES[FILESYSTEM_BLOCK.log],

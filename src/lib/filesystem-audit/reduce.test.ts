@@ -123,7 +123,7 @@ function lines(md: string): string[] {
 // The "Accessed Paths" table's rows, verbatim.
 function programRows(md: string): string[] {
   const m = md.match(
-    /<summary>📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /### 📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }
@@ -131,7 +131,7 @@ function programRows(md: string): string[] {
 // The same rows as path and access alone, for a test of the paths.
 function tableRows(md: string): string[] {
   return programRows(md).map((row) =>
-    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
+    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| (?:[^|\\]|\\.)* \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
   );
 }
 
@@ -281,15 +281,19 @@ describe("createAuditSummary", () => {
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
     expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
-    // Below the executed table, which shows no flags.
-    expect(md.indexOf("<summary>📂 Accessed Paths")).toBeGreaterThan(
-      md.indexOf("### ⚙️ Executed Programs"),
-    );
+    expect(md).toContain("### 📂 Accessed Paths (2)\n\n<sub>R read");
     expect(md.split("<sub>R read")).toHaveLength(2);
     // With no accessed paths table, the details are the first to show flags.
-    const ran = render({ kind: "exec", comm: "sh", path: "/usr/bin/cat" });
-    expect(ran).not.toContain("<summary>📂 Accessed Paths");
-    expect(ran.slice(ran.indexOf("<details>"))).toContain("<sub>R read");
+    const killed = render({
+      kind: "syscall",
+      comm: "a.out",
+      syscall: "socketcall",
+      compat: true,
+      killed: true,
+      failed: true,
+    });
+    expect(killed).not.toContain("### 📂 Accessed Paths");
+    expect(killed.slice(killed.indexOf("<details>"))).toContain("<sub>R read");
   });
 
   it("escapes control, format and separator characters so a name cannot close the code block", () => {
@@ -484,6 +488,7 @@ describe("createAuditSummary", () => {
       "| `./libx.so` | R |",
       "| `/etc/ld.so.cache` | R |",
       "| `/usr/bin/tool` | R |",
+      "| `/usr/bin/tool` | X |",
     ]);
   });
 
@@ -507,7 +512,7 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R x /opt/lib/x.conf"]);
   });
 
-  it("keeps one row for a command that writes a file and then runs it", () => {
+  it("keeps one details row for a command that writes a file and then runs it", () => {
     // As rustup updating itself does.
     const md = render(
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
@@ -515,7 +520,12 @@ describe("createAuditSummary", () => {
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
     expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
-    expect(tableRows(md)).toEqual(["| `~/.cargo/bin/rustup` | W |"]);
+    // The table names each run by the program that ran it: first the one
+    // the recording knows only by name, then rustup itself.
+    expect(programRows(md)).toEqual([
+      "| `rustup` | `rustup` | X | `~/.cargo/bin/rustup` |",
+      "| `~/.cargo/bin/rustup` | `rustup` | WX | `~/.cargo/bin/rustup` |",
+    ]);
   });
 
   it("never folds a program run, nor lets one fold its directory", () => {
@@ -537,7 +547,13 @@ describe("createAuditSummary", () => {
       "w! sh /usr/local/x",
       "R sh /usr/share/y",
     ]);
-    expect(tableRows(md)).toEqual(["| `/usr/local/x` | w! |", "| `/usr/share/y` | R |"]);
+    expect(tableRows(md)).toEqual([
+      "| `/usr/bin/a` | X |",
+      "| `/usr/bin/b` | X |",
+      "| `/usr/bin/c` | X |",
+      "| `/usr/local/x` | w! |",
+      "| `/usr/share/y` | R |",
+    ]);
   });
 
   it("tells a process from a later one given the same pid", () => {
@@ -639,11 +655,11 @@ describe("createAuditSummary", () => {
     );
     expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
     expect(programRows(md)).toEqual([
-      "| `b` | R | `/etc/x` |",
-      "| `a` | R | `/etc/x` |",
-      "| `c` | R | `./a` |",
-      "| `c` | R | `./b` |",
-      "| `c` | R | `~/y` |",
+      "| `b` | `b` | R | `/etc/x` |",
+      "| `a` | `a` | R | `/etc/x` |",
+      "| `c` | `c` | R | `./a` |",
+      "| `c` | `c` | R | `./b` |",
+      "| `c` | `c` | R | `~/y` |",
     ]);
   });
 
@@ -1295,19 +1311,19 @@ describe("createAuditSummary: limits", () => {
       path: `memfd:m${i}`,
       memfd: true,
     }));
-    // Each line counts 20 bytes, so the fifth passes 90 and folds them.
-    expect(tableRows(limited({ bytes: 90 }, ...memfds))).toEqual(["| `memfd:**` | W |"]);
+    // Each line counts 26 bytes, so the fifth passes 120 and folds them.
+    expect(tableRows(limited({ bytes: 120 }, ...memfds))).toEqual(["| `memfd:**` | W |"]);
   });
 
   it("keeps the rows that fit and notes the cut, rather than drop the table and the details", () => {
     // Paths with ".." under different directories, which no fold joins. A
-    // table row counts 25 bytes and a details row 12.
+    // table row counts 31 bytes and a details row 12.
     const md = limited(
       { bytes: 40 },
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -1318,9 +1334,8 @@ describe("createAuditSummary: limits", () => {
       { kind: "exec", comm: "c", path: "/usr/bin/c" },
       ...tmpFiles(20),
     );
-    expect(section(md, "### ⚙️ Executed Programs", CUT)).toContain("`/usr/bin/c`");
     // The table's note stands for the details too.
-    expect(md).not.toContain("<summary>📂 Accessed Paths");
+    expect(md).not.toContain("### 📂 Accessed Paths");
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -1349,18 +1364,22 @@ describe("createAuditSummary: limits", () => {
       path: "/tmp/x",
     }));
     const md = limited({ bytes: 200 }, ...records);
-    expect(programRows(md)).toEqual(["| `command-0` | R | `/tmp/x` |"]);
+    expect(programRows(md)).toEqual([
+      "| `command-0` | `command-0`, `command-1` and 18 more | R | `/tmp/x` |",
+    ]);
     expect(section(md, "🔍")).toContain(CUT);
   });
 
-  it("stops listing new programs once the executed table outgrows the limit, still counting runs", () => {
+  it("keeps the program runs when it cuts the table short", () => {
     const execs = Array.from({ length: 20 }, (_, i) => ({
       kind: "exec",
+      pid: i + 1,
       comm: "c",
       path: `/usr/bin/tool-${i}`,
     }));
-    const md = limited({ bytes: 200 }, ...execs, execs[0]);
-    expect(md).toContain("| `/usr/bin/tool-0` | 2 |");
+    const md = limited({ bytes: 200 }, ...execs, ...tmpFiles(2));
+    expect(tableRows(md)).toEqual([0, 1, 2, 3, 4].map((i) => `| \`/usr/bin/tool-${i}\` | X |`));
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(md).not.toContain("tool-19");
   });
 
@@ -1375,9 +1394,8 @@ describe("createAuditSummary: limits", () => {
       PREFIXES,
       {
         "filesystem-unexpected": 1,
-        "filesystem-executed": 1,
-        "filesystem-paths": 2,
-        "filesystem-log": 3,
+        "filesystem-paths": 1,
+        "filesystem-log": 2,
       },
       () => "unused",
     );
@@ -1387,7 +1405,7 @@ describe("createAuditSummary: limits", () => {
     );
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
-    expect(md).not.toContain("<summary>📂 Accessed Paths");
+    expect(md).not.toContain("/tmp/f0");
     expect(md).not.toContain("<details>");
   });
 
@@ -1418,7 +1436,7 @@ describe("createAuditSummary: limits", () => {
       { kind: "read", pid: 1, comm: "b", path: "/x/f" },
       { kind: "read", pid: 1, comm: "b", path: "/y/g" },
     );
-    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain("`/x/f`");
+    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain("`/x/f`");
     expect(section(md, "🔍")).toContain("too many distinct paths to summarize");
   });
 

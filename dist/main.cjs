@@ -72639,9 +72639,8 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", FILESYSTEM_BLOCK = {
 	unexpected: "filesystem-unexpected",
-	executed: "filesystem-executed",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
 }, keyed = (rows) => rows.map((row) => {
@@ -72655,18 +72654,6 @@ const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK =
 function inRecordingOrder(rows) {
 	return keyed(rows).sort(byRecording).map((k) => k.row);
 }
-function executedBlock(executed, { priorities }) {
-	let md = markdownRows(["Path", "Count"], executed.map((e) => [pathCell(e), String(e.runs)]));
-	return {
-		id: FILESYSTEM_BLOCK.executed,
-		priority: priorities[FILESYSTEM_BLOCK.executed],
-		level: 2,
-		section: SECTION,
-		text: `### ⚙️ Executed Programs\n\n${md}\n\n`,
-		cut: "lines",
-		head: 4
-	};
-}
 function byProgramAndPath(paths) {
 	return keyed(paths).sort(byRecording).sort((a, b) => a.row.program.rank - b.row.program.rank || a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
 }
@@ -72674,7 +72661,7 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	let block = {
 		id: FILESYSTEM_BLOCK.paths,
 		priority: priorities[FILESYSTEM_BLOCK.paths],
-		level: 3,
+		level: 2,
 		section: SECTION
 	};
 	if (!rows) return {
@@ -72684,20 +72671,20 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	};
 	let md = markdownRows([
 		"Program",
+		"Command",
 		"Access",
 		"Path"
 	], rows.map((r) => [
 		pathCell(r.program),
+		firstOf(r.commands.map(codeCell), 3),
 		r.flags,
 		pathCell(r)
 	]));
 	return {
 		...block,
 		cut: "lines",
-		head: 4,
-		open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
-		text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
-		close: `${DETAILS_CLOSE}\n`
+		head: 6,
+		text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
@@ -72705,10 +72692,10 @@ function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, p
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 4,
+		level: 3,
 		section: SECTION,
 		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
-		close: DETAILS_CLOSE
+		close: "</details>\n"
 	};
 	if (!details) return {
 		...log,
@@ -72764,7 +72751,7 @@ function unexpectedBlock(summary, { priorities }) {
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
 function renderAuditSummaryBlocks(summary, opts) {
-	let { ended, lost, hostMissed, executed, paths, details, killed, pathsCut } = summary, killedLine = killedNote(killed), top = [
+	let { ended, lost, hostMissed, paths, details, killed, pathsCut } = summary, killedLine = killedNote(killed), top = [
 		heading(opts.title),
 		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
 		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
@@ -72780,7 +72767,6 @@ function renderAuditSummaryBlocks(summary, opts) {
 	let blocks = [frame(`${top}\n\n`)];
 	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
 	else {
-		executed.length !== 0 && blocks.push(executedBlock(executed, opts));
 		let rows = paths && byProgramAndPath(paths);
 		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts));
 	}
@@ -72834,8 +72820,7 @@ const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.log]: 9
 }, FILESYSTEM_PRIORITIES = {
 	[FILESYSTEM_BLOCK.unexpected]: 6,
-	[FILESYSTEM_BLOCK.executed]: 6,
-	[FILESYSTEM_BLOCK.paths]: 7,
+	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 10
 };
 //#endregion
@@ -73386,7 +73371,7 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + 16
+		rowBytes: (p, rank) => relLength(p) + ranks[Number(rank)].bytes + ranks[Number(rank)].leaf + 21
 	}), details = new Lines({
 		fanout,
 		keep,
@@ -73394,7 +73379,7 @@ function createAuditSummary(prefixes) {
 		loose,
 		nodes: limits.nodes,
 		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
-	}), executed = new Map(), executedBytes = 0, programs = new Map(), ranks = [], ruleIds = new Map(), rankOf = new Map(), rank = (key, name) => {
+	}), programs = new Map(), ranks = [], ruleIds = new Map(), rankOf = new Map(), rank = (key, name) => {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {
 			r = ranks.length, rankOf.set(id, r);
@@ -73402,6 +73387,7 @@ function createAuditSummary(prefixes) {
 			ruleIds.set(rule, ruleId), ranks.push({
 				shown: s,
 				bytes,
+				leaf: leaf(s.path).length,
 				...name ? {} : { program: key },
 				ruleName: rule,
 				ruleId
@@ -73480,17 +73466,15 @@ function createAuditSummary(prefixes) {
 			Number.isNaN(t) || (row.agg.seq === Infinity && (row.agg.seq = seq++), row.agg.first = Math.min(row.agg.first, t), row.agg.last = Math.max(row.agg.last, t));
 			return;
 		}
-		let runner = tally && r.kind === "exec" ? runnerOf(r) : void 0;
-		if (tally && commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
+		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
+		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
 			let p = normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
-			let run = escaped(p), runs = executed.get(run);
-			runs === void 0 ? executedBytes <= limit && (executed.set(run, 1), executedBytes += relLength(run) + 11) : executed.set(run, runs + 1);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
 				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
-				if (!c.failed && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+				if (!c.failed && r.kind !== "exec" && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
 					path: escaped(normalize$2(path, nsPids.get(r.pid))),
@@ -73501,12 +73485,12 @@ function createAuditSummary(prefixes) {
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path);
 				details.add(x, parts);
-				let program = programOf(r.pid, r.comm ?? "");
+				let by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
 				paths.add({
 					...x,
-					comm: String(program),
-					bit: x.bit & ~BIT.X
-				}, parts), tally && takeForRules(x, parts, runner?.program ?? program, runner?.cmd ?? x.comm);
+					comm: String(by),
+					cmd
+				}, parts), tally && takeForRules(x, parts, by, cmd);
 			}
 			return tally?.endLine();
 		}
@@ -73534,13 +73518,13 @@ function createAuditSummary(prefixes) {
 					...program,
 					deleted: !0
 				} : program,
-				commands: [...new Set([...agg.cmds].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd).text))],
+				commands: commandsOf(agg),
 				flags: fmtFlags(agg),
 				path: shown(only?.path ? path + DELETED : path)
 			};
 		});
 	}
-	let rows = (lines) => lines?.map(({ comm, path, agg }) => {
+	let commandsOf = (agg) => [...new Set([...agg.cmds].sort((a, b) => a[1] - b[1]).map(([cmd]) => commands.get(cmd).text))], rows = (lines) => lines?.map(({ comm, path, agg }) => {
 		let { text, field } = commands.get(comm);
 		return {
 			agg,
@@ -73566,16 +73550,13 @@ function createAuditSummary(prefixes) {
 				program: {
 					...ranks[Number(comm)].shown,
 					rank: Number(comm)
-				}
+				},
+				commands: commandsOf(agg)
 			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
 			return {
 				ended,
 				lost,
 				hostMissed,
-				executed: [...executed].map(([path, runs]) => ({
-					...shown(path),
-					runs
-				})),
 				paths: byPath,
 				details: log,
 				killed: [...killed.values()],
