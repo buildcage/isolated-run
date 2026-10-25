@@ -207,6 +207,10 @@ describe("isContainerNotFoundError", () => {
   it("does not misclassify an ENOENT (docker not on PATH)", () => {
     expect(isContainerNotFoundError({ code: "ENOENT" })).toBe(false);
   });
+
+  it("reads a value that is not an object as some other failure, not a missing container", () => {
+    expect(isContainerNotFoundError("Error: No such object: buildcage")).toBe(false);
+  });
 });
 
 // General deriveProjectName tests live in
@@ -218,11 +222,5 @@ describe("deriveProjectName", () => {
       const projectName = deriveProjectName(generateContainerName());
       expect(projectName).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
     }
-  });
-});
-
-describe("isContainerNotFoundError on a value that is not an object", () => {
-  it("reads it as some other failure rather than a missing container", () => {
-    expect(isContainerNotFoundError("Error: No such object: buildcage")).toBe(false);
   });
 });

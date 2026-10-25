@@ -208,6 +208,25 @@ describe("createOverlayScratchDirs", () => {
       `${SLUG_DIR}/upper`,
     ]);
   });
+
+  describe("directory names", () => {
+    const name = (upper: string) => upper.split("/").at(-2)!;
+
+    it("gives roots that differ only in / and _ their own directories", () => {
+      const dirs = createOverlayScratchDirs(
+        "/scratch",
+        ["/a/b_c", "/a/b/c", "/a/b%5Fc"],
+        scratchDeps().deps,
+      );
+      expect(new Set(dirs.map((d) => d.upper)).size).toBe(3);
+    });
+
+    it("keeps the name short for a root past the 255-byte name limit", () => {
+      const roots = [`/mnt/${"d".repeat(300)}`, `/mnt/${"_".repeat(200)}`];
+      const dirs = createOverlayScratchDirs("/scratch", roots, scratchDeps().deps);
+      expect(dirs.map((d) => name(d.upper).length)).toStrictEqual([16, 16]);
+    });
+  });
 });
 
 describe("nestedMountRoots", () => {
@@ -365,24 +384,5 @@ describe("formatFilesystemPlanLog", () => {
     expect(formatFilesystemPlanLog("ephemeral", [], [], [])).toStrictEqual([
       "Filesystem mode: ephemeral",
     ]);
-  });
-});
-
-describe("createOverlayScratchDirs: directory names", () => {
-  const name = (upper: string) => upper.split("/").at(-2)!;
-
-  it("gives roots that differ only in / and _ their own directories", () => {
-    const dirs = createOverlayScratchDirs(
-      "/scratch",
-      ["/a/b_c", "/a/b/c", "/a/b%5Fc"],
-      scratchDeps().deps,
-    );
-    expect(new Set(dirs.map((d) => d.upper)).size).toBe(3);
-  });
-
-  it("keeps the name short for a root past the 255-byte name limit", () => {
-    const roots = [`/mnt/${"d".repeat(300)}`, `/mnt/${"_".repeat(200)}`];
-    const dirs = createOverlayScratchDirs("/scratch", roots, scratchDeps().deps);
-    expect(dirs.map((d) => name(d.upper).length)).toStrictEqual([16, 16]);
   });
 });
