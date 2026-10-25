@@ -11,8 +11,8 @@
 // Sensitive /proc paths masked with /dev/null. runc's own `runc spec`
 // default already masks /proc/kcore, /proc/keys, and /proc/timer_list
 // (among others) and leaves /proc/sysrq-trigger merely read-only.
-// buildOciConfig upgrades sysrq-trigger to fully masked (moving it out of
-// readonlyPaths) and adds kallsyms/kmsg, which runc's default doesn't
+// resolveProtectedPaths upgrades sysrq-trigger to fully masked (moving it out
+// of readonlyPaths) and adds kallsyms/kmsg, which runc's default doesn't
 // cover at all.
 //
 // Imported from a shared JSON file (rather than a JS literal) so
@@ -44,12 +44,12 @@ export function maskedRuntimeDir(env: NodeJS.ProcessEnv): string[] {
  * `root.readonly` in OCI/runc only remounts the top-level rootfs mount
  * point and does not recursively apply to separate mount points that
  * `mount --rbind /` duplicates into the sandbox's rootfs. A host mount
- * point is skipped only when it exactly matches one of
- * `freshMountDestinations`: runc will mount fresh content there when it
- * sets up the sandbox's own further-nested namespaces, shadowing whatever
- * the rbind copy swept in from the host at that path, so forcing that
- * (about-to-be-overridden) copy read-only would be pointless, and some
- * pseudo-filesystems reject a read-only remount outright.
+ * point that exactly matches one of `freshMountDestinations` is skipped:
+ * runc will mount fresh content there when it sets up the sandbox's own
+ * further-nested namespaces, shadowing whatever the rbind copy swept in
+ * from the host at that path, so forcing that (about-to-be-overridden)
+ * copy read-only would be pointless, and some pseudo-filesystems reject a
+ * read-only remount outright.
  */
 export function computeReadonlyHostMounts(
   hostMounts: HostMount[],

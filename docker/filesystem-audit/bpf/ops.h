@@ -143,7 +143,7 @@ int BPF_PROG(on_truncate, const struct path *path)
 
 /**
  * From 6.2, ftruncate(2) and a truncating open reach this rather than
- * security_path_truncate; absent before (see main.go).
+ * security_path_truncate; absent before (see optionalProgs in load.go).
  */
 SEC("fentry/security_file_truncate")
 int BPF_PROG(on_file_truncate, struct file *file)

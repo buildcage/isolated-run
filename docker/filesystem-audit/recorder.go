@@ -233,13 +233,13 @@ func (r *recorder) finish(l loss) error {
 }
 
 // end is the recording's last line, written only once every queued event is
-// out, so a recording without it was cut short. Dropped events found the ring
-// buffer full, and Untracked calls found a tracking map full or had a return
-// the tracer never saw, or, when no open passed its name, failed opens that
-// came without one, or opens whose caller's name differed from the kernel's
-// copy. HostMissed runs the kernel skipped between attaching
-// and the stop signal; the summary does not count them as lost, since any of
-// them may have been another process's.
+// out, so a recording without it was cut short. Dropped counts events that
+// found the ring buffer full. Untracked counts calls that found a tracking map
+// full, calls whose return the tracer never saw, opens whose caller's name
+// differed from the kernel's copy and, when no open passed its name, failed
+// opens that came without one. HostMissed counts program runs the kernel
+// skipped between attaching and the stop signal; the summary does not count
+// them as lost, since any of them may have been another process's.
 type end struct {
 	Kind       string `json:"kind"`
 	Dropped    uint64 `json:"dropped"`

@@ -93,7 +93,8 @@ export interface CheckOverlayfsSupportOptions {
  * ensureOwnScratchBase creates the base rather than a local mkdir: a mkdir
  * here can only produce a mode/ownership that function's own validation must
  * reject, and `recursive: true` follows a pre-existing symlink instead of
- * refusing it. Idempotent, so persistent mode's later call is unaffected.
+ * refusing it. Idempotent, so the later calls (withScratchDir's among them)
+ * are unaffected.
  */
 export function checkOverlayfsSupport({
   base = SANDBOX_SCRATCH_BASE,

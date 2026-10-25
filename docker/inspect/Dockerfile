@@ -149,10 +149,8 @@ RUN mkdir -p /etc/haproxy/rules /etc/coredns /var/log/haproxy /var/log/coredns
 # Tools (QuickJS scripts, rolldown-bundled by qjs-build above).
 # gen-configs.js is used by init-cfg to generate both haproxy.cfg
 # and the CoreDNS Corefile from one shared rule parse, so the two can't
-# describe different allowlists. No report-action.js here: src/lib/report.ts
-# builds its own report in-process instead of fetching one from the
-# container, same as docker/universal/Dockerfile. This action's generator is
-# core's with the AWS access key check added (src/proxy/).
+# describe different allowlists. This action's generator is core's with the
+# AWS access key check added (src/proxy/).
 COPY --from=qjs-build /build/dist/qjs/src/proxy/scripts/gen-configs-inspect.js /opt/buildcage/scripts/gen-configs.js
 
 # runc, extracted onto the runner host at action startup and used by
@@ -177,7 +175,7 @@ COPY licenses/alpine-packages.txt /opt/buildcage/licenses/
 COPY --from=gen-seccomp-profile-build /out/licenses/ /opt/buildcage/licenses/
 COPY --from=filesystem-audit-build /out/licenses/ /opt/buildcage/licenses/
 
-# The services both engines run, then this engine's own files on top.
+# The common services, then this engine's own files on top.
 COPY docker/common/files/s6-rc.d/     /etc/s6-overlay/s6-rc.d/
 COPY docker/common/files/s6-scripts/  /etc/s6-overlay/scripts/
 COPY docker/inspect/files/s6-scripts/ /etc/s6-overlay/scripts/

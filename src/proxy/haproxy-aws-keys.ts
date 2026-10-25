@@ -10,9 +10,9 @@
  * to. The last two are read off the response and added to the map at runtime.
  * A key is matched as a whole string and never decoded.
  *
- * Only one credential is matched, SigV4's or SigV4a's, in the Authorization
- * header or a presigned URL, as current SDKs send it. Any other AWS
- * credential is blocked without reading its key.
+ * Only SigV4's or SigV4a's credential, in the Authorization header or a
+ * presigned URL as current SDKs send it, and a CodeCommit Basic login are
+ * matched. Any other AWS credential is blocked without reading its key.
  */
 
 import type { InspectStageExtension } from "#core/lib/acl/haproxy-inspect-stage.ts";

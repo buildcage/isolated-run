@@ -49,8 +49,7 @@ function unescapeField(field: string | undefined): string {
  * Reads the real host mount table. Node runs directly on the runner host,
  * not inside any namespace, so this is exactly the mount table
  * run-isolated.sh's `mount --rbind /` will duplicate into rootfsBindDir a
- * moment later (see buildOciConfig's readonlyPaths handling for why this
- * matters).
+ * moment later (see computeReadonlyHostMounts for why this matters).
  */
 // Untested by design: parseMountinfo holds the logic and is tested directly.
 /* v8 ignore start */

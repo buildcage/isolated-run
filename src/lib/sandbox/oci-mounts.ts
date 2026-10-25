@@ -215,8 +215,8 @@ export function persistentLayers(
   const mounts: MountEntry[] = [];
   const protectedPaths = new Set(writableDirs);
   if (!disableReadonly) {
-    // `writable: /` (disableReadonly) is an intentional, documented full
-    // opt-out of the read-only restriction, so it's exempt from this guard.
+    // `write_through: /` (disableReadonly) is the documented full opt-out of
+    // the read-only restriction, so it's exempt from this guard.
     assertScratchBaseNotWritable(writableDirs);
     assertNoFreshMountDestinations(writableDirs, freshMountDestinations);
     for (const p of writableDirs)
@@ -259,10 +259,9 @@ export function writableDirsOf({
  * scratch dir, and their 0700/0600 modes separate nothing: without a user
  * namespace every sandbox on the host shares one real UID. An empty tmpfs
  * over the scratch base is what separates them. Called last so the mounts
- * above still resolve against the real
- * scratch base, and root-owned/unwritable so the sandbox can only traverse
- * it. Not maskedPaths: runc applies those after every mount, which would
- * undo the reveal below.
+ * above still resolve against the real scratch base, and root-owned/unwritable
+ * so the sandbox can only traverse it. Not maskedPaths: runc applies those
+ * after every mount, which would undo the reveal below.
  *
  * `aliases` are the other paths the scratch base is reachable at on the host
  * (see pathAliases), each covered the same way with nothing revealed again.

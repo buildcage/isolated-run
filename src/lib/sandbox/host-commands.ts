@@ -213,9 +213,9 @@ function unpinnableMessage(command: string, refusal: Refusal | undefined, persis
 
 /**
  * Pins `docker` and `sudo`, and the PATH each runs with, for the rest of this
- * process. A command missing from PATH altogether is
- * left unpinned, so the sudo preflight or docker's ENOENT reports a runner
- * without them in clearer terms than this would.
+ * process. A command missing from PATH altogether is left unpinned, so the
+ * sudo preflight or docker's ENOENT reports a runner without them in clearer
+ * terms than this would.
  */
 export function pinHostCommands(
   paths: string[],

@@ -286,9 +286,9 @@ function writeLedger(path: string, ledger: Ledger): void {
 }
 
 /** Runs fn on the ledger under its lock and saves it afterwards, even when fn
- *  throws, since the undo fn ran has taken effect. An untrusted ledger is
- *  handed to fn as the reason and never rewritten: remaking it would drop
- *  other steps' uses. */
+ *  throws, since what fn undid before throwing has already happened on disk.
+ *  An untrusted ledger is handed to fn as the reason and never rewritten:
+ *  remaking it would drop other steps' uses. */
 function withLedger<T>(fn: (ledger: Ledger | string) => T, deps: NssDbLedgerDeps): T {
   const path = join(baseOf(deps), NSS_DB_LEDGER_NAME);
   return withLock(

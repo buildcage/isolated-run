@@ -74,13 +74,14 @@ int BPF_PROG(on_task_exit, struct task_struct *p)
 #define X32_SYSCALL_BIT 0x40000000
 
 /**
- * seccomp kills a process's last thread for a 32-bit or x32 syscall, which
- * the audit's profile allows none of, with a SIGSYS to that thread naming the
- * syscall it is making and its architecture. A native one comes from a filter
- * of the step's own, and one naming another call was queued by the process
- * itself; one naming the queuing call itself still passes, adding a record
- * only about that process. A thread killed while others live on gets no
- * signal, and is not recorded.
+ * seccomp kills a process's last thread for a 32-bit or x32 syscall, none of
+ * which the audit's profile allows, with a SIGSYS to that thread naming the
+ * syscall it is making and its architecture. A SIGSYS naming a native syscall
+ * comes from the step's own filter, and one naming a syscall the thread is
+ * not in was queued by the process itself; both are skipped. One the process
+ * queues naming the queuing call itself still passes, but records only that
+ * process. A thread killed while others live on gets no signal, so goes
+ * unrecorded.
  */
 SEC("tp_btf/signal_generate")
 int BPF_PROG(on_signal, int sig, struct kernel_siginfo *info, struct task_struct *task)

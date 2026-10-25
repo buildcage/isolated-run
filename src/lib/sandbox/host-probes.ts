@@ -1,5 +1,5 @@
 /**
- * The facts buildOciConfig reads off the machine it runs on, behind one
+ * The facts the sandbox setup reads off the machine it runs on, behind one
  * collaborator: they all describe the same machine, so a test supplying one
  * without the others would be describing one that cannot exist.
  *

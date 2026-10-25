@@ -24,8 +24,8 @@ check_failed() {
 
 # Re-exec into a fresh, private mount namespace before doing anything else.
 # Every concurrently running `run:` step's own scratch dir lives under the
-# same /tmp, so without this, the `mount --rbind /` staging below (and `ip
-# netns add`'s own bind-mount of /run/netns) would run in the one mount
+# same scratch base, so without this, the `mount --rbind /` staging below
+# (and `ip netns add`'s own bind-mount of /run/netns) would run in the one mount
 # namespace shared by every step on the host, unavoidably nesting a copy
 # of each concurrently running step's rootfs tree inside every other's
 # snapshot, which races their unmount/rmdir cleanup against each other.

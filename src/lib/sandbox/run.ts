@@ -8,7 +8,7 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError, cancelledBeforeRun } from "../errors.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 
-// rollup's cjs output doesn't convert import.meta.dirname (it silently
+// rolldown's cjs output doesn't convert import.meta.dirname (it silently
 // becomes undefined), so use this form instead.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

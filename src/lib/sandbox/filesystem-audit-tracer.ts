@@ -253,14 +253,13 @@ function signalTracer(
 }
 
 /**
- * Stops the tracer with SIGTERM for a clean flush. It goes to the sudo wrapper,
- * which passes it on to a tracer that has not written its pidfile yet, and,
- * while the tracer runs, to the tracer itself through sudo. Once its end line is
- * written the record is whole, and the seconds the kernel takes to detach its
- * probes are left to it, so it can remove its cgroup. One that neither writes
- * it nor exits in time is killed. Removing the pidfile once it
- * is gone tells the post step the tracer is stopped, so it only acts on one a
- * cancel orphaned.
+ * Stops the tracer with SIGTERM for a clean flush, sent both to the sudo
+ * wrapper, for a tracer that has not written its pidfile yet, and to the pid in
+ * the pidfile (see signalTracer). Once its end line is written the record is
+ * whole, and the seconds the kernel takes to detach its probes are left to it,
+ * so it can remove its cgroup. One that neither writes it nor exits in time is
+ * killed. Removing the pidfile once it is gone tells the post step the tracer
+ * is stopped, so it only acts on one a cancel orphaned.
  *
  * untilRecorded: return once the record is whole rather than once the tracer
  * has gone, which a tracer that never attached has no record for.

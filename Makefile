@@ -29,8 +29,8 @@ help:
 test_unit: test_unit_core test_unit_sandbox test_unit_qjs ## Run unit tests
 
 # vitest matches these by path substring, not glob, so keep them scoped:
-# src/core is the shared library (also dual-tested under QuickJS below),
-# src/lib + src/main*.ts is isolated-run's own action code.
+# src/core is the core library (also tested under QuickJS below), src/lib +
+# src/main*.ts the action's own code.
 .PHONY: test_unit_core
 test_unit_core: ## Run core library unit tests
 	@vp test run src/core
@@ -154,7 +154,7 @@ test_integration_sandbox_linux_runtime: ## The action's remaining integration te
 # blocking and an SNI naming another address), and keeps the rest from depending on a
 # third-party site being up.
 .PHONY: test_integration_sandbox_universal
-test_integration_sandbox_universal: ## Run the universal-engine fixture-based integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF built with test hooks)
+test_integration_sandbox_universal: ## Run the universal-engine fixture-based integration tests (needs BUILDCAGE_LOCAL_IMAGE_REF and a test-hook build of dist/main.cjs)
 	@./test/with-fixture.sh universal \
 		./test/integration-test-universal-restrict.sh \
 		./test/integration-test-universal-audit.sh \
@@ -186,7 +186,7 @@ test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NS
 		./test/integration-test-inspect-reserved-mounts.sh
 
 # Builds each engine's proxy image itself (docker compose build), unlike the
-# two groups above which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.
+# groups above, which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.
 .PHONY: test_integration_listener_scope
-test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0, for both engines
+test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0
 	@./test/integration-test-listener-scope.sh

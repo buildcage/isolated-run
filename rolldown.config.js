@@ -16,9 +16,9 @@ const configs = [
   {
     input: "src/main.ts",
     file: "dist/main.cjs",
+    plugins: mainPlugins,
     // src/core/lib/provenance's sigstore usage relies on dynamic imports;
     // inline them so dist is a single file.
-    plugins: mainPlugins,
     codeSplitting: false,
   },
   // Also gated: post.ts's own crash-fallback cleanup reads the same

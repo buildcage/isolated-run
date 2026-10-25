@@ -1,8 +1,8 @@
 import { SandboxError } from "./errors.ts";
 
 /**
- * Lives here rather than in inputs.ts for the same reason engine.ts does:
- * sandbox/ needs only the type.
+ * Lives here rather than in inputs.ts so that sandbox/, which needs only the
+ * type, does not import inputs.ts.
  */
 const FILESYSTEM_MODES = ["persistent", "ephemeral"] as const;
 export type FilesystemMode = (typeof FILESYSTEM_MODES)[number];

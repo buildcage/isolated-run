@@ -1,3 +1,20 @@
+/**
+ * CA trust for the inspect engine. The sandbox's rootfs is the live host `/`
+ * (via `mount --rbind /`), so a CA written into it and deleted afterwards
+ * would land on the host. Instead the files in CaTrustFiles are written into
+ * this run's scratch dir and mounted over the sandbox's view of each path
+ * (see caTrustAdditions).
+ *
+ * The mount needs nothing undone afterward: run-isolated.sh's `umount -R`
+ * (and the scratch dir's own cleanup) removes it, along with the rest of the
+ * rootfs bind-mount, when the step ends, and the real host store is never
+ * touched (the augmented copy goes back over the path it was read from, so
+ * there is always a file there).
+ *
+ * OWN_CA_DESTINATION and NSS_CA_DB_DESTINATION have nothing there ahead of
+ * time: runc creates their mount points in the container's own /dev tmpfs,
+ * not on the host.
+ */
 import { execFileSync } from "node:child_process";
 import {
   readFileSync,
@@ -19,29 +36,6 @@ import { isAtOrUnder, WritablePathConflictError } from "./paths.ts";
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import type { MountEntry } from "./types.ts";
 
-/**
- * CA trust for the inspect engine, adapted for this sandbox's rootfs being
- * the live host `/` (via `mount --rbind /`), not a throwaway image layer.
- *
- * Writing the CA into the rootfs and deleting it again once the step's
- * process exits is the obvious approach, and the right one when that rootfs
- * is a disposable image layer, one torn down (or diffed and discarded) after
- * the step. It does not work here: this sandbox's rootfs is a bind-mount of
- * the live host `/`, so both the write and the delete land on the host
- * filesystem itself.
- *
- * Instead, the files below are written into this run's own scratch
- * directory and mounted over the sandbox's own view of the relevant
- * paths (see caTrustAdditions / buildOciConfig), a mount-namespace-scoped
- * overlay, not a host write. The mount needs nothing undone
- * afterward: run-isolated.sh's `umount -R` (and the scratch dir's own
- * cleanup) removes it, along with the rest of the rootfs bind-mount, when
- * the step ends, and the real host store is never touched (the augmented copy
- * goes back over the path it was read from, so there is always a file there).
- *
- * OWN_CA_DESTINATION is the one path with nothing there ahead of time. runc
- * creates its mount point in the container's own /dev tmpfs, not on the host.
- */
 export interface CaTrustFiles {
   /** A CA-only file, mounted at OWN_CA_DESTINATION, for variables that add
    *  to a tool's built-in trust set (NODE_EXTRA_CA_CERTS, DENO_CERT). */
@@ -199,15 +193,14 @@ export function discoverJvmKeystores(
   return found;
 }
 
-// Mirrors buildcage/docker's inspect-engine CA-injection policy table (see
-// docs/security.md): NODE_EXTRA_CA_CERTS/DENO_CERT add to a built-in trust
-// set, so they're pointed at a CA-only file; REQUESTS_CA_BUNDLE/PIP_CERT/
-// SSL_CERT_FILE replace a tool's bundle outright, so they're pointed at the
-// (augmented) system store instead, never a CA-only file: doing so would
-// leave the tool trusting nothing else. CURL_CA_BUNDLE is left unset: curl
-// already reads the system store by default, which is also how Debian's
-// GnuTLS-linked tools (wget, git) reach it, since they read none of these.
-// RHEL's and SUSE's read a directory instead; see CA_DIR_CANDIDATES.
+// NODE_EXTRA_CA_CERTS/DENO_CERT add to a built-in trust set, so they're
+// pointed at a CA-only file; REQUESTS_CA_BUNDLE/PIP_CERT/SSL_CERT_FILE
+// replace a tool's bundle outright, so they're pointed at the (augmented)
+// system store instead, never a CA-only file: doing so would leave the tool
+// trusting nothing else. CURL_CA_BUNDLE is left unset: curl already reads
+// the system store by default, which is also how Debian's GnuTLS-linked
+// tools (wget, git) reach it, since they read none of these. RHEL's and
+// SUSE's read a directory instead; see CA_DIR_CANDIDATES.
 //
 // Only applied when a variable is unset. A step that already points one of
 // these somewhere keeps doing so unmodified: safely appending to an
@@ -445,7 +438,7 @@ export function writeCaTrustFiles(
 }
 
 // Variables this never sets, each replacing its tool's bundle when the step
-// does. npm reads npm_config_* in any case.
+// does. npm reads npm_config_* case-insensitively.
 const REPLACING_WHEN_SET = [
   "CURL_CA_BUNDLE",
   "GIT_SSL_CAINFO",

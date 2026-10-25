@@ -134,7 +134,7 @@ const busySpins = 64
 
 // read passes each record to f until Flush, then returns once it has read
 // what was queued when Flush was called. It calls tick when the ring stays
-// empty for every, and at least that often while records keep coming. A
+// empty for `every`, and at least that often while records keep coming. A
 // record is valid only until f returns.
 func (r *ring) read(f func([]byte) error, every time.Duration, tick func() error) error {
 	flushing, until, spins := false, ^uintptr(0), 0

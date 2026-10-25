@@ -26,11 +26,11 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 */
 	K_OPEN_NAME = 12, K_READ = 13, K_WRITE = 14, K_MMAP = 15,
 	/**
-	 * @name Failed path syscalls
+	 * @name Path syscalls recorded from their exit
 	 * data holds the user path(s), NUL-separated (old then new for rename),
 	 * then the base directories of the relative ones (see add_base);
-	 * path_len holds the errno. A failed chmod's new mode is in flags, a
-	 * failed chown's new uid in flags and gid in gid.
+	 * path_len holds the errno of a failed one. A failed chmod's new mode is
+	 * in flags, a failed chown's new uid in flags and gid in gid.
 	 * @{
 	 */
 	K_UNLINK_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
@@ -115,7 +115,7 @@ struct event {
 	u8 truncated; ///< The path, or the first path of a two-path operation.
 	u8 trunc2;    ///< The second path of a rename or link.
 	char comm[16];
-	s32 nr;    ///< The syscall an event with tid was sent from.
+	s32 nr;    ///< The syscall a path change or K_RESULT was sent from.
 	u32 marks; ///< MARK_* for the file a path was taken from.
 	u32 gid;   ///< A failed chown's new group.
 	u32 tid;   ///< The thread, on an event whose syscall's K_RESULT follows.
