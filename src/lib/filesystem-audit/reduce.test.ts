@@ -889,6 +889,15 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R c /etc/hosts", "r c …/", "r c …/d/**"]);
   });
 
+  it("never folds names with an unknown start together, as they may share nothing", () => {
+    const md = render(
+      { kind: "open", failed: true, comm: "c", path: "…/x", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "y", err: 2 },
+      { kind: "open", failed: true, comm: "c", path: "…/z", err: 2 },
+    );
+    expect(lines(md)).toEqual(["r c …/x", "r c …/y", "r c …/z"]);
+  });
+
   it("renders paths thousands of components deep without stalling", () => {
     const deep = `/work/${"a/".repeat(2000)}`;
     const records = Array.from({ length: 500 }, (_, i) => ({

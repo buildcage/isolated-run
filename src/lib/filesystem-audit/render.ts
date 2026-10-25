@@ -114,9 +114,7 @@ export interface RenderOptions {
   rulesNote?: string;
 }
 
-// By program, in the order each first ran, and by path within each. Two
-// paths can print alike ("x" and "…/x"), so they keep their recording order
-// between them.
+// By program, in the order each first ran, and by path within each.
 function byProgramAndPath(paths: PathRow[]): PathRow[] {
   return keyed(paths)
     .sort(byRecording)

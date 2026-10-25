@@ -208,8 +208,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     home: prefixes.home.map(escapePath),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
-  // "…" stands for the unknown start of a cut or relative name, so a fold at
-  // it would take in names that may have nothing in common.
+  // "…" stands for the unknown start of a cut or relative name, so it folds
+  // only as the kept directories do, not for having three such names under it.
   const keep = [
     "/",
     "/home",
@@ -336,17 +336,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
-    let path = deletedPath ? unmarked(x.path) : x.path;
-    // A name still relative shows as a "…/" walk, as relativize spells it.
-    if (
-      !path.startsWith("/") &&
-      !path.startsWith("…/") &&
-      !path.startsWith(MEMFD) &&
-      !isRunnerFile(path)
-    )
-      path = `…/${path}`;
-    const same = path === x.path;
-    const left = tally!.take(x, same ? parts : components(path), id, path, cmd);
+    const path = deletedPath ? unmarked(x.path) : x.path;
+    const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
     // Past the tally's limit, only the matching is left to do.
     if (!left || tally!.givenUp) return;
     const program = Boolean(ranks[by].shown.deleted);
@@ -472,7 +463,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
-        path: escaped(normalize(path, nsPids.get(r.pid))),
+        path: walk(escaped(normalize(path, nsPids.get(r.pid)))),
         bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,
@@ -489,6 +480,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return tally?.endLine();
   };
+
+  // A name still relative, a failed access's whose directory was not found,
+  // keyed as the "…/" walk relativize spells it as, so it shares a line with
+  // a path cut to the same.
+  const walk = (path: string): string =>
+    path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path)
+      ? path
+      : `…/${path}`;
 
   // A path escaped as the summary shows it, its marks kept, before anything
   // folds it: a star in a name is then never a fold's.

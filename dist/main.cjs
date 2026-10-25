@@ -73411,9 +73411,7 @@ function createAuditSummary(prefixes) {
 		path: ruleName
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
 		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
-		!path.startsWith("/") && !path.startsWith("…/") && !path.startsWith(MEMFD) && !isRunnerFile(path) && (path = `…/${path}`);
-		let same = path === x.path;
-		if (!tally.take(x, same ? parts : components(path), id, path, cmd) || tally.givenUp) return;
+		if (!tally.take(x, deletedPath ? components(path) : parts, id, path, cmd) || tally.givenUp) return;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
 		deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
@@ -73471,7 +73469,7 @@ function createAuditSummary(prefixes) {
 				if (!c.failed && r.kind !== "exec" && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
-					path: escaped(normalize$2(path, nsPids.get(r.pid))),
+					path: walk(escaped(normalize$2(path, nsPids.get(r.pid)))),
 					bit: bitsOf(c.letter),
 					failed: c.failed,
 					perm: c.perm,
@@ -73489,7 +73487,7 @@ function createAuditSummary(prefixes) {
 			}
 			return tally?.endLine();
 		}
-	};
+	}, walk = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path) ? path : `…/${path}`;
 	function escaped(path) {
 		return path.startsWith(MEMFD) ? MEMFD + escapeForDisplay(path.slice(MEMFD.length)) : isRunnerFile(path) ? path : path.endsWith(DELETED) ? escapePath(path.slice(0, -DELETED.length)) + DELETED : escapePath(path);
 	}

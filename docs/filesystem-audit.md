@@ -272,7 +272,7 @@ command's paths on their own, so they often name it; the artifact always does.
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
 - `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
-  `/proc/<pid>`, `/proc/self`, and the `…` a cut or relative name starts with.
+  `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule

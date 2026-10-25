@@ -200,12 +200,12 @@ describe("renderAuditSummaryBlocks: tables", () => {
     expect(tableRows(md)).toEqual(["| `…/run.sh` | X |", "| `/proc/<pid>/fd/3` | X |"]);
   });
 
-  it("keeps two rows that read alike in a stable order", () => {
+  it("gives a name with an unknown start one row, cut or left relative alike", () => {
     const md = render(
       { kind: "read", comm: "a", path: "…/x" },
       { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
     );
-    expect(tableRows(md)).toEqual(["| `…/x` | R |", "| `…/x` | r |"]);
+    expect(tableRows(md)).toEqual(["| `…/x` | R |"]);
   });
 
   it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {
