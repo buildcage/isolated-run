@@ -17,6 +17,7 @@ import {
   components,
   DELETED,
   DELETED_MARK,
+  hasKnownStart,
   isRunnerFile,
   leaf,
   marked,
@@ -208,6 +209,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     home: prefixes.home.map(escapePath),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
+  // "…" stands for the unknown start of a cut or relative name, so it folds
+  // only as the kept directories do, not for having three such names under it.
   const keep = [
     "/",
     "/home",
@@ -215,6 +218,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/proc",
     "/proc/<pid>",
     "/proc/self",
+    "…",
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
   ].map(components);
@@ -333,17 +337,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
-    let path = deletedPath ? unmarked(x.path) : x.path;
-    // A name still relative shows as a "…/" walk, as relativize spells it.
-    if (
-      !path.startsWith("/") &&
-      !path.startsWith("…/") &&
-      !path.startsWith(MEMFD) &&
-      !isRunnerFile(path)
-    )
-      path = `…/${path}`;
-    const same = path === x.path;
-    const left = tally!.take(x, same ? parts : components(path), id, path, cmd);
+    const path = deletedPath ? unmarked(x.path) : x.path;
+    const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
     // Past the tally's limit, only the matching is left to do.
     if (!left || tally!.givenUp) return;
     const program = Boolean(ranks[by].shown.deleted);
@@ -437,7 +432,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     // The exec maps its image under the name it gives, before its own record.
     if (!r.image) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
-      const p = normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
+      const p = walk(normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
     } else if (r.kind === "exec") {
@@ -455,21 +450,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // an attribute change whose directory descriptor closed meanwhile, which
       // is lost; a failed one may keep the relative name it was given, and so
       // may a run whose file the tracer did not see.
-      if (
-        !c.failed &&
-        r.kind !== "exec" &&
-        !r.memfd &&
-        !isRunnerFile(path) &&
-        !path.startsWith("/") &&
-        !path.startsWith("…/")
-      )
-        continue;
+      if (!c.failed && r.kind !== "exec" && !hasKnownStart(path)) continue;
       // A read of what the process loaded prints nothing.
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
       const t = Date.parse(r.t ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
-        path: escaped(normalize(path, nsPids.get(r.pid))),
+        path: walk(escaped(normalize(path, nsPids.get(r.pid)))),
         bit: bitsOf(c.letter),
         failed: c.failed,
         perm: c.perm,
@@ -486,6 +473,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return tally?.endLine();
   };
+
+  // A relative name, keyed as the "…/" walk relativize shows it as, so it
+  // shares a line with a cut path spelled the same.
+  function walk(path: string): string {
+    return hasKnownStart(path) ? path : `…/${path}`;
+  }
 
   // A path escaped as the summary shows it, its marks kept, before anything
   // folds it: a star in a name is then never a fold's.

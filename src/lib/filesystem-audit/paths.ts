@@ -24,6 +24,14 @@ export const leaf = (path: string): string => path.slice(path.lastIndexOf("/") +
 
 export const isRunnerFile = (path: string): boolean => path.startsWith(RUNNER_FILE);
 
+/**
+ * Whether a path says where it starts: absolute, a "…/" walk, a memfd or a
+ * runner file. A relative name does not: its directory was closed before the
+ * tracer could read it.
+ */
+export const hasKnownStart = (path: string): boolean =>
+  path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path);
+
 // Never folded, nor credited to the directories it names: a path with "..",
 // which may lead elsewhere through a symlink, a memfd, whose name only looks
 // like a path, and a runner file, whose name is no path.
@@ -80,9 +88,6 @@ export function relativize(path: string, prefixes: Prefixes): string {
     if (path === home) return "~";
     if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   }
-  // A name still relative is one whose directory the tracer could not find
-  // (its fd was closed meanwhile); like a truncated walk, its start is unknown.
-  if (!path.startsWith("/") && !path.startsWith("…/")) return `…/${path}`;
   return path;
 }
 
