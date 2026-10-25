@@ -1,43 +1,16 @@
-# Local-development counterpart to docker/compose.action.yaml (which the
-# action itself uses with a verified, digest-pinned image ref). This one
-# builds the proxy image from source. CI's test_sandbox/test_sandbox_*
-# jobs build through it (via .github/actions/prepare-local-proxy, relying on
-# Compose's default-filename discovery), never docker/compose.action.yaml.
+# Local-development counterpart to docker/compose.action.yaml, which it
+# extends so the two cannot drift: this one only adds building the proxy image
+# from source. CI's test_sandbox/test_sandbox_* jobs build through it (via
+# .github/actions/prepare-local-proxy, relying on Compose's default-filename
+# discovery).
 services:
   proxy:
-    container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
+    extends:
+      file: docker/compose.action.yaml
+      service: proxy
+    # Dropped so the build takes Compose's own name, which carries the project
+    # and so differs between checkouts.
+    image: !reset null
     build:
       context: .
       dockerfile: docker/${PROXY_ENGINE:-inspect}/Dockerfile
-    cap_add:
-      - NET_ADMIN
-    environment:
-      - PROXY_MODE=${PROXY_MODE:-restrict}
-      - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
-      - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
-      - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
-      # inspect only: it is the one engine that can see a method or a path.
-      - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
-      - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
-      # inspect only: the AWS access key check, off when no key is given.
-      - ALLOWED_AWS_KEY=${ALLOWED_AWS_KEY:-}
-      - ALLOWED_AWS_ROLE_ACCOUNTS=${ALLOWED_AWS_ROLE_ACCOUNTS:-}
-      # Runner addresses the engine blocks as a resolved destination.
-      - HOST_ADDRESSES=${HOST_ADDRESSES:-}
-    # `--wait` would otherwise return on "running" alone. Runs every service's
-    # own s6 check: the resolver starts in parallel with HAProxy, so probing
-    # HAProxy alone would pass while DNS is still coming up. No restart policy
-    # goes with it: a container that stopped itself has to stay stopped for the
-    # wait to see it.
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'for check in /etc/s6-overlay/s6-rc.d/*/data/check; do "$$check" || exit 1; done',
-        ]
-      interval: 30s
-      # Every start pays this before the first probe, and the tree is ready in ~0.3s.
-      start_interval: 250ms
-      timeout: 10s
-      retries: 3
-      start_period: 60s

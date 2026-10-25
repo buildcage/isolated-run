@@ -3,8 +3,9 @@
 #
 # This file does not define the proxy service: isolated-run's real action
 # always starts its own throwaway proxy container via
-# docker/compose.action.yaml (or, for these tests,
-# docker/compose.action.test-inspect.yaml; see BUILDCAGE_TEST_COMPOSE_FILE in
+# docker/compose.action.yaml (for these tests, with
+# docker/compose.action.test-inspect.yaml layered on; see
+# BUILDCAGE_TEST_COMPOSE_OVERLAY in
 # src/core/lib/provenance/local-image-override.ts), a separate
 # `docker compose` invocation/project from this one. This file only has to
 # bring up the fixture origins and the network both invocations join.

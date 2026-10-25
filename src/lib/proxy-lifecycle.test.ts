@@ -13,7 +13,7 @@ import { startSandboxProxy, stopSandboxProxy, type ProxyLifecycleDeps } from "./
 const CONTAINER = "buildcage-proxy-deadbeef";
 
 const OPTIONS = {
-  composeFile: "/action/docker/compose.action.yaml",
+  composeFiles: ["/action/docker/compose.action.yaml"],
   projectName: "buildcage-deadbeef",
   containerName: CONTAINER,
   pullPolicy: "always",
@@ -175,7 +175,7 @@ describe("startSandboxProxy", () => {
 
 describe("stopSandboxProxy", () => {
   const stopOptions = {
-    composeFile: OPTIONS.composeFile,
+    composeFiles: OPTIONS.composeFiles,
     projectName: OPTIONS.projectName,
     composeEnv: OPTIONS.composeEnv,
   };

@@ -655,7 +655,7 @@ describe("runSandboxStep", () => {
     });
     expect(mocks.startSandboxProxy.mock.calls[0][0]).toMatchObject({
       pullPolicy: "always",
-      composeFile: expect.stringContaining("compose.action.yaml"),
+      composeFiles: [expect.stringContaining("compose.action.yaml")],
     });
     expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
       BUILDCAGE_PROXY_IMAGE_REF: `ghcr.io/buildcage/isolated-run@${DIGEST}`,
@@ -680,11 +680,11 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it("skips provenance verification and takes the compose file from a local override", async () => {
+  it("skips provenance verification and layers a local override's compose file on the shipped one", async () => {
     mocks.readLocalImageOverride.mockResolvedValue({
       imageRef: "local:dev",
       pullPolicy: "never",
-      composeFile: "/repo/test/compose.test-inspect.yaml",
+      composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
     });
 
     await runSandboxStep(ENV, deps);
@@ -692,7 +692,10 @@ describe("runSandboxStep", () => {
     expect(mocks.verifyImageDigestOrThrow).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy.mock.calls[0][0]).toMatchObject({
       pullPolicy: "never",
-      composeFile: "/repo/test/compose.test-inspect.yaml",
+      composeFiles: [
+        expect.stringMatching(/\/compose\.action\.yaml$/),
+        "/repo/docker/compose.action.test-inspect.yaml",
+      ],
     });
   });
 

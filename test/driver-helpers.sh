@@ -55,7 +55,7 @@ run_step() {
     GITHUB_STATE="$prefix.state"
     GITHUB_STEP_SUMMARY="$prefix.md"
     BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF"
-    BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-$engine.yaml"
+    BUILDCAGE_TEST_COMPOSE_OVERLAY="$REPO_ROOT/docker/compose.action.test-$engine.yaml"
     INPUT_PROXY_ENGINE="$engine"
     "$@"
     node "$REPO_ROOT/dist/main.cjs"

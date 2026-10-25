@@ -23254,8 +23254,8 @@ const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
-function resolveComposeFile(override) {
-	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
+function resolveComposeFiles(override) {
+	return override?.composeOverlay ? [DEFAULT_COMPOSE_FILE, override.composeOverlay] : [DEFAULT_COMPOSE_FILE];
 }
 //#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
@@ -74300,11 +74300,13 @@ function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 		hostPath
 	];
 }
-function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
+function fileArgs(composeFiles) {
+	return composeFiles.flatMap((file) => ["-f", file]);
+}
+function buildComposeUpArgs({ composeFiles, projectName, pullPolicy }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"up",
@@ -74318,11 +74320,10 @@ function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
 		"--quiet-pull"
 	];
 }
-function buildComposeLogsArgs({ composeFile, projectName, tail }) {
+function buildComposeLogsArgs({ composeFiles, projectName, tail }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"logs",
@@ -74331,11 +74332,10 @@ function buildComposeLogsArgs({ composeFile, projectName, tail }) {
 		String(tail)
 	];
 }
-function buildComposeDownArgs({ composeFile, projectName }) {
+function buildComposeDownArgs({ composeFiles, projectName }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"down",
@@ -74391,18 +74391,18 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 		env: hostCommandEnv("docker", env)
 	});
 };
-async function startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
+async function startSandboxProxy({ composeFiles, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
 	let { printDocker = printDockerViaExec } = deps;
 	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
 		try {
 			printDocker(buildComposeUpArgs({
-				composeFile,
+				composeFiles,
 				projectName,
 				pullPolicy
 			}), composeEnv);
 		} catch (e) {
 			throw proxyStartError(e, {
-				composeFile,
+				composeFiles,
 				projectName,
 				containerName,
 				composeEnv
@@ -74410,10 +74410,10 @@ async function startSandboxProxy({ composeFile, projectName, containerName, pull
 		}
 	});
 }
-function proxyStartError(e, { composeFile, projectName, containerName, composeEnv }, deps) {
+function proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps) {
 	let state = readProxyState(containerName, composeEnv, deps);
 	return state ? (printProxyLog({
-		composeFile,
+		composeFiles,
 		projectName,
 		composeEnv
 	}, deps), new SandboxError(describeContainerStartFailure(state, {
@@ -74432,10 +74432,10 @@ function reportInspectFailure(e) {
 	let stderr = capturedStderr(e);
 	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
 }
-function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
+function printProxyLog({ composeFiles, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
 	try {
 		printDocker(buildComposeLogsArgs({
-			composeFile,
+			composeFiles,
 			projectName,
 			tail: 100
 		}), composeEnv);
@@ -74443,11 +74443,11 @@ function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker =
 		console.log("The sandbox proxy container's log could not be read.");
 	}
 }
-async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
+async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
 	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
 		try {
 			printDocker(buildComposeDownArgs({
-				composeFile,
+				composeFiles,
 				projectName
 			}), composeEnv);
 		} catch (e) {
@@ -77490,7 +77490,7 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 	return deps.log(`buildcage: proxy image: ${imageRef}`), {
 		imageRef,
 		pullPolicy,
-		composeFile: resolveComposeFile(localOverride)
+		composeFiles: resolveComposeFiles(localOverride)
 	};
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
@@ -77562,7 +77562,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let deps = {
 		...realDeps,
 		...overrides
-	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
@@ -77583,14 +77583,14 @@ async function runSandboxStep(env, overrides = {}) {
 		awsKey: aws.key,
 		awsRoleAccounts: aws.roleAccounts
 	}, env), stopProxy = () => deps.stopSandboxProxy({
-		composeFile,
+		composeFiles,
 		projectName,
 		composeEnv,
 		annotation
 	});
 	try {
 		await deps.startSandboxProxy({
-			composeFile,
+			composeFiles,
 			projectName,
 			containerName,
 			pullPolicy,

@@ -27,7 +27,7 @@ import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts"
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { buildComposeEnv } from "./compose-env.ts";
-import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
+import { readLocalImageOverride, resolveComposeFiles } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
@@ -115,7 +115,7 @@ function onCancel(listener: () => void): () => void {
  * The steps runSandboxStep sequences, injected so a test can watch their order
  * and arguments; each is tested in its own file. Pure steps
  * (resolveWriteThroughInput, deriveProjectName, buildComposeEnv,
- * resolveComposeFile, formatFilesystemPlanLog, resolveBuildcageImageRef, and
+ * resolveComposeFiles, formatFilesystemPlanLog, resolveBuildcageImageRef, and
  * pinningPaths with realPathOf injected) run for real: a test checks the value
  * they pass on, not the call.
  */
@@ -419,12 +419,16 @@ async function resolveProxyImage(
   { actionRef, actionRepo, proxyEngine }: StepInputs,
   env: NodeJS.ProcessEnv,
   deps: SandboxStepDeps,
-): Promise<{ imageRef: string; pullPolicy: "always" | "never"; composeFile: string }> {
+): Promise<{
+  imageRef: string;
+  pullPolicy: "always" | "never";
+  composeFiles: readonly string[];
+}> {
   const localOverride = await deps.readLocalImageOverride(env);
   const { imageRef, pullPolicy } =
     localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
   deps.log(`buildcage: proxy image: ${imageRef}`);
-  return { imageRef, pullPolicy, composeFile: resolveComposeFile(localOverride) };
+  return { imageRef, pullPolicy, composeFiles: resolveComposeFiles(localOverride) };
 }
 
 /** Said where the restrict example is too large to print while it lists the
@@ -575,7 +579,7 @@ export async function runSandboxStep(
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
-  const { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+  const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
 
   const { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } =
@@ -606,11 +610,11 @@ export async function runSandboxStep(
     env,
   );
   const stopProxy = () =>
-    deps.stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    deps.stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation });
 
   try {
     await deps.startSandboxProxy({
-      composeFile,
+      composeFiles,
       projectName,
       containerName,
       pullPolicy,

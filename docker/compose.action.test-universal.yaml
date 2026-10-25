@@ -1,28 +1,13 @@
-# Test-only counterpart to compose.action.yaml, used only via
-# BUILDCAGE_TEST_COMPOSE_FILE (see
+# Layered on compose.action.yaml through BUILDCAGE_TEST_COMPOSE_OVERLAY (see
 # src/core/lib/provenance/local-image-override.ts) by this repo's own
-# universal-engine integration tests. Adds the one thing a published action
-# has no reason to know about: a second network joining the fixture origin
-# started by ../compose.test-universal.yaml. Unlike
-# compose.action.test-inspect.yaml, there is no CA cert to trust: the
-# universal engine never terminates TLS.
-#
-# BUILDCAGE_TEST_COMPOSE_FILE only takes effect at all when
-# BUILDCAGE_BUILD_TEST_HOOKS=1 was set at build time (see
-# readLocalImageOverride in src/lib/compose-file.ts); without that flag the
-# override is unreachable, and therefore irrelevant, in a published action's
-# dist/main.cjs.
+# universal-engine integration tests, which reach it only in a build made with
+# BUILDCAGE_BUILD_TEST_HOOKS=1. Adds what a published action has no reason to
+# know about: a second network joining the fixture origin started by
+# ../compose.test-universal.yaml. Paths resolve against this directory, the
+# first compose file's.
 services:
   proxy:
-    container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
-    image: ${BUILDCAGE_PROXY_IMAGE_REF:-placeholder}
-    cap_add:
-      - NET_ADMIN
     environment:
-      - PROXY_MODE=${PROXY_MODE:-restrict}
-      - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
-      - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
-      - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
       # Overridable because test/integration-test-concurrent.sh puts two
       # proxies on this network at once, and they cannot share an address.
       - TEST_NET_ADDR=${TEST_NET_ADDR:-10.200.0.2/24}
@@ -41,19 +26,6 @@ services:
     networks:
       default:
       test-net:
-    labels:
-      io.buildcage.owner: ${BUILDCAGE_OWNER:-}
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'for check in /etc/s6-overlay/s6-rc.d/*/data/check; do "$$check" || exit 1; done',
-        ]
-      interval: 30s
-      start_interval: 250ms
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
 networks:
   test-net:

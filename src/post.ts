@@ -7,7 +7,7 @@ import * as core from "@actions/core";
 import { annotate } from "#core/lib/actions/annotation.ts";
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
 
-import { readLocalImageOverride, resolveComposeFile } from "./lib/compose-file.ts";
+import { readLocalImageOverride, resolveComposeFiles } from "./lib/compose-file.ts";
 import { readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
@@ -19,14 +19,14 @@ import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
 // what may be torn down, and tearing it down is one `docker compose down`.
 /* v8 ignore start */
 // The override is read here too, not just in main.ts: if main.ts started the
-// proxy via BUILDCAGE_TEST_COMPOSE_FILE (this repo's own driver tests, see
+// proxy with BUILDCAGE_TEST_COMPOSE_OVERLAY (this repo's own driver tests, see
 // test/driver-helpers.sh) and the process was then killed before its own
-// finally block ran, this fallback must tear down the same compose file that
-// started it, not the shipped default it never used.
+// finally block ran, this fallback must tear down with the same compose files
+// that started it.
 async function stopProxyContainer({ containerName, projectName }: PostCleanupTargets) {
-  const composeFile = resolveComposeFile(await readLocalImageOverride(process.env));
+  const composeFiles = resolveComposeFiles(await readLocalImageOverride(process.env));
 
-  execFileSync(hostCommand("docker"), buildComposeDownArgs({ composeFile, projectName }), {
+  execFileSync(hostCommand("docker"), buildComposeDownArgs({ composeFiles, projectName }), {
     stdio: "inherit",
     env: hostCommandEnv("docker", { ...process.env, PROXY_CONTAINER_NAME: containerName }),
   });

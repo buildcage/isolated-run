@@ -1,7 +1,7 @@
 /**
- * Which compose file starts (and tears down) the proxy container, for both
+ * Which compose files start (and tear down) the proxy container, for both
  * entry points. main.ts and post.ts have to agree on this: post.ts's fallback
- * cleanup only reaches the right containers if it runs against the same file
+ * cleanup only reaches the right containers if it runs against the same files
  * main.ts started them from.
  */
 import { join, dirname } from "node:path";
@@ -46,7 +46,9 @@ export async function readLocalImageOverride(
   return override;
 }
 
-/** The shipped compose file, unless the override named one of its own. */
-export function resolveComposeFile(override: LocalImageOverride | null): string {
-  return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
+/** The shipped compose file, with the override's overlay on top if it names one. */
+export function resolveComposeFiles(override: LocalImageOverride | null): string[] {
+  return override?.composeOverlay
+    ? [DEFAULT_COMPOSE_FILE, override.composeOverlay]
+    : [DEFAULT_COMPOSE_FILE];
 }
