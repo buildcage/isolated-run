@@ -677,7 +677,7 @@ check exists, how to set it up, what it does not stop, and the IAM settings that
 - An unsigned request is left to the URL rules where the host names the resource it is for, such as
   an S3 bucket or an ECR registry, on a public host that reaches no account, such as
   `checkip.amazonaws.com`, and on CodeCommit, which Git asks before it logs in. Everywhere else it
-  is blocked, but for an `AssumeRoleWithWebIdentity` call sent as a form, as the SDKs send it, for a
+  is blocked, except an `AssumeRoleWithWebIdentity` call sent as a form, as the SDKs send it, for a
   role in one of these accounts; see [Which hosts](./aws.md#which-hosts).
 
 The check blocks after the URL rules have allowed a request, with a reason that starts with `aws-`:
