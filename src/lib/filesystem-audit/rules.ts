@@ -6,8 +6,9 @@
  * Programs and paths are written and matched as the summary shows them,
  * escapes included (see reduce.ts's ruleName): `./` the workspace, `~/` $HOME,
  * `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory.
- * `*` matches within one path component and `**` across components; `*` as
- * the whole program matches any program, and `\*` is a literal star.
+ * `*` matches within one path component and `**` across components, any
+ * number of them, none included, when it is a whole component. `*` as the
+ * whole program matches any program, and `\*` is a literal star.
  * The access letters are the summary's: `R` a read, failed or not, `r` one
  * that failed, `r!` one that was refused or failed. `R` and `r` never take a
  * refusal.

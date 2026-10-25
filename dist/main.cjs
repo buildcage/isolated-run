@@ -77487,7 +77487,7 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
 		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
-		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_With upload_filesystem_audit_artifact: true, the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
+		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true and the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
