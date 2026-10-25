@@ -20,8 +20,8 @@ assert_report_complete
 # action's own report carries what the proxy decided. Which names, ports and
 # protocols are decided which way is the fixture-based integration tests'
 # subject, against an origin this suite controls (see
-# test/universal-restrict-scenarios.sh).
-assert_summary_contains "example.com:443" "Allowed host recorded in report"
-assert_summary_contains "example.org:443" "Blocked host recorded in report"
+# test/scenarios/universal-restrict.sh).
+assert_section_contains "Allowed Hosts" "| \`example.com:443\` |" "Allowed host recorded in report"
+assert_section_contains "🚫 Blocked" "| \`example.org:443\` |" "Blocked host recorded in report"
 
 assert_results

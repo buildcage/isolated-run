@@ -13,38 +13,15 @@
 # The report assertion reads $SUMMARY, which the sourcing script fills once up
 # front from the summary file the action wrote.
 
-FAILURES=0
+# FAILURES, pass, fail, check_status and check_ok, which the scenario scripts
+# under scenarios/ share. scenario_results is redefined below.
+# shellcheck source-path=SCRIPTDIR
+. "$(dirname "${BASH_SOURCE[0]}")/scenarios/lib.sh"
 
 # Assembled at runtime: a literal shaped like an AWS access key ID trips secret
 # scanning on push.
 # shellcheck disable=SC2034 # used by the scripts that source this
 AKIA="AK""IA" ASIA="AS""IA"
-
-pass() { echo "  PASS  $1"; }
-
-fail() {
-  echo "  FAIL  $1"
-  FAILURES=$((FAILURES + 1))
-}
-
-check_status() {
-  local label="$1" code="$2" want="$3"
-  if [ "$code" = "$want" ]; then
-    pass "$label"
-  else
-    fail "$label -- expected $want, got $code"
-  fi
-}
-
-# The response body, matched on its leading marker: the fixture origins answer
-# with a marker naming the path and method, and nothing after it matters here.
-check_ok() {
-  local label="$1" out="$2" want="$3"
-  case "$out" in
-    "$want"*) pass "$label" ;;
-    *) fail "$label -- got: $out" ;;
-  esac
-}
 
 # A row, a heading or any other literal fragment of the rendered report.
 assert_summary_contains() {
@@ -64,6 +41,36 @@ assert_summary_matches() {
     pass "$label"
   else
     fail "$missed"
+  fi
+}
+
+# summary_section <heading text>: the lines under the `###` heading holding
+# that text, up to the next heading of that level or above, or the next
+# <details> block. A table's rows start the same as another table's for the
+# same host, so a row is looked for in its own table.
+summary_section() {
+  awk -v want="$1" '
+    /^(#|##|###)( |$)/ { in_section = (/^### / && index($0, want) > 0); next }
+    /^[[:space:]]*<details/ { in_section = 0 }
+    in_section { print }
+  ' <<< "$SUMMARY"
+}
+
+assert_section_contains() {
+  local heading="$1" pattern="$2" label="$3"
+  if grep -qF -- "$pattern" <<< "$(summary_section "$heading")"; then
+    pass "$label"
+  else
+    fail "$label -- not found under the \"$heading\" heading"
+  fi
+}
+
+assert_section_lacks() {
+  local heading="$1" pattern="$2" label="$3"
+  if grep -qF -- "$pattern" <<< "$(summary_section "$heading")"; then
+    fail "$label -- found under the \"$heading\" heading"
+  else
+    pass "$label"
   fi
 }
 
@@ -95,14 +102,35 @@ assert_report_complete() {
   fi
 }
 
+# print_group <title> <text>: a collapsed group in the job log, left out when
+# there is no text. The text is a log or a report, so a workflow command in it
+# is printed rather than run.
+print_group() {
+  [ -n "$2" ] || return 0
+  local token
+  token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  echo "::group::$1"
+  echo "::stop-commands::$token"
+  printf '%s\n' "$2"
+  echo "::$token::"
+  echo "::endgroup::"
+}
+
 assert_results() {
   echo ""
   if [ "$FAILURES" -gt 0 ]; then
+    show_diagnostics
     echo "❌ FAILED: $FAILURES assertion(s) failed"
     exit 1
   fi
   echo "✅ All assertions passed."
   echo ""
+}
+
+# What assert_results prints on a failure: what the assertions read, which
+# their own messages only name.
+show_diagnostics() {
+  print_group "Job Summary" "${SUMMARY:-}"
 }
 
 scenario_results() {

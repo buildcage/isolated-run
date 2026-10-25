@@ -3,7 +3,7 @@
 # and a fixture origin network (compose.test-inspect.yaml), proving
 # method/path enforcement, DNS non-leak, SSRF/forged-Host guards, TLS
 # passthrough and CA trust end-to-end (see
-# test/inspect-restrict-scenarios.sh for the scenario list itself).
+# test/scenarios/inspect-restrict.sh for the scenario list itself).
 #
 # Also checks CA injection (src/lib/sandbox/ca-trust.ts): the sandbox's rootfs
 # is the real host `/`, so CA trust must arrive as mounts torn down with the
@@ -73,13 +73,13 @@ echo "--- report assertions (Job Summary) ---"
 SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
-assert_summary_contains "| \`allowed.example.com:443\` | HTTPS |" "allowed.example.com:443 recorded as allowed"
-assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
-assert_summary_contains "| \`blocked.example.com:443\` | HTTPS |" "blocked.example.com:443 recorded as blocked"
-assert_summary_contains "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
-assert_summary_contains "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
-assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
-assert_summary_contains "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`allowed.example.com:443\` | HTTPS |" "allowed.example.com:443 recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
+assert_section_contains "🚫 Blocked" "| \`blocked.example.com:443\` | HTTPS |" "blocked.example.com:443 recorded as blocked"
+assert_section_contains "Allowed Hosts" "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule blocked this one and none can clear it, so it is marked as a
 # failure beside the blocks.
 assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the blocks"
