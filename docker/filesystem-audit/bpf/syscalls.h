@@ -47,7 +47,7 @@ struct path_call {
 };
 
 /**
- * @name Failed path syscalls
+ * @name Path syscalls recorded from their exit
  * security_path_* fires only once the path has resolved, so a missing target
  * (the common failure) never reaches it; the syscall's exit catches it, with
  * the arguments the call left in its registers, reading the user path(s) they
