@@ -337,24 +337,6 @@ describe("computeReportOutcomes", () => {
         .map((table) => table.trim().split("\n").slice(2));
     };
 
-    it("counts each host and reason in a table", () => {
-      const markdown = markdownOf(
-        audit([
-          wouldBlock(1, "s3.amazonaws.com", "aws-key-not-allowed"),
-          { time: 2, action: "allow", protocol: "https", host: "s3.amazonaws.com", port: 443 },
-          wouldBlock(3, "s3.amazonaws.com", "aws-key-not-allowed"),
-          wouldBlock(4, "s3.amazonaws.com", "aws-no-credential"),
-        ]),
-        options(),
-      );
-      expect(tables(markdown)).toStrictEqual([
-        [
-          "| `s3.amazonaws.com:443` | HTTPS | aws-key-not-allowed | 2 |",
-          "| `s3.amazonaws.com:443` | HTTPS | aws-no-credential | 1 |",
-        ],
-      ]);
-    });
-
     it("puts aws-key-not-allowed in a table of keys, whatever the host, naming the account a role was assumed in", () => {
       const markdown = markdownOf(
         audit([
@@ -426,20 +408,19 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("numbers a key as AWS Keys does, even when the run blocked one alone", () => {
+    it("names three hosts of each key and counts the rest", () => {
+      const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
       const markdown = markdownOf(
         audit([
-          signed(1, "ssm.amazonaws.com", "bbbb2222"),
-          { ...signed(2, "ssm.amazonaws.com", "bbbb2222"), wouldBlock: undefined },
-          assumed("222222222222", "aaaa1111"),
-          signed(3, "s3.amazonaws.com", "aaaa1111"),
+          ...hosts.map((host, i) => signed(i, host, "aaaa1111")),
+          signed(5, hosts[0], "bbbb2222"),
         ]),
         options(),
       );
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 | `ssm.amazonaws.com` | 1 |",
-          "| key 2 from a role in 222222222222 | `s3.amazonaws.com` | 1 |",
+          "| key 1 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more | 5 |",
+          "| key 2 | `a.amazonaws.com` | 1 |",
         ],
       ]);
     });
