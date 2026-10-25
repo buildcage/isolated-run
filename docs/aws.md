@@ -177,9 +177,9 @@ The report is the step's section in the workflow run's Job Summary.
 
 ### 🔑 AWS Keys
 
-This table, after the hosts the check let through, has one row per access key a request was signed
-with or an STS or ECR answer issued, so it shows what the check made of each key even in a run it
-blocked nothing in:
+This table follows the allowed hosts and has one row per access key a request was signed with or an
+STS or ECR answer issued, so it shows what the check made of each key even in a run it blocked
+nothing in:
 
 | Key   | Check                                         | Source                            | Requests | Hosts                                                                  | keyRef             |
 | ----- | --------------------------------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
@@ -442,8 +442,8 @@ them on those, through a customized bootstrap template:
   request the key check did not block, so in `audit` mode a request it would block teaches no key. A
   host that names a resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS
   answer the proxy cannot read, because the client asked for JSON or it is unusually large, is not
-  learned, and requests signed with it are blocked. Such an answer, and one over plain HTTP, name no
-  account in the restrict example.
+  learned, and requests signed with it are blocked. Neither such an answer nor one over plain HTTP
+  names an account in the restrict example.
 - A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible
