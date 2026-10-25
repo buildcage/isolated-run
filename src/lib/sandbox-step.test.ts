@@ -9,7 +9,6 @@ import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { parseExpectedRules } from "./filesystem-audit/rules.ts";
 import {
   EXAMPLE_RULES_FILE_NOTE,
-  filesystemExampleInputs,
   finalizeStep,
   preflight,
   readStepInputs,
@@ -880,137 +879,15 @@ describe("runSandboxStep", () => {
       );
     });
 
-    it("still sets the other name empty and reports when one cannot be set", async () => {
-      mocks.setTrafficArtifactOutput.mockImplementation(() => {
-        throw new Error("EACCES");
-      });
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-    });
-
-    it("writes nothing back and still reports where the runner gave neither file", async () => {
-      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "", GITHUB_STEP_SUMMARY: "" }, deps);
-      expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
-      expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-    });
-
-    it("fails the step but still reports when $GITHUB_OUTPUT held what the runner cannot read", async () => {
-      mocks.writeBackOutputFile.mockReturnValue({
-        error: 'line 2, output "x", never reaches its delimiter "NEVER"',
-      });
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(annotation.error).toHaveBeenCalledWith(
-        '$GITHUB_OUTPUT was written without what the runner could not read: line 2, output "x", never reaches its delimiter "NEVER"; failing the step',
-      );
-      expect(process.exitCode).toBe(1);
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
-    });
-
-    it("fails the step but still reports when $GITHUB_OUTPUT's real file cannot be written", async () => {
+    it("fails the step, still reporting and stopping the proxy, when a runner file fails", async () => {
       mocks.writeBackOutputFile.mockImplementation(() => {
         throw new Error("EACCES");
       });
 
       await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT could not be written: EACCES; failing the step",
-      );
       expect(process.exitCode).toBe(1);
       expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-    });
-
-    // Written before the report so a cancelled step keeps it; the report step
-    // moves it after its own part.
-    it("writes $GITHUB_STEP_SUMMARY back as it is before the report, and says how much", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("```\nlog") } : { empty: true },
-      );
-
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
-        ENV.GITHUB_STEP_SUMMARY,
-        Buffer.from("```\nlog"),
-      );
-      expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
-      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(7);
-      expect(annotation.error).not.toHaveBeenCalled();
-    });
-
-    it("reads $GITHUB_STEP_SUMMARY back up to GitHub's 1 MiB limit", async () => {
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.readBackingFile).toHaveBeenCalledExactlyOnceWith(
-        expect.stringMatching(/GITHUB_STEP_SUMMARY$/),
-        1024 * 1024,
-      );
-    });
-
-    // GitHub drops a summary over its limit whole without failing the step.
-    it("writes a note in place of a $GITHUB_STEP_SUMMARY over the limit, without failing", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY") ? { oversize: 1024 * 1024 + 1 } : { empty: true },
-      );
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-
-      // Rounded up: a byte over the limit does not read as 1024 KiB.
-      const message =
-        "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit.";
-      const note = Buffer.from(`> ⚠️ ${message}\n`);
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, note);
-      expect(annotation.warning).toHaveBeenCalledWith(message);
-      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(note.length);
-      expect(annotation.error).not.toHaveBeenCalled();
-      expect(process.exitCode).toBeUndefined();
-    });
-
-    it("fails the step but still reports when the $GITHUB_OUTPUT backing was not a regular file", async () => {
-      mocks.writeBackOutputFile.mockReturnValue({ reason: "it was not a regular file" });
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_OUTPUT it was not a regular file; failing the step",
-      );
-      expect(process.exitCode).toBe(1);
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-    });
-
-    it("counts nothing of a $GITHUB_STEP_SUMMARY it could not write", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY") ? { bytes: Buffer.from("mine\n") } : { empty: true },
-      );
-      mocks.writeRunnerFile.mockImplementation((path: string) => {
-        if (path === ENV.GITHUB_STEP_SUMMARY) throw new Error("EACCES");
-      });
-
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(0);
-      expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_STEP_SUMMARY could not be written: EACCES; failing the step",
-      );
-    });
-
-    it("fails the step but still reports when the $GITHUB_STEP_SUMMARY backing was not a regular file", async () => {
-      mocks.readBackingFile.mockImplementation((path: string) =>
-        path.endsWith("GITHUB_STEP_SUMMARY")
-          ? { reason: "it was not a regular file" }
-          : { empty: true },
-      );
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, Buffer.alloc(0));
-      expect(annotation.error).toHaveBeenCalledWith(
-        "$GITHUB_STEP_SUMMARY it was not a regular file; failing the step",
-      );
-      expect(process.exitCode).toBe(1);
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
     });
 
     it("writes back none of the runner files the plan leaves under the overlay", async () => {
@@ -1028,19 +905,6 @@ describe("runSandboxStep", () => {
       expect(mocks.readStepFilesystemAudit.mock.calls[0][0].mediated).toStrictEqual([]);
     });
 
-    it("tells the audit report which runner files were mediated", async () => {
-      mocks.resolveFilesystemPlan.mockReturnValue({
-        overlayRoots: ["/home/runner"],
-        writeThroughPaths: [],
-        mediatedVariables: ["GITHUB_OUTPUT"],
-      });
-      await runSandboxStep(ENV, deps);
-
-      expect(mocks.readStepFilesystemAudit.mock.calls[0][0].mediated).toStrictEqual([
-        "GITHUB_OUTPUT",
-      ]);
-    });
-
     // The sandbox sees the backing directory only through its bind, and the
     // post step finds it by the container name.
     it("keeps the backing directory beside the scratch dir, and removes it after the write-back", async () => {
@@ -1050,34 +914,6 @@ describe("runSandboxStep", () => {
       expect(mocks.mediateRunnerOutputFiles.mock.calls[0][2]).toBe(backingDir);
       expect(mocks.removeBackingDir).toHaveBeenCalledExactlyOnceWith(backingDir);
       expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.removeBackingDir));
-    });
-
-    // The command can leave a subdirectory it made unreadable there.
-    it("warns but still reports when the backing directory cannot be removed", async () => {
-      mocks.removeBackingDir.mockImplementation(() => {
-        throw new Error("EACCES");
-      });
-
-      await expect(runSandboxStep(ENV, deps)).resolves.toBe(0);
-      expect(mocks.warn).toHaveBeenCalledWith(
-        expect.stringMatching(/^Could not remove .*: EACCES$/),
-      );
-      expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
-      expect(mocks.stopSandboxProxy).toHaveBeenCalledTimes(1);
-    });
-
-    it("writes nothing back where the runner gave no $GITHUB_STEP_SUMMARY", async () => {
-      await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
-      expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
-      expect(mocks.writeBackOutputFile.mock.calls[0][1]).toBe(ENV.GITHUB_OUTPUT);
-    });
-
-    it("writes nothing back where the runner gave no $GITHUB_OUTPUT", async () => {
-      await runSandboxStep({ ...ENV, GITHUB_OUTPUT: "" }, deps);
-      expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
-      const written = mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0]);
-      expect(written).toStrictEqual([ENV.GITHUB_STEP_SUMMARY]);
-      expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
     });
 
     it("creates nothing when docker or sudo cannot be pinned", async () => {
@@ -1155,102 +991,6 @@ describe("runSandboxStep", () => {
   });
 });
 
-describe("filesystemExampleInputs", () => {
-  const NO_RULES = { expectedRulesLines: [], failOnUnexpectedFileAccess: false };
-  const given = {
-    filesystemMode: "persistent" as const,
-    writeThroughInput: "",
-    filesystemAudit: "record" as const,
-    expectedRulesLines: ["# npm", "node R ./a", "", "node W ./b"],
-    failOnUnexpectedFileAccess: true,
-  };
-
-  it("writes the expected rules as given, and fail_on_unexpected_file_access when set", () => {
-    expect(filesystemExampleInputs(given)).toStrictEqual([
-      "filesystem_audit: record",
-      "expected_filesystem_rules: |",
-      "  # npm",
-      "  node R ./a",
-      "",
-      "  node W ./b",
-      "fail_on_unexpected_file_access: true",
-    ]);
-    expect(filesystemExampleInputs({ ...given, expectedRulesLines: [] })).toStrictEqual([
-      "filesystem_audit: record",
-      "fail_on_unexpected_file_access: true",
-    ]);
-    // Rules all commented out are kept, for the step to turn back on.
-    expect(filesystemExampleInputs({ ...given, expectedRulesLines: ["# node R ./a"] })).toContain(
-      "  # node R ./a",
-    );
-    // An earlier run's heading goes, as it does from the proposed file.
-    expect(
-      filesystemExampleInputs({
-        ...given,
-        expectedRulesLines: ["node R ./a", "", "# Not matched in this run", "node W ./b"],
-      }),
-    ).toStrictEqual([
-      "filesystem_audit: record",
-      "expected_filesystem_rules: |",
-      "  node R ./a",
-      "  node W ./b",
-      "fail_on_unexpected_file_access: true",
-    ]);
-  });
-
-  it("points config_file to this run's proposed rules when the artifact holds them", () => {
-    expect(filesystemExampleInputs(given, "rules.yml")).toStrictEqual([
-      "filesystem_audit: record",
-      "# rules.yml from this run's artifact, reviewed and committed at this path",
-      "config_file: path/to/expected-filesystem-rules.yml",
-      "fail_on_unexpected_file_access: true",
-    ]);
-    expect(filesystemExampleInputs({ ...given, ...NO_RULES }, "rules.yml")).toStrictEqual([
-      "filesystem_audit: record",
-    ]);
-  });
-
-  it("leaves out every input at its default", () => {
-    expect(
-      filesystemExampleInputs({
-        filesystemMode: "persistent",
-        writeThroughInput: "",
-        filesystemAudit: "off",
-        ...NO_RULES,
-      }),
-    ).toStrictEqual([]);
-  });
-
-  it("writes each input that is not its default, and write_through as a block of its paths", () => {
-    expect(
-      filesystemExampleInputs({
-        filesystemMode: "ephemeral",
-        writeThroughInput: "# caches\n  ~/.cache  \n\n./dist\n/opt/a # b",
-        filesystemAudit: "record",
-        ...NO_RULES,
-      }),
-    ).toStrictEqual([
-      "filesystem_mode: ephemeral",
-      "write_through: |",
-      "  ~/.cache",
-      "  ./dist",
-      "  /opt/a # b",
-      "filesystem_audit: record",
-    ]);
-  });
-
-  it("leaves out a write_through holding only comments and blank lines", () => {
-    expect(
-      filesystemExampleInputs({
-        filesystemMode: "persistent",
-        writeThroughInput: "# none yet\n\n",
-        filesystemAudit: "off",
-        ...NO_RULES,
-      }),
-    ).toStrictEqual([]);
-  });
-});
-
 describe("readStepInputs", () => {
   it("reads every input and checks the rules, before any privileged check", () => {
     const inputs = readStepInputs(ENV, deps);
@@ -1311,6 +1051,26 @@ describe("finalizeStep", () => {
     ...over,
   });
 
+  /** The mediation of `variables`, each backed under /b. */
+  const mediating = (...variables: (typeof RUNNER_FILES)[number][]) => ({
+    envOverrides: {},
+    mounts: [],
+    maskedPaths: [],
+    files: variables.map((variable) => ({
+      variable,
+      realPath: ENV[variable],
+      backingPath: `/b/${variable}`,
+    })),
+  });
+  const both = mediating(...RUNNER_FILES);
+
+  /** The step summary's backing copy reads as `read`, the output's as empty. */
+  function summaryReads(read: unknown) {
+    mocks.readBackingFile.mockImplementation((path: string) =>
+      path.endsWith("GITHUB_STEP_SUMMARY") ? read : { empty: true },
+    );
+  }
+
   it("reports, with nothing to write back", async () => {
     expect(await finalizeStep(run(), deps)).toBe(false);
 
@@ -1318,29 +1078,144 @@ describe("finalizeStep", () => {
     expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledWith("");
   });
 
-  it("says a runner file it could not write back failed the step, and still reports", async () => {
-    mocks.writeBackOutputFile.mockImplementation(() => {
+  it("writes back only the runner files it mediated", async () => {
+    await finalizeStep(run({ mediation: mediating("GITHUB_STEP_SUMMARY") }), deps);
+    expect(mocks.writeBackOutputFile).not.toHaveBeenCalled();
+    expect(mocks.writeRunnerFile.mock.calls.map((c: unknown[]) => c[0])).toStrictEqual([
+      ENV.GITHUB_STEP_SUMMARY,
+    ]);
+
+    vi.clearAllMocks();
+    await finalizeStep(run({ mediation: mediating("GITHUB_OUTPUT") }), deps);
+    expect(mocks.writeBackOutputFile).toHaveBeenCalledExactlyOnceWith(
+      "/b/GITHUB_OUTPUT",
+      ENV.GITHUB_OUTPUT,
+    );
+    expect(mocks.writeRunnerFile).not.toHaveBeenCalled();
+  });
+
+  it("tells the audit report which runner files were mediated", async () => {
+    await finalizeStep(run({ mediation: mediating("GITHUB_OUTPUT") }), deps);
+
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].mediated).toStrictEqual([
+      "GITHUB_OUTPUT",
+    ]);
+  });
+
+  it("still sets the other name empty and reports when one cannot be set", async () => {
+    mocks.setTrafficArtifactOutput.mockImplementation(() => {
       throw new Error("EACCES");
     });
-    const mediation = {
-      envOverrides: {},
-      mounts: [],
-      maskedPaths: [],
-      files: [
-        {
-          variable: "GITHUB_OUTPUT" as const,
-          realPath: ENV.GITHUB_OUTPUT,
-          backingPath: "/b/GITHUB_OUTPUT",
-        },
-      ],
-    };
 
-    const failed = await finalizeStep(run({ mediation }), deps);
+    expect(await finalizeStep(run(), deps)).toBe(false);
+    expect(mocks.setFilesystemAuditOutput).toHaveBeenCalledWith("");
+    expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+  });
 
-    expect(annotation.error).toHaveBeenCalledWith(
+  it.each([
+    [
+      "its real file cannot be written",
+      () => {
+        throw new Error("EACCES");
+      },
       "$GITHUB_OUTPUT could not be written: EACCES; failing the step",
+    ],
+    [
+      "it held what the runner cannot read",
+      () => ({ error: 'line 2, output "x", never reaches its delimiter "NEVER"' }),
+      '$GITHUB_OUTPUT was written without what the runner could not read: line 2, output "x", never reaches its delimiter "NEVER"; failing the step',
+    ],
+    [
+      "its backing was not a regular file",
+      () => ({ reason: "it was not a regular file" }),
+      "$GITHUB_OUTPUT it was not a regular file; failing the step",
+    ],
+  ])("fails the step but still reports when $GITHUB_OUTPUT %s", async (_, writeBack, error) => {
+    mocks.writeBackOutputFile.mockImplementation(writeBack);
+
+    expect(await finalizeStep(run({ mediation: both }), deps)).toBe(true);
+    expect(annotation.error).toHaveBeenCalledWith(error);
+    expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+  });
+
+  // Written before the report so a cancelled step keeps it; the report step
+  // moves it after its own part.
+  it("writes $GITHUB_STEP_SUMMARY back as it is before the report, and says how much", async () => {
+    summaryReads({ bytes: Buffer.from("```\nlog") });
+
+    expect(await finalizeStep(run({ mediation: both }), deps)).toBe(false);
+
+    expect(mocks.writeRunnerFile).toHaveBeenCalledWith(
+      ENV.GITHUB_STEP_SUMMARY,
+      Buffer.from("```\nlog"),
     );
-    expect(failed).toBe(true);
-    expect(mocks.reportStepTraffic).toHaveBeenCalled();
+    expect(orderOf(mocks.writeRunnerFile)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+    expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(7);
+    expect(annotation.error).not.toHaveBeenCalled();
+  });
+
+  it("reads $GITHUB_STEP_SUMMARY back up to GitHub's 1 MiB limit", async () => {
+    await finalizeStep(run({ mediation: both }), deps);
+
+    expect(mocks.readBackingFile).toHaveBeenCalledExactlyOnceWith(
+      "/b/GITHUB_STEP_SUMMARY",
+      1024 * 1024,
+    );
+  });
+
+  // GitHub drops a summary over its limit whole without failing the step.
+  it("writes a note in place of a $GITHUB_STEP_SUMMARY over the limit, without failing", async () => {
+    summaryReads({ oversize: 1024 * 1024 + 1 });
+
+    expect(await finalizeStep(run({ mediation: both }), deps)).toBe(false);
+
+    // Rounded up: a byte over the limit does not read as 1024 KiB.
+    const message =
+      "This step's own Job Summary was dropped: at 1025 KiB it was over GitHub's 1 MiB limit.";
+    const note = Buffer.from(`> ⚠️ ${message}\n`);
+    expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, note);
+    expect(annotation.warning).toHaveBeenCalledWith(message);
+    expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(note.length);
+    expect(annotation.error).not.toHaveBeenCalled();
+  });
+
+  it("counts nothing of a $GITHUB_STEP_SUMMARY it could not write", async () => {
+    summaryReads({ bytes: Buffer.from("mine\n") });
+    mocks.writeRunnerFile.mockImplementation((path: string) => {
+      if (path === ENV.GITHUB_STEP_SUMMARY) throw new Error("EACCES");
+    });
+
+    expect(await finalizeStep(run({ mediation: both }), deps)).toBe(true);
+
+    expect(mocks.reportStepTraffic.mock.calls[0][0].commandSummaryBytes).toBe(0);
+    expect(annotation.error).toHaveBeenCalledWith(
+      "$GITHUB_STEP_SUMMARY could not be written: EACCES; failing the step",
+    );
+  });
+
+  it("fails the step but still reports when the $GITHUB_STEP_SUMMARY backing was not a regular file", async () => {
+    summaryReads({ reason: "it was not a regular file" });
+
+    expect(await finalizeStep(run({ mediation: both }), deps)).toBe(true);
+    expect(mocks.writeRunnerFile).toHaveBeenCalledWith(ENV.GITHUB_STEP_SUMMARY, Buffer.alloc(0));
+    expect(annotation.error).toHaveBeenCalledWith(
+      "$GITHUB_STEP_SUMMARY it was not a regular file; failing the step",
+    );
+    expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
+  });
+
+  // The command can leave a subdirectory it made unreadable there.
+  it("warns but still reports when the backing directory cannot be removed", async () => {
+    mocks.removeBackingDir.mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+
+    const step = run({ mediation: both });
+
+    expect(await finalizeStep(step, deps)).toBe(false);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      `Could not remove ${step.runnerFilesBackingDir}: EACCES`,
+    );
+    expect(mocks.reportStepTraffic).toHaveBeenCalledTimes(1);
   });
 });

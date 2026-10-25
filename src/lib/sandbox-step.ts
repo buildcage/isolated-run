@@ -31,10 +31,10 @@ import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
-import { givenRules } from "./filesystem-audit/proposed-rules.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
-import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
+import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
+import { filesystemExampleInputs } from "./filesystem-example-inputs.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -80,7 +80,7 @@ import {
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
-import { splitWriteThroughInput, WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
+import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -425,45 +425,6 @@ async function resolveProxyImage(
     localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
   deps.log(`buildcage: proxy image: ${imageRef}`);
   return { imageRef, pullPolicy, composeFile: resolveComposeFile(localOverride) };
-}
-
-/** The filesystem inputs for the report's restrict example, each only when it
- *  is not its default, so pasting the example keeps them. The expected rules
- *  point to `rulesFile`, this run's proposed file, when it is given. */
-export function filesystemExampleInputs(
-  {
-    filesystemMode,
-    writeThroughInput,
-    filesystemAudit,
-    expectedRulesLines,
-    failOnUnexpectedFileAccess,
-  }: Pick<
-    StepInputs,
-    | "filesystemMode"
-    | "writeThroughInput"
-    | "filesystemAudit"
-    | "expectedRulesLines"
-    | "failOnUnexpectedFileAccess"
-  >,
-  rulesFile?: string,
-): string[] {
-  const lines: string[] = [];
-  if (filesystemMode !== "persistent") lines.push(`filesystem_mode: ${filesystemMode}`);
-  const paths = splitWriteThroughInput(writeThroughInput);
-  if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
-  if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
-  if (rulesFile && expectedRulesLines.length)
-    lines.push(
-      `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
-      `config_file: ${RULES_FILE_EXAMPLE}`,
-    );
-  else if (expectedRulesLines.length)
-    lines.push(
-      `${EXPECTED_RULES_INPUT}: |`,
-      ...givenRules(expectedRulesLines).map((line) => (line ? `  ${line}` : "")),
-    );
-  if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
-  return lines;
 }
 
 /** Said where the restrict example is too large to print while it lists the
