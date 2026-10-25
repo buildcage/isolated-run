@@ -89,9 +89,8 @@ export function pathCell({ path, deleted }: Shown): string {
   return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 
-// A count column aligns right, as in the traffic report's tables.
 export function markdownRows(header: string[], rows: string[][]): string {
   const line = (cells: string[]): string => `| ${cells.join(" | ")} |`;
-  const rule = header.map((h) => (h === "Count" ? "---:" : "---"));
+  const rule = header.map(() => "---");
   return [line(header), line(rule), ...rows.map(line)].join("\n");
 }

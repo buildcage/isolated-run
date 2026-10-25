@@ -72502,7 +72502,7 @@ function pathCell({ path, deleted }) {
 	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
 }
 function markdownRows(header, rows) {
-	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map((h) => h === "Count" ? "---:" : "---");
+	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map(() => "---");
 	return [
 		line(header),
 		line(rule),
