@@ -3,7 +3,13 @@ import { describe, it, expect } from "vitest";
 import type { TrafficEvent } from "#core/lib/log/traffic-event.ts";
 
 import type { AwsTrafficFields } from "../proxy/aws-log.ts";
-import { awsKeyLineNote, awsKeys, awsKeysBlocks, awsKeysTruncationNote } from "./aws-keys.ts";
+import {
+  awsKeyLineNote,
+  awsKeys,
+  awsKeysBlocks,
+  awsKeysTruncationNote,
+  keyHostsCell,
+} from "./aws-keys.ts";
 
 const event = (
   host: string,
@@ -102,7 +108,7 @@ describe("awsKeysBlocks", () => {
     ]);
   });
 
-  it("names three hosts of a key and counts the rest", () => {
+  it("counts every request of a key beside the hosts it names", () => {
     const hosts = ["a", "b", "c", "d"].map((h) => `${h}.amazonaws.com`);
     expect(rows(hosts.map((host) => event(host, { key: "env", keyRef: "aaaa" })))).toStrictEqual([
       "| key 1 | ✅ known | starting key | 4 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 1 more | `aaaa` |",
@@ -117,6 +123,24 @@ describe("awsKeysBlocks", () => {
     expect(block).toMatchObject({ id: "traffic-aws-keys", priority: 5, cut: "lines", head: 4 });
     expect(block.text.startsWith("### 🔑 AWS Keys\n\n| Key | Check |")).toBe(true);
     expect(block.notice).toBe(awsKeysTruncationNote(false));
+  });
+});
+
+describe("keyHostsCell", () => {
+  it("names three hosts and counts the rest", () => {
+    const hosts = (...names: string[]) =>
+      keyHostsCell(new Set(names.map((h) => `${h}.amazonaws.com`)));
+    expect(hosts("a", "b", "c")).toBe("`a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com`");
+    expect(hosts("a", "b", "c", "d", "e")).toBe(
+      "`a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more",
+    );
+    expect(hosts()).toBe("");
+  });
+
+  it("puts each host in a code span of its own", () => {
+    expect(
+      keyHostsCell(new Set(["b&ZeroWidthSpace;.amazonaws.com", "~~c|d~~.amazonaws.com"])),
+    ).toBe("`b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com`");
   });
 });
 

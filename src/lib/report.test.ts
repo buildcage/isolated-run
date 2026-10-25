@@ -426,36 +426,6 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("names three hosts of a key and counts the rest", () => {
-      const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
-      const markdown = markdownOf(
-        audit([
-          ...hosts.map((host, i) => signed(i, host, "aaaa1111")),
-          signed(5, hosts[0], "bbbb2222"),
-        ]),
-        options(),
-      );
-      expect(tables(markdown)[0][0]).toBe(
-        "| key 1 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more | 5 |",
-      );
-    });
-
-    it("puts each host of a key in a code span of its own", () => {
-      const hosts = [
-        "www.a.amazonaws.com",
-        "b&ZeroWidthSpace;.amazonaws.com",
-        "~~c|d~~.amazonaws.com",
-        "e.amazonaws.com",
-      ];
-      const markdown = markdownOf(
-        audit(hosts.map((host, i) => signed(i, host, "aaaa1111"))),
-        options(),
-      );
-      expect(tables(markdown)[0][0]).toBe(
-        "| key 1 | `www.a.amazonaws.com`, `b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com` and 1 more | 4 |",
-      );
-    });
-
     it("numbers a key as AWS Keys does, even when the run blocked one alone", () => {
       const markdown = markdownOf(
         audit([
