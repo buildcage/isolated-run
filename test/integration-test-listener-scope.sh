@@ -1,16 +1,15 @@
 #!/bin/bash
-# HAProxy's single listener binds *:10024 (both engines' CoreDNS also binds
-# *:53), but only buildcage0, the veth end run-isolated.sh wires into the
-# sandbox once a step starts, may reach them (see
-# docker/common/files/s6-scripts/init-iptables). This starts
-# each engine's proxy standalone, with no sandbox attached, so buildcage0
-# never exists: :10024/:53 must be unreachable both from another container
-# on the proxy's own compose network and from the runner host itself.
-# Sandbox-side access is covered by the existing fixture-based integration
-# tests, which would themselves fail outright if this had blocked too much.
-# The same standalone proxy also has to reach its own readiness checks over
-# loopback and exit on SIGTERM, which is what tells an over-broad rule from a
-# correct one that merely looks unreachable from outside.
+# HAProxy's single listener binds *:10024 (CoreDNS also binds *:53), but only
+# buildcage0, the veth end run-isolated.sh wires into the sandbox once a step
+# starts, may reach them (see docker/common/files/s6-scripts/init-iptables).
+# This starts each engine's proxy standalone, with no sandbox attached, so
+# buildcage0 never exists: :10024/:53 must be unreachable both from another
+# container on the proxy's own compose network and from the runner host
+# itself. Sandbox-side access is covered by the existing fixture-based
+# integration tests, which would themselves fail outright if this had blocked
+# too much. The same standalone proxy also has to reach its own readiness
+# checks over loopback and exit on SIGTERM, which is what tells an over-broad
+# rule from a correct one that merely looks unreachable from outside.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -61,12 +60,10 @@ run_engine() {
     pass "[$engine] :10024 not reachable from another container on the compose network"
   fi
 
-  if [ "$engine" = "universal" ]; then
-    if dns_answered "$net" "$proxy_name"; then
-      fail "[$engine] :53/udp answered a query from another container on the compose network"
-    else
-      pass "[$engine] :53/udp did not answer a query from another container on the compose network"
-    fi
+  if dns_answered "$net" "$proxy_name"; then
+    fail "[$engine] :53/udp answered a query from another container on the compose network"
+  else
+    pass "[$engine] :53/udp did not answer a query from another container on the compose network"
   fi
 
   echo "--- from the runner host itself ---"
@@ -78,12 +75,10 @@ run_engine() {
     pass "[$engine] :10024 not reachable from the runner host"
   fi
 
-  if [ "$engine" = "universal" ]; then
-    if dns_answered host "$proxy_ip"; then
-      fail "[$engine] :53/udp answered a query from the runner host"
-    else
-      pass "[$engine] :53/udp did not answer a query from the runner host"
-    fi
+  if dns_answered host "$proxy_ip"; then
+    fail "[$engine] :53/udp answered a query from the runner host"
+  else
+    pass "[$engine] :53/udp did not answer a query from the runner host"
   fi
 
   echo "--- internal-address guard covers this container's own gateway and address ---"
