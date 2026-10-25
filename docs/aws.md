@@ -166,8 +166,8 @@ Then, with the report described in [Reading the report](#reading-the-report):
 2. Name those accounts, or uncomment them in the example. If that added any, run `audit` again
    before reading on: until an account is named, every request signed with its roles' keys shows as
    one `restrict` would block.
-3. Read **⚠️ Restrict Would Block** in the report. [Troubleshooting](#troubleshooting) gives the
-   usual causes of each reason.
+3. Read **⚠️ Restrict Would Block** in the report; see [In `audit`](#in-audit).
+   [Troubleshooting](#troubleshooting) gives the usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries the URL
    rules, `aws_key_check: true` and the accounts you named over.
 
@@ -194,9 +194,9 @@ report uses the same numbers.
 - **Check** is ✅ when the check let a request signed with the key through, 🚫 or ⚠️ with the reason
   when it blocked one or `restrict` would, and `not checked` when it did neither, such as for a key
   issued and never used.
-- **Source** says where the key came from. All but `starting key` and `unknown` are followed by the
-  key that signed the call that issued it, or by `a web identity` or `a registry token` for an
-  unsigned one:
+- **Source** says where the key came from. All but `starting key` and `unknown` are followed in
+  brackets by the key that signed the call that issued it, as `(from key 1)`, or by
+  `a web identity` or `a registry token` for an unsigned one:
   - `starting key`: the key the step started with.
   - `role in <account>`: one an STS call in the run issued for a role in that account.
   - `STS`: one an STS answer issued without an account the proxy could read.
@@ -230,7 +230,7 @@ so one no URL rule allows can carry an `aws-` reason too.
 | --------------------------------- | ----- | ----------------- | ----: |
 | `sts.us-east-1.amazonaws.com:443` | HTTPS | aws-no-credential |     1 |
 
-A key's row adds the account of the role STS issued it for, when an STS call in the run did.
+A key's row adds `from a role in <account>` when an STS call in the run issued it for a role.
 Communication details marks each of these requests `(restrict would block: <reason>)`, and with
 `upload_traffic_artifact: true` the traffic artifact has them all, with the reason in `wouldBlock`.
 If the tables do not fit the Job Summary, they are cut and a warning annotation says so.
@@ -262,9 +262,9 @@ allowed_aws_role_accounts: |
 
 A key from a role assumed with the key of another unnamed role is left out of the comment: it passes
 only once that other role's account is named too. A `key N` row with no `from a role in`, and an
-`aws-no-credential` row for anything but an `AssumeRoleWithWebIdentity` call, are not fixed by a
-rule, so both are still blocked after the switch. [Troubleshooting](#troubleshooting) says what each
-needs.
+`aws-no-credential` row for anything but an `AssumeRoleWithWebIdentity` call, are not fixed by
+anything the example sets, so both are still blocked after the switch.
+[Troubleshooting](#troubleshooting) says what each needs.
 
 ## Common setups
 
@@ -434,7 +434,7 @@ them on those, through a customized bootstrap template:
 
 ### Limits
 
-- Keys from `GetSessionToken`, SAML, IAM Identity Center's `GetRoleCredentials` or Cognito's
+- Keys from `GetSessionToken`, IAM Identity Center's `GetRoleCredentials` or Cognito's
   `GetCredentialsForIdentity` are never learned, and `AssumeRoleWithSAML` is blocked as
   `aws-no-credential`. `AssumeRoleWithWebIdentity` is judged by the account of its role; see
   [Host and credential](#host-and-credential).
