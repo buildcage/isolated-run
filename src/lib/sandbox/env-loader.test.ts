@@ -129,8 +129,8 @@ describe("resolveSandboxEnv", () => {
     );
   });
 
-  // The runner sets these for this action alone, so they are withheld before
-  // the check above ever sees them: nothing for the user to act on.
+  // The runner sets these for this action alone, so they are withheld without
+  // a warning: nothing for the user to act on.
   it("says nothing about the inputs it withholds by design", () => {
     const warn = vi.fn();
 

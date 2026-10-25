@@ -192,10 +192,13 @@ describe("readFilesystemInputs", () => {
   });
 
   // resolveWriteThroughInput decides what these mean; what is left here is
-  // that each of the three reaches it under the name action.yml declares.
-  it("reads write_through:, writable: and allow_write: under those names", () => {
+  // that each of the three reaches it under its own name.
+  it("reads write_through: and writable:, and refuses allow_write:", () => {
     const notice = vi.fn();
 
+    expect(
+      readFilesystemInputs(silent, inputs({ write_through: "/tmp/out" })).writeThroughInput,
+    ).toBe("/tmp/out");
     expect(readFilesystemInputs(notice, inputs({ writable: "/tmp/out" })).writeThroughInput).toBe(
       "/tmp/out",
     );

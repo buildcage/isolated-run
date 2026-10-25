@@ -45,8 +45,8 @@ assert_summary_contains "| \`allowed.example.com:443\` | HTTPS |" "allowed.examp
 assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
 # Case and a trailing dot survive only on the Host-header path, so that is
 # where the scenarios ask for both forms. The report folds both into the
-# allowed.example.com:80 row above (see the absence check below), and the
-# scenarios' own 200s assert that they passed.
+# allowed.example.com:80 row above (the uppercase form's absence is checked
+# below), and the scenarios' own 200s assert that they passed.
 assert_summary_contains "| \`sub.wildcard.example.com:443\` | HTTPS |" "wildcard-matched name recorded as allowed"
 # Each of these is the near miss for a rule the scenarios also request on its
 # matching side. From inside the sandbox every one of them looks the same,
@@ -66,7 +66,8 @@ assert_summary_contains "| \`10.200.0.100:80\` | IP | 🚫 ip-not-allowed |" "di
 assert_summary_contains "| \`10.200.0.100:8443\` | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.101:8443\` | IP | 🚫 ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
-# No rule blocked these and none can clear them, so they are tabled apart.
+# No rule blocked these and none can clear them, so they are marked as
+# failures beside the blocks.
 assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the blocks"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:443\` | HTTPS | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed"
 assert_summary_contains "| \`nxdomain.wildcard.example.com:80\` | HTTP | ⚠️ dns-failed |" "unresolvable allowlisted name recorded as dns-failed on the HTTP path too"

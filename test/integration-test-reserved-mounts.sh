@@ -54,7 +54,7 @@ echo ""
 fixture_up universal
 
 # Case 1: write_through: /etc persists writes under /etc without taking the
-# action's own DNS and CA mounts with it. `-k` because the fixture origin's
+# action's own resolv.conf mount with it. `-k` because the fixture origin's
 # certificate is self-signed and the universal engine never terminates TLS.
 run_instance "/etc" "curl -fsS -k --max-time 20 -o /dev/null https://allowed.example.com/
 cp /etc/resolv.conf \"\$GITHUB_WORKSPACE/sandbox-resolv.conf\"

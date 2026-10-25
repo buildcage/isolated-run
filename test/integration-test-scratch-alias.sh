@@ -1,6 +1,6 @@
 #!/bin/bash
 # Verifies that the scratch base stays hidden on a host that bind-mounts
-# /var/tmp onto /tmp, a common hardening step. There the scratch base is
+# /tmp onto /var/tmp, a common hardening step. There the scratch base is
 # also reachable as /tmp/buildcage-<uid>, under a writable path, so covering
 # /var/tmp/buildcage-<uid> alone would leave it readable and, in persistent
 # mode, writable from the sandbox.

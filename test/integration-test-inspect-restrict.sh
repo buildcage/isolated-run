@@ -80,14 +80,15 @@ assert_summary_contains "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex r
 assert_summary_contains "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
 assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
-# No rule blocked this one and none can clear it, so it is tabled apart.
+# No rule blocked this one and none can clear it, so it is marked as a
+# failure beside the blocks.
 assert_summary_contains "### 🚫 Blocked / ⚠️ Failed Hosts" "a name that resolved nowhere is marked as a failure beside the blocks"
 assert_summary_contains "| \`absent.example.com:443\` | HTTPS | ⚠️ dns-failed |" "absent.example.com:443 recorded as failed, reason dns-failed"
 # The opposite case: a connection that never completed is a block, because
 # nothing on it was ever authenticated. It reads like an outage and is counted
 # anyway.
 assert_summary_contains "| \`deadend.example.com:443\` | HTTPS | 🚫 origin-connect-failed |" \
-  "a connection that never completed is in the blocked table, not the failed one"
+  "a connection that never completed is reported as a block, not a failure"
 # Only a numeric tlserr on the log line makes this origin-untrusted rather than
 # origin-connect-failed, so the row also shows HAProxy logged the TLS error.
 assert_summary_contains "| \`impostor.example.com:443\` | HTTPS | 🚫 origin-untrusted |" \
@@ -198,7 +199,7 @@ else
 fi
 
 echo ""
-echo "--- CA-injection residue check (novel to this repo's host-rootfs design) ---"
+echo "--- CA-injection residue check (the sandbox's rootfs is the host's) ---"
 HASH_AFTER=$(sha256sum "$SYSTEM_CA" | awk '{print $1}')
 if [ "$HASH_BEFORE" = "$HASH_AFTER" ]; then
   pass "the host's own system CA store ($SYSTEM_CA) is byte-identical before and after the step"

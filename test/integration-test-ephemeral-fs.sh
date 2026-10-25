@@ -48,9 +48,9 @@ echo "=== Sandbox filesystem_mode: ephemeral / write_through: Assertions ==="
 echo ""
 
 # A fresh runner has no scratch base at all, which is the state this test
-# has to cover: earlier runs in the same Makefile target (all persistent
-# mode) leave one behind at 0700, masking a preflight that only works
-# because the base already exists in the right shape.
+# has to cover: any earlier run of the action on the host leaves one behind
+# at 0700, masking a preflight that only works because the base already
+# exists in the right shape.
 sudo rm -rf "/var/tmp/buildcage-$(id -u)"
 
 # --- Without write_through, one sandbox for every check, since a start is not

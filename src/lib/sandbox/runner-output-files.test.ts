@@ -205,7 +205,7 @@ describe("readBackingFile", () => {
     expect(read).toStrictEqual({ reason: "it could not be read (EACCES)" });
   });
 
-  // Or the file's own.
+  // The command can take the file's own read permission away too.
   it("refuses a regular file it cannot read, without throwing", () => {
     const read = readBackingFile("/backing/output", 1024, {
       lstat: () => ({ isFile: () => true, size: 1 }),
