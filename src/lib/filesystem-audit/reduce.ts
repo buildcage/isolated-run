@@ -473,9 +473,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         seq: Number.isNaN(t) ? Infinity : seq++,
       };
       const parts = components(x.path);
-      details.add(x, parts);
       const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
       const cmd = runner?.cmd ?? x.comm;
+      // A run is the command's that started it, as in the table.
+      details.add({ ...x, comm: cmd }, parts);
       paths.add({ ...x, comm: String(by), cmd }, parts);
       if (tally) takeForRules(x, parts, by, cmd);
     }

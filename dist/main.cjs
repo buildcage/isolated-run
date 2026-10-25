@@ -73483,10 +73483,11 @@ function createAuditSummary(prefixes) {
 					perm: c.perm,
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
-				}, parts = components(x.path);
-				details.add(x, parts);
-				let by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
-				paths.add({
+				}, parts = components(x.path), by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
+				details.add({
+					...x,
+					comm: cmd
+				}, parts), paths.add({
 					...x,
 					comm: String(by),
 					cmd

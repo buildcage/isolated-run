@@ -130,11 +130,11 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 
 ▶ 🔍 File access details
 first-last access since the proxy started · flags · command · path
-00:00.401:           X   node         /usr/local/bin/node
+00:00.401:           X   bash         /usr/local/bin/node
 00:00.412:           R   node[npm ci] ./package.json
 00:00.415-00:00.418: Rr! node[npm ci] /etc/**
 00:00.530-00:41.207: RWD node[npm ci] ./node_modules/**
-00:00.531-00:40.982: X   dash         /usr/bin/dash
+00:00.531-00:40.982: X   node[npm ci] /usr/bin/dash
 
 ▶ 📝 Expected filesystem rules
 
@@ -156,10 +156,10 @@ From the top:
   [How rows are grouped](#how-rows-are-grouped). A row lists its commands in the order they first
   made its accesses, and past three, the first two and how many more, as `and 2 more`.
 - **File access details**, folded, has one row per command and path, in the order the rows were
-  first touched, with when that command first and last touched the path. A run shows there under
-  the command it started, as `X dash` above. Times count from the
-  start of the step's proxy, on the same clock as the traffic report's Communication details, so a
-  file access can be matched to a request.
+  first touched, with when that command first and last touched the path. A run is the row of the
+  command that started it, as in the table. Times count from the start of the step's proxy, on the
+  same clock as the traffic report's Communication details, so a file access can be matched to a
+  request.
 - **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
   them; see [Expected accesses](#expected-accesses).
 - The closing line explains the `./`, `~/` and `dir/**` notations, links to the artifact that holds

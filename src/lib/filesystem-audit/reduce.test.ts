@@ -512,14 +512,16 @@ describe("createAuditSummary", () => {
     expect(lines(md)).toEqual(["R x /opt/lib/x.conf"]);
   });
 
-  it("keeps one details row for a command that writes a file and then runs it", () => {
+  it("keeps one row for a program that writes a file and then runs it", () => {
     // As rustup updating itself does.
     const md = render(
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
-    expect(lines(md)).toEqual(["WX rustup ~/.cargo/bin/rustup"]);
+    // The first run is the one of a process the recording names only, which
+    // the table tells from rustup itself.
+    expect(lines(md)).toEqual(["X rustup ~/.cargo/bin/rustup", "WX rustup ~/.cargo/bin/rustup"]);
     // The table names each run by the program that ran it: first the one
     // the recording knows only by name, then rustup itself.
     expect(programRows(md)).toEqual([
@@ -541,9 +543,9 @@ describe("createAuditSummary", () => {
       { kind: "read", pid: 9, comm: "sh", path: "/usr/share/y" },
     );
     expect(lines(md)).toEqual([
-      "X a /usr/bin/a",
-      "X b /usr/bin/b",
-      "X c /usr/bin/c",
+      "X sh /usr/bin/a",
+      "X sh /usr/bin/b",
+      "X sh /usr/bin/c",
       "w! sh /usr/local/x",
       "R sh /usr/share/y",
     ]);
@@ -580,7 +582,7 @@ describe("createAuditSummary", () => {
           { kind: "exec", pid: 4, comm: "z" },
         ),
       ),
-    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X tool /usr/bin/tool"]);
+    ).toEqual(["R y ./blob", "R x ~/.ssh/id_rsa", "X y /usr/bin/tool"]);
   });
 
   it("leaves out the program and interpreter an exec maps, and their reads", () => {
@@ -602,7 +604,7 @@ describe("createAuditSummary", () => {
           { kind: "exec", pid: 2, comm: "run.sh", path: "/work/run.sh" },
         ),
       ),
-    ).toEqual(["X run.sh ./run.sh"]);
+    ).toEqual(["X sh ./run.sh"]);
   });
 
   it("starts a process's loads afresh when it runs a new program", () => {
@@ -618,7 +620,7 @@ describe("createAuditSummary", () => {
           { kind: "read", pid: 2, comm: "cp", path: "/usr/bin/cp" },
         ),
       ),
-    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X cp /usr/bin/cp"]);
+    ).toEqual(["R cp /etc/ld.so.cache", "R cp /lib/libtinfo.so.6", "X bash /usr/bin/cp"]);
   });
 
   it("merges two spellings of one relative name into a row", () => {
@@ -835,7 +837,7 @@ describe("createAuditSummary", () => {
       { kind: "mmap", comm: "node", path: "/work/shared", access: "w" },
       { kind: "exec", comm: "tool", path: "/work/tool" },
     );
-    expect(lines(md)).toEqual(["W node ./shared", "X tool ./tool"]);
+    expect(lines(md)).toEqual(["W node ./shared", "X node ./tool"]);
   });
 
   it("collapses a directory past the fanout and folds its bare parents", () => {
@@ -1145,6 +1147,9 @@ describe("createAuditSummary", () => {
 
 describe("createAuditSummary: commands", () => {
   const byte = (b: number): string => String.fromCharCode(0xdc00 + b);
+  // A run goes by the command that started it, so a command's own name shows
+  // on what it does after.
+  const reads = (md: string): string[] => lines(md).filter((l) => !l.startsWith("X "));
 
   it("names a command by its program, and the name it gave itself where that differs", () => {
     const md = render(
@@ -1158,20 +1163,24 @@ describe("createAuditSummary: commands", () => {
       "R node[npm ls] ./.npmrc",
       "R node[npm ls] ./package-lock.json",
       "R node[npm] ./package.json",
-      "X node[npm] /usr/bin/node",
+      // Run by a process the recording names only.
+      "X npm /usr/bin/node",
     ]);
   });
 
   it("takes a name cut to 15 bytes, or the one an exec was run by, as the program's", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "unattended-upgr", path: "/usr/bin/unattended-upgrade" },
+      { kind: "read", pid: 2, comm: "unattended-upgr", path: "/work/a" },
       { kind: "exec", pid: 3, comm: "sh", path: "/usr/bin/dash", name: "sh" },
+      { kind: "read", pid: 3, comm: "sh", path: "/work/b" },
       { kind: "exec", pid: 4, comm: "unattended-upg", path: "/usr/bin/unattended-upgrade" },
+      { kind: "read", pid: 4, comm: "unattended-upg", path: "/work/c" },
     );
-    expect(lines(md)).toEqual([
-      "X dash /usr/bin/dash",
-      "X unattended-upgrade /usr/bin/unattended-upgrade",
-      "X unattended-upgrade[unattended-upg] /usr/bin/unattended-upgrade",
+    expect(reads(md)).toEqual([
+      "R unattended-upgrade ./a",
+      "R dash ./b",
+      "R unattended-upgrade[unattended-upg] ./c",
     ]);
   });
 
@@ -1184,53 +1193,65 @@ describe("createAuditSummary: commands", () => {
         comm: `abcdefghijklm${byte(0xe3)}${byte(0x81)}`,
         path: "/x/abcdefghijklmあ",
       },
+      { kind: "read", pid: 2, comm: `abcdefghijklm${byte(0xe3)}${byte(0x81)}`, path: "/work/a" },
       { kind: "exec", pid: 3, comm: `p${byte(0xff)}`, path: `/x/p${byte(0xff)}` },
+      { kind: "read", pid: 3, comm: `p${byte(0xff)}`, path: "/work/b" },
     );
-    expect(lines(md)).toEqual(["X abcdefghijklmあ /x/abcdefghijklmあ", "X p\\xff /x/p\\xff"]);
+    expect(reads(md)).toEqual(["R abcdefghijklmあ ./a", "R p\\xff ./b"]);
   });
 
   it("escapes brackets in either name, so neither passes for the other, quoting a name with a space", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "node[npm ls]", path: "/tmp/node[npm ls]" },
+      { kind: "read", pid: 2, comm: "node[npm ls]", path: "/work/b" },
       { kind: "exec", pid: 3, comm: "x", path: "/tmp/node[npm ls]" },
+      { kind: "read", pid: 3, comm: "x", path: "/work/c" },
       { kind: "exec", pid: 4, comm: "a] /etc/passwd", path: "/usr/bin/node" },
+      { kind: "read", pid: 4, comm: "a] /etc/passwd", path: "/work/d" },
       // A shell's subshell renames itself without running anything.
       { kind: "read", pid: 5, comm: "node[npm ls]", path: "/work/a" },
     );
-    expect(lines(md)).toEqual([
+    expect(reads(md)).toEqual([
       'R "node\\[npm ls\\]" ./a',
-      'X "node\\[npm ls\\]" "/tmp/node[npm ls]"',
-      'X "node\\[npm ls\\]"[x] "/tmp/node[npm ls]"',
-      "X node[a\\] /etc/passwd] /usr/bin/node",
+      'R "node\\[npm ls\\]" ./b',
+      'R "node\\[npm ls\\]"[x] ./c',
+      "R node[a\\] /etc/passwd] ./d",
     ]);
   });
 
   it("quotes a program's name holding a space, but not the name it gave itself", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "a b", path: "/work/a b" },
+      { kind: "read", pid: 2, comm: "a b", path: "/work/x" },
       { kind: "exec", pid: 3, comm: "c d", path: "/work/a b" },
+      { kind: "read", pid: 3, comm: "c d", path: "/work/y" },
     );
-    expect(lines(md)).toEqual(['X "a b" "./a b"', 'X "a b"[c d] "./a b"']);
+    expect(reads(md)).toEqual(['R "a b" ./x', 'R "a b"[c d] ./y']);
   });
 
   it("names a memfd or deleted program by its file", () => {
     const md = render(
       { kind: "exec", pid: 2, comm: "3", path: "memfd:x", memfd: true, name: "/dev/fd/3" },
+      { kind: "read", pid: 2, comm: "3", path: "/work/m" },
       { kind: "exec", pid: 3, comm: "gone", path: "/work/gone", deleted: true },
+      { kind: "read", pid: 3, comm: "gone", path: "/work/n" },
     );
-    expect(lines(md)).toEqual(["X gone ./gone (deleted)", 'X memfd:"x" memfd:"x"']);
+    expect(reads(md)).toEqual(['R memfd:"x" ./m', "R gone ./n"]);
   });
 
   it("takes a memfd's whole name, a slash included, as the program's", () => {
-    const md = render({
-      kind: "exec",
-      pid: 2,
-      comm: "memfd:a/b",
-      path: "memfd:a/b",
-      memfd: true,
-      name: "/dev/fd/3",
-    });
-    expect(lines(md)).toEqual(['X memfd:"a/b" memfd:"a/b"']);
+    const md = render(
+      {
+        kind: "exec",
+        pid: 2,
+        comm: "memfd:a/b",
+        path: "memfd:a/b",
+        memfd: true,
+        name: "/dev/fd/3",
+      },
+      { kind: "read", pid: 2, comm: "memfd:a/b", path: "/work/m" },
+    );
+    expect(reads(md)).toEqual(['R memfd:"a/b" ./m']);
   });
 
   it("forgets a program once an exec's file is unknown", () => {
