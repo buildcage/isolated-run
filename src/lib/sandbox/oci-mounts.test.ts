@@ -113,7 +113,7 @@ describe("persistentLayers", () => {
     expect(writablePaths).toStrictEqual(new Set(["/home/runner", "/tmp"]));
   });
 
-  it("mounts nothing under `writable: /`, the whole root being writable already", () => {
+  it("mounts nothing under `write_through: /`, the whole root being writable already", () => {
     // Still reports the paths, since oci-protected-paths.ts reads them to
     // decide what not to force read-only.
     const { mounts, writablePaths } = persistentLayers(["/home/runner"], fresh, {

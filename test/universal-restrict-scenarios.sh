@@ -2,16 +2,7 @@
 # Runs inside the sandbox, as the `run:` input of a real proxy_engine:
 # universal step (see test/integration-test-universal-restrict.sh).
 #
-# ---------------------------------------------------------------------------
-# Rules under test (set by test/integration-test-universal-restrict.sh):
-#   allowed_https_rules: allowed.example.com:443 allowed.example.com:8443
-#                        *.wildcard.example.com:443 *.wildcard.example.com:8443
-#                        ~ok\.regex\.example\.com:443        (no anchors)
-#                        ~^ports\.regex\.example\.com:(443|8443)$
-#   allowed_http_rules:  allowed.example.com:80 allowed.example.com:8080
-#                        *.wildcard.example.com:80 *.wildcard.example.com:8080
-#   allowed_ip_rules:    10.200.0.100:8443 10.200.0.100:2525
-# ---------------------------------------------------------------------------
+# The rules under test are the INPUT_ALLOWED_* values that script sets.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 

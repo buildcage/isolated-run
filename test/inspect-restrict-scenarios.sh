@@ -1,34 +1,14 @@
 #!/bin/bash
 # Runs inside the sandbox, as the `run:` input of a real proxy_engine:
-# inspect step (see test/integration-test-inspect-restrict.sh). One shell
-# script covers every case: isolated-run's rootfs is the real host, so there
-# is no per-step image layer to assert on.
+# inspect step (see test/integration-test-inspect-restrict.sh).
 #
-# ---------------------------------------------------------------------------
-# Rules under test (set by test/integration-test-inspect-restrict.sh):
-#   allowed_url_rules:
-#     GET https://allowed.example.com/public/**
-#     GET https://allowed.example.com:9443/public/**
-#     GET|POST https://api.example.com/v1/*
-#     GET http://10.200.0.100/pub-by-addr/**
-#     GET https://*.wildcard.example.com/public/**
-#     GET ~^https://blocked\.example\.com:9443/public/.*$
-#     GET ~^https://blocked\.example\.com/defaultport/.*$
-#     GET ~https://ok\.wildcard\.example\.com/regexpub/        (no anchors)
-#     GET ~^https://ok\.wildcard\.example\.com/regexexact$
-#   allowed_https_rules: sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443
-#   allowed_http_rules:  allowed.example.com:80 deadend.example.com:80
-#   allowed_tls_rules:     tlspass.example.com:443 ~^tlspass\.example\.com:8443$
-#   allowed_ip_rules:    ~^10\.200\.0\.\d+:9080$ 10.200.0.53:53 10.200.0.100:2525
-# ---------------------------------------------------------------------------
+# The rules under test are the INPUT_ALLOWED_* values that script sets.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 
 S="curl -sS --max-time 10"
-# Deliberately unquoted here: $C is expanded unquoted below (word-split into
-# argv), so a literal quote around %{http_code} would become part of the
-# argument itself instead of being stripped; see the direct curl calls
-# further down, where it's a single literal invocation and quoting is correct.
+# %{http_code} is unquoted: $C is word-split, so a quote would reach curl as
+# part of the argument.
 C="curl -sS -o /dev/null -w %{http_code} --max-time 10"
 
 echo "=== [URL rule - path allowed] ==="
@@ -338,9 +318,8 @@ echo "=== [Regex IP rule] ==="
 OUT=$($S http://10.200.0.100:9080/anything)
 check_ok "GET http://10.200.0.100:9080/anything" "$OUT" "ROOT GET"
 
-# Same address, on a port only the URL rule's :80 default would cover:
-# blocking it proves the ~regex ip rule's own literal port (9080) is
-# enforced, not "any port".
+# Same address on 8080, which no rule names: blocking it proves the ~regex ip
+# rule's own literal port (9080) is enforced, not "any port".
 echo "=== [Regex IP rule - other port not covered] ==="
 CODE=$($C http://10.200.0.100:8080/anything)
 check_status "GET http://10.200.0.100:8080/anything" "$CODE" "403"

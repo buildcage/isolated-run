@@ -46,8 +46,8 @@ func (n rawName) MarshalJSON() ([]byte, error) {
 	return append(out, '"'), nil
 }
 
-// legacy is how the tracer wrote a record before appendRecord: a value whose
-// MarshalJSON json.Encoder calls.
+// legacy writes a record through encoding/json, as a value whose MarshalJSON
+// json.Encoder calls; appendRecord must match it byte for byte.
 type legacy struct {
 	r record
 	t string

@@ -91,8 +91,9 @@ echo ""
 echo "=== Cancelled step Assertions ==="
 echo ""
 
-# The SIGTERM reaches what the run script started as well, and the step waits for
-# it to finish its own cleanup after the script itself has died of the signal.
+# The action passes the cancel on as SIGTERM, which reaches what the run script
+# started as well, and the step waits for it to finish its own cleanup after
+# the script itself has died of the signal.
 cancel_step command \
   "bash -c 'trap \"sleep 1; touch cleaned-up; exit 0\" TERM; sleep 303 & wait'" "^sleep 303"
 if [ "$CODE" != "-1" ]; then

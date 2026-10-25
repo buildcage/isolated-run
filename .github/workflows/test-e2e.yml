@@ -216,13 +216,14 @@ jobs:
             chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
             chown 1:2 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
             mkdir "$GITHUB_WORKSPACE/root-owned/x" 2>/dev/null || true
-            # Refused by the read-only root before the tracer's path hook, and
-            # a name already there, which is no change.
+            # Refused by the read-only root before the tracer's path hook.
             mkdir /usr/local/buildcage-ro-probe 2>/dev/null || true
-            # Changes through a descriptor alone the kernel refuses before the
-            # tracer's hook: on the read-only root, also through an empty name
-            # and AT_EMPTY_PATH, and a truncate through one not open for
-            # writing, but not one on /dev/null. Then an xattr set through one.
+            # Changes through a descriptor alone that the kernel refuses before
+            # the tracer's hook: a chmod and chown on the read-only root, a
+            # chown there through an empty name and AT_EMPTY_PATH, and a
+            # truncate through a descriptor not open for writing. Then a
+            # truncate on /dev/null, which changes no file, and an xattr set
+            # through a descriptor.
             echo data > "$GITHUB_WORKSPACE/fd-truncate.txt"
             echo data > "$GITHUB_WORKSPACE/fd-xattr.txt"
             python3 -c 'import ctypes, os, sys
@@ -236,6 +237,7 @@ jobs:
                 try: change()
                 except OSError: pass' \
               "$GITHUB_WORKSPACE/fd-truncate.txt" "$GITHUB_WORKSPACE/fd-xattr.txt"
+            # A mkdir on a name already there, which is no change.
             mkdir "$GITHUB_WORKSPACE/sub" 2>/dev/null || true
             # A script run by a relative name from the directory it sits in.
             mkdir -p "$GITHUB_WORKSPACE/A"

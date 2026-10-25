@@ -267,7 +267,7 @@ describe("reportStepTraffic", () => {
     { wants: false, engine: "inspect", available: false },
     { wants: false, engine: "universal", available: false },
   ])(
-    "tells the summary an artifact is available for either engine, only when wanted ($engine, wants=$wants)",
+    "tells the summary an artifact is available only when wanted ($engine, wants=$wants)",
     async ({ wants, engine, available }) => {
       mocks.fetchReport.mockResolvedValue({ engine });
 

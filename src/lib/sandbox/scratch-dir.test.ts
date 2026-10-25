@@ -347,8 +347,8 @@ describe("cleanupScratchDir: EBUSY retry", () => {
   });
 
   it("rethrows any other errno immediately, without retrying", () => {
-    // Only the first attempt fails; a retry would find the second one waiting
-    // and succeed, so reaching the throw is what "no retry" means here.
+    // Only the first attempt fails, so a retry would succeed; reaching the
+    // throw is what "no retry" means here.
     const h = host({ removeFailures: [fsError("EROFS")] });
 
     expect(() => cleanupScratchDir(SCRATCH_DIR, {}, h.deps)).toThrow(/simulated EROFS/);

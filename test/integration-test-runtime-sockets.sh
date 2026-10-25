@@ -1,9 +1,9 @@
 #!/bin/bash
-# Regression check for the runtime-socket hardening: if the sandboxed
-# command's primary GID were left privileged, or a Unix domain socket
-# under /run were left reachable, either would let it escape the isolation
-# (docker.sock -> a sibling privileged container; a systemd --user bus ->
-# a unit that runs entirely outside every namespace the sandbox creates).
+# Checks the runtime-socket hardening: if the sandboxed command's primary GID
+# were left privileged, or a Unix domain socket under /run were left
+# reachable, either would let it escape the isolation (docker.sock -> a
+# sibling privileged container; a systemd --user bus -> a unit that runs
+# entirely outside every namespace the sandbox creates).
 # See identity.ts (GID substitution) and oci-mounts.ts's hostRunCoverageLayers
 # (the empty /run tmpfs) for the two independent layers that close this.
 # Drives dist/main.cjs directly, without the real action wrapper; see

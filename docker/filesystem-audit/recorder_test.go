@@ -256,7 +256,6 @@ func TestRecorderRecordsAnOpenThatFailedBeforeItsFile(t *testing.T) {
 	}
 }
 
-// A name the kernel copied gives way to none read from the caller.
 // The kernel's copy of a name is kept over the caller's; a caller's copy
 // that differs from it counts as untracked, since the kernel's may then be an
 // earlier call's.

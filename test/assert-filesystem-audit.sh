@@ -91,7 +91,6 @@ assert_file_has "$f" "A hard link across mounts shows as failed" -E ' l +ln +/et
 assert_file_has "$f" "A file mapped executable shows as read" -E ' R +python3\.[0-9]+ +\./mapped\.bin$'
 # A mapping the kernel refused after the tracer's hook is not a write.
 assert_file_lacks "$f" "A refused mapping is not a write" -E ' [A-Za-z!]*[Ww][A-Za-z!]* +python3\.[0-9]+ +\./ro-mapped\.bin$'
-# Shared anonymous memory names no file.
 assert_file_has "$f" "A shared mapping made writable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected\.bin$'
 assert_file_has "$f" "A shared mapping made writable and executable shows as read and written" -E ' RW +python3\.[0-9]+ +\./mprotected-rwx\.bin$'
 assert_file_lacks "$f" "Shared anonymous memory names no file" '/dev/zero'

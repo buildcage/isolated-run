@@ -24,10 +24,11 @@ import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
 // secret scanning on push.
 const ASIA = ["A", "S", "I", "A"].join("");
 
-// What is left to check here is the order they run in, what each one is
-// handed, and which of them still run when an earlier step fails.
 const annotation = { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
 
+// Each dependency is tested in its own file; what is left to check here is the
+// order they run in, what each one is handed, and which of them still run when
+// an earlier one fails.
 const mocks = {
   applyConfigFile: vi.fn(),
   readRunCommand: vi.fn(),
@@ -696,9 +697,9 @@ describe("runSandboxStep", () => {
     });
   });
 
-  // A renamed input still works, so its migration message is the only warning
-  // the run gets; suppressing it with the rest of the annotations would leave
-  // a workflow on the old spelling with nothing to go on.
+  // A renamed input still works, so its migration notice is the only hint the
+  // run gets; suppressing it with the rest of the annotations would leave a
+  // workflow on the old spelling with nothing to go on.
   it("sends a renamed input's notice to the emitter the annotation gate cannot suppress", async () => {
     await runSandboxStep({ ...ENV, GITHUB_STEP_SUMMARY: "" }, deps);
 

@@ -98,10 +98,9 @@ if [ "$CODE" = "0" ]; then
 else
   fail "default privilege/seccomp/filesystem/environment check failed (exit $CODE)"
 fi
-# Both annotations the head check can produce: the blocked-connection one and
-# the incomplete-log one it is replaced by when the marker is missing. Matched
-# on the part that outlives a rewording of what is counted: the check fires on
-# absence, where a pattern that quietly stops matching would pass.
+# The head check's two annotations, for blocked connections and for an
+# incomplete log. Matched on their stable part: this assertion passes on
+# absence, so a pattern that stopped matching would pass silently.
 if ! grep -Eq "detected by buildcage|logs are incomplete" "$WORKDIR/out.log"; then
   pass "no blocked or incomplete-log annotation for a step with no outbound connection"
 else

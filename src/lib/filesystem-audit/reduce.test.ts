@@ -519,8 +519,6 @@ describe("createAuditSummary", () => {
       { kind: "write", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
       { kind: "exec", comm: "rustup", path: "/home/u/.cargo/bin/rustup" },
     );
-    // The first run is the one of a process the recording names only, which
-    // the table tells from rustup itself.
     expect(lines(md)).toEqual(["X rustup ~/.cargo/bin/rustup", "WX rustup ~/.cargo/bin/rustup"]);
     // The table names each run by the program that ran it: first the one
     // the recording knows only by name, then rustup itself.

@@ -167,7 +167,7 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).not.toContain("/tmp/runtime-runner");
   });
 
-  it("skips the host-mount sweep under `writable: /`, still masking what it masks", () => {
+  it("skips the host-mount sweep under `write_through: /`, still masking what it masks", () => {
     const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
       ...base,
       hostMounts: [{ mountPoint: "/mnt", fsType: "ext4" }],

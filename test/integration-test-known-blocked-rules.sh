@@ -32,7 +32,7 @@ trap 'fixture_down universal' EXIT
 fixture_up universal
 
 # Case 1: the only blocked connection matches known_blocked_rules -> the
-# step must succeed despite fail_on_blocked defaulting to true.
+# step must succeed despite fail_on_blocked: true.
 TMP_MATCH=$(mktemp -d)
 run_instance "$TMP_MATCH" "blocked.example.com:80"
 CODE_MATCH=$(cat "$TMP_MATCH/exit_code")

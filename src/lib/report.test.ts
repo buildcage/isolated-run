@@ -53,8 +53,8 @@ function options(
 const markdownOf = (...args: Parameters<typeof computeReportOutcomes>): string =>
   joinSummaryBlocks(computeReportOutcomes(...args).blocks);
 
-// Annotates blocked rows with parameters.knownBlockedRules, as a Report has them
-// by the time it reaches computeReportOutcomes. The blocked outcome reads only
+// A Report as computeReportOutcomes receives it; callers annotate its blocked
+// rows with annotateKnownBlocked. The blocked outcome reads only
 // ReportDataCommon fields, so a universal-shaped fixture covers inspect too.
 function report(overrides: Partial<UniversalReportData> = {}): UniversalReportData {
   const params = overrides.parameters ?? reportParams();

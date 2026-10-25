@@ -312,7 +312,7 @@ describe("buildOciConfig", () => {
       expect(underRun).toStrictEqual([]);
     });
 
-    it("never lifts the /proc info-leak masks, even under writable: /", () => {
+    it("never lifts the /proc info-leak masks, even under write_through: /", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
@@ -374,7 +374,7 @@ describe("buildOciConfig", () => {
       expect(varRun).toBeLessThan(destinations.indexOf("/var/run/docker.sock"));
     });
 
-    it("leaves /var/run uncovered under writable: /, like /run", () => {
+    it("leaves /var/run uncovered under write_through: /, like /run", () => {
       probes = { ...pinnedProbes(), varRunRealPath: () => "/var/run" };
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
@@ -383,7 +383,7 @@ describe("buildOciConfig", () => {
       expect(config.mounts.map((m) => m.destination)).not.toContain("/var/run");
     });
 
-    it("drops the /run coverage tmpfs under writable: /, the documented full opt-out", () => {
+    it("drops the /run coverage tmpfs under write_through: /, the documented full opt-out", () => {
       // write_through: / hands the whole host back writable, /run included, so
       // covering /run would be the one exception to "you get what you opened".
       const config = build(fakeBaseSpec(), {
@@ -621,7 +621,7 @@ describe("buildOciConfig", () => {
 
     // Which shapes the guard rejects is assertScratchBaseNotWritable's own
     // (see paths.test.ts); what this says is that write_through reaches it.
-    it("fails closed when writable: names the scratch base", () => {
+    it("fails closed when write_through: names the scratch base", () => {
       expect(() =>
         build(fakeBaseSpec(), {
           ...baseArgs,
@@ -695,8 +695,8 @@ describe("buildOciConfig", () => {
     });
   });
 
-  describe("`writable: /`, the documented full opt-out", () => {
-    it("`writable: /` is exempt from the scratch-base guard (documented full opt-out)", () => {
+  describe("`write_through: /`, the documented full opt-out", () => {
+    it("`write_through: /` is exempt from the scratch-base guard (documented full opt-out)", () => {
       expect(() =>
         build(fakeBaseSpec(), {
           ...baseArgs,
@@ -705,7 +705,7 @@ describe("buildOciConfig", () => {
       ).not.toThrow();
     });
 
-    it("`writable: /` disables the read-only root and skips the individual writable-path mounts", () => {
+    it("`write_through: /` disables the read-only root and skips the individual writable-path mounts", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
@@ -715,7 +715,7 @@ describe("buildOciConfig", () => {
       expect(rw.length).toBe(0);
     });
 
-    it("`writable: /` still keeps the action's own host directories read-only", () => {
+    it("`write_through: /` still keeps the action's own host directories read-only", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
@@ -724,7 +724,7 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).toContain("/home/runner/.docker");
     });
 
-    it("`writable: /` skips the host-mount readonly pass entirely", () => {
+    it("`write_through: /` skips the host-mount readonly pass entirely", () => {
       const hostMounts = [{ mountPoint: "/mnt", fsType: "ext4" }];
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
