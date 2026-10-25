@@ -1,8 +1,22 @@
-import { describe, it, expect } from "vitest";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, beforeAll, describe, it, expect } from "vitest";
 
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
+  assertKnownFilesExist,
   assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
   splitWriteThroughInput,
@@ -215,6 +229,67 @@ describe("assertNoSymlinkInWriteThrough", () => {
       );
     }
   });
+});
+
+describe("write_through checks on the real filesystem", () => {
+  let root = "";
+
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "buildcage-write-through-")));
+    mkdirSync(join(root, "real"));
+    mkdirSync(join(root, "sealed"), { mode: 0o555 });
+    writeFileSync(join(root, "file"), "");
+    writeFileSync(join(root, "output"), "");
+    symlinkSync("real", join(root, "link"));
+  });
+
+  afterAll(() => {
+    if (root === "") return;
+    if (existsSync(join(root, "sealed"))) chmodSync(join(root, "sealed"), 0o755);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("accepts a real path, including one still to be created", () => {
+    expect(() => assertNoSymlinkInWriteThrough(join(root, "real/new"))).not.toThrow();
+  });
+
+  it("refuses a path through a symlink, naming where it leads", () => {
+    expect(() => assertNoSymlinkInWriteThrough(join(root, "link/new"))).toThrow(
+      `instead: ${JSON.stringify(join(root, "real/new"))}`,
+    );
+  });
+
+  it("tells a missing runner file from a present one", () => {
+    const env = { GITHUB_OUTPUT: join(root, "output"), GITHUB_ENV: join(root, "missing") };
+
+    expect(() => assertKnownFilesExist([env.GITHUB_OUTPUT], env)).not.toThrow();
+    expect(() => assertKnownFilesExist([env.GITHUB_ENV], env)).toThrow(/doesn't exist/);
+  });
+
+  it("creates a missing path under a directory the runner can write", () => {
+    const target = join(root, "real/a/b");
+
+    ensureWriteThroughTargetsExist([target]);
+
+    expect(existsSync(target)).toBe(true);
+  });
+
+  // Holds for root too: X_OK needs an execute bit even for root.
+  it("refuses a missing path under a regular file", () => {
+    expect(() => ensureWriteThroughTargetsExist([join(root, "file/x")])).toThrow(
+      WriteThroughTargetUncreatableError,
+    );
+  });
+
+  // Root ignores the mode bits.
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a missing path under a directory the runner can't write",
+    () => {
+      expect(() => ensureWriteThroughTargetsExist([join(root, "sealed/x")])).toThrow(
+        WriteThroughTargetUncreatableError,
+      );
+    },
+  );
 });
 
 describe("ensureWriteThroughTargetsExist", () => {

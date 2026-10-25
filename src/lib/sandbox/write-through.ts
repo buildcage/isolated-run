@@ -152,9 +152,6 @@ export interface EnsureWriteThroughTargetsExistOptions {
   mkdir?: (path: string) => void;
 }
 
-// Untested by design: the defaults behind ensureWriteThroughTargetsExist's
-// seams, which only hand node:fs what the tested caller decided.
-/* v8 ignore start */
 function defaultExists(path: string): boolean {
   try {
     lstatSync(path);
@@ -176,7 +173,6 @@ function defaultCanWrite(path: string): boolean {
 function defaultMkdir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
-/* v8 ignore stop */
 
 /**
  * Following a symlink would make writable wherever it leads, which an earlier

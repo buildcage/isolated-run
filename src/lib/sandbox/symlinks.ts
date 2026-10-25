@@ -21,9 +21,6 @@ export type ResolvedHostPath =
 // The kernel's MAXSYMLINKS; also stops a symlink loop.
 const MAX_SYMLINK_HOPS = 40;
 
-// Untested by design: the defaults behind this module's seam, which only hand
-// node:fs what the tested caller decided.
-/* v8 ignore start */
 export const realSymlinkDeps: SymlinkDeps = {
   lstat: (path) => {
     try {
@@ -34,7 +31,6 @@ export const realSymlinkDeps: SymlinkDeps = {
   },
   readlink: (path) => readlinkSync(path),
 };
-/* v8 ignore stop */
 
 /**
  * `path` with its symlinks resolved component by component, as the kernel
