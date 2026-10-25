@@ -293,8 +293,8 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 
 A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would Block**
 in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. The report links
-here after those tables, naming each reason it shows unless `known_blocked_rules` expects every
-block with it. Look the reason up below.
+here after those tables, naming each reason they show; in `restrict` it leaves out one whose every
+block `known_blocked_rules` expects. Look the reason up below.
 
 To accept a block you expect, list its host or URL in `known_blocked_rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
