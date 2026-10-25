@@ -32,10 +32,9 @@ jobs:
             dockerfile: docker/inspect/Dockerfile
     outputs:
       tag: ${{ steps.version.outputs.tag }}
-      # Matrix legs sharing one output name would clobber each other (last
-      # completed leg wins); each leg instead writes to a step-output key
-      # suffixed with its own matrix.engine value, so neither collides and
-      # both survive into this job's own (statically-declared) outputs.
+      # Matrix legs sharing one output name would overwrite each other (the
+      # last leg to finish wins), so each leg writes a key named after its
+      # engine.
       digest-universal: ${{ steps.digest.outputs['universal'] }}
       digest-inspect: ${{ steps.digest.outputs['inspect'] }}
 
@@ -211,7 +210,8 @@ jobs:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.image.outputs.ref }}
         with:
           proxy_engine: ${{ matrix.engine }}
-          # Each engine gets the rule kind it actually enforces on.
+          # universal cannot see a URL, so it gets a host rule; inspect gets a
+          # URL rule, which only it enforces.
           allowed_https_rules: ${{ matrix.engine == 'universal' && 'example.com:443' || '' }}
           allowed_url_rules: ${{ matrix.engine == 'inspect' && 'GET|HEAD https://example.com/**' || '' }}
           # The block below is the point, not a failure.

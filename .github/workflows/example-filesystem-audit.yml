@@ -24,7 +24,7 @@ jobs:
       - name: Stage the sample project
         run: cp test/filesystem-audit/package.json test/filesystem-audit/package-lock.json .
 
-      # The Job Summary's "Filesystem Activity" section lists the programs the
+      # The Job Summary's "Filesystem Activity Report" section lists the programs the
       # install ran and every path it touched. The rules are the inspect
       # restrict example's, since this example is about the filesystem.
       - name: Record what an install touches

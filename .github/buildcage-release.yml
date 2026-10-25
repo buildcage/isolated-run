@@ -8,7 +8,7 @@ allowed_url_rules: |
   GET https://github.com/coredns/coredns/releases/download/**
   GET https://release-assets.githubusercontent.com/**
 
-  # Go module proxy for the seccomp-profile generator build
+  # Go module proxy for the seccomp-profile generator and filesystem-audit builds
   GET https://proxy.golang.org/**
 
   # Node.js runtime for the QuickJS scripts build stage

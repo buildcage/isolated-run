@@ -12,9 +12,9 @@ jobs:
       contents: read
 
     steps:
-      # Same command as the audit example, with the rules that run produced.
-      # universal enforces on host and port only: as far as it can see
-      # without decrypting, and all a JVM build like this one can accept.
+      # The audit example's command, with the rules that run produced and one
+      # request they block. universal enforces on host and port only, which is
+      # as far as it can see without decrypting.
       # fail_on_blocked is false only because this example blocks on purpose;
       # leave it at its default so a real workflow fails on a disallowed destination.
       - name: Run a Maven build with outbound network isolation

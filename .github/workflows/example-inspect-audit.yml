@@ -13,7 +13,8 @@ jobs:
 
     steps:
       # inspect decrypts, so it logs each request's method and full URL, and
-      # the Job Summary's "Switch to restrict mode" section returns allowed_url_rules.
+      # the Job Summary's "Switch to restrict mode" section lists them as
+      # allowed_url_rules.
       - name: Discover required URLs with isolated-run
         uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
         with:

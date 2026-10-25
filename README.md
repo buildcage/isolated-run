@@ -127,8 +127,8 @@ unnoticed.
 
 ### Example workflows
 
-Each pair runs the same command with and without rules:
-`inspect` on an npm and pip install ([audit](.github/workflows/example-inspect-audit.yml) ·
+Each pair runs a command in audit, then in restrict with the rules audit reported and one request
+they block: `inspect` on an npm install ([audit](.github/workflows/example-inspect-audit.yml) ·
 [restrict](.github/workflows/example-inspect-restrict.yml)), `universal` on a Maven build
 ([audit](.github/workflows/example-universal-audit.yml) ·
 [restrict](.github/workflows/example-universal-restrict.yml)).
