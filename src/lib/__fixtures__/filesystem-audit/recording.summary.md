@@ -1,7 +1,7 @@
 
 ## Filesystem Activity Report
 
-### 📂 Accessed Paths (89)
+### 📂 Accessed Paths (90)
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
@@ -41,6 +41,7 @@
 | `/usr/bin/cat` | `cat` | R | `/usr/lib/locale/**` |
 | `/usr/bin/cat` | `cat` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
 | `/usr/bin/mv` | `mv` | M | `./probe.txt` |
+| `/usr/bin/mv` | `mv` | W | `./probe2.txt` |
 | `/usr/bin/mv` | `mv` | R | `/etc/locale.alias` |
 | `/usr/bin/mv` | `mv` | R | `/proc/filesystems` |
 | `/usr/bin/mv` | `mv` | R | `/usr/lib/locale/**` |
@@ -121,6 +122,7 @@
 00:06.628:           R   mv         /etc/locale.alias
 00:06.628:           R   mv         /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache
 00:06.628:           M   mv         ./probe.txt
+00:06.628:           W   mv         ./probe2.txt
 00:06.629:           X   bash       /usr/bin/rm
 00:06.629-00:06.630: R   rm         /usr/lib/locale/**
 00:06.629:           R   rm         /etc/locale.alias

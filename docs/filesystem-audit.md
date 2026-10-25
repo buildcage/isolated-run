@@ -189,17 +189,17 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Flags
 
-| Flag | Means                                                                                          |
-| ---- | ---------------------------------------------------------------------------------------------- |
-| `R`  | Read, or mapped for reading or to run                                                          |
-| `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program, on the row of the program that ran it                                        |
-| `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
-| `L`  | Given a second name by a hard link; the new name shows `W`                                     |
-| `D`  | Deleted                                                                                        |
-| `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
-| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
-| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path |
+| Flag | Means                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------ |
+| `R`  | Read, or mapped for reading or to run                                                            |
+| `W`  | Written, mapped shared and writable, created, truncated or moved to: a file, a directory, a link |
+| `X`  | Run as a program, on the row of the program that ran it                                          |
+| `M`  | Moved (renamed) away from this path; the new name shows `W`                                      |
+| `L`  | Given a second name by a hard link; the new name shows `W`                                       |
+| `D`  | Deleted                                                                                          |
+| `A`  | Attributes changed: mode, owner, times, extended attributes                                      |
+| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file        |
+| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path   |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
   `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused.
@@ -331,8 +331,8 @@ To name only what a later step needs:
    `upload_filesystem_audit_artifact: true`, and in `write_through` only what you already know a
    later step reads.
 2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
-   temporary name and then renames into place shows `M` under the temporary name; its new name is
-   the `to` on its `rename` line in the artifact.
+   temporary name and then renames into place shows `M` under the temporary name and `W` under the
+   new one.
 3. Of those, add to `write_through` what a later step or the end of the job uses: build output,
    test reports, coverage, a cache directory. Run again. The rest is what ephemeral discards on
    purpose.
@@ -783,7 +783,7 @@ letter lowercase in the summary. The failures that are not recorded are in
 | `exec`                                  | a program run                                                                                                                                                                 | `X`                                                          |
 | `fork`                                  | a new process; `pid` is the child                                                                                                                                             | none                                                         |
 | `unlink`, `rmdir`                       | a file or a directory deleted                                                                                                                                                 | `D`                                                          |
-| `rename`                                | a move from `path` to `to`                                                                                                                                                    | `M` on `path`                                                |
+| `rename`                                | a move from `path` to `to`                                                                                                                                                    | `M` on `path`, `W` on `to`                                   |
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                          | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`; see below the table                                                                                                                     | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                     | `A`                                                          |
