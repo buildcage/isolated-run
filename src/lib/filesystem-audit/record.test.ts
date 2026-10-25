@@ -7,10 +7,24 @@ import { classify, type AuditRecord } from "./record.ts";
 const ok = (letter: string, path: string) => ({ letter, path, failed: false, perm: false });
 
 describe("classify", () => {
-  it("names each kind by its letter", () => {
-    expect(classify({ kind: "read", path: "/a" })).toStrictEqual([ok("R", "/a")]);
-    expect(classify({ kind: "unlink", path: "/a" })).toStrictEqual([ok("D", "/a")]);
-    expect(classify({ kind: "chown", path: "/a" })).toStrictEqual([ok("A", "/a")]);
+  it.each([
+    ["read", "R"],
+    ["write", "W"],
+    ["exec", "X"],
+    ["mkdir", "W"],
+    ["mknod", "W"],
+    ["truncate", "W"],
+    ["symlink", "W"],
+    ["unlink", "D"],
+    ["rmdir", "D"],
+    ["chmod", "A"],
+    ["chown", "A"],
+    ["attr", "A"],
+  ])("names %s by %s, done or failed", (kind, letter) => {
+    expect(classify({ kind, path: "/a" })).toStrictEqual([ok(letter, "/a")]);
+    expect(classify({ kind, path: "/a", failed: true, err: 2 })).toStrictEqual([
+      { letter, path: "/a", failed: true, perm: false },
+    ]);
   });
 
   it("counts an open only when it creates or truncates", () => {

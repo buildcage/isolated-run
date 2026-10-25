@@ -1,13 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { stripSandboxMachinery } from "../test/filesystem-audit.ts";
-
-const BASE = "/var/tmp/buildcage-0";
-const RUN_SCRIPT = `${BASE}/sandbox-x/exec/run-script.sh`;
-
-function jsonl(...records: object[]): string {
-  return records.map((r) => JSON.stringify(r)).join("\n");
-}
+import {
+  RUN_SCRIPT,
+  SCRATCH_BASE,
+  jsonl,
+  stripSandboxMachinery,
+} from "../test/filesystem-audit.ts";
 
 function records(out: string): object[] {
   return out
@@ -36,7 +34,7 @@ describe("stripSandboxMachinery", () => {
         { kind: "read", comm: "node", path: "/work/z" }, // a record with no pid, kept
         { kind: "end", dropped: 0, untracked: 0 }, // the tracer's closing line, kept
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 11, ppid: 10, kind: "write", comm: "bash", path: "/work/probe.txt" },
@@ -68,7 +66,7 @@ describe("stripSandboxMachinery", () => {
           err: 2,
         },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 13, ppid: 11, kind: "fork", comm: "bash" },
@@ -100,7 +98,7 @@ describe("stripSandboxMachinery", () => {
         { pid: 14, ppid: 13, kind: "fork", comm: "run-script.sh" },
         { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
@@ -132,7 +130,7 @@ describe("stripSandboxMachinery", () => {
           program: "/usr/bin/cat",
         },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 11, ppid: 10, kind: "write", comm: "bash", path: "/work/a" },
@@ -160,7 +158,7 @@ describe("stripSandboxMachinery", () => {
         { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT, ...P },
         { pid: 12, ppid: 11, kind: "write", comm: "run-script.sh", path: "/work/b", ...P },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 12, ppid: 11, kind: "fork", comm: "bash" },
@@ -178,7 +176,7 @@ describe("stripSandboxMachinery", () => {
         // pid 12 exits, and the shell forks a subshell that gets its pid.
         { pid: 12, ppid: 11, kind: "fork", comm: "run-script.sh" },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 12, ppid: 11, kind: "exec", comm: "run-script.sh", path: "/work/run-script.sh" },
@@ -198,7 +196,7 @@ describe("stripSandboxMachinery", () => {
         fork,
         read,
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([fork, read]);
   });
@@ -214,7 +212,7 @@ describe("stripSandboxMachinery", () => {
         { pid: 21, ppid: 11, kind: "exec", comm: "run-script.sh", path: "/work/run-script.sh" },
         { pid: 21, ppid: 11, kind: "write", comm: "run-script.sh", path: "/work/out" },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 20, ppid: 11, kind: "exec", comm: "setpriv", path: "/work/tools/setpriv" },
@@ -233,7 +231,7 @@ describe("stripSandboxMachinery", () => {
         { pid: 10, ppid: 1, kind: "write", comm: "buildcage-init", path: "/dev/null" },
         sleep,
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([sleep]);
   });
@@ -241,9 +239,9 @@ describe("stripSandboxMachinery", () => {
   it("keeps every record when no step shell is found", () => {
     const records_ = [
       { pid: 30, kind: "read", comm: "node", path: "/work/a" },
-      { pid: 30, kind: "read", comm: "node", path: `${BASE}/leftover` },
+      { pid: 30, kind: "read", comm: "node", path: `${SCRATCH_BASE}/leftover` },
     ];
-    expect(records(stripSandboxMachinery(jsonl(...records_), BASE))).toEqual(records_);
+    expect(records(stripSandboxMachinery(jsonl(...records_), SCRATCH_BASE))).toEqual(records_);
   });
 
   it("keeps a step's access spelled through the scratch base", () => {
@@ -252,7 +250,7 @@ describe("stripSandboxMachinery", () => {
       ppid: 11,
       kind: "attr",
       comm: "node",
-      path: `${BASE}/../../home/u/.bashrc`,
+      path: `${SCRATCH_BASE}/../../home/u/.bashrc`,
     };
     const out = stripSandboxMachinery(
       jsonl(
@@ -272,7 +270,7 @@ describe("stripSandboxMachinery", () => {
         },
         { pid: 11, ppid: 10, kind: "open", comm: "run-script.sh", path: RUN_SCRIPT, access: "wt" },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       sneaky,
@@ -299,7 +297,7 @@ describe("stripSandboxMachinery", () => {
         // Another step process reading the script is the step's.
         { pid: 12, ppid: 11, kind: "read", comm: "cat", path: RUN_SCRIPT },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { ...shell, comm: "bash", kind: "open", access: "rw" },
@@ -319,7 +317,7 @@ describe("stripSandboxMachinery", () => {
         // pid 15 names pid 13 as its parent but was not seen forking from it.
         { pid: 15, ppid: 13, kind: "read", comm: "run-script.sh", path: "/work/a" },
       ),
-      BASE,
+      SCRATCH_BASE,
     );
     expect(records(out)).toEqual([
       { pid: 13, ppid: 11, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
@@ -331,20 +329,20 @@ describe("stripSandboxMachinery", () => {
   it("keeps a record with no pid, such as the tracer's end line, with or without an anchor", () => {
     const end = { kind: "end", dropped: 0, untracked: 0 };
     const read = { pid: 30, kind: "read", comm: "c", path: "/w" };
-    expect(records(stripSandboxMachinery(jsonl(read, end), BASE))).toEqual([read, end]);
+    expect(records(stripSandboxMachinery(jsonl(read, end), SCRATCH_BASE))).toEqual([read, end]);
     const anchored = jsonl(
       { pid: 10, ppid: 1, kind: "exec", comm: "setpriv", path: "/usr/bin/setpriv" },
       { pid: 11, ppid: 10, kind: "exec", comm: "run-script.sh", path: RUN_SCRIPT },
       end,
     );
-    expect(records(stripSandboxMachinery(anchored, BASE))).toEqual([end]);
+    expect(records(stripSandboxMachinery(anchored, SCRATCH_BASE))).toEqual([end]);
   });
 
   it("keeps a truncated tail and tolerates an empty recording", () => {
-    expect(stripSandboxMachinery("", BASE)).toBe("");
+    expect(stripSandboxMachinery("", SCRATCH_BASE)).toBe("");
     const out = stripSandboxMachinery(
       `{"pid":1,"kind":"read","comm":"node","path":"/work/a"}\n{"pid":1,"kind":"wr`,
-      BASE,
+      SCRATCH_BASE,
     );
     expect(out).toBe(`{"pid":1,"kind":"read","comm":"node","path":"/work/a"}\n{"pid":1,"kind":"wr`);
   });
