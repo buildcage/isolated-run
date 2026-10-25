@@ -71419,23 +71419,8 @@ function formatElapsedFixed(elapsedSeconds) {
 	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
-function communicationTruncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
-}
-function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, lineNote)).join("\n")}\n\`\`\`\n\n`;
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt, lineNote) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${event.wouldBlock})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}${tail}`;
-}
+//#endregion
+//#region src/core/lib/report/render/credential-query.ts
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
 	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
@@ -71463,6 +71448,23 @@ function redactCredentialQuery(url) {
 	if (start === -1) return url;
 	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
 	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function communicationTruncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, lineNote)).join("\n")}\n\`\`\`\n\n`;
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt, lineNote) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${event.wouldBlock})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}${tail}`;
 }
 function subject(event) {
 	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
