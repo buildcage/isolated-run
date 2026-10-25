@@ -410,12 +410,13 @@ The summary can also open with a warning, or be missing:
   missing from both the summary and the artifact. A step that touches a very large number of files
   at once can cause it.
 - **❗ This record is incomplete, with the error
-  `The filesystem audit tracer stopped before it finished its record`.** The step fails, in `audit`
-  too. The record has no [end line](#the-end-line): the tracer exited before the step ended, or did
-  not finish the record when the step stopped it. A reason the tracer gave is in the step log on a
-  `filesystem-audit: fatal:` line, such as one ending in `no space left on device` once the step
-  filled the disk, or on a `filesystem-audit: read loss counters:` line when it could not count
-  what it lost. A cancelled step does not add this error.
+  `The filesystem audit tracer did not finish its record`.** The step fails, in `audit` too. The
+  record has no [end line](#the-end-line). Either the tracer exited before the step ended, or did
+  not finish the record when the step stopped it, with a reason on a `filesystem-audit: fatal:`
+  line in the step log, such as one ending in `no space left on device` once the step filled the
+  disk. Or it wrote every access but could not count what it lost, with the reason on a
+  `filesystem-audit: read loss counters:` line in the log's `buildcage: filesystem audit totals`
+  group. A cancelled step does not add this error.
 - **❗ The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so
   some accesses may be missing; see [Skipped hooks](#skipped-hooks).
 - **❗ The recording could not be read**, with a `Failed to read the filesystem audit recording`
@@ -586,7 +587,7 @@ The summary marks 1, 13 and 30 with `!`.
 
 The last line is the end line, such as
 `{"kind":"end","dropped":0,"untracked":0,"host_missed":0}`, written only after every access the
-tracer caught:
+tracer caught, and left out when it could not read these counts:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
 - `untracked` counts calls it could not follow because too many files were open at once or a name
@@ -751,4 +752,5 @@ itself can do to the record, and what the record can be trusted for.
   Accesses table and the proposed rules count paths the same way, but do not fold more past
   300 KB.
 - **Many libraries.** Once the step's processes have loaded 200,000 files between them, each
-  process's counted apart, a library loaded after that shows as a read.
+  process's counted apart, its program and `/etc/ld.so.cache` included, a file loaded after that
+  shows as a read.

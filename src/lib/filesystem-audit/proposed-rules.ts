@@ -26,9 +26,10 @@ const ruleField = (text: string): string => {
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
 
 /**
- * The proposed rules as a config_file: the rules given, as written but for an
- * earlier run's heading, then a rule for each access they did not take, in
- * columns. Undefined when there is nothing to write.
+ * The proposed rules as a config_file: the rules given, each line trimmed,
+ * without an earlier run's heading or trailing blank lines, then a rule for
+ * each access they did not take, in columns. Undefined when there is nothing
+ * to write.
  */
 export function expectedRulesFile(written: string[], proposed: RuleRow[]): string | undefined {
   // A file proposed before and committed would otherwise keep its heading
