@@ -1576,6 +1576,19 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(rows(summary)).toStrictEqual(["mv W ~/.bashrc"]);
   });
 
+  it("takes an exchange as a move of both paths, and a failed move as failed on both", () => {
+    const { lines, summary } = marked(
+      { rules: rulesOf("mv M ./a\nmv W ./c") },
+      { kind: "rename", pid: 3, comm: "mv", path: "/work/a", to: "/work/b", exchange: true },
+      { kind: "rename", pid: 3, comm: "mv", path: "/work/c", to: "/work/d", failed: true, err: 18 },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { unexpected?: boolean }).unexpected)).toStrictEqual([
+      true,
+      true,
+    ]);
+    expect(rows(summary)).toStrictEqual(["mv M ./b", "mv m ./c", "mv w ./d"]);
+  });
+
   it("expects a run of the program that ran it", () => {
     const { summary } = marked(
       { rules: rulesOf("bash X /usr/bin/curl") },
