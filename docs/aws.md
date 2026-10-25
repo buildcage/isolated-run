@@ -207,7 +207,8 @@ report uses the same numbers.
 - **keyRef** is the key's `keyRef` in the [traffic artifact](#in-the-traffic-artifact).
 
 **Communication details** ends each line signed with a key in `[aws key N]`, and the line of a call
-whose answer issued a key names that key too:
+whose answer issued a key names that key too. An unsigned call that issued one, such as a web
+identity's, ends in `[issued aws key N]`:
 
 ```
 ✅ 00:01.234: POST https://sts.us-east-1.amazonaws.com/ -> 200 (1.4KB) [aws key 1 → issued key 3]
@@ -290,9 +291,10 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 
 ## Troubleshooting
 
-A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would
-Block** in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. Look the
-reason up below.
+A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would Block**
+in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. The report links
+here after those tables, naming each reason it shows unless `known_blocked_rules` expects every
+block with it. Look the reason up below.
 
 To accept a block you expect, list its host or URL in `known_blocked_rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
@@ -576,7 +578,11 @@ request there is blocked, `GET` included, `AssumeRoleWithWebIdentity` excepted (
 same way; if a legitimate request is blocked for that reason, as `aws-no-credential` or, carrying a
 token, `aws-unsupported-credential`, report it.
 
-These hosts are only as narrow as the URL rules that allow them. A rule such as
+An interface VPC endpoint's own names, such as `vpce-<id>.sts.us-east-1.vpce.amazonaws.com`, are
+hosts of this kind too. STS, EC2 and CodeCommit are recognized under them as under their usual
+names, so a key STS issues through one is learned the same way.
+
+The hosts that name a resource are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
 API, and whoever owns it can read what was sent, `User-Agent` and query string included, in their
 own logs. Allow them by name, as you would any other host:
