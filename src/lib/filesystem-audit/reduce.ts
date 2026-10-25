@@ -208,6 +208,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     home: prefixes.home.map(escapePath),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
+  // "…" stands for the unknown start of a cut or relative name, so a fold at
+  // it would take in names that may have nothing in common.
   const keep = [
     "/",
     "/home",
@@ -215,6 +217,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/proc",
     "/proc/<pid>",
     "/proc/self",
+    "…",
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
   ].map(components);

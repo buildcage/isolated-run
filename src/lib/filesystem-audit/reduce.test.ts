@@ -1787,6 +1787,17 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     ]);
   });
 
+  it("keeps relative names apart, as the table does, rather than folding them into …/**", () => {
+    const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
+    const { summary } = marked(
+      { propose: true },
+      { ...missing, path: "a" },
+      { ...missing, path: "b" },
+      { ...missing, path: "…/c" },
+    );
+    expect(rows(summary)).toStrictEqual(["cat r …/a", "cat r …/b", "cat r …/c"]);
+  });
+
   it("folds a relative name with the walks the summary spells it as", () => {
     const missing = { kind: "open", pid: 3, comm: "cat", access: "r", failed: true, err: 2 };
     const { summary } = marked(

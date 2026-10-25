@@ -73356,6 +73356,7 @@ function createAuditSummary(prefixes) {
 		"/proc",
 		"/proc/<pid>",
 		"/proc/self",
+		"…",
 		...shownPrefixes.workspace,
 		...shownPrefixes.home
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({

@@ -272,7 +272,7 @@ command's paths on their own, so they often name it; the artifact always does.
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
 - `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
-  `/proc/<pid>` and `/proc/self`.
+  `/proc/<pid>`, `/proc/self`, and the `…` a cut or relative name starts with.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
@@ -464,8 +464,9 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`, and a deleted file without its ` (deleted)`. `*` matches within one component of
   a path, and `**` across them, as a whole component any number of them: `./dist/**` matches
-  `./dist` and everything under it. A `*` in a name shows as `\*`, which matches only a star.
-  Regular expressions are not supported.
+  `./dist` and everything under it. Inside a component, `**` still crosses them: `./dist/**.js`
+  takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as `\*`, which
+  matches only a star. Regular expressions are not supported.
 - **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
   included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
   process's threads. A process the recording has no `nspid` for shows its own directory as
