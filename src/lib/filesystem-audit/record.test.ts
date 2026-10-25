@@ -47,6 +47,13 @@ describe("classify", () => {
         { letter: "W", path: "/b", failed: true, perm: true },
       ],
     );
+    // Across mounts, which mv then copies instead.
+    expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 18 })).toStrictEqual(
+      [
+        { letter: "M", path: "/a", failed: true, perm: false },
+        { letter: "W", path: "/b", failed: true, perm: false },
+      ],
+    );
     expect(classify({ kind: "rename", path: "/a", to: "/b", exchange: true })).toStrictEqual([
       ok("M", "/a"),
       ok("M", "/b"),

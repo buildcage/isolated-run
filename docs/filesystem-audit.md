@@ -189,17 +189,17 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Flags
 
-| Flag | Means                                                                                            |
-| ---- | ------------------------------------------------------------------------------------------------ |
-| `R`  | Read, or mapped for reading or to run                                                            |
-| `W`  | Written, mapped shared and writable, created, truncated or moved to: a file, a directory, a link |
-| `X`  | Run as a program, on the row of the program that ran it                                          |
-| `M`  | Moved (renamed) away from this path; the new name shows `W`                                      |
-| `L`  | Given a second name by a hard link; the new name shows `W`                                       |
-| `D`  | Deleted                                                                                          |
-| `A`  | Attributes changed: mode, owner, times, extended attributes                                      |
-| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file        |
-| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path   |
+| Flag | Means                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------- |
+| `R`  | Read, or mapped for reading or to run                                                                |
+| `W`  | Written, mapped shared and writable, created, truncated or moved to: a file, a directory, a link     |
+| `X`  | Run as a program, on the row of the program that ran it                                              |
+| `M`  | Moved (renamed) away from this path; the new name shows `W`, or `M` too where two paths were swapped |
+| `L`  | Given a second name by a hard link; the new name shows `W`                                           |
+| `D`  | Deleted                                                                                              |
+| `A`  | Attributes changed: mode, owner, times, extended attributes                                          |
+| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file            |
+| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path       |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
   `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused.
