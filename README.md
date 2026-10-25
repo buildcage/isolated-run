@@ -728,19 +728,19 @@ GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wr
 the whole summary rather than truncating it. The report is written first; what the command wrote
 follows it, cut at a line boundary with a note and a warning when it does not fit in what is left.
 A note and a warning replace what the command wrote when it is over 1 MiB on its own, as GitHub
-would drop it whole; the step does not fail. When the report itself,
-with its Filesystem Activity section if the filesystem audit was on, would pass the limit, its parts
-give way in this order: the file access details, the timeline, the known blocked hosts table, the
-Filesystem Activity tables, the AWS keys table, the allowed table, the blocked and failed table,
-the ⚠️ tables of requests `restrict` would block, and last the `restrict` example. A part that does
-not fit is cut at a line boundary
-with a note after what is kept, or replaced by the note when nothing of it fits; the example is only
-ever replaced whole. Once
-a table is cut, the timeline is left out under the same note. The Filesystem Activity parts
-(Executed Programs, Accessed Paths, then the details) follow the same rule: once one is cut, those
-after it are left out under its note. The report is written to the Job Summary only, so what was cut
-is recovered from the [traffic artifact](./docs/reference.md#traffic-artifact), or the filesystem
-audit's own artifact for its section; when neither was uploaded, it is not kept anywhere.
+would drop it whole; the step does not fail. When the report itself, with its Filesystem Activity
+section if the filesystem audit was on, would pass the limit, its parts give way in this order: the
+file access details, the timeline, the known blocked hosts table, the Filesystem Activity tables,
+the AWS keys table, the allowed table, the blocked and failed table, the ⚠️ tables of requests
+`restrict` would block, and last the `restrict` example. A part that does not fit is cut at a line
+boundary with a note after what is kept, or replaced by the note when nothing of it fits; the known
+blocked hosts table and the example are only ever replaced whole. Once one of the other traffic
+tables is cut, the timeline and the known blocked hosts table are left out under the same note. The
+Filesystem Activity parts (Executed Programs, Accessed Paths, then the details) follow the same
+rule: once one is cut, those after it are left out under its note. The report is written to the Job
+Summary only, so what was cut is recovered from the
+[traffic artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for
+its section; when neither was uploaded, it is not kept anywhere.
 
 ## FAQ
 

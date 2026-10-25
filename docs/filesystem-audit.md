@@ -613,7 +613,8 @@ itself can do to the record, and what the record can be trusted for.
 ## Limits
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
-  file access details give way first, and this section's tables after the traffic report's timeline;
+  file access details give way first, and this section's tables after the traffic report's timeline
+  and known blocked hosts;
   [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the full order. A part that
   does not fit is cut at a line, with a note after what is kept, or replaced by the note when none
   of it fits. The note names the artifact, which still holds every access, or says how to ask for
