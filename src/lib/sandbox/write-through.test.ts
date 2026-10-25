@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, it, expect } from "vitest";
 
+import { RUNNER_ENV, withLinks } from "../test/runner-host.ts";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
@@ -23,15 +24,7 @@ import {
   WriteThroughTargetUncreatableError,
 } from "./write-through.ts";
 
-const ENV = {
-  HOME: "/home/runner",
-  GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
-  RUNNER_TEMP: "/home/runner/work/_temp",
-  GITHUB_OUTPUT: "/home/runner/work/_temp/_runner_file_commands/set_output_abc",
-  GITHUB_ENV: "/home/runner/work/_temp/_runner_file_commands/set_env_abc",
-  GITHUB_PATH: "/home/runner/work/_temp/_runner_file_commands/add_path_abc",
-  GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/_runner_file_commands/step_summary_abc",
-};
+const ENV = RUNNER_ENV;
 
 describe("resolveWriteThroughEntry", () => {
   it("expands $NAME and ${NAME} forms for allowed variables", () => {
@@ -195,11 +188,7 @@ describe("splitWriteThroughInput", () => {
 });
 
 describe("assertNoSymlinkInWriteThrough", () => {
-  /** Every path exists; `links` are the symlinks, each to its stored target. */
-  const host = (links: Record<string, string> = {}) => ({
-    lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
-    readlink: (p: string) => links[p]!,
-  });
+  const host = withLinks;
 
   it("accepts a path with no symlinks on it, including one still to be created", () => {
     const missing = { lstat: () => undefined, readlink: () => "" };

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { RUNNER_DIRS_ENV } from "../test/runner-host.ts";
 import {
   determineOverlayRoots,
   createOverlayScratchDirs,
@@ -8,11 +9,7 @@ import {
 } from "./ephemeral-fs.ts";
 import type { HostMount } from "./types.ts";
 
-const ENV = {
-  HOME: "/home/runner",
-  GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
-  RUNNER_TEMP: "/home/runner/work/_temp",
-};
+const ENV = RUNNER_DIRS_ENV;
 
 describe("determineOverlayRoots", () => {
   const exists = () => true;

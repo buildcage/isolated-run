@@ -4,15 +4,10 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, it, expect } from "vitest";
 
+import { withLinks } from "../test/runner-host.ts";
 import { realSymlinkDeps, resolveHostPath } from "./symlinks.ts";
 
-/** Every path exists; `links` are the symlinks, each to its stored target. */
-function fs(links: Record<string, string>) {
-  return {
-    lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
-    readlink: (p: string) => links[p]!,
-  };
-}
+const fs = withLinks;
 
 describe("resolveHostPath", () => {
   it("returns a path with no symlinks on it unchanged, normalized", () => {

@@ -18,6 +18,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { RUNNER_ENV } from "../test/runner-host.ts";
 import {
   mediateRunnerOutputFiles,
   readBackingFile,
@@ -31,8 +32,8 @@ import {
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 const ENV = {
-  GITHUB_OUTPUT: "/home/runner/work/_temp/_runner_file_commands/set_output_abc",
-  GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/_runner_file_commands/step_summary_abc",
+  GITHUB_OUTPUT: RUNNER_ENV.GITHUB_OUTPUT,
+  GITHUB_STEP_SUMMARY: RUNNER_ENV.GITHUB_STEP_SUMMARY,
 };
 const BOTH = ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const;
 

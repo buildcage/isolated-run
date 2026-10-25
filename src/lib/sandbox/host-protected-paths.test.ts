@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { HOME, NO_LINKS, PERSISTENT, WORKSPACE, withLinks } from "../test/runner-host.ts";
 import {
   dockerConfigDir,
   renameGuardDirs,
@@ -8,20 +9,6 @@ import {
   sandboxReadonlyHostDirs,
 } from "./host-protected-paths.ts";
 import type { MountinfoEntry } from "./types.ts";
-
-const HOME = "/home/runner";
-const WORKSPACE = "/home/runner/work/repo/repo";
-const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
-
-/** A filesystem whose only symlinks are `links`, each to its stored target. */
-function withLinks(links: Record<string, string>) {
-  const fs = {
-    lstat: (path: string) => ({ isSymbolicLink: () => path in links }),
-    readlink: (path: string) => links[path]!,
-  };
-  return fs;
-}
-const NO_LINKS = withLinks({});
 
 /** A bind mount of `root` on the host's one filesystem at `mountPoint`. */
 function mount(root: string, mountPoint: string): MountinfoEntry {

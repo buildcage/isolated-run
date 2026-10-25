@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import { RUNNER_DIRS_ENV } from "../test/runner-host.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
@@ -9,12 +10,11 @@ import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 // /proc/self/mountinfo is Linux-only, so the default listHostMounts is mocked.
 vi.mock("./mountinfo.ts", () => ({ listHostMounts: vi.fn(() => []) }));
 
+// Back to the empty table, in case a test's own value went unread.
+beforeEach(() => vi.mocked(listHostMounts).mockReset());
+
 describe("resolveFilesystemPlan", () => {
-  const ENV = {
-    HOME: "/home/runner",
-    GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
-    RUNNER_TEMP: "/home/runner/work/_temp",
-  };
+  const ENV = RUNNER_DIRS_ENV;
   // Everything "exists" by default (candidates and write_through targets)
   // unless a test narrows it.
   const alwaysExists = () => true;
