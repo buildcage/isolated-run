@@ -2,15 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
+import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 
 // /proc/self/mountinfo is Linux-only, so the default listHostMounts is mocked.
-vi.mock("./mountinfo.ts", () => ({
-  listHostMounts: () => [
-    { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", device: "0:50", root: "/" },
-  ],
-}));
+vi.mock("./mountinfo.ts", () => ({ listHostMounts: vi.fn(() => []) }));
 
 describe("resolveFilesystemPlan", () => {
   const ENV = {
@@ -60,16 +57,6 @@ describe("resolveFilesystemPlan", () => {
       mediatedVariables: [],
     });
     expect(exists).not.toHaveBeenCalled();
-  });
-
-  it("throws FILESYSTEM_INPUT_CONFLICT for write_through: / in ephemeral mode", () => {
-    expect.assertions(2);
-    try {
-      resolveFilesystemPlan("ephemeral", "/", ENV);
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    }
   });
 
   it("rejects a spelling that only resolves to the / sentinel, in either mode", () => {
@@ -367,6 +354,9 @@ describe("resolveFilesystemPlan", () => {
   });
 
   it("reads the host mount table by default", () => {
+    vi.mocked(listHostMounts).mockReturnValueOnce([
+      { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", device: "0:50", root: "/" },
+    ]);
     const warn = vi.fn();
     resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,

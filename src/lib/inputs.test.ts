@@ -193,19 +193,22 @@ describe("readFilesystemInputs", () => {
 
   // resolveWriteThroughInput decides what these mean; what is left here is
   // that each of the three reaches it under its own name.
-  it("reads write_through: and writable:, and refuses allow_write:", () => {
-    const notice = vi.fn();
-
+  it("hands writable: and allow_write: to resolveWriteThroughInput too", () => {
     expect(
-      readFilesystemInputs(silent, inputs({ write_through: "/tmp/out" })).writeThroughInput,
-    ).toBe("/tmp/out");
-    expect(readFilesystemInputs(notice, inputs({ writable: "/tmp/out" })).writeThroughInput).toBe(
-      "/tmp/out",
-    );
-    expect(notice).toHaveBeenCalledOnce();
+      readFilesystemInputs(silent, inputs({ write_through: "/a", writable: "/b" }))
+        .writeThroughInput,
+    ).toBe("/a\n/b");
     expect(() => readFilesystemInputs(silent, inputs({ allow_write: "/tmp/out" }))).toThrow(
       /allow_write: has been replaced/,
     );
+  });
+
+  it("passes its notice callback on, for the writable: rename notice", () => {
+    const notice = vi.fn();
+
+    readFilesystemInputs(notice, inputs({ writable: "/b" }));
+
+    expect(notice).toHaveBeenCalledWith(expect.stringContaining("writable:"));
   });
 });
 
