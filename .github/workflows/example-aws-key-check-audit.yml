@@ -27,10 +27,11 @@ jobs:
 
       # No account is named yet, so the report's "Restrict Would Block" counts
       # the call signed with the switched role's key as well as the compromised
-      # dependency's, and its "Switch to restrict mode" example returns the URL
+      # dependency's. Its "Switch to restrict mode" example returns the URL
       # rules, aws_key_check and the switched role's account, commented out
-      # until you check it is yours, with the key it lets through. No STS
-      # answer issued the dependency's key, so no account lets it through.
+      # until you check it is yours; its comment says which keys naming it lets
+      # through. No STS answer issued the dependency's key, so no account lets
+      # it through.
       - name: Discover required URLs and accounts with isolated-run
         uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
         env:

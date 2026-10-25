@@ -29,7 +29,7 @@ runs:
   steps:
     - uses: ./.github/actions/setup-vp
 
-    # compose.yaml names the image the same for either engine, so each build
+    # compose.yaml's image name does not depend on PROXY_ENGINE, so each build
     # is retagged before the next one overwrites it.
     - name: Build the proxy images
       id: build

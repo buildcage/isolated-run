@@ -25,12 +25,12 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      # Same command as the audit example, with the rules that run produced and
-      # the account it commented out, uncommented once checked, kept in a
-      # repository variable. The compromised dependency's call is blocked even though the
-      # URL rule allows its host. fail_on_blocked is false only because this
-      # example blocks on purpose; leave it at its default so a real workflow
-      # fails on a block.
+      # Same command as the audit example, with the rules that run produced.
+      # The account they listed commented out is uncommented once checked and
+      # kept in a repository variable. The compromised dependency's call is
+      # blocked even though the URL rule allows its host. fail_on_blocked is
+      # false only because this example blocks on purpose; leave it at its
+      # default so a real workflow fails on a block.
       - name: Call AWS with outbound network isolation
         uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
         env:
