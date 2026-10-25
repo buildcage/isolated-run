@@ -1182,6 +1182,19 @@ describe("filesystemExampleInputs", () => {
     expect(filesystemExampleInputs({ ...given, expectedRulesLines: ["# node R ./a"] })).toContain(
       "  # node R ./a",
     );
+    // An earlier run's heading goes, as it does from the proposed file.
+    expect(
+      filesystemExampleInputs({
+        ...given,
+        expectedRulesLines: ["node R ./a", "", "# Not matched in this run", "node W ./b"],
+      }),
+    ).toStrictEqual([
+      "filesystem_audit: record",
+      "expected_filesystem_rules: |",
+      "  node R ./a",
+      "  node W ./b",
+      "fail_on_unexpected_file_access: true",
+    ]);
   });
 
   it("points config_file to this run's proposed rules when the artifact holds them", () => {

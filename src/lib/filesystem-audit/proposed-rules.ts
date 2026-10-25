@@ -22,13 +22,27 @@ const ruleField = (text: string): string => {
   return text === "" || text.startsWith("#") ? `"${text}"` : field(text);
 };
 
-// The artifact holds every path the step touched, so a file committed as is
-// should say what keeps it coming.
-const UPLOAD_NOTE =
-  "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.";
+/** Over the upload key, as the artifact holds every path the step touched and a
+ *  file committed as is should say what keeps it coming. */
+export const UPLOAD_NOTE =
+  "# Uploads the full record and the next proposed rules each run; drop this key once the baseline holds.";
 
 /** The heading over the rules a run with rules adds for what they did not take. */
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
+
+/**
+ * The rules as given, less an earlier run's heading and the blank lines before
+ * it, which a file proposed before and committed would otherwise keep over
+ * rules this run matched.
+ */
+export function givenRules(written: string[]): string[] {
+  const out: string[] = [];
+  for (const line of written) {
+    if (line !== NOT_MATCHED_HEADING) out.push(line);
+    else while (out.at(-1) === "") out.pop();
+  }
+  return out;
+}
 
 /**
  * The proposed rules as a config_file: the rules given, each line trimmed,
@@ -37,12 +51,7 @@ export const NOT_MATCHED_HEADING = "# Not matched in this run";
  * to write.
  */
 export function expectedRulesFile(written: string[], proposed: RuleRow[]): string | undefined {
-  // A file proposed before and committed would otherwise keep its heading,
-  // and the blank line before it, over rules this run matched.
-  const given = written.filter(
-    (line, i) =>
-      line !== NOT_MATCHED_HEADING && (line !== "" || written[i + 1] !== NOT_MATCHED_HEADING),
-  );
+  const given = givenRules(written);
   const rows = proposed.map((r) => [ruleField(r.program.path), r.flags, ruleField(r.path.path)]);
   const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
   const [programW, flagsW] = [width(0), width(1)];

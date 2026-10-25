@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { expectedRulesFile } from "./proposed-rules.ts";
+import { expectedRulesFile, UPLOAD_NOTE } from "./proposed-rules.ts";
 import { parseExpectedRules } from "./rules.ts";
 
 describe("expectedRulesFile", () => {
@@ -29,7 +29,7 @@ describe("expectedRulesFile", () => {
     ).toBe(
       [
         "filesystem_audit: record",
-        "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  /usr/bin/node   RW   ./node_modules/**",
@@ -62,7 +62,7 @@ describe("expectedRulesFile", () => {
     expect(expectedRulesFile(["# npm", "* R ./a", "", "* W ./b"], [row("bash", "R", "./c")])).toBe(
       [
         "filesystem_audit: record",
-        "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  # npm",
@@ -77,8 +77,8 @@ describe("expectedRulesFile", () => {
     );
   });
 
-  it("leaves out an earlier run's heading, and the blank line before it, among the rules given", () => {
-    const given = ["* R ./a", "", "# Not matched in this run", "bash R ./c"];
+  it("leaves out an earlier run's heading, and the blank lines before it, among the rules given", () => {
+    const given = ["* R ./a", "", "", "# Not matched in this run", "bash R ./c"];
     expect(
       expectedRulesFile(given, [row("bash", "W", "./d")])
         ?.split("\n")
@@ -97,7 +97,7 @@ describe("expectedRulesFile", () => {
     expect(expectedRulesFile(["* R ./a"], [])).toBe(
       [
         "filesystem_audit: record",
-        "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.",
+        UPLOAD_NOTE,
         "upload_filesystem_audit_artifact: true",
         "expected_filesystem_rules: |",
         "  * R ./a",
