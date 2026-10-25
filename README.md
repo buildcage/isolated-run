@@ -93,7 +93,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 
 The step writes every destination the command contacted to the Job Summary:
 
-<img src="assets/report-inspect-audit-mode.png" alt="Outbound Traffic Report (audit mode)" width="568">
+<img src="assets/report-inspect-audit-mode.png" alt="Outbound Traffic Report (audit mode)" width="557">
 
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
 command actually did. A request whose method, host or path a rule would read as a wildcard is listed
@@ -120,7 +120,7 @@ Paste that allowlist into the step and switch the mode:
 Each rule names the methods it permits, so these let npm install packages without letting it publish
 any: `npm publish` is a `PUT` to the same host, which no rule here covers.
 
-<img src="assets/report-inspect-restrict-mode.png" alt="Outbound Traffic Report (restrict mode)" width="568">
+<img src="assets/report-inspect-restrict-mode.png" alt="Outbound Traffic Report (restrict mode)" width="557">
 
 A blocked connection fails the step, so a command that starts reaching somewhere new doesn't pass
 unnoticed.
