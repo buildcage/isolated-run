@@ -72626,8 +72626,7 @@ var RuleMatcher = class {
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function firstOf(names, shown) {
-	let left = names.length - shown;
-	return `${names.slice(0, shown).join(", ")}${left > 0 ? ` and ${left} more` : ""}`;
+	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
 }
 function killedNote(rows) {
 	let killed = inRecordingOrder(rows);

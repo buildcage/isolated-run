@@ -19,15 +19,16 @@ const heading = (title: string): string => `\n${reportHeading(title, false).trim
 const INCOMPLETE_NOTE =
   "> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n" +
   "> some accesses are missing from this summary and from the artifact.";
-// The note names this many commands; the details, where they fit, show the rest.
+// The note names up to this many commands; the details, where they fit, show the rest.
 const KILLED_COMMS_SHOWN = 3;
-// An Unexpected Accesses row names this many commands; the artifact has the rest.
+// An Unexpected Accesses row names up to this many commands.
 const UNEXPECTED_COMMS_SHOWN = 3;
 
-// The first `shown` names, then how many more there are.
+// Every name if there are at most `shown`, else one fewer and how many more
+// there are, so the count never stands for a single name.
 function firstOf(names: string[], shown: number): string {
-  const left = names.length - shown;
-  return `${names.slice(0, shown).join(", ")}${left > 0 ? ` and ${left} more` : ""}`;
+  if (names.length <= shown) return names.join(", ");
+  return `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
 }
 
 // Each command killed for a 32-bit syscall, in the order killed.

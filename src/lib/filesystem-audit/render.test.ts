@@ -444,7 +444,7 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     );
   });
 
-  it("names a row's first three commands and counts the rest", () => {
+  it("names up to three commands in a row, else two and counts the rest", () => {
     const summary: AuditSummary = {
       ended: true,
       lost: false,
@@ -466,9 +466,15 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
           flags: "R",
           path: { path: "/x" },
         },
+        {
+          program: { path: "/bin/sh" },
+          commands: ["a", "b", "c", "d"],
+          flags: "D",
+          path: { path: "/y" },
+        },
       ],
       matched: 0,
-      unexpected: 2,
+      unexpected: 3,
     };
     const md = joinSummaryBlocks(
       renderAuditSummaryBlocks(summary, {
@@ -479,7 +485,8 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
         expected: true,
       }),
     );
-    expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` and 2 more | W | `/tmp/**` |\n");
+    expect(md).toContain("| `/bin/sh` | `a`, `b` and 3 more | W | `/tmp/**` |\n");
     expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` | R | `/x` |\n");
+    expect(md).toContain("| `/bin/sh` | `a`, `b` and 2 more | D | `/y` |\n");
   });
 });
