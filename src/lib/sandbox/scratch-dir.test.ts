@@ -95,23 +95,25 @@ describe("ensureOwnScratchBase", () => {
     expect(() => ensureOwnScratchBase(base)).not.toThrow();
   });
 
-  it("throws when the base is a symlink, even one pointing at a valid directory", () => {
+  it.each([
+    [
+      "a symlink, even one pointing at a valid directory",
+      (path: string) => {
+        mkdirSync(`${path}-target`, { mode: 0o700 });
+        symlinkSync(`${path}-target`, path);
+      },
+    ],
+    [
+      "group/other writable",
+      (path: string) => {
+        mkdirSync(path, { mode: 0o700 });
+        chmodSync(path, 0o777);
+      },
+    ],
+    ["a plain file, not a directory", (path: string) => writeFileSync(path, "")],
+  ])("throws when the base is %s", (_, make) => {
     base = freshBasePath();
-    mkdirSync(`${base}-target`, { mode: 0o700 });
-    symlinkSync(`${base}-target`, base);
-    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
-  });
-
-  it("throws when the base is group/other writable", () => {
-    base = freshBasePath();
-    mkdirSync(base, { mode: 0o700 });
-    chmodSync(base, 0o777);
-    expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
-  });
-
-  it("throws when the base is a plain file, not a directory", () => {
-    base = freshBasePath();
-    writeFileSync(base, "");
+    make(base);
     expect(() => ensureOwnScratchBase(base)).toThrow(/Another user may have created it/);
   });
 
@@ -214,21 +216,18 @@ describe("cleanupScratchDir", () => {
     ).not.toThrow();
   });
 
-  it("refuses to touch a path resolving to the scratch base's parent", () => {
+  it.each([
+    ["a path resolving to the scratch base's parent", "/"],
+    [
+      "a traversal that resolves outside the scratch base",
+      join(SANDBOX_SCRATCH_BASE, "sandbox-abcd1234", "..", "..", "etc"),
+    ],
+    ["a sibling of the scratch base whose basename merely looks right", "/etc/sandbox-abcd1234"],
+  ])("refuses %s, running nothing", (_, path) => {
     const exec: [string, string[]][] = [];
     const deps = { exec: (command: string, args: string[]) => void exec.push([command, args]) };
-    expect(() => cleanupScratchDir("/", {}, deps)).toThrow(/not a scratch dir under/);
+    expect(() => cleanupScratchDir(path, {}, deps)).toThrow(/not a scratch dir under/);
     expect(exec).toStrictEqual([]);
-  });
-
-  it("refuses a traversal that resolves outside the scratch base", () => {
-    expect(() =>
-      cleanupScratchDir(join(SANDBOX_SCRATCH_BASE, "sandbox-abcd1234", "..", "..", "etc")),
-    ).toThrow(/not a scratch dir under/);
-  });
-
-  it("refuses a sibling of the scratch base whose basename merely looks right", () => {
-    expect(() => cleanupScratchDir("/etc/sandbox-abcd1234")).toThrow(/not a scratch dir under/);
   });
 });
 

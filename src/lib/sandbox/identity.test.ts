@@ -138,46 +138,28 @@ describe("resolveSandboxGid", () => {
 });
 
 describe("resolveSandboxGid: groups served through NSS", () => {
-  it("substitutes a privileged primary GID that only NSS knows the name of", () => {
-    const result = resolveSandboxGid(
-      2000,
-      {},
-      {
-        host: host("nogroup:x:65534:\n", {}, { "2000": "docker:*:2000:runner\n" }),
-        runtimeSocketPaths: [],
-      },
-    );
-    expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
-  });
-
-  it("finds the substitute through NSS when the group file can't be read", () => {
-    const result = resolveSandboxGid(
-      2000,
-      {},
-      {
-        host: host(null, {}, { "2000": "docker:*:2000:\n", nogroup: "nogroup:x:65534:\n" }),
-        runtimeSocketPaths: [],
-      },
-    );
-    expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
-  });
-
-  it("recognizes a privileged group another source names differently by GID", () => {
+  it.each([
+    [
+      "substitutes a privileged primary GID that only NSS knows the name of",
+      "nogroup:x:65534:\n",
+      { "2000": "docker:*:2000:runner\n" },
+    ],
+    [
+      "finds the substitute through NSS when the group file can't be read",
+      null,
+      { "2000": "docker:*:2000:\n", nogroup: "nogroup:x:65534:\n" },
+    ],
     // By GID, NSS answers with the first source's name; by name, it finds docker.
+    [
+      "recognizes a privileged group another source names differently by GID",
+      "runner:x:2000:\nnogroup:x:65534:\n",
+      { "2000": "runner:x:2000:\n", docker: "docker:*:2000:\n" },
+    ],
+  ])("%s", (_, groupFile, nss) => {
     const result = resolveSandboxGid(
       2000,
       {},
-      {
-        host: host(
-          "runner:x:2000:\nnogroup:x:65534:\n",
-          {},
-          {
-            "2000": "runner:x:2000:\n",
-            docker: "docker:*:2000:\n",
-          },
-        ),
-        runtimeSocketPaths: [],
-      },
+      { host: host(groupFile, {}, nss), runtimeSocketPaths: [] },
     );
     expect(result).toStrictEqual({ gid: 65534, substitutedFrom: 2000 });
   });
