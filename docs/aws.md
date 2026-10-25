@@ -292,9 +292,9 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 ## Troubleshooting
 
 A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would Block**
-in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. The report links
-here after those tables, naming each reason they show; in `restrict` it leaves out one whose every
-block `known_blocked_rules` expects. Look the reason up below.
+in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. After those
+tables, the report links here for each reason they show; in `restrict` it leaves out a reason whose
+every block `known_blocked_rules` expects. Look the reason up below.
 
 To accept a block you expect, list its host or URL in `known_blocked_rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
@@ -579,8 +579,8 @@ same way; if a legitimate request is blocked for that reason, as `aws-no-credent
 token, `aws-unsupported-credential`, report it.
 
 An interface VPC endpoint's own names, such as `vpce-<id>.sts.us-east-1.vpce.amazonaws.com`, are
-hosts of this kind too. STS, EC2 and CodeCommit are recognized under them as under their usual
-names, so a key STS issues through one is learned the same way.
+hosts of this kind too. The check recognizes STS, EC2 and CodeCommit under them as under their
+usual names, and learns a key STS issues through one.
 
 The hosts that name a resource are only as narrow as the URL rules that allow them. A rule such as
 `* https://**.amazonaws.com/**` lets an unsigned request reach anyone's bucket, registry, cluster or
