@@ -340,9 +340,10 @@ Under `inspect`, a step gives Chromium a slot trusting the CA as follows. What t
 │   │                          # config generator, core's plus the check
 │   └── core/                  # Code shared with the proxy image's QuickJS scripts
 │       ├── lib/               # acl/ (rule parsing and the proxy config generators) is built for
-│       │                      # both runtimes, and so is anything it imports (errors.ts).
-│       │                      # actions/, docker/, provenance/, report/ and log/ are Node-only,
-│       │                      # and test/test-shim.ts is the node:test-alike shim *.test.ts uses
+│       │                      # both runtimes, and so is anything it imports (errors.ts,
+│       │                      # line-comments.ts, log/proxy-address.ts). actions/, docker/,
+│       │                      # provenance/, report/ and the rest of log/ are Node-only, and
+│       │                      # test/test-shim.ts is the node:test-alike shim *.test.ts uses
 │       │                      # under either runtime
 │       └── scripts/           # QuickJS only: each engine's config generator, the test runner
 │                              # and qjs's type declarations
