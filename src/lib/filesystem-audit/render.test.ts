@@ -206,6 +206,18 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "open", failed: true, comm: "a", path: "x", err: 2 },
     );
     expect(tableRows(md)).toEqual(["| `…/x` | R |"]);
+    // A program too.
+    const runs = render(
+      { kind: "exec", pid: 2, comm: "x", path: "x" },
+      { kind: "read", pid: 2, comm: "x", path: "/work/a" },
+      { kind: "exec", pid: 3, comm: "x", path: "…/x" },
+      { kind: "read", pid: 3, comm: "x", path: "/work/b" },
+    );
+    expect(programRows(runs)).toEqual([
+      "| `x` | `x` | X | `…/x` |",
+      "| `…/x` | `x` | R | `./a` |",
+      "| `…/x` | `x` | R | `./b` |",
+    ]);
   });
 
   it("shows a memfd by its quoted name and a deleted file with a mark outside its path", () => {

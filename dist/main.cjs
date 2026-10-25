@@ -72421,7 +72421,7 @@ const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
 function normalize$2(path, self) {
 	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
 	return unnumbered(path.replace(/^\.\//, ""), own);
@@ -72436,7 +72436,7 @@ function relativize(path, prefixes) {
 		if (path === home) return "~";
 		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
 	}
-	return !path.startsWith("/") && !path.startsWith("…/") ? `…/${path}` : path;
+	return hasKnownStart(path) ? path : `…/${path}`;
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
@@ -73460,13 +73460,13 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
 		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid));
+			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
 				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
-				if (!c.failed && r.kind !== "exec" && !r.memfd && !isRunnerFile(path) && !path.startsWith("/") && !path.startsWith("…/") || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
+				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
 					path: walk(escaped(normalize$2(path, nsPids.get(r.pid)))),
@@ -73487,7 +73487,10 @@ function createAuditSummary(prefixes) {
 			}
 			return tally?.endLine();
 		}
-	}, walk = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path) ? path : `…/${path}`;
+	};
+	function walk(path) {
+		return hasKnownStart(path) ? path : `…/${path}`;
+	}
 	function escaped(path) {
 		return path.startsWith(MEMFD) ? MEMFD + escapeForDisplay(path.slice(MEMFD.length)) : isRunnerFile(path) ? path : path.endsWith(DELETED) ? escapePath(path.slice(0, -DELETED.length)) + DELETED : escapePath(path);
 	}
