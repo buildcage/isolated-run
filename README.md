@@ -389,6 +389,13 @@ How an entry is resolved, which paths are reserved, what `write_through: /` does
 to the old `writable:` and `allow_write:` inputs are all in
 [Reference](./docs/reference.md#write_through-paths).
 
+> [!WARNING]
+> `write_through: /` is for trusted code only. Against a compromised command it gives up the
+> outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
+> reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
+> commands this action runs on the host after the command are not kept out of writable paths either.
+> See [The `/` opt-out](./docs/reference.md#the--opt-out).
+
 ### `filesystem_mode: ephemeral`
 
 > [!WARNING]
@@ -444,13 +451,6 @@ runner and this action run code from them after the command exits. A command tha
 config (`docker login`, `gcloud auth configure-docker`) needs a step of its own. The exceptions, and
 what this means for a self-hosted runner's `_work`, are in
 [Runner directories](./docs/reference.md#runner-directories).
-
-> [!WARNING]
-> `write_through: /` is for trusted code only. Against a compromised command it gives up the
-> outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
-> reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
-> commands this action runs on the host after the command are not kept out of writable paths either.
-> See [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 ## Filesystem audit
 
@@ -551,8 +551,8 @@ the step, Buildcage adds it where the common toolchains look:
 - The NSS database in `$HOME` that Chromium reads, including the `chrome-headless-shell` that
   Puppeteer, Playwright and Remotion download.
 
-Each is a copy mounted over the sandbox's own view of the path, so the CA is never written to the
-runner, and the mount goes away with the sandbox when the step ends. How each one is done is in
+The store, the keystores and the NSS database are copies mounted over the sandbox's own view of
+their paths, and the mounts go away with the sandbox when the step ends. How each one is done is in
 [CA trust variables](./docs/reference.md#ca-trust-variables), and what this cannot cover is in
 [Limitations](#under-the-inspect-engine), below.
 
@@ -568,9 +568,9 @@ unchanged, and in `persistent` mode so does anything it writes under `$HOME`, `/
 npm step. Those steps run without this action's restrictions unless you wrap them too, and post
 steps, which run after the last step, cannot be wrapped. If a step runs untrusted code, isolate the
 steps after it in the same job as well, or move them to a separate job, and don't treat an output
-an isolated step set as trustworthy. `filesystem_mode: ephemeral`
-with a narrow `write_through:` keeps such files from reaching them, and `$GITHUB_ENV`,
-`$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode (see
+an isolated step set as trustworthy. `filesystem_mode: ephemeral` with a narrow `write_through:`
+keeps such files from reaching them. `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay
+read-only in either mode, and `write_through:` can open only the first two, by name (see
 [What stays read-only](#what-stays-read-only)).
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. What it
@@ -661,8 +661,10 @@ reported as blocked; see
   another JDK on the runner, such as the one a Maven or Gradle toolchain forks tests into, set
   `JAVA_HOME` to it in the step's `env:` or use `proxy_engine: universal` for that step. A JDK the
   step itself fetches (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or
-  `remotejdk`) is not covered either. On a self-hosted runner whose only JDKs are under `$HOME`, no
-  keystore gets the CA and the step warns. See [JVM keystores](./docs/reference.md#jvm-keystores).
+  `remotejdk`) is not covered either. A self-hosted runner whose only JDKs are under `$HOME` needs a
+  system JDK or a `RUNNER_TOOL_CACHE` outside `$HOME`; without one, or with a keystore sealed under
+  a non-default password, the step warns and a JVM build needs `proxy_engine: universal`. See
+  [JVM keystores](./docs/reference.md#jvm-keystores).
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
   accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
   decrypts nothing and breaks nothing.
