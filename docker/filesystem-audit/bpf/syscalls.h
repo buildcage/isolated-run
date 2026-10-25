@@ -260,6 +260,8 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;
 	u32 off = r > 0 ? r : 0;
 	u32 second = off;
+	// The bases the names need: bit 1 for the first, 2 for the second.
+	u32 want = 0;
 	// Mark a second path only when both were read, so a failed read never
 	// leaves n1 claiming a name that is not in the buffer.
 	if (call->p2 && off > 0) {
@@ -289,10 +291,18 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 			return;
 		e->marks |= MARK_DESCRIPTOR;
 	} else if (r > 1 && e->data[0] != '/') {
+		want = 1;
 		off = add_base(e, off, call->dfd1, 1, e->n1);
 	}
 	if (e->n1 && e->data[second & (DATA_SZ - 1)] != '/' && e->data[second & (DATA_SZ - 1)]) {
+		want |= 2;
 		off = add_base(e, off, call->dfd2, 2, 0);
+	}
+	// A relative name whose directory descriptor closed by the time the call
+	// returned resolves against nothing, so it counts in untracked too.
+	if (ret >= 0 && (e->bases & want) != want) {
+		bump(&untracked);
+		return;
 	}
 	e->data_len = off;
 	submit(e);
