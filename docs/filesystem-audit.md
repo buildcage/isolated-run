@@ -189,17 +189,17 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Flags
 
-| Flag | Means                                                                                          |
-| ---- | ---------------------------------------------------------------------------------------------- |
-| `R`  | Read, or mapped for reading or to run                                                          |
-| `W`  | Written, mapped shared and writable, created or truncated: a file, a directory, a link         |
-| `X`  | Run as a program, on the row of the program that ran it                                        |
-| `M`  | Moved (renamed) away from this path; where it went is in the artifact                          |
-| `L`  | Given a second name by a hard link; the new name shows `W`                                     |
-| `D`  | Deleted                                                                                        |
-| `A`  | Attributes changed: mode, owner, times, extended attributes                                    |
-| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file      |
-| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path |
+| Flag | Means                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------- |
+| `R`  | Read, or mapped for reading or to run                                                                |
+| `W`  | Written, mapped shared and writable, created, truncated or moved to: a file, a directory, a link     |
+| `X`  | Run as a program, on the row of the program that ran it                                              |
+| `M`  | Moved (renamed) away from this path; the new name shows `W`, or `M` too where two paths were swapped |
+| `L`  | Given a second name by a hard link; the new name shows `W`                                           |
+| `D`  | Deleted                                                                                              |
+| `A`  | Attributes changed: mode, owner, times, extended attributes                                          |
+| `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file            |
+| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path       |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
   `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused.
@@ -331,8 +331,8 @@ To name only what a later step needs:
    `upload_filesystem_audit_artifact: true`, and in `write_through` only what you already know a
    later step reads.
 2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
-   temporary name and then renames into place shows `M` under the temporary name; its new name is
-   the `to` on its `rename` line in the artifact.
+   temporary name and then renames into place shows `M` under the temporary name and `W` under the
+   new one.
 3. Of those, add to `write_through` what a later step or the end of the job uses: build output,
    test reports, coverage, a cache directory. Run again. The rest is what ephemeral discards on
    purpose.
@@ -684,10 +684,10 @@ also fails the step, after the command, with the record cut where it stopped.
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
   file access details give way first, and this section's table after the traffic report's timeline
-  and known blocked hosts; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the
-  full order. A part that does not fit is cut at a line, with a note after what is kept, or replaced
-  by the note when none of it fits. The note names the artifact, which still holds every access, or
-  says how to ask for one, or, when the upload failed, that the record was not kept.
+  and known blocked hosts; [The Job Summary size cap](./reference.md#the-job-summary-size-cap) has
+  the full order. A part that does not fit is cut at a line, with a note after what is kept, or
+  replaced by the note when none of it fits. The note names the artifact, which still holds every
+  access, or says how to ask for one, or, when the upload failed, that the record was not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
   keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is
@@ -758,7 +758,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
 | `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
 | `rule`       | a line the rules took, with `expected_filesystem_rules`         | where the rule that took it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined the value's lines, as outside a `\|` block |
-| `unexpected` | a line the rules did not take, with `expected_filesystem_rules` | some access of the line, such as one side of a link, no rule took                                                                                                                                          |
+| `unexpected` | a line the rules did not take, with `expected_filesystem_rules` | some access of the line, such as one side of a link or of a rename, no rule took                                                                                                                           |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted`, `exchange`
 and `unexpected` are absent rather than `false`. Without `expected_filesystem_rules`, no line has
@@ -787,7 +787,7 @@ letter lowercase in the summary. The failures that are not recorded are in
 | `exec`                                  | a program run                                                                                                                                                                 | `X`                                                          |
 | `fork`                                  | a new process; `pid` is the child                                                                                                                                             | none                                                         |
 | `unlink`, `rmdir`                       | a file or a directory deleted                                                                                                                                                 | `D`                                                          |
-| `rename`                                | a move from `path` to `to`                                                                                                                                                    | `M` on `path`                                                |
+| `rename`                                | a move from `path` to `to`                                                                                                                                                    | `M` on `path`, `W` on `to`; `M` on both of an exchange       |
 | `mkdir`, `mknod`, `symlink`, `truncate` | a directory, a special file or Unix socket, or a symlink made; or a file cut to size                                                                                          | `W`                                                          |
 | `link`                                  | a hard link made from `path` to `to`; see below the table                                                                                                                     | `W` on `to`, `L` on `path` unless it is `deleted` or `memfd` |
 | `chmod`, `chown`, `attr`                | a mode, an owner, or times or extended attributes changed                                                                                                                     | `A`                                                          |

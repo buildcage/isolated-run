@@ -70978,8 +70978,8 @@ function classify(r) {
 		failed,
 		perm
 	}] : [];
-	return r.kind === "rename" && r.exchange && r.to && out.push({
-		letter,
+	return r.kind === "rename" && r.to && out.push({
+		letter: r.exchange ? letter : "W",
 		path: r.to,
 		failed,
 		perm
