@@ -2,7 +2,9 @@
 # HAProxy's single listener binds *:10024 (CoreDNS also binds *:53), but only
 # buildcage0, the veth end run-isolated.sh wires into the sandbox once a step
 # starts, may reach them (see docker/common/files/s6-scripts/init-iptables).
-# This starts each engine's proxy standalone, with no sandbox attached, so
+# This starts each engine's proxy standalone, from the shipped compose file and
+# the prebuilt images BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and
+# BUILDCAGE_LOCAL_IMAGE_REF_INSPECT name, with no sandbox attached, so
 # buildcage0 never exists: :10024/:53 must be unreachable both from another
 # container on the proxy's own compose network and from the runner host
 # itself. Sandbox-side access is covered by the existing fixture-based
@@ -33,7 +35,7 @@ dns_answered() {
 }
 
 run_engine() {
-  local engine="$1"
+  local engine="$1" image="$2"
   # Both are global to the daemon, so they carry the Makefile's worktree suffix.
   local project="buildcage-listener-scope-$engine${BUILDCAGE_WORKTREE_SUFFIX:-}"
   local proxy_name="buildcage-proxy${BUILDCAGE_WORKTREE_SUFFIX:-}"
@@ -43,12 +45,14 @@ run_engine() {
   echo "=== Listener Scope Test ($engine) ==="
   echo ""
 
+  local compose=(docker compose -p "$project" -f "$REPO_ROOT/docker/compose.action.yaml")
+
   cleanup() {
-    docker compose -p "$project" -f "$REPO_ROOT/compose.yaml" down -v >/dev/null 2>&1 || true
+    "${compose[@]}" down -v >/dev/null 2>&1 || true
   }
   trap cleanup RETURN
 
-  PROXY_ENGINE="$engine" docker compose -p "$project" -f "$REPO_ROOT/compose.yaml" up -d --build --wait proxy
+  BUILDCAGE_PROXY_IMAGE_REF="$image" "${compose[@]}" up -d --pull never --no-build --wait proxy
 
   local net
   net=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$proxy_name")
@@ -135,7 +139,9 @@ run_engine() {
   fi
 }
 
-run_engine universal
-run_engine inspect
+: "${BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL:?must name a locally built universal-engine image}"
+: "${BUILDCAGE_LOCAL_IMAGE_REF_INSPECT:?must name a locally built inspect-engine image}"
+run_engine universal "$BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL"
+run_engine inspect "$BUILDCAGE_LOCAL_IMAGE_REF_INSPECT"
 
 assert_results

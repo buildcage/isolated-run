@@ -111,10 +111,9 @@ jobs:
 
   # Three groups side by side, each under its own Compose project and test-net
   # subnet (the names a linked worktree gets): the universal engine's fixture
-  # tests, the inspect engine's CA half, and the listener check, which builds
-  # its own images and attaches no sandbox. The CA half cannot share a job with
-  # the rules half: its cleanup checks wait for every inspect step of the user
-  # to end.
+  # tests, the inspect engine's CA half, and the listener check, which attaches
+  # no sandbox. The CA half cannot share a job with the rules half: its cleanup
+  # checks wait for every inspect step of the user to end.
   test_sandbox_universal:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox_universal == 'true' || needs.changes.outputs.test_sandbox_inspect == 'true') }}
@@ -143,6 +142,11 @@ jobs:
           engines: universal inspect
           proxy-test-hooks: true
 
+      # The listener check runs on what ships, so without the test hooks. They
+      # are the image's last layer, so everything else comes from the cache.
+      - name: Build the inspect image without test hooks
+        run: docker build -q -f docker/inspect/Dockerfile -t buildcage-local-proxy:inspect-release .
+
       - parallel:
           - name: Run universal-engine fixture-based integration tests
             env:
@@ -164,6 +168,8 @@ jobs:
 
           - name: Run listener-scope integration tests
             env:
+              BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL: ${{ steps.local_proxy.outputs.universal }}
+              BUILDCAGE_LOCAL_IMAGE_REF_INSPECT: buildcage-local-proxy:inspect-release
               BUILDCAGE_WORKTREE_SUFFIX: -listener
             run: make test_integration_listener_scope
 

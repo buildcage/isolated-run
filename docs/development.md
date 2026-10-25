@@ -60,14 +60,14 @@ vp run build      # rolldown → the committed dist/ bundles
 │   ├── inspect/             # proxy_engine: inspect
 │   ├── gen-seccomp-profile/ # Go: derives the seccomp filter from Docker's default profile
 │   ├── filesystem-audit/    # Go and eBPF: the filesystem audit tracer
-│   ├── compose.*.yaml       # The compose files the action, its tests and the dev loop run
+│   ├── compose.*.yaml       # The action's compose file, and the overlays its tests and dev loop add
 │   └── *-licenses.sh        # License collection and checks run at image build time
 ├── scripts/
 │   ├── run-isolated.sh      # netns, veth and rootfs setup around `runc run`, via `sudo -n`
 │   └── buildcage-init.sh    # The sandbox's PID 1
 ├── test/                    # integration-test-*.sh drivers, assert-*.sh/.mjs, *-scenarios.sh
 ├── dev/                     # The macOS dev-loop image and scripts, and the fixture refresh
-├── compose.yaml             # Local compose config, also what CI's sandbox jobs build from
+├── compose.yaml             # The action's compose file plus a build from source; CI builds through it
 ├── compose.test-*.yaml      # Fixture origins for the integration tests
 ├── licenses/                # License texts copied into the images, and the npm license generator
 ├── docs/
@@ -165,10 +165,14 @@ the Node run.
 
 They drive `dist/main.cjs` directly (`test/integration-test-*.sh`). The first three groups need
 `BUILDCAGE_LOCAL_IMAGE_REF` and a [test-hook build](#the-action-against-an-unpublished-image).
-They do not all want the same image: the inspect group needs one built from `docker/inspect`, and
-`test_integration_listener_scope` builds both images itself and wants the variable unset. So
-`make test_integration` records what CI runs rather than running it in one go; build the image a
-group needs, then run that group.
+They do not all want the same image: the inspect group needs one built from `docker/inspect`. The
+last takes both engines' images at once, in `BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL` and
+`BUILDCAGE_LOCAL_IMAGE_REF_INSPECT`. So `make test_integration` records what CI runs rather than
+running it in one go; build the images a group needs, then run that group.
+
+The fixture groups start the proxy with `docker/compose.action.test-<engine>.yaml` layered on the
+shipped `docker/compose.action.yaml` (`BUILDCAGE_TEST_COMPOSE_OVERLAY`), so they run what ships
+plus the fixture network and nothing in place of it.
 
 A test that needs a fixture origin, whether for what only a fixture can cover or just to keep off
 the real internet, goes in `test_integration_sandbox_universal` or

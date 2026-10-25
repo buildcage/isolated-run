@@ -92,10 +92,10 @@ test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify is
 
 .PHONY: clean_sandbox_dev
 clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
-	@docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml down -v --rmi local
+	@docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml down -v --rmi all
 
 # ===========================================================================
-# Integration tests. The four groups below, and nothing else, are what CI's
+# Integration tests. The groups below, and nothing else, are what CI's
 # test-integration.yml runs.
 # ===========================================================================
 
@@ -103,11 +103,11 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 # about what "the integration tests" are. Not a target to run straight
 # through, unlike the unit tests: each group wants a different proxy image
 # under BUILDCAGE_LOCAL_IMAGE_REF: universal for the first two, an inspect
-# image built with BUILDCAGE_TEST_HOOKS=1 for the third, and none at all for
-# the fourth, which builds both images itself and wants the variable unset.
-# Build the image a group needs, then run that group.
+# image built with BUILDCAGE_TEST_HOOKS=1 for the third, and both at once, under
+# BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT, for
+# the last. Build the images a group needs, then run that group.
 .PHONY: test_integration
-test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the four groups need different proxy images, so build each one's image first
+test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the groups need different proxy images, so build each one's image first
 
 # Drives dist/main.cjs directly (a host command, not a Docker build). Two
 # halves, which CI runs as separate jobs; here they run one after the other,
@@ -185,8 +185,6 @@ test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NS
 		./test/integration-test-inspect-chromium.sh \
 		./test/integration-test-inspect-reserved-mounts.sh
 
-# Builds each engine's proxy image itself (docker compose build), unlike the
-# groups above, which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.
 .PHONY: test_integration_listener_scope
-test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0
+test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0 (needs BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT)
 	@./test/integration-test-listener-scope.sh
