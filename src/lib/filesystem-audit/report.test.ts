@@ -309,6 +309,7 @@ describe("readStepFilesystemAudit", () => {
   it("warns and uploads nothing when the step's directory cannot be made", async () => {
     const note = annotation();
     const opened: string[] = [];
+    const proposing: (boolean | undefined)[] = [];
     const {
       deps: d,
       uploads,
@@ -316,6 +317,10 @@ describe("readStepFilesystemAudit", () => {
     } = deps({
       makeDir: () => {
         throw new Error("EEXIST");
+      },
+      createSummary: (options) => {
+        proposing.push(options.propose);
+        return createAuditSummary(options);
       },
       openWriter: (path) => {
         opened.push(path);
@@ -335,6 +340,8 @@ describe("readStepFilesystemAudit", () => {
     expect(opened).toEqual([]);
     expect(ruleFiles).toEqual([]);
     expect(uploads).toEqual([]);
+    // Nor are rules gathered for a file that cannot be written.
+    expect(proposing).toEqual([false]);
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {

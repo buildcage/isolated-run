@@ -550,6 +550,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     ],
     omittedExampleNote:
       inputs.expectedRulesLines.length &&
+      inputs.filesystemAudit === "record" &&
       !inputs.filesystemAuditArtifact.upload &&
       configFileAllowed(env)
         ? EXAMPLE_RULES_FILE_NOTE

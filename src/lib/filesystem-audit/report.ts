@@ -225,13 +225,6 @@ export function readStepFilesystemAudit(
       result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE)),
   });
   if (!audit) return settled(NONE);
-  const options: SummaryOptions = {
-    workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-    home: prefixes(env.HOME, deps.realpath),
-    runnerFiles: runnerFiles(env, mediated, deps.realpath),
-    ...(rules && { rules: new RuleMatcher(rules.rules) }),
-    propose: upload,
-  };
   // The stripped copy and the proposed rules go in the step's own directory
   // under the scratch base, which the sandbox cannot reach (unlike
   // $RUNNER_TEMP or /tmp). Writing a new file leaves the root-owned recording
@@ -246,6 +239,14 @@ export function readStepFilesystemAudit(
       annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
       prepared = false;
     }
+  const options: SummaryOptions = {
+    workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+    home: prefixes(env.HOME, deps.realpath),
+    runnerFiles: runnerFiles(env, mediated, deps.realpath),
+    ...(rules && { rules: new RuleMatcher(rules.rules) }),
+    // Only a prepared directory takes the proposed rules.
+    propose: prepared,
+  };
   // What the verdict says of accesses that could not all be checked, which
   // fail the step as unexpected ones would.
   const checkIncomplete: VerdictItems =

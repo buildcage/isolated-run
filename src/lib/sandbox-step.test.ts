@@ -643,6 +643,9 @@ describe("runSandboxStep", () => {
     expect(await note(ENV, true)).toBeUndefined();
     expect(await note({ ...ENV, GITHUB_EVENT_NAME: "workflow_run" })).toBeUndefined();
     expect(await note(ENV, false, "")).toBeUndefined();
+    // Comments alone pass without filesystem_audit: record, which proposes no file.
+    mocks.readFilesystemAuditInput.mockReturnValue("off");
+    expect(await note(ENV, false, "# node R ./a")).toBeUndefined();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {

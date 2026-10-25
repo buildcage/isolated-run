@@ -73784,19 +73784,19 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
 	});
 	if (!audit) return settled(NONE);
-	let options = {
-		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-		home: prefixes(env.HOME, deps.realpath),
-		runnerFiles: runnerFiles(env, mediated, deps.realpath),
-		...rules && { rules: new RuleMatcher(rules.rules) },
-		propose: upload
-	}, cleanPath = audit.stepPath, prepared = upload;
+	let cleanPath = audit.stepPath, prepared = upload;
 	if (upload) try {
 		deps.makeDir(audit.uploadDir);
 	} catch (e) {
 		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), prepared = !1;
 	}
-	let checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	let options = {
+		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+		home: prefixes(env.HOME, deps.realpath),
+		runnerFiles: runnerFiles(env, mediated, deps.realpath),
+		...rules && { rules: new RuleMatcher(rules.rules) },
+		propose: prepared
+	}, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
@@ -77549,7 +77549,7 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
 		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
-		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true and the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
+		omittedExampleNote: inputs.expectedRulesLines.length && inputs.filesystemAudit === "record" && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true and the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,
