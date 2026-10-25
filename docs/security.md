@@ -8,16 +8,13 @@ the [README](../README.md); for implementation internals, see the
 ## Contents
 
 - [Threat model](#threat-model)
-- [Isolation Mechanisms](#isolation-mechanisms)
-- [The network boundary](#the-network-boundary)
-- [Engines](#engines)
 - [Attempts to get around it](#attempts-to-get-around-it)
-- [What the engines cannot see](#what-the-engines-cannot-see)
-- [Credentials in a URL](#credentials-in-a-url)
-- [Filesystem audit](#filesystem-audit)
+- [The network boundary](#the-network-boundary)
+- [Isolation mechanisms](#isolation-mechanisms)
+- [Engines](#engines)
+- [What it does not stop](#what-it-does-not-stop)
 - [Hardening](#hardening)
-- [Known Limitations](#known-limitations)
-- [Image Provenance Verification](#image-provenance-verification)
+- [Image provenance verification](#image-provenance-verification)
 
 ## Threat model
 
@@ -29,7 +26,7 @@ The difference from a Docker-build tool is that the command is not already insid
 a full shell command chosen by the workflow author, running with the same privileges as the Actions
 runner, so restricting its network alone would not be enough: the command also has to be unable to
 leave by other means, whether by escalating privileges, reaching the Docker socket, or reading
-another process's memory. See [Isolation Mechanisms](#isolation-mechanisms).
+another process's memory. See [Isolation mechanisms](#isolation-mechanisms).
 
 The design goal is to bolt egress control onto an existing step without changing how the rest of the
 job works. A step that configures AWS credentials, an npm cache directory, or anything else keeps
@@ -66,7 +63,129 @@ has no reason to reach it. That is also the hardest kind of leak to find afterwa
 closing it is worth doing even though the rest stays open. [Hardening](#hardening) is about making
 the set of destinations a step needs smaller.
 
-## Isolation Mechanisms
+## Attempts to get around it
+
+| What the isolated command does                                                                                     | What happens                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Asks for any name, on or off the allowlist                                                                         | Answered locally with the proxy's own address; the query is never forwarded, allowed or not                                                                                                                                                                                                                                                                                  |
+| Requests a host no rule covers                                                                                     | Blocked, origin never contacted; `inspect` records the URL it asked for                                                                                                                                                                                                                                                                                                      |
+| Requests a path or method no rule covers                                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                                                                                                                                                                                                                           |
+| Walks out of an allowed path with `..` or `%2e%2e`                                                                 | **403**: the path is normalized before the rules see it, and a `..` joined to an encoded separator or `;` is blocked, as is any backslash                                                                                                                                                                                                                                    |
+| Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing                 | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                                                                                                                                                                                                                                     |
+| Puts an address in the `Host` header                                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                                                                                                                                                                                                                          |
+| Allowlists a name that resolves to an internal address                                                             | Blocked if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                                                                                                                                                                                                                                    |
+| Reaches an allowed host presenting a wrong certificate                                                             | **503** under `inspect`, which checks the origin's certificate when it connects and fails the step; under `universal` the command validates it itself                                                                                                                                                                                                                        |
+| Presents a wrong certificate and then stops answering, to look like an outage                                      | Still fails the step: a connection `inspect` never completed is one whose origin it never authenticated, so it is blocked whether or not the error survived                                                                                                                                                                                                                  |
+| Uses ECH to conceal the real SNI                                                                                   | Reaches whatever the outer SNI resolved to, and that outer name still has to be allowed; the type 65 record carrying ECHConfig is never returned either                                                                                                                                                                                                                      |
+| Encodes data into DNS queries                                                                                      | Answered locally and never forwarded; an outside resolver is unreachable                                                                                                                                                                                                                                                                                                     |
+| Uses DNS over TLS or DNS over HTTPS                                                                                | Redirected to the proxy like any other TCP and checked on its SNI, so an outside resolver is reachable only if its own host and port are allowlisted                                                                                                                                                                                                                         |
+| Tunnels over ICMP, raw UDP or QUIC, or falls back to IPv6                                                          | Dropped before the proxy; only TCP is redirected to it, and the proxy reaches allowed names over IPv4                                                                                                                                                                                                                                                                        |
+| Connects to a raw address                                                                                          | Checked against `allowed_ip_rules`, and blocked when nothing matches                                                                                                                                                                                                                                                                                                         |
+| Speaks something that is not HTTP to a port no rule covers                                                         | Read as a request by the stage it is handed to and blocked, on both engines, and counted as blocked like any other                                                                                                                                                                                                                                                           |
+| Escalates privileges, or reaches a container runtime socket                                                        | Nothing to escalate to: every capability set is empty, and the host's `/run`, where the sockets live, is an empty tmpfs                                                                                                                                                                                                                                                      |
+| Reads another process's memory                                                                                     | Structurally refused by the kernel across a PID namespace boundary, capabilities or not                                                                                                                                                                                                                                                                                      |
+| Ignores the proxy variables entirely                                                                               | No effect: interception is at the network level, not opt-in                                                                                                                                                                                                                                                                                                                  |
+| Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                                                                                                                                                                                                                                 |
+| Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)                                                                                                                                                                                                                 |
+| Replaces its `$GITHUB_STEP_SUMMARY` with a symlink, FIFO or directory, or removes it, to stop the report           | The command writes a backing copy (an overlay copy under `ephemeral` when `write_through` does not cover the file), never the real file, and the host writes the real file itself, so the report still lands. A removed copy is read back as empty; one that is not a regular file is too, rather than followed or blocked on, and fails the step                            |
+| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut to what is left, with a note and a warning annotation, or replaced by the note when it is over the limit on its own; the verdict is applied before the summary is written, so enforcement is unaffected                                                                                                     |
+| Writes its own `traffic_artifact_name`/`filesystem_audit_artifact_name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The command writes a backing copy (an overlay copy, discarded, under `ephemeral` when `write_through` does not cover the file); the host writes the real file from the backing copy, trimmed to the entries the runner can read, then sets the names itself (last-write-wins). A copy that is not a regular file, or holds an entry the runner would stop at, fails the step |
+
+## The network boundary
+
+The isolated command runs in its own network namespace, connected to the proxy container's netns by
+a dedicated veth pair. There is no bridge: it is always a 1:1 connection, one sandbox to one proxy.
+The namespaces come from runc's default spec, and the step fails before the sandbox starts if that
+spec stops giving it a new network, PID, mount, IPC or UTS namespace. The proxy's netns is
+referenced by Docker's own `NetworkSettings.SandboxKey` path rather than by PID, which Docker holds
+for the container's whole lifetime, so it cannot be silently reused if the proxy dies before the
+sandbox starts. iptables sends all TCP to a single listener and drops everything else, and that
+veth is the sandbox's only route to any network at all.
+
+Nothing in the command has to be told about a proxy: interception is at the network level, so the
+`HTTP_PROXY` family of variables is not what puts a request in front of the rules, and ignoring them
+changes nothing.
+
+### The proxy chooses the destination, not the command
+
+A rule matches on the name the request carried, the SNI or the `Host` header. Once it has passed,
+HAProxy resolves that name itself and rewrites the destination to the result (`do-resolve` and
+`set-dst`), so the address the command chose is discarded. A forged `Host`, a doctored `/etc/hosts`,
+or an SNI naming one host while the connection aims at another all reach the server the name belongs
+to: destination spoofing is removed rather than detected. A connection an `allowed_ip_rules` entry
+covers is the one exception: that rule names the address itself, so the connection goes there
+whatever name it carries. A name with anything but letters, digits,
+`.`, `_` and `-` in it never reaches a rule, in `audit` too: `universal` blocks such an SNI
+(`invalid-sni`) or plaintext `Host` (`invalid-host`), and `inspect` never passes one through and
+blocks such a `Host` (`invalid-host`).
+A `:` in the name could otherwise let a `~` rule's port pattern match a name the proxy then looks up.
+
+That order is an invariant. Reversed, resolution would become the exfiltration channel the resolver
+below exists to prevent, so a name a request would be blocked for never triggers a real DNS query.
+
+Where the proxy resolves is the proxy container's own `/etc/resolv.conf`. On a runner that is
+Docker's embedded DNS forwarding to the runner's own resolvers, so a name only an internal resolver
+knows still resolves, and the query follows the runner's own DNS policy. There is no search-domain
+expansion, so a rule has to name a host in full.
+
+### DNS never leaves the job
+
+The resolver inside the sandbox's network has no upstream at all, and answers every query, on the
+allowlist or not, with the proxy's own address. A lookup by itself therefore cannot carry anything
+out: `SECRET-DATA.attacker.example` would otherwise reach an attacker's own nameserver the moment it
+was forwarded. Answering a name outside the allowlist the same way as one inside is deliberate too,
+so that the request which follows is recorded with its URL before it is blocked.
+
+No discovery record is returned either. Having no upstream, the resolver has nothing to answer an
+`SRV`, `TXT`, `TLSA` or `URI` query with, which is load-bearing rather than incidental:
+`_http._tcp.deb.debian.org` really does carry an `SRV` record pointing at `debian.map.fastlydns.net`,
+and a command that followed it would connect to a name no allowlist mentions. A client that cannot
+fall back, such as a `mongodb+srv://` connection string, does not work inside the cage; see
+[Service discovery](../README.md#service-discovery).
+
+### A name may not resolve inward
+
+An allowlisted name that resolves to loopback, link-local (AWS/GCP/Azure IMDS), CGNAT (Alibaba
+IMDS), the IETF protocol block (Oracle IMDS), Azure's WireServer (`168.63.129.16`), the proxy's own
+network (`198.19.255.0/24`, the proxy's and the step's own link), or **an address the runner itself holds** is blocked, reported as `internal-address`, in `audit` too. A name under an
+attacker's control, or DNS for an allowlisted domain that has been compromised, therefore cannot
+turn the proxy into a route to cloud metadata or back into the runner. The rest of RFC1918 is
+deliberately exempt: a name pointing at an internal mirror is a real, intended setup.
+
+The runner's addresses come from two places, because neither sees all of them: the action reads the
+runner's interfaces before starting the proxy, and the engine adds the gateway of the network Docker
+then put it on, which did not exist when the action looked. The engine also adds the proxy's own
+address on that network, which Docker's DNS returns for the proxy's service and container names, so
+a request naming them cannot loop the proxy into itself. A published container port is DNAT'd, so
+it answers on every one of them.
+
+This has two consequences:
+
+- **An internal mirror running on the runner itself is not reachable by name.** Name it with
+  `allowed_ip_rules` instead, which skips this guard. The same applies to a public name that
+  resolves to the runner's own public address, which a self-hosted runner may well have.
+- The list is read once at startup, and on a containerized runner it holds that container's
+  addresses rather than the real host's.
+
+This guard is about a _name_ landing somewhere it never should. Under `inspect`, a rule whose host
+is a literal address, such as `169.254.169.254:80`, exempts the requests it matches, in `audit` too,
+except in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any internal address: a
+rule naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits
+the address, `**:80` or `~^.*:80$`, is not. Under `universal`, no rule does. Reaching a cloud
+metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
+`allowed_ip_rules` is the intended path for it. That path skips this guard except for the listener:
+a connection to port `10024` of an internal address is blocked there too, whatever the IP rules say
+and in `audit` as well.
+
+### Only TCP gets out
+
+Everything that is not TCP is dropped before it reaches the proxy, so ICMP, raw UDP and QUIC have no
+exit path at all; port 53 to the gateway, which is the resolver, is the one exception. IPv6 is
+dropped by equivalent `ip6tables` rules, AAAA lookups are answered with no records,
+and the proxy reaches allowed names over IPv4 only. The cost of that last part is in
+[Rough edges](#rough-edges) below.
+
+## Isolation mechanisms
 
 <img src="../assets/diagram-architecture-universal.png" alt="isolated-run sandbox architecture" width="620" height="544">
 
@@ -302,100 +421,6 @@ life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chai
 out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
 orphans.
 
-## The network boundary
-
-The isolated command runs in its own network namespace, connected to the proxy container's netns by
-a dedicated veth pair. There is no bridge: it is always a 1:1 connection, one sandbox to one proxy.
-The namespaces come from runc's default spec, and the step fails before the sandbox starts if that
-spec stops giving it a new network, PID, mount, IPC or UTS namespace. The proxy's netns is
-referenced by Docker's own `NetworkSettings.SandboxKey` path rather than by PID, which Docker holds
-for the container's whole lifetime, so it cannot be silently reused if the proxy dies before the
-sandbox starts. iptables sends all TCP to a single listener and drops everything else, and that
-veth is the sandbox's only route to any network at all.
-
-Nothing in the command has to be told about a proxy: interception is at the network level, so the
-`HTTP_PROXY` family of variables is not what puts a request in front of the rules, and ignoring them
-changes nothing.
-
-### The proxy chooses the destination, not the command
-
-A rule matches on the name the request carried, the SNI or the `Host` header. Once it has passed,
-HAProxy resolves that name itself and rewrites the destination to the result (`do-resolve` and
-`set-dst`), so the address the command chose is discarded. A forged `Host`, a doctored `/etc/hosts`,
-or an SNI naming one host while the connection aims at another all reach the server the name belongs
-to: destination spoofing is removed rather than detected. A connection an `allowed_ip_rules` entry
-covers is the one exception: that rule names the address itself, so the connection goes there
-whatever name it carries. A name with anything but letters, digits,
-`.`, `_` and `-` in it never reaches a rule, in `audit` too: `universal` blocks such an SNI
-(`invalid-sni`) or plaintext `Host` (`invalid-host`), and `inspect` never passes one through and
-blocks such a `Host` (`invalid-host`).
-A `:` in the name could otherwise let a `~` rule's port pattern match a name the proxy then looks up.
-
-That order is an invariant. Reversed, resolution would become the exfiltration channel the resolver
-below exists to prevent, so a name a request would be blocked for never triggers a real DNS query.
-
-Where the proxy resolves is the proxy container's own `/etc/resolv.conf`. On a runner that is
-Docker's embedded DNS forwarding to the runner's own resolvers, so a name only an internal resolver
-knows still resolves, and the query follows the runner's own DNS policy. There is no search-domain
-expansion, so a rule has to name a host in full.
-
-### DNS never leaves the job
-
-The resolver inside the sandbox's network has no upstream at all, and answers every query, on the
-allowlist or not, with the proxy's own address. A lookup by itself therefore cannot carry anything
-out: `SECRET-DATA.attacker.example` would otherwise reach an attacker's own nameserver the moment it
-was forwarded. Answering a name outside the allowlist the same way as one inside is deliberate too,
-so that the request which follows is recorded with its URL before it is blocked.
-
-No discovery record is returned either. Having no upstream, the resolver has nothing to answer an
-`SRV`, `TXT`, `TLSA` or `URI` query with, which is load-bearing rather than incidental:
-`_http._tcp.deb.debian.org` really does carry an `SRV` record pointing at `debian.map.fastlydns.net`,
-and a command that followed it would connect to a name no allowlist mentions. A client that cannot
-fall back, such as a `mongodb+srv://` connection string, does not work inside the cage; see
-[Service discovery](../README.md#service-discovery).
-
-### A name may not resolve inward
-
-An allowlisted name that resolves to loopback, link-local (AWS/GCP/Azure IMDS), CGNAT (Alibaba
-IMDS), the IETF protocol block (Oracle IMDS), Azure's WireServer (`168.63.129.16`), the proxy's own
-network (`198.19.255.0/24`, the proxy's and the step's own link), or **an address the runner itself holds** is blocked, reported as `internal-address`, in `audit` too. A name under an
-attacker's control, or DNS for an allowlisted domain that has been compromised, therefore cannot
-turn the proxy into a route to cloud metadata or back into the runner. The rest of RFC1918 is
-deliberately exempt: a name pointing at an internal mirror is a real, intended setup.
-
-The runner's addresses come from two places, because neither sees all of them: the action reads the
-runner's interfaces before starting the proxy, and the engine adds the gateway of the network Docker
-then put it on, which did not exist when the action looked. The engine also adds the proxy's own
-address on that network, which Docker's DNS returns for the proxy's service and container names, so
-a request naming them cannot loop the proxy into itself. A published container port is DNAT'd, so
-it answers on every one of them.
-
-This has two consequences:
-
-- **An internal mirror running on the runner itself is not reachable by name.** Name it with
-  `allowed_ip_rules` instead, which skips this guard. The same applies to a public name that
-  resolves to the runner's own public address, which a self-hosted runner may well have.
-- The list is read once at startup, and on a containerized runner it holds that container's
-  addresses rather than the real host's.
-
-This guard is about a _name_ landing somewhere it never should. Under `inspect`, a rule whose host
-is a literal address, such as `169.254.169.254:80`, exempts the requests it matches, in `audit` too,
-except in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any internal address: a
-rule naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits
-the address, `**:80` or `~^.*:80$`, is not. Under `universal`, no rule does. Reaching a cloud
-metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
-`allowed_ip_rules` is the intended path for it. That path skips this guard except for the listener:
-a connection to port `10024` of an internal address is blocked there too, whatever the IP rules say
-and in `audit` as well.
-
-### Only TCP gets out
-
-Everything that is not TCP is dropped before it reaches the proxy, so ICMP, raw UDP and QUIC have no
-exit path at all; port 53 to the gateway, which is the resolver, is the one exception. IPv6 is
-dropped by equivalent `ip6tables` rules, AAAA lookups are answered with no records,
-and the proxy reaches allowed names over IPv4 only. The cost of that last part is in
-[Known Limitations](#known-limitations) below.
-
 ## Engines
 
 The engines differ in how much of a connection a rule gets to see. `universal` reads the name at the
@@ -482,35 +507,21 @@ the container: HAProxy signs each per-SNI certificate with it, and only the cert
 out, into this run's scratch directory. The step removes the container with `docker compose down`
 before it ends, and the key with it.
 
-## Attempts to get around it
+### `inspect` cannot work with everything, in either mode
 
-| What the isolated command does                                                                                     | What happens                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Asks for any name, on or off the allowlist                                                                         | Answered locally with the proxy's own address; the query is never forwarded, allowed or not                                                                                                                                                                                                                                                                                  |
-| Requests a host no rule covers                                                                                     | Blocked, origin never contacted; `inspect` records the URL it asked for                                                                                                                                                                                                                                                                                                      |
-| Requests a path or method no rule covers                                                                           | **403** under `inspect`, recorded with its URL; `universal` reads neither and enforces on the host                                                                                                                                                                                                                                                                           |
-| Walks out of an allowed path with `..` or `%2e%2e`                                                                 | **403**: the path is normalized before the rules see it, and a `..` joined to an encoded separator or `;` is blocked, as is any backslash                                                                                                                                                                                                                                    |
-| Sends an allowed name while aiming elsewhere, or points `/etc/hosts` at an address of its choosing                 | Reaches the address the proxy resolved; the command's own choice of address is discarded                                                                                                                                                                                                                                                                                     |
-| Puts an address in the `Host` header                                                                               | Taken as the destination once a rule allows it; an internal one only if a rule names it as its host                                                                                                                                                                                                                                                                          |
-| Allowlists a name that resolves to an internal address                                                             | Blocked if it lands on loopback, link-local, the proxy itself, an address the runner holds, or another never-public range, in `audit` too                                                                                                                                                                                                                                    |
-| Reaches an allowed host presenting a wrong certificate                                                             | **503** under `inspect`, which checks the origin's certificate when it connects and fails the step; under `universal` the command validates it itself                                                                                                                                                                                                                        |
-| Presents a wrong certificate and then stops answering, to look like an outage                                      | Still fails the step: a connection `inspect` never completed is one whose origin it never authenticated, so it is blocked whether or not the error survived                                                                                                                                                                                                                  |
-| Uses ECH to conceal the real SNI                                                                                   | Reaches whatever the outer SNI resolved to, and that outer name still has to be allowed; the type 65 record carrying ECHConfig is never returned either                                                                                                                                                                                                                      |
-| Encodes data into DNS queries                                                                                      | Answered locally and never forwarded; an outside resolver is unreachable                                                                                                                                                                                                                                                                                                     |
-| Uses DNS over TLS or DNS over HTTPS                                                                                | Redirected to the proxy like any other TCP and checked on its SNI, so an outside resolver is reachable only if its own host and port are allowlisted                                                                                                                                                                                                                         |
-| Tunnels over ICMP, raw UDP or QUIC, or falls back to IPv6                                                          | Dropped before the proxy; only TCP is redirected to it, and the proxy reaches allowed names over IPv4                                                                                                                                                                                                                                                                        |
-| Connects to a raw address                                                                                          | Checked against `allowed_ip_rules`, and blocked when nothing matches                                                                                                                                                                                                                                                                                                         |
-| Speaks something that is not HTTP to a port no rule covers                                                         | Read as a request by the stage it is handed to and blocked, on both engines, and counted as blocked like any other                                                                                                                                                                                                                                                           |
-| Escalates privileges, or reaches a container runtime socket                                                        | Nothing to escalate to: every capability set is empty, and the host's `/run`, where the sockets live, is an empty tmpfs                                                                                                                                                                                                                                                      |
-| Reads another process's memory                                                                                     | Structurally refused by the kernel across a PID namespace boundary, capabilities or not                                                                                                                                                                                                                                                                                      |
-| Ignores the proxy variables entirely                                                                               | No effect: interception is at the network level, not opt-in                                                                                                                                                                                                                                                                                                                  |
-| Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                                                                                                                                                                                                                                 |
-| Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default)                                                                                                                                                                                                                 |
-| Replaces its `$GITHUB_STEP_SUMMARY` with a symlink, FIFO or directory, or removes it, to stop the report           | The command writes a backing copy (an overlay copy under `ephemeral` when `write_through` does not cover the file), never the real file, and the host writes the real file itself, so the report still lands. A removed copy is read back as empty; one that is not a regular file is too, rather than followed or blocked on, and fails the step                            |
-| Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut to what is left, with a note and a warning annotation, or replaced by the note when it is over the limit on its own; the verdict is applied before the summary is written, so enforcement is unaffected                                                                                                     |
-| Writes its own `traffic_artifact_name`/`filesystem_audit_artifact_name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The command writes a backing copy (an overlay copy, discarded, under `ephemeral` when `write_through` does not cover the file); the host writes the real file from the backing copy, trimmed to the entries the runner can read, then sets the names itself (last-write-wins). A copy that is not a regular file, or holds an entry the runner would stop at, fails the step |
+TLS is terminated, so a tool that pins a certificate, or ships a bundled trust store it never lets
+the system update, will not work. The JVM and Chromium read their own trust stores rather than the
+system one, and only some of those stores get the CA.
+[Limitations](../README.md#under-the-inspect-engine) says which, and has the rest of the
+compatibility picture.
 
-## What the engines cannot see
+`audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
+cannot accept the CA fails under `audit` exactly as it would under `restrict`. What `audit` drops is
+the rule ACLs, not the interception: `set-dst`, the origin certificate check and the
+[inward-resolution guard](#a-name-may-not-resolve-inward) all stay, because none of them can be
+dropped honestly.
+
+## What it does not stop
 
 ### Domain fronting
 
@@ -544,27 +555,13 @@ stable hostname.
 `universal` sees nothing inside any tunnel, not only these: a rule reaches as far as a host and a
 port, so the method and the path are neither enforced nor reported.
 
-### `inspect` cannot work with everything, in either mode
-
-TLS is terminated, so a tool that pins a certificate, or ships a bundled trust store it never lets
-the system update, will not work. The JVM and Chromium read their own trust stores rather than the
-system one, and only some of those stores get the CA.
-[Limitations](../README.md#under-the-inspect-engine) says which, and has the rest of the
-compatibility picture.
-
-`audit` is not a passive observer here either. TLS is terminated in both modes, so a tool that
-cannot accept the CA fails under `audit` exactly as it would under `restrict`. What `audit` drops is
-the rule ACLs, not the interception: `set-dst`, the origin certificate check and the
-[inward-resolution guard](#a-name-may-not-resolve-inward) all stay, because none of them can be
-dropped honestly.
-
 ### No content digests
 
 Nothing here attests to what a request returned, only that it was made and to what. Query strings
 are kept in the log, since that is also where an exfiltration payload would go; the report is the
 exception, see below.
 
-## Credentials in a URL
+### Credentials in a URL
 
 **Communication details** prints the URL of every request, so a credential written into a query
 string reaches everyone who can read the run. GitHub masks the values it knows as workflow secrets,
@@ -598,7 +595,7 @@ out of the summary.
 An `allowed_url_rules` block suggested by an audit run never carries a query at all: rules match on
 the path, and a recorded query is as likely to hold a one-off token as anything reusable.
 
-## Filesystem audit
+### Filesystem audit
 
 `filesystem_audit: record` records what the step touches; it never blocks an access, so it is a
 visibility aid, not a control. What follows is what the watched step itself can do to the record;
@@ -691,69 +688,6 @@ Where the tracer cannot start or cannot attach a probe the kernel offers, for wa
 or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep a partial
 record. A tracer that exits during the step, as one does when the step fills the disk it writes to,
 also fails the step, after the command, with the record cut where it stopped.
-
-## Hardening
-
-Buildcage runs against the command you already have, and an allowlist generated from an audit run
-already blocks every destination the audit did not record. Going further is about shrinking the set
-of services that stay reachable, which is the [structural limit](#threat-model) above. Weigh what
-follows against what the step has access to.
-
-### Keep each rule as narrow as it can be
-
-An audit run only ever emits the exact `host:port` pairs it observed. Wildcards and `:*` ports come
-from broadening a rule by hand, and each one covers destinations the command never asked for. Where
-a broad rule exists, it is worth checking whether the command can be changed instead.
-
-Pay particular attention to general-purpose destinations: a gist host, object storage, or an API
-that can create repositories. They accept uploads as readily as they serve downloads, which is what
-makes them useful for sending data out.
-
-A wildcard host widens the DNS side too. The resolver inside the sandbox answers locally and forwards
-nothing (see [DNS never leaves the job](#dns-never-leaves-the-job)), but a request the rules admit is
-resolved upstream by the proxy against the runner's own DNS before it connects. Under `*.example.com`
-a name like `<data>.example.com` is resolved the moment the request is allowed, so its labels reach
-that domain's authoritative nameserver even if the request is then blocked on its path. In `audit`,
-where nothing is blocked, every name the command asks for is resolved this way. A literal host, or a
-narrow wildcard, limits which names leave the job.
-
-### Reduce what has to be reachable
-
-Each step carries its own allowlist, so work that needs a wide one can be separated from work that
-does not. Fetching dependencies is usually what puts a package registry on the list:
-
-```yaml
-- name: Install
-  uses: buildcage/isolated-run@<sha>
-  with:
-    allowed_https_rules: registry.npmjs.org:443
-    run: npm ci --ignore-scripts
-
-- name: Build and test
-  uses: buildcage/isolated-run@<sha>
-  with:
-    allowed_https_rules: "" # nothing
-    run: |
-      npm run build
-      npm test
-```
-
-This only helps when fetching does not itself execute dependency code. `--ignore-scripts` makes that
-explicit rather than leaning on npm's default, and it is what keeps the step with the registry and
-the step running third-party code separate. Where fetching does run third-party code, such as a
-`pip install` that builds an sdist or a Cargo build script, the split moves nothing, because the
-code still runs where the network is.
-
-A mirror configured as a read-only pull-through cache serves upstream packages on demand and accepts
-no publishes, so nothing can be uploaded to the destination on your allowlist. Running one is a
-bigger commitment than anything else in this section.
-
-### Keep the rest of your supply chain practice
-
-Pinning versions, lockfiles, review, least-privilege tokens, and a dependency cooldown each cover
-something an allowlist does not. Buildcage adds a layer to these and replaces none of them.
-
-## Known Limitations
 
 ### What the sandbox does not stop
 
@@ -919,7 +853,68 @@ something an allowlist does not. Buildcage adds a layer to these and replaces no
   step-to-container mapping unambiguous, at the cost of startup time on jobs with many isolated
   steps.
 
-## Image Provenance Verification
+## Hardening
+
+Buildcage runs against the command you already have, and an allowlist generated from an audit run
+already blocks every destination the audit did not record. Going further is about shrinking the set
+of services that stay reachable, which is the [structural limit](#threat-model) above. Weigh what
+follows against what the step has access to.
+
+### Keep each rule as narrow as it can be
+
+An audit run only ever emits the exact `host:port` pairs it observed. Wildcards and `:*` ports come
+from broadening a rule by hand, and each one covers destinations the command never asked for. Where
+a broad rule exists, it is worth checking whether the command can be changed instead.
+
+Pay particular attention to general-purpose destinations: a gist host, object storage, or an API
+that can create repositories. They accept uploads as readily as they serve downloads, which is what
+makes them useful for sending data out.
+
+A wildcard host widens the DNS side too. The resolver inside the sandbox answers locally and forwards
+nothing (see [DNS never leaves the job](#dns-never-leaves-the-job)), but a request the rules admit is
+resolved upstream by the proxy against the runner's own DNS before it connects. Under `*.example.com`
+a name like `<data>.example.com` is resolved the moment the request is allowed, so its labels reach
+that domain's authoritative nameserver even if the request is then blocked on its path. In `audit`,
+where nothing is blocked, every name the command asks for is resolved this way. A literal host, or a
+narrow wildcard, limits which names leave the job.
+
+### Reduce what has to be reachable
+
+Each step carries its own allowlist, so work that needs a wide one can be separated from work that
+does not. Fetching dependencies is usually what puts a package registry on the list:
+
+```yaml
+- name: Install
+  uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_https_rules: registry.npmjs.org:443
+    run: npm ci --ignore-scripts
+
+- name: Build and test
+  uses: buildcage/isolated-run@<sha>
+  with:
+    allowed_https_rules: "" # nothing
+    run: |
+      npm run build
+      npm test
+```
+
+This only helps when fetching does not itself execute dependency code. `--ignore-scripts` makes that
+explicit rather than leaning on npm's default, and it is what keeps the step with the registry and
+the step running third-party code separate. Where fetching does run third-party code, such as a
+`pip install` that builds an sdist or a Cargo build script, the split moves nothing, because the
+code still runs where the network is.
+
+A mirror configured as a read-only pull-through cache serves upstream packages on demand and accepts
+no publishes, so nothing can be uploaded to the destination on your allowlist. Running one is a
+bigger commitment than anything else in this section.
+
+### Keep the rest of your supply chain practice
+
+Pinning versions, lockfiles, review, least-privilege tokens, and a dependency cooldown each cover
+something an allowlist does not. Buildcage adds a layer to these and replaces none of them.
+
+## Image provenance verification
 
 isolated-run decides what a step can reach, so the action has to establish that the image it runs is
 the one this repository published.
@@ -979,7 +974,7 @@ even if it is signed. An attacker who can push to `ghcr.io/buildcage/isolated-ru
 compromising the repository cannot produce a valid bundle, since the Fulcio certificate requires an
 OIDC token issued during a real workflow run on the real repository.
 
-### Verification Limitations
+### Verification limitations
 
 Verification establishes where the image came from, and leaves the following uncovered:
 

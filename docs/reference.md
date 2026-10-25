@@ -709,7 +709,8 @@ request that followed them, and service-discovery lookups with the record type t
 
 This is also the form to keep where the report is an audit trail rather than something to read: in
 `filesystem_mode: persistent` a later step can add to the Job Summary, but not to an artifact
-already uploaded. See [Known Limitations](./security.md#known-limitations).
+already uploaded. See
+[What the sandbox does not stop](./security.md#what-the-sandbox-does-not-stop).
 
 | Field         | Always | Notes                                                                                                               |
 | ------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -974,7 +975,7 @@ The sandbox covers the host's `/run` with an empty tmpfs to keep host service so
 Naming a path under `/run`, or `/run` itself, re-exposes it, for a service socket a later step
 needs, say. That reopens an outbound path through the daemon behind it, and all of `/run` leaves the
 outbound restriction nearly pointless, so do it deliberately. See
-[Isolation Mechanisms](./security.md#isolation-mechanisms).
+[Isolation mechanisms](./security.md#isolation-mechanisms).
 
 ### Reserved paths
 
@@ -1000,7 +1001,7 @@ Naming a reserved path, or anything under one, fails the step rather than being 
 Naming a directory that contains them (`write_through: /etc`) is fine: writes elsewhere under it
 reach the host, and only the reserved paths themselves stay read-only. The same applies to the filesystems the sandbox mounts fresh, such as `/proc`
 and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`; see
-[Known Limitations](./security.md#known-limitations).
+[Rough edges](./security.md#rough-edges).
 
 ### The `/` opt-out
 
