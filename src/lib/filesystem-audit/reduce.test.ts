@@ -1764,7 +1764,7 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     );
     expect(rows(summary)).toStrictEqual(["./tool R ./dir/**", "tool X ./tool"]);
     const file = expectedRulesFile([], summary.proposed!)!;
-    const added = file.split("\n").slice(3, -1);
+    const added = file.split("\n").slice(4, -1);
     expect(added).toHaveLength(summary.proposed!.length);
     expect(new Set(added).size).toBe(added.length);
   });

@@ -8,6 +8,7 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { mediatedPathOf } from "../sandbox/runner-output-files.ts";
+import { UPLOAD_NOTE } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 import {
@@ -183,7 +184,7 @@ describe("readStepFilesystemAudit", () => {
         "and point `config_file` at it:\n\n" +
         "```yaml\nconfig_file: path/to/expected-filesystem-rules.yml\n```\n\n" +
         "Or copy its rules into the config file the step already uses, or into the workflow:\n\n" +
-        "```yaml\nfilesystem_audit: record\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n" +
+        `\`\`\`yaml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n` +
         "  # The reviewed rules from expected-filesystem-rules.yml, such as:\n",
     );
     // Below them, not under the heading.
@@ -1144,7 +1145,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(read.verdictItems).toStrictEqual({});
-    expect(ruleFiles[0].content.split("\n").slice(3, 6)).toStrictEqual([
+    expect(ruleFiles[0].content.split("\n").slice(4, 7)).toStrictEqual([
       "  # node R ./a",
       "",
       "  # Not matched in this run",
@@ -1187,6 +1188,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
         path: RULES,
         content: [
           "filesystem_audit: record",
+          UPLOAD_NOTE,
           "upload_filesystem_audit_artifact: true",
           "expected_filesystem_rules: |",
           "  # reads",

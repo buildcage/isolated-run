@@ -380,6 +380,7 @@ Like the audit itself, the rules never block an access.
 
    ```yaml
    filesystem_audit: record
+   # Uploads the full record and the next proposed rules each run; keep this key while you want them.
    upload_filesystem_audit_artifact: true
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
@@ -407,20 +408,23 @@ Like the audit itself, the rules never block an access.
    naming that file while the workflow still lists its own rules ends up with every rule twice.
 
 4. Once the baseline holds steady, set `fail_on_unexpected_file_access: true` to fail the step on
-   an access outside it.
+   an access outside it. The file also keeps `upload_filesystem_audit_artifact: true`: each run
+   then uploads an artifact holding every path the step touched, and the next proposed file with
+   it, as below. Keep the key while you want those files, and drop it when you do not.
 
 ### Keeping it up to date
 
-A run with rules proposes a file too: the rules given, each line trimmed, then, under a
-`# Not matched in this run` line, a rule for each access they did not take; where they took every
-access, the file holds only the rules given. When the summary shows unexpected accesses, download
-the file and compare it with the committed one: commit the rules a change you know of explains, such
-as a dependency update, and look into the rest.
+A run with rules and `upload_filesystem_audit_artifact: true` proposes a file too: the rules given,
+each line trimmed, then, under a `# Not matched in this run` line, a rule for each access they did
+not take; where they took every access, the file holds only the rules given. When the summary shows
+unexpected accesses, download the file and compare it with the committed one: commit the rules a
+change you know of explains, such as a dependency update, and look into the rest.
 
 Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
 your own rules already take. A new `dir/**` that covers one of your narrower rules is left beside
 it: the comparison shows both, and you decide which to keep. A `# Not matched in this run` line
-committed with the file is dropped from the next one.
+committed with the file, and the blank lines around it, are dropped from the next one and from the
+traffic report's **Switch to restrict mode** example.
 
 No file is proposed when the run recorded no access, when the accesses touched too many distinct
 paths, when the file could not be written, or when the artifact could not be prepared or uploaded;
