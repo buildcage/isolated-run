@@ -66,3 +66,16 @@ run_step() {
   fi
   "${cmd[@]}" > "$prefix.log" 2>&1
 }
+
+# state_container_name <state file>: the proxy container name a step wrote to
+# its GITHUB_STATE, empty if it wrote none.
+state_container_name() {
+  awk '/^container_name<</{getline; print; exit}' "$1" 2>/dev/null
+}
+
+# proxy_project <container name>: the Compose project the step started that
+# container under, as deriveProjectName (src/core/lib/docker/compose-project-name.ts)
+# derives it. Once the container is gone its labels can't be read.
+proxy_project() {
+  printf 'buildcage-%s' "$(printf '%s' "$1" | sha256sum | cut -c1-12)"
+}

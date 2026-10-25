@@ -77,7 +77,7 @@ done
 for label_dir in "A:$TMP_A" "B:$TMP_B"; do
   label="${label_dir%%:*}"
   dir="${label_dir#*:}"
-  name=$(awk '/^container_name<</{getline; print; exit}' "$dir/step.state")
+  name=$(state_container_name "$dir/step.state")
   if [ -z "$name" ]; then
     fail "instance $label wrote no container_name to GITHUB_STATE"
     continue
@@ -89,9 +89,7 @@ for label_dir in "A:$TMP_A" "B:$TMP_B"; do
     fail "instance $label left $name behind"
   fi
 
-  # Mirrors deriveProjectName (src/core/lib/docker/compose-project-name.ts):
-  # the container is already gone here, so its Compose labels can't be read.
-  project="buildcage-$(printf '%s' "$name" | sha256sum | cut -c1-12)"
+  project=$(proxy_project "$name")
   if [ -z "$(docker network ls --filter "label=com.docker.compose.project=$project" -q)" ]; then
     pass "instance $label left no proxy network behind"
   else

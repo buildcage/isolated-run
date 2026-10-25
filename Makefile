@@ -160,7 +160,8 @@ test_integration_sandbox_universal: ## Run the universal-engine fixture-based in
 		./test/integration-test-universal-audit.sh \
 		./test/integration-test-concurrent.sh \
 		./test/integration-test-known-blocked-rules.sh \
-		./test/integration-test-reserved-mounts.sh
+		./test/integration-test-reserved-mounts.sh \
+		./test/integration-test-proxy-down.sh
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.

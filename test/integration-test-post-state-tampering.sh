@@ -97,8 +97,8 @@ VICTIM_PID=$!
 
 VICTIM_NAME=""
 for _ in $(seq 1 60); do
-  if grep -q '^container_name<<' "$VICTIM_DIR/state.env" 2>/dev/null; then
-    VICTIM_NAME=$(awk '/^container_name<</{getline; print; exit}' "$VICTIM_DIR/state.env")
+  VICTIM_NAME=$(state_container_name "$VICTIM_DIR/state.env")
+  if [ -n "$VICTIM_NAME" ]; then
     CREATED_CONTAINERS+=("$VICTIM_NAME")
     break
   fi
