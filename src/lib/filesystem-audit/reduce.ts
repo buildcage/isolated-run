@@ -244,8 +244,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // Each pid's program, by its rank in the order programs first ran. An exec
   // sets it, naming a script rather than its interpreter, and a fork hands
   // the parent's on; a process with no exec in the step's records, such as
-  // the step's shell, goes by its command name. The paths are keyed by rank, as a marked
-  // path holds the NUL a key ends at.
+  // the step's shell, goes by its command name. The paths are keyed by rank,
+  // as a marked path holds the NUL a key ends at.
   const programs = new Map<number | undefined, number>();
   // A program's rank holds its path, a command name's none.
   // A rank's ruleId is the first rank of its rule's name: a program shown

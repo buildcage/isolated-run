@@ -221,10 +221,10 @@ export function buildOciConfig(
     }));
   // Covers the host's /run, and a /var/run that isn't a link to it, with an
   // empty tmpfs (see hostRunCoverageLayers). Before the writable layers, so a
-  // write_through entry under either re-exposes
-  // that path on top of the tmpfs instead of being buried by it. Skipped under
-  // `write_through: /`, the documented full filesystem opt-out, so /run comes
-  // back with the rest of the host.
+  // write_through entry under either re-exposes that path on top of the tmpfs
+  // instead of being buried by it. Skipped under `write_through: /`, the
+  // documented full filesystem opt-out, so /run comes back with the rest of
+  // the host.
   const runCoverage = disableReadonly
     ? { mounts: [], writablePaths: new Set<string>() }
     : hostRunCoverageLayers(probes.varRunRealPath());
@@ -262,18 +262,9 @@ export function buildOciConfig(
       ...baseSpec.process,
       terminal: false,
       user: { uid, gid },
-      // setpriv --pdeathsig ties this process's life to its direct
-      // parent's, the `runc run` process, not run-isolated.sh itself
-      // (runc's own process sits in between). This is the second hop of a
-      // two-hop chain: run-isolated.sh also wraps its own `runc run`
-      // invocation in `setpriv --pdeathsig=KILL` (targeting itself), so if
-      // run-isolated.sh is SIGKILL'd, `runc run` dies too, which then
-      // kills this process in turn. Without the outer hop, `runc run`
-      // would merely become an orphan (still alive) and this process,
-      // whose parent never actually died, would never receive anything.
-      // No other setpriv flags are needed here: uid/gid, capabilities,
-      // and no_new_privs are already applied by runc itself (above/below)
-      // before this execs.
+      // Dies with `runc run`, its direct parent. run-isolated.sh puts the
+      // same pdeathsig on `runc run` itself, so a SIGKILLed run-isolated.sh
+      // takes both down.
       args: [
         probes.setprivPath(),
         "--pdeathsig=KILL",
@@ -301,10 +292,10 @@ export function buildOciConfig(
       ...(cgroupsPath !== undefined && { cgroupsPath }),
       namespaces,
       seccomp: seccompProfile,
-      // runc applies masks after every mount, so they win over a writable layer:
-      // the mediation's real runner files stay covered even under write_through.
+      // runc applies both after every mount, so they win over any writable
+      // layer: the mediation's real runner files stay masked even under
+      // write_through.
       maskedPaths: [...new Set([...maskedPaths, ...extraMaskedPaths])],
-      // runc applies these after every mount, so they win over any writable layer.
       readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])],
     },
   };

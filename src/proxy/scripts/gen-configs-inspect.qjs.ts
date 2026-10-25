@@ -4,7 +4,7 @@
  * of core's, so init-cfg runs it unchanged.
  *
  * ALLOWED_AWS_KEY and ALLOWED_AWS_ROLE_ACCOUNTS are read from the environment
- * rather than passed by init-cfg, which both repos share.
+ * rather than passed by init-cfg.
  */
 import * as std from "qjs:std";
 

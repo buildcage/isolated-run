@@ -8,7 +8,7 @@ const productionInputs = globSync(["**/scripts/*.ts"], {
   exclude: ["node_modules/**", "dist/**", "**/*.test.ts"],
 });
 
-// src/core/lib/acl/*.test.ts and src/proxy/*.test.ts are dual-consumed (also runs under vitest);
+// src/core/lib/acl/*.test.ts and src/proxy/*.test.ts also run under vitest;
 // *.property.test.ts (fast-check) and *.golden.test.ts (reads its fixture off
 // disk) siblings are vitest-only, not qjs-compatible.
 const qjsTestInputs = [

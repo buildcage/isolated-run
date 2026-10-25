@@ -19,10 +19,10 @@ import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
 // what may be torn down, and tearing it down is one `docker compose down`.
 /* v8 ignore start */
 // The override is read here too, not just in main.ts: if main.ts started the
-// proxy via BUILDCAGE_TEST_COMPOSE_FILE (this repo's own inspect-engine fixture
-// tests) and the process was then killed before its own finally block ran, this
-// fallback must tear down the same compose file that started it, not the
-// shipped default it never used.
+// proxy via BUILDCAGE_TEST_COMPOSE_FILE (this repo's own driver tests, see
+// test/driver-helpers.sh) and the process was then killed before its own
+// finally block ran, this fallback must tear down the same compose file that
+// started it, not the shipped default it never used.
 async function stopProxyContainer({ containerName, projectName }: PostCleanupTargets) {
   const composeFile = resolveComposeFile(await readLocalImageOverride(process.env));
 
@@ -32,11 +32,11 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
   });
 }
 
-// Fallback-only cleanup: main.ts already stops the proxy container in its
-// own finally block on every normal exit path. This only matters if the
-// process was killed outright before reaching that finally (e.g. a cancel
-// while the proxy was still starting). State saved by main.ts's core.saveState surfaces
-// here via core.getState; see
+// Fallback-only cleanup: runSandboxStep (sandbox-step.ts) already stops the
+// proxy container in its own finally block on every normal exit path. This
+// only matters if the process was killed outright before reaching that
+// finally (e.g. a cancel while the proxy was still starting). State saved by
+// the main step's core.saveState surfaces here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {
   // The write_through the main step saved when it read config_file, which

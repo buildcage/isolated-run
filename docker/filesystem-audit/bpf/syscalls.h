@@ -38,8 +38,8 @@ struct path_call {
 	u32 kind;      ///< emitted on failure
 	u32 kind_ok;   ///< emitted on success, 0 to skip
 	u32 quiet_err; ///< an errno that changed nothing, so is not recorded
-	s32 dfd1;      ///< what p1 and p2 resolve against when relative
-	s32 dfd2;
+	s32 dfd1;      ///< what p1 resolves against when relative
+	s32 dfd2;      ///< likewise for p2
 	u32 val1;      ///< a chmod's new mode, or a chown's new uid
 	u32 val2;      ///< a chown's new gid
 	u32 empty_dfd; ///< an empty p1 names dfd1's own file (AT_EMPTY_PATH)
@@ -50,11 +50,11 @@ struct path_call {
  * @name Failed path syscalls
  * security_path_* fires only once the path has resolved, so a missing target
  * (the common failure) never reaches it; the syscall's exit catches it, with
- * the arguments the call left in its registers, and emits only when ret < 0,
- * reading the user path(s) they point to. Best-effort: this reads the user
- * buffer, which a concurrent thread could rewrite while the call runs, so a
- * failed op's recorded path is not tamper-proof the way an open's getname
- * copy is.
+ * the arguments the call left in its registers, reading the user path(s) they
+ * point to. Only a failure is sent, save the attribute changes (see attr_op).
+ * Best-effort: this reads the user buffer, which a concurrent thread could
+ * rewrite while the call runs, so a failed op's recorded path is not
+ * tamper-proof the way an open's getname copy is.
  * @{
  */
 

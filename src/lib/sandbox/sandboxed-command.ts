@@ -311,7 +311,7 @@ interface BundleFiles {
 /**
  * The side-effecting half of the assembly (mkdir/write). Must happen before
  * run-isolated.sh's `mount --rbind /` and before runIsolated, the same timing
- * constraint ensureWriteThroughTargetsExist has; see ephemeral-fs.ts.
+ * constraint ensureWriteThroughTargetsExist has; see write-through.ts.
  */
 function writeBundleFiles(
   dir: string,

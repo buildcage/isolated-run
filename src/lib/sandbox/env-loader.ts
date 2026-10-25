@@ -88,7 +88,7 @@ export function buildEnvBlob(resolved: Record<string, string>): Buffer {
   return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
 }
 
-// Resolved from the bundle's own location: dist/main.cjs sits beside scripts/.
+// Resolved from the bundle's own location: dist/ sits beside scripts/.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** The sandbox's PID 1, shipped in scripts/ as run-isolated.sh is. */

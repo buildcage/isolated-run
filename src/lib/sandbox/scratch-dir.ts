@@ -89,7 +89,9 @@ function defaultRemove(path: string): void {
 }
 
 function defaultMkdir(path: string, mode: number): void {
-  mkdirSync(path, { mode }); // no recursive: /var/tmp always exists
+  // Not recursive: an existing path must fail with EEXIST (see
+  // ensureOwnScratchBase), and a missing /var/tmp is reported, not created.
+  mkdirSync(path, { mode });
 }
 /* v8 ignore stop */
 
@@ -136,8 +138,8 @@ function unmountAllUnder(dir: string, deps: ScratchDirDeps, warn?: Warn): void {
  * mounted (notably a "work/work" subdirectory used for atomic rename
  * during copy-up), content that stays on disk, root-owned and not
  * traversable by the unprivileged runner user, once the mount itself is
- * gone. The plain (unprivileged) rmSync above stays the fast path: it is all
- * that persistent mode, and every unit test, ever needs.
+ * gone. The unprivileged removal stays the fast path: it is all persistent
+ * mode, and every unit test, ever needs.
  */
 function removeScratchDir(dir: string, deps: ScratchDirDeps): void {
   const { exec = runPinnedHostCommand, lstat = lstatSync, remove = defaultRemove } = deps;
@@ -187,9 +189,9 @@ export interface CleanupScratchDirOptions {
 
 /**
  * Force-detach anything still mounted under `dir` (see unmountAllUnder) and
- * then recursively remove it. Exported
- * so post.ts can reclaim a scratch dir orphaned by a hard kill that bypassed
- * withScratchDir's own finally. No-ops safely when `dir` doesn't exist.
+ * then recursively remove it. Exported so post.ts can reclaim a scratch dir
+ * orphaned by a hard kill that bypassed withScratchDir's own finally. No-ops
+ * safely when `dir` doesn't exist.
  */
 export function cleanupScratchDir(
   dir: string,

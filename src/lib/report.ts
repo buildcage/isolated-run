@@ -217,9 +217,9 @@ function cutCommandSummary(summary: Buffer, room: number): Buffer {
  * Moves the command's own summary, the first `commandBytes` of the file, after
  * what buildcage wrote, under a rule, and cuts it to what buildcage left of
  * GitHub's limit. There, whatever it leaves open (a code fence, a comment, a
- * `<details>`) has nothing after it to swallow. It is written first so that
- * neither a cancelled step nor a failure in between can lose it. Returns
- * whether the command's summary was cut.
+ * `<details>`) has nothing after it to swallow. The command's summary is
+ * written back before the report, so neither a cancelled step nor a failure in
+ * between can lose it. Returns whether the command's summary was cut.
  */
 export function moveCommandSummaryLast(path: string, commandBytes: number): boolean {
   if (commandBytes === 0) return false;

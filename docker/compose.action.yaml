@@ -2,9 +2,8 @@ services:
   proxy:
     container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
     image: ${BUILDCAGE_PROXY_IMAGE_REF:-placeholder}
-    # Nothing in this image runs buildkitd or runc, so only NET_ADMIN is needed
-    # (interface renaming/addressing + iptables), no SYS_ADMIN/SYS_PTRACE,
-    # no cgroup:host, no default-seccomp/apparmor bypass.
+    # Only NET_ADMIN, for interface addressing and iptables: runc runs on the
+    # runner host, not in this container.
     cap_add:
       - NET_ADMIN
     environment:
@@ -12,7 +11,7 @@ services:
       - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
       - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
       - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
-      # inspect only: it is the one engine that can see a method or a path.
+      # inspect only: it sees a request's method and path.
       - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
       - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
       # inspect only: the AWS access key check, off when no key is given.

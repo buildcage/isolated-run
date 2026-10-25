@@ -52,22 +52,12 @@ export interface DetermineOverlayRootsOptions {
 /**
  * Pure: fold the fixed candidate paths ($HOME, $RUNNER_TEMP, /tmp,
  * $GITHUB_WORKSPACE) down to the set that actually needs an overlay:
- * 1. Drop any candidate that doesn't exist on disk. Checked first, before
- *    the nesting fold below, so one existing candidate's own coverage can
- *    never be affected by whether some other candidate
- *    happens to exist; otherwise an absent outer candidate could still
- *    "swallow" an existing inner one in step 3, then itself get dropped
- *    here, leaving the inner one with no overlay and no protection at all.
- * 2. Drop any candidate that's covered by (equals, or is a descendant of) a
- *    write_through entry: that entry already persists everything under it,
- *    so no overlay is needed there. A candidate that only contains a
- *    narrower write_through entry (the common case: write_through: ./dist
- *    under an otherwise-ephemeral $GITHUB_WORKSPACE) is kept: its overlay
- *    still covers everything else under it, and the narrower entry's own rw
- *    bind (a later, and so winning, mount; see buildOciConfig's ephemeral
- *    branch) persists just that subtree on top. Dropping the candidate here
- *    too would make the rest of it read-only instead of ephemeral-writable,
- *    defeating the point of layering write_through over an overlay at all.
+ * 1. Drop any candidate that doesn't exist, first, so an absent outer
+ *    candidate cannot swallow an existing inner one in step 3.
+ * 2. Drop any candidate at or under a write_through entry, which already
+ *    persists it. One that only contains a narrower entry is kept: its
+ *    overlay covers the rest, and the entry's own rw bind (a later, and so
+ *    winning, mount; see ephemeralLayers) persists just that subtree.
  * 3. Drop any remaining candidate nested under another remaining candidate
  *    (no nested overlays; the outer one wins), but only when they're on
  *    the same filesystem. A candidate on a filesystem of its own (an
@@ -180,11 +170,10 @@ export function overlayUpperFor(scratchDir: string, root: string): string {
 }
 
 /**
- * Physical upper/work dirs for each overlay root: siblings of rootfsBindDir
- * under this run's own scratch dir (`<scratchDir>/ephemeral/<slug>/{upper,work}`),
- * never inside SANDBOX_SCRATCH_BASE's rootfs subtree itself; see
- * assertScratchBaseNotWritable's invariant. Creates the directories as a
- * side effect; must run before runIsolated(), for the same reason
+ * Physical upper/work dirs for each overlay root, under this run's scratch
+ * dir beside rootfsBindDir (`<scratchDir>/ephemeral/<slug>/{upper,work}`),
+ * never inside the rootfs bind itself. Creates the directories as a side
+ * effect; must run before runIsolated(), for the same reason
  * ensureWriteThroughTargetsExist does.
  */
 export function createOverlayScratchDirs(

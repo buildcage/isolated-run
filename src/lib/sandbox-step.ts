@@ -221,12 +221,11 @@ function saveCleanupState(
  * backing copy, and returns whether that failed the step and how many bytes
  * of $GITHUB_STEP_SUMMARY it wrote. $GITHUB_OUTPUT is trimmed to the entries
  * the runner can read; a dropped entry fails the step, since the runner would
- * stop at it. A
- * $GITHUB_STEP_SUMMARY over GitHub's limit is replaced with a note, as GitHub
- * would drop it whole. A backing copy the command made unreadable (a symlink,
- * FIFO, or permissions taken away) leaves the real file empty and fails the
- * step, and so does a real path that is not a regular file (see
- * writeRunnerFile).
+ * stop at it. A $GITHUB_STEP_SUMMARY over GitHub's limit is replaced with a
+ * note, as GitHub would drop it whole. A backing copy the command made
+ * unreadable (a symlink, FIFO, or permissions taken away) leaves the real file
+ * empty and fails the step, and so does a real path that is not a regular file
+ * (see writeRunnerFile).
  */
 function writeBackMediatedFile(
   file: MediatedRunnerFile,
@@ -604,7 +603,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
  * Runs one `run:` step start to finish and returns the exit code the workflow
  * step should take, which is the isolated command's own. Anything that stops
  * the command from running rejects instead. Sets process.exitCode only for a
- * failure a report finds, or a $GITHUB_OUTPUT the command left unreadable; the
+ * failure a report finds, or a runner file the command left unreadable; the
  * command's own exit code is left to whoever invoked the action.
  */
 export async function runSandboxStep(

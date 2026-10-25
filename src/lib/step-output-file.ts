@@ -88,9 +88,9 @@ function isWide(head: Buffer): boolean {
 }
 
 // A value may hold a secret, so only a NAME<<DELIMITER line's name and
-// delimiter are quoted, cut short and escaped. After a delimiter that came too
-// early that line can still be part of a value; the runner's own error would
-// quote all of it.
+// delimiter are quoted, cut short and escaped. Even that line can be part of a
+// value, after a delimiter that came too early; the runner's own error would
+// quote it whole.
 const MAX_QUOTED = 64;
 // Enough for MAX_QUOTED + 1 characters of up to four bytes each, so a name or
 // delimiter cut to them still shows as cut.

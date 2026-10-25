@@ -62,10 +62,9 @@ function mountAt(mounts: MountinfoEntry[], path: string): MountinfoEntry | undef
 
 /**
  * Thrown by the guards that reject a writable path conflicting with something
- * the sandbox needs for itself: this one and oci-mounts.ts's
- * assertNoFreshMountDestinations. Both run twice, once early over the
- * write_through input and once authoritatively while the OCI bundle is built,
- * so both callers can turn it into the same FILESYSTEM_INPUT_CONFLICT code.
+ * the sandbox needs for itself. assertScratchBaseNotWritable also runs early
+ * over the write_through input, so the early and the bundle-time callers both
+ * turn it into FILESYSTEM_INPUT_CONFLICT.
  */
 export class WritablePathConflictError extends Error {}
 

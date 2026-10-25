@@ -59,7 +59,8 @@ export function classify(r: AuditRecord): Classified[] {
   let letter: string | undefined;
   let failed = false;
   if (r.failed && r.kind === "open") {
-    // What it asked for: a read, and a write if it asked to write, create or truncate.
+    // What it asked for: a read unless it opened write-only, and a write if it
+    // asked to write, create or truncate.
     const access = r.access ?? "r";
     letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : "");
     failed = true;
