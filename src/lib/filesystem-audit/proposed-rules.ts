@@ -22,6 +22,11 @@ const ruleField = (text: string): string => {
   return text === "" || text.startsWith("#") ? `"${text}"` : field(text);
 };
 
+// The artifact holds every path the step touched, so a file committed as is
+// should say what keeps it coming.
+const UPLOAD_NOTE =
+  "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.";
+
 /** The heading over the rules a run with rules adds for what they did not take. */
 export const NOT_MATCHED_HEADING = "# Not matched in this run";
 
@@ -32,9 +37,12 @@ export const NOT_MATCHED_HEADING = "# Not matched in this run";
  * to write.
  */
 export function expectedRulesFile(written: string[], proposed: RuleRow[]): string | undefined {
-  // A file proposed before and committed would otherwise keep its heading
-  // over rules this run matched.
-  const given = written.filter((line) => line !== NOT_MATCHED_HEADING);
+  // A file proposed before and committed would otherwise keep its heading,
+  // and the blank line before it, over rules this run matched.
+  const given = written.filter(
+    (line, i) =>
+      line !== NOT_MATCHED_HEADING && (line !== "" || written[i + 1] !== NOT_MATCHED_HEADING),
+  );
   const rows = proposed.map((r) => [ruleField(r.program.path), r.flags, ruleField(r.path.path)]);
   const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
   const [programW, flagsW] = [width(0), width(1)];
@@ -50,6 +58,7 @@ export function expectedRulesFile(written: string[], proposed: RuleRow[]): strin
   if (lines.length === 0) return undefined;
   return [
     "filesystem_audit: record",
+    UPLOAD_NOTE,
     "upload_filesystem_audit_artifact: true",
     `${EXPECTED_RULES_INPUT}: |`,
     ...lines.map((line) => (line ? `  ${line}` : "")),

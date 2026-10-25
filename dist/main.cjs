@@ -72949,20 +72949,21 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 }
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), NOT_MATCHED_HEADING = "# Not matched in this run";
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text);
 function expectedRulesFile(written, proposed) {
-	let given = written.filter((line) => line !== NOT_MATCHED_HEADING), rows = proposed.map((r) => [
+	let given = written.filter((line, i) => line !== "# Not matched in this run" && (line !== "" || written[i + 1] !== "# Not matched in this run")), rows = proposed.map((r) => [
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(r.path.path)
 	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
 		...given,
 		"",
-		NOT_MATCHED_HEADING,
+		"# Not matched in this run",
 		...added
 	];
 	if (lines.length !== 0) return [
 		"filesystem_audit: record",
+		"# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.",
 		"upload_filesystem_audit_artifact: true",
 		`${EXPECTED_RULES_INPUT}: |`,
 		...lines.map((line) => line ? `  ${line}` : ""),

@@ -1144,7 +1144,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
 
     expect(read.verdictItems).toStrictEqual({});
-    expect(ruleFiles[0].content.split("\n").slice(3, 6)).toStrictEqual([
+    expect(ruleFiles[0].content.split("\n").slice(4, 7)).toStrictEqual([
       "  # node R ./a",
       "",
       "  # Not matched in this run",
@@ -1187,6 +1187,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
         path: RULES,
         content: [
           "filesystem_audit: record",
+          "# Uploads the full record and the next proposed rules each run; drop it once the baseline holds.",
           "upload_filesystem_audit_artifact: true",
           "expected_filesystem_rules: |",
           "  # reads",

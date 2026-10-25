@@ -380,6 +380,7 @@ Like the audit itself, the rules never block an access.
 
    ```yaml
    filesystem_audit: record
+   # Uploads the full record and the next proposed rules each run; drop it once the baseline holds.
    upload_filesystem_audit_artifact: true
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
@@ -407,7 +408,8 @@ Like the audit itself, the rules never block an access.
    naming that file while the workflow still lists its own rules ends up with every rule twice.
 
 4. Once the baseline holds steady, set `fail_on_unexpected_file_access: true` to fail the step on
-   an access outside it.
+   an access outside it, and drop `upload_filesystem_audit_artifact` from the file, unless you want
+   each run to keep its record, which holds every path the step touched.
 
 ### Keeping it up to date
 
@@ -420,7 +422,7 @@ as a dependency update, and look into the rest.
 Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
 your own rules already take. A new `dir/**` that covers one of your narrower rules is left beside
 it: the comparison shows both, and you decide which to keep. A `# Not matched in this run` line
-committed with the file is dropped from the next one.
+committed with the file, and the blank line before it, are dropped from the next one.
 
 No file is proposed when the run recorded no access, when the accesses touched too many distinct
 paths, when the file could not be written, or when the artifact could not be prepared or uploaded;
