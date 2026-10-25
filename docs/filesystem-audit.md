@@ -680,10 +680,10 @@ also fails the step, after the command, with the record cut where it stopped.
 
 - **Job Summary size.** When the traffic report and this section would pass GitHub's 1 MiB cap, the
   file access details give way first, and this section's table after the traffic report's timeline
-  and known blocked hosts; [The Job Summary size cap](../README.md#the-job-summary-size-cap) has the
-  full order. A part that does not fit is cut at a line, with a note after what is kept, or replaced
-  by the note when none of it fits. The note names the artifact, which still holds every access, or
-  says how to ask for one, or, when the upload failed, that the record was not kept.
+  and known blocked hosts; [The Job Summary size cap](./reference.md#the-job-summary-size-cap) has
+  the full order. A part that does not fit is cut at a line, with a note after what is kept, or
+  replaced by the note when none of it fits. The note names the artifact, which still holds every
+  access, or says how to ask for one, or, when the upload failed, that the record was not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
   keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is

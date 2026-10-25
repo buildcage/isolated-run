@@ -445,6 +445,12 @@ refused with an error naming what to write instead.
 
 ## Report details
 
+An alert under the report's title counts what needs a look: requests blocked, requests `restrict`
+would block, connections that failed and requests nothing acted on. It is a CAUTION when a request
+was blocked unexpectedly or the report is incomplete, and a WARNING otherwise. With nothing to
+count, or only requests blocked as expected, there is no alert. In the tables that follow, blocked
+requests are marked 🚫 and failed connections ⚠️.
+
 Matching is per request, so a row that counts several requests to one host counts as expected only
 when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's
 other blocked requests to fail the step. The matched rows go under **Known Blocked Hosts**,
@@ -460,6 +466,28 @@ and no port (folded like any other row when a `known_blocked_rules` rule matches
 wider than the step needs shows up. A name that was connected to has no such row: the connection is
 already there. A name whose every connection ended before a request keeps that row, since the
 [ones nobody decided](#the-ones-nobody-decided) reach no table.
+
+### The Job Summary size cap
+
+GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
+the whole summary rather than truncating it. The report is written first; what the command wrote
+follows it, cut at a line boundary with a note and a warning when it does not fit in what is left.
+A note and a warning replace what the command wrote when it is over 1 MiB on its own, as GitHub
+would drop it whole; the step does not fail.
+
+When the report itself, with its Filesystem Activity section if the filesystem audit was on, would
+pass the limit, its parts give way in this order: the file access details, the timeline, the known
+blocked hosts table, the Filesystem Activity table, the AWS keys table, the allowed table, the
+blocked and failed table, the ⚠️ tables of requests `restrict` would block, and last the `restrict`
+example. A part that does not fit is cut at a line boundary with a note after what is kept, or
+replaced by the note when nothing of it fits; the known blocked hosts table and the example are only
+ever replaced whole. Once one of the other traffic tables is cut, the timeline and the known blocked
+hosts table are left out under the same note. The Filesystem Activity section follows the same
+rule: once its table is cut, the details are left out under its note.
+
+The report is written to the Job Summary only, so what was cut is recovered from the
+[traffic artifact](#traffic-artifact), or the filesystem audit's own artifact for its section; when
+neither was uploaded, it is not kept anywhere.
 
 ## Blocked service names
 
@@ -872,6 +900,21 @@ about the same way when the step sets them. The CA goes only into a store that a
 is created. Both limits are in [Limitations](../README.md#limitations), with what they mean for a
 command that needs TLS trust.
 
+### JVM keystores
+
+A JVM reads none of these variables, only its own keystore. The CA is added, with the runner's own
+`keytool`, to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH` and
+of `$JAVA_HOME`, and the copy is mounted over it. Any other JDK keeps its own keystore. Bazel can be
+pointed at an injected copy with
+`bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`.
+
+The `keytool` that injects the CA runs outside the sandbox, so it must live outside `$HOME`,
+`$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. GitHub-hosted runners have one in
+`/usr/lib/jvm`. A self-hosted runner whose only JDKs are under `$HOME` (mise, sdkman, coursier, or
+`setup-java` with the runner in a home directory) needs a system JDK or a `RUNNER_TOOL_CACHE`
+outside `$HOME`. Without one, or with a keystore sealed under a non-default password, the step
+warns and a JVM build needs `proxy_engine: universal`.
+
 ### Chromium
 
 Chromium reads none of these, only its compiled-in root store and the NSS database in `$HOME`.
@@ -885,11 +928,11 @@ command starts: a `HOME` the command changes gets no slot.
 What the command writes to the database is kept where `filesystem_mode` keeps writes to that path:
 always under `persistent`, and under `ephemeral` only below a `write_through:` entry. Elsewhere it is
 discarded. The slot itself is never kept. A database that carries the CA itself, which a command
-changing the CA's trust (`certutil -M`) leaves, is not written back: it fails the step, naming the
-database and pointing at `fail_on_ca_residue`, or only warns under `fail_on_ca_residue: false`,
-which writes it back. When parallel steps change the same database, the one that ends later
-replaces the other's changes as a whole, as it does whatever else wrote to the database while the
-step ran.
+changing the CA's trust (`certutil -M`) or exporting it and importing it back leaves, is not
+written back: it fails the step, naming the database and pointing at `fail_on_ca_residue`, or only
+warns under `fail_on_ca_residue: false`, which writes it back. When parallel steps change the same
+database, the one that ends later replaces the other's changes as a whole, as it does whatever else
+wrote to the database while the step ran.
 
 A database the runner user cannot write, one too large to copy (over 512 files or 20 MiB), or a
 symlink or non-directory on the path leaves the database as it is, with a warning: Chromium in that
@@ -1000,7 +1043,7 @@ reaches them only through the bind and cannot move them aside.
 `$GITHUB_OUTPUT` is written back trimmed to the entries the runner can read (a dropped entry fails
 the step). `$GITHUB_STEP_SUMMARY` is written back as the command left it, after the report, cut to
 what the report leaves of GitHub's limit, or replaced by a note when it is over 1 MiB on its own
-(see [The Job Summary size cap](../README.md#the-job-summary-size-cap)). `$GITHUB_ENV`,
+(see [The Job Summary size cap](#the-job-summary-size-cap)). `$GITHUB_ENV`,
 `$GITHUB_PATH` and `$GITHUB_STATE` are not mediated: they stay read-only in the sandbox.
 
 ### Paths under `/run`
@@ -1010,6 +1053,19 @@ Naming a path under `/run`, or `/run` itself, re-exposes it, for a service socke
 needs, say. That reopens an outbound path through the daemon behind it, and all of `/run` leaves the
 outbound restriction nearly pointless, so do it deliberately. See
 [Isolation mechanisms](./security.md#isolation-mechanisms).
+
+### Runner directories
+
+The runner's install directory, the runner's `_actions` directory holding every action's checkout,
+and the docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only, since
+the runner and this action run code from them after the command exits. The exceptions are a
+`write_through:` entry naming the directory itself, and `uses: ./`, whose checkout is the
+workspace. On a self-hosted runner whose work directory is inside its install directory, as `_work`
+is by default, the rest of `_work`, such as the tool cache in `_work/_tool`, is read-only too; the
+workspace, `$RUNNER_TEMP` and `write_through:` entries stay writable. A directory reached through a
+symlink the command could replace, such as a `~/.docker` that links elsewhere, fails the step
+before the command runs; point `DOCKER_CONFIG` or the runner's work directory at the real path
+instead.
 
 ### Reserved paths
 

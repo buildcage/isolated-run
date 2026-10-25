@@ -29,14 +29,13 @@ Docker build's `RUN` steps rather than a workflow step, use
 
 - [Requirements](#requirements)
 - [Usage](#usage)
+- [How `run` is executed](#how-run-is-executed)
 - [Engines](#engines)
 - [Inputs](#inputs)
 - [The report](#the-report)
-- [AWS access key check](#aws-access-key-check)
-- [How `run` is executed](#how-run-is-executed)
-- [Passing values to `run`](#passing-values-to-run)
 - [Filesystem access](#filesystem-access)
 - [Filesystem audit](#filesystem-audit)
+- [AWS access key check](#aws-access-key-check)
 - [How it works](#how-it-works)
 - [CA trust and compatibility](#ca-trust-and-compatibility)
 - [Scope](#scope)
@@ -63,9 +62,8 @@ runner with passwordless `sudo` and a working Docker installation:
     one. Otherwise the step fails before writing anything there, saying where `/var/tmp` resolves.
   - For `filesystem_mode: ephemeral`, overlayfs support on the runner's own filesystem, checked by
     a probe before the step. It fails where the runner itself runs in a container whose root
-    filesystem is overlayfs, since an overlay's `upperdir` cannot sit on overlayfs. The probe's
-    leftovers are removed with `sudo rm -rf`, which the mode's own cleanup needs later anyway, so a
-    sudoers scope too narrow for it fails the probe as well.
+    filesystem is overlayfs, since an overlay's `upperdir` cannot sit on overlayfs, and where the
+    sudoers scope does not allow `sudo rm -rf`.
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
     the runner as root (`RUNNER_ALLOW_RUNASROOT`).
@@ -144,6 +142,49 @@ install touches. The AWS access key check runs against a real AWS account
 [restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and blocking a
 key the step was not given.
 
+## How `run` is executed
+
+`run` runs under `bash -e`, the same as a native `run:` step without `shell:`. To use another
+interpreter, start `run` with a shebang line; the script is then run as written, with no `set -e`
+added:
+
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    run: |
+      #!/usr/bin/env python3
+      print("hello")
+```
+
+`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
+they have no effect here. Use a shebang and `cd` instead.
+
+### Passing values to `run`
+
+Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
+`run:` step. The action forwards its process environment into the isolated command, so anything set
+via `env:` is available there too:
+
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+  with:
+    run: |
+      echo "Building for: $PR_TITLE"
+      npm test
+```
+
+Avoid interpolating `${{ }}` expressions directly into `run` itself (e.g.
+`run: echo "${{ github.event.pull_request.title }}"`). GitHub substitutes them into the script text
+before any shell runs, so an attacker-controlled value (a PR title, branch name, issue body) can
+inject arbitrary commands. Passing the same value through `env:` instead means it reaches the
+isolated command as a single environment variable, never interpreted as shell syntax. This is the
+same
+[script injection guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections)
+GitHub gives for any workflow, and applies to this action's `run` input exactly as it would to a
+native `run:` step.
+
 ## Engines
 
 `proxy_engine` selects how closely the command's traffic is examined.
@@ -175,6 +216,10 @@ job.
 
 The inputs can also be kept in a YAML file in the repository, named by `config_file`. See
 [Config file](./docs/reference.md#config-file).
+
+A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
+heading or a rule can carry its reason. It works the same in every rule input. `write_through` takes
+only whole-line `#` comments, since a path may contain a `#`.
 
 ### Operation modes
 
@@ -249,10 +294,6 @@ allowed_ip_rules: |
   192.168.1.10:443
 ```
 
-A `#` starts a comment at the start of a line or after whitespace, so a group of rules can carry a
-heading or a rule can carry its reason. It works the same in every rule input. `write_through` takes
-only whole-line `#` comments, since a path may contain a `#`.
-
 ### Destinations you expect to stay blocked
 
 A noisy dependency, or a domain you are deliberately keeping off the allowlist to confirm it stays
@@ -283,12 +324,8 @@ Any other blocked request to that host still fails the step. See
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was blocked
 from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title counts
-what needs a look: requests blocked, requests `restrict` would block, connections that failed and
-requests nothing acted on. It is a CAUTION when a request was blocked unexpectedly or the report is
-incomplete, and a WARNING otherwise. With nothing to count, or only requests blocked as expected,
-there is no alert. In the tables that follow, blocked requests are marked 🚫 and failed connections
-⚠️. With the [filesystem audit](./docs/filesystem-audit.md) on, a **Filesystem Activity Report**
-section follows the report.
+what needs a look. With the [filesystem audit](./docs/filesystem-audit.md) on, a **Filesystem
+Activity Report** section follows the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, so a blocked entry names the URL that was attempted rather than a bare host.
@@ -298,87 +335,14 @@ URL](docs/security.md#credentials-in-a-url).
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
 or written, since it can't show that nothing was blocked. Set `fail_on_blocked: false` to report
 without failing, or list what you expect to stay blocked in `known_blocked_rules`. In `audit` mode
-nothing fails the step. How the report folds expected rows, and what a `dns-service-not-allowed` row
-means, is in [Reference](./docs/reference.md#report-details).
+nothing fails the step. How the alert and the tables are made up, and what a
+`dns-service-not-allowed` row means, is in [Report details](./docs/reference.md#report-details).
 
 `upload_traffic_artifact: true` uploads the whole timeline as a `traffic.json`, one row per request
 and per name lookup, with the method, URL, status, size and the address it resolved to. It is
 uploaded even when the step fails. Under `universal` it omits the method, URL, status and resolved
 address that only `inspect` sees. The fields are listed in
 [Reference](./docs/reference.md#traffic-artifact).
-
-## AWS access key check
-
-> [!WARNING]
-> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
-> error messages may still change in a future release without following semver.
-
-Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
-account signs the request, so a compromised dependency could sign with its own key and send data to
-its author's account. `aws_key_check: true` accepts only the key the step was given in
-`AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts you
-name:
-
-```yaml
-- uses: aws-actions/configure-aws-credentials@<sha>
-  with:
-    role-to-assume: arn:aws:iam::111111111111:role/deploy
-    aws-region: us-east-1
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    proxy_mode: audit # shows what restrict would block
-    aws_key_check: true
-    run: aws ecs update-service --cluster app --service web --force-new-deployment
-```
-
-Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
-step that assumes roles of its own, as the CDK does, also names the roles' accounts in
-`allowed_aws_role_accounts`. The check needs the `inspect` engine.
-[AWS access key check](./docs/aws.md) covers adopting it, the block reasons, and the IAM settings
-for what it cannot see.
-
-## How `run` is executed
-
-`run` runs under `bash -e`, the same as a native `run:` step without `shell:`. To use another
-interpreter, start `run` with a shebang line; the script is then run as written, with no `set -e`
-added:
-
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    run: |
-      #!/usr/bin/env python3
-      print("hello")
-```
-
-`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
-they have no effect here. Use a shebang and `cd` instead.
-
-## Passing values to `run`
-
-Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
-`run:` step. The action forwards its process environment into the isolated command, so anything set
-via `env:` is available there too:
-
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  env:
-    PR_TITLE: ${{ github.event.pull_request.title }}
-  with:
-    run: |
-      echo "Building for: $PR_TITLE"
-      npm test
-```
-
-Avoid interpolating `${{ }}` expressions directly into `run` itself (e.g.
-`run: echo "${{ github.event.pull_request.title }}"`). GitHub substitutes them into the script text
-before any shell runs, so an attacker-controlled value (a PR title, branch name, issue body) can
-inject arbitrary commands. Passing the same value through `env:` instead means it reaches the
-isolated command as a single environment variable, never interpreted as shell syntax. This is the
-same
-[script injection guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections)
-GitHub gives for any workflow, and applies to this action's `run` input exactly as it would to a
-native `run:` step.
 
 ## Filesystem access
 
@@ -410,23 +374,20 @@ file ownership. The sandboxed command runs as the runner's own user with every c
 and `no_new_privileges` set, so `sudo` and setuid binaries do nothing for it. A path the runner user
 could not write outside the sandbox stays unwritable inside it.
 
-`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
-under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
+If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
+directory for example, list it under `write_through:`:
 
-The runner's install directory, the runner's `_actions` directory holding every action's checkout,
-and the docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only, since
-the runner and this action run code from them after the command exits. The exceptions are a
-`write_through:` entry naming the directory itself, and `uses: ./`, whose checkout is the
-workspace. A command that writes docker config (`docker login`, `gcloud auth configure-docker`)
-needs a step of its own. On a self-hosted runner whose work directory is inside its install
-directory, as `_work` is by default, the rest of `_work`, such as the tool cache in `_work/_tool`,
-is read-only too; the workspace, `$RUNNER_TEMP` and `write_through:` entries stay writable. A
-directory reached through a symlink the command could replace, such as a `~/.docker` that links
-elsewhere, fails the step before the command runs; point `DOCKER_CONFIG` or the runner's work
-directory at the real path instead.
+```yaml
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    write_through: |
+      /opt/some-tool/cache
+    run: some-tool build
+```
 
-Under `write_through: /`, the step fails only on a symlink in one of the four always-writable paths
-or another `write_through:` entry, though the command could replace one anywhere.
+How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
+to the old `writable:` and `allow_write:` inputs are all in
+[Reference](./docs/reference.md#write_through-paths).
 
 > [!WARNING]
 > `write_through: /` is for trusted code only. Against a compromised command it gives up the
@@ -434,6 +395,8 @@ or another `write_through:` entry, though the command could replace one anywhere
 > reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
 > commands this action runs on the host after the command are not kept out of writable paths either.
 > See [The `/` opt-out](./docs/reference.md#the--opt-out).
+
+### `filesystem_mode: ephemeral`
 
 > [!WARNING]
 > `filesystem_mode: ephemeral` is **experimental**: its behavior, inputs, and error messages may still
@@ -477,20 +440,17 @@ exposed as in `persistent` mode, since a later step may run or ship what lands t
 set through `$GITHUB_OUTPUT` is untrusted as in
 [Passing values to `run`](#passing-values-to-run) above.
 
-If `run` needs to write somewhere else in `persistent` mode, a build output or a tool-specific cache
-directory for example, list it under `write_through:`:
+### What stays read-only
 
-```yaml
-- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
-  with:
-    write_through: |
-      /opt/some-tool/cache
-    run: some-tool build
-```
+`$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
+under `$RUNNER_TEMP`; see [`write_through` paths](./docs/reference.md#write_through-paths).
 
-How an entry is resolved, which paths are reserved, what `write_through: /` does, and what happened
-to the old `writable:` and `allow_write:` inputs are all in
-[Reference](./docs/reference.md#write_through-paths).
+The runner's install directory, its `_actions` directory holding every action's checkout, and the
+docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only too, since the
+runner and this action run code from them after the command exits. A command that writes docker
+config (`docker login`, `gcloud auth configure-docker`) needs a step of its own. The exceptions, and
+what this means for a self-hosted runner's `_work`, are in
+[Runner directories](./docs/reference.md#runner-directories).
 
 ## Filesystem audit
 
@@ -525,6 +485,36 @@ Once a step's accesses are known, `expected_filesystem_rules` lists them, one
 them. Each uploaded artifact holds a proposed set to start from; see
 [Expected accesses](./docs/filesystem-audit.md#expected-accesses).
 
+## AWS access key check
+
+> [!WARNING]
+> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
+> error messages may still change in a future release without following semver.
+
+Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
+account signs the request, so a compromised dependency could sign with its own key and send data to
+its author's account. `aws_key_check: true` accepts only the key the step was given in
+`AWS_ACCESS_KEY_ID`, and `allowed_aws_role_accounts` adds the keys of roles in the accounts you
+name:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@<sha>
+  with:
+    role-to-assume: arn:aws:iam::111111111111:role/deploy
+    aws-region: us-east-1
+- uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+  with:
+    proxy_mode: audit # shows what restrict would block
+    aws_key_check: true
+    run: aws ecs update-service --cluster app --service web --force-new-deployment
+```
+
+Then switch to `restrict` with the rules the report's **Switch to restrict mode** example writes. A
+step that assumes roles of its own, as the CDK does, also names the roles' accounts in
+`allowed_aws_role_accounts`. The check needs the `inspect` engine.
+[AWS access key check](./docs/aws.md) covers adopting it, the block reasons, and the IAM settings
+for what it cannot see.
+
 ## How it works
 
 <img src="assets/diagram-overview.png" alt="How Buildcage restricts what a run: step can reach" width="1000">
@@ -548,25 +538,23 @@ mechanisms, with a diagram of what runs where.
 
 `proxy_engine: inspect` terminates TLS and re-signs it with a CA generated for that step, whose
 private key never leaves the step's proxy container
-([details](docs/security.md#the-ca-and-its-private-key)), so the command has to trust that CA. The
-CA, and where relevant an augmented copy of the system CA store, is mounted over the sandbox's own
-view of those paths, and the mount goes away with the sandbox when the step ends. Where the
-command's environment leaves them unset, Buildcage also points the variables the common toolchains
-read at a store that holds the CA: `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT_FILE`,
-`REQUESTS_CA_BUNDLE` and `PIP_CERT`. `CURL_CA_BUNDLE` is left unset, since curl reads the system
-store already. On a RHEL, Fedora or SUSE runner, where GnuTLS reads a directory of certificates
-instead of the store (`wget` on RHEL uses GnuTLS), the CA also goes into a copy of that directory
-mounted over it. A JVM already on the runner reads none of those, only its own keystore, so the CA
-is added to a copy of the `cacerts` (and `jssecacerts` when present) of the `java` on `PATH` and of
-`$JAVA_HOME` with the runner's own `keytool` and mounted over it. `mvn`, `gradle` and `java` then
-reach the proxy without `proxy_engine: universal`. Chromium, including the `chrome-headless-shell`
-that Puppeteer, Playwright and Remotion download, reads neither the store nor any variable, only its
-compiled-in root store and the NSS database in `$HOME`, so for the step, that database's
-`pkcs11.txt` gains a read-only slot on a second database that holds only the CA. The database itself
-stays the runner's own, with whatever the command writes to it.
+([details](docs/security.md#the-ca-and-its-private-key)), so the command has to trust that CA. For
+the step, Buildcage adds it where the common toolchains look:
 
-The full table is in [Reference](./docs/reference.md#ca-trust-variables). What this cannot cover is
-in [Limitations](#limitations), below.
+- The system CA store, and on a RHEL, Fedora or SUSE runner the directory of certificates GnuTLS
+  reads instead (`wget` on RHEL uses GnuTLS).
+- The variables Node, Deno, OpenSSL, Python `requests` and pip read: `NODE_EXTRA_CA_CERTS`,
+  `DENO_CERT`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `PIP_CERT`, where the command's environment
+  leaves them unset.
+- The keystore of the JVM behind the `java` on `PATH` and of `$JAVA_HOME`, so `mvn`, `gradle` and
+  `java` reach the proxy without `proxy_engine: universal`.
+- The NSS database in `$HOME` that Chromium reads, including the `chrome-headless-shell` that
+  Puppeteer, Playwright and Remotion download.
+
+The store, the keystores and the NSS database are copies mounted over the sandbox's own view of
+their paths, and the mounts go away with the sandbox when the step ends. How each one is done is in
+[CA trust variables](./docs/reference.md#ca-trust-variables), and what this cannot cover is in
+[Limitations](#under-the-inspect-engine), below.
 
 ## Scope
 
@@ -575,16 +563,15 @@ delivered through an allowed domain still runs. Treat it as one layer among your
 something gets past them, it still cannot reach a destination outside the allowlist.
 
 This action isolates the step it wraps, not the job. An output the command sets reaches later steps
-unchanged, and so does anything it writes under `$HOME`, `/tmp`, `$RUNNER_TEMP`, or
-`$GITHUB_WORKSPACE`. Those steps run without this action's restrictions unless you wrap them too. If
-a step runs untrusted code, isolate the steps after it in the same job as well, or move them to a
-separate job, and don't treat an output an isolated step set as trustworthy. Post steps cannot be
-wrapped and run after the last step. `$GITHUB_ENV` and `$GITHUB_PATH`, which reach every later step
-and post step at once, and `$GITHUB_STATE`, which this action's post step reads, are read-only
-inside the sandbox in either mode, and `write_through:` can open only the first two, by name. Other
-paths stay open in `persistent` mode:
-a `~/.npmrc` the command leaves still runs code in a later npm step. `filesystem_mode: ephemeral`
-with a narrow `write_through:` prevents that.
+unchanged, and in `persistent` mode so does anything it writes under `$HOME`, `/tmp`,
+`$RUNNER_TEMP`, or `$GITHUB_WORKSPACE`: a `~/.npmrc` the command leaves still runs code in a later
+npm step. Those steps run without this action's restrictions unless you wrap them too, and post
+steps, which run after the last step, cannot be wrapped. If a step runs untrusted code, isolate the
+steps after it in the same job as well, or move them to a separate job, and don't treat an output
+an isolated step set as trustworthy. `filesystem_mode: ephemeral` with a narrow `write_through:`
+keeps such files from reaching them. `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay
+read-only in either mode, and `write_through:` can open only the first two, by name (see
+[What stays read-only](#what-stays-read-only)).
 
 An allowlist also cannot stop anything leaving through a service you had to allow anyway. What it
 does stop is traffic to a destination that is not on the list, and infrastructure an attacker set up
@@ -670,50 +657,33 @@ reported as blocked; see
 - A client that insists on HTTP/2 through ALPN, as gRPC clients do (grpc-go since 1.67, for one),
   fails to connect: `inspect` answers no ALPN. Pass its host through with `allowed_tls_rules`,
   which judges the SNI and port only. A client that falls back to HTTP/1.1, such as curl, works.
-- Only the JDKs of the `java` on `PATH` and of `$JAVA_HOME` get the CA in their keystore
-  ([above](#ca-trust-and-compatibility)). Any other JDK keeps its own keystore. For one on the
-  runner, such as the JDK a Maven or Gradle toolchain forks tests into, set `JAVA_HOME` to it in the
-  step's `env:` or use `proxy_engine: universal` for that step. A JDK the step itself fetches
-  (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or `remotejdk`) is not
-  covered either;
-  Bazel can be pointed at an injected copy with
-  `bazel --host_jvm_args=-Djavax.net.ssl.trustStore=$JAVA_HOME/lib/security/cacerts ...`.
-  The `keytool` that injects the CA runs outside the sandbox, so it must live outside `$HOME`,
-  `$GITHUB_WORKSPACE`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. GitHub-hosted runners have one
-  in `/usr/lib/jvm`. A self-hosted runner whose only
-  JDKs are under `$HOME` (mise, sdkman, coursier, or `setup-java` with the runner in a home
-  directory) needs a system JDK or a `RUNNER_TOOL_CACHE` outside `$HOME`. Without one, or with a
-  keystore sealed under a non-default password, the step warns and a JVM build needs
-  `proxy_engine: universal`.
+- Only the JDKs of the `java` on `PATH` and of `$JAVA_HOME` get the CA in their keystore. For
+  another JDK on the runner, such as the one a Maven or Gradle toolchain forks tests into, set
+  `JAVA_HOME` to it in the step's `env:` or use `proxy_engine: universal` for that step. A JDK the
+  step itself fetches (Gradle's toolchain auto-provisioning, `sdk install`, Bazel's embedded JDK or
+  `remotejdk`) is not covered either. A self-hosted runner whose only JDKs are under `$HOME` needs a
+  system JDK or a `RUNNER_TOOL_CACHE` outside `$HOME`; without one, or with a keystore sealed under
+  a non-default password, the step warns and a JVM build needs `proxy_engine: universal`. See
+  [JVM keystores](./docs/reference.md#jvm-keystores).
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
   accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
   decrypts nothing and breaks nothing.
-- A CA-trust variable that is already set is left alone rather than appended to. Appending safely
-  would mean resolving the path it points at against the sandbox rootfs without following a symlink
-  back out to the host, which this engine does not do yet. The step warns when one points anywhere
-  but the system store, since a tool reading it then fails TLS.
+- A CA-trust variable the command's environment already sets is left alone rather than appended to,
+  so a tool reading it fails TLS unless it points at the system store; the step warns about it.
   [Reference](./docs/reference.md#ca-trust-variables) lists the variables it checks.
-- Chromium trusts the CA through a slot added to the NSS database it reads: `~/.pki/nssdb` when it
-  exists, else `~/.local/share/pki/nssdb`, else a new `~/.pki/nssdb`, which Chromium then fills. A
-  Chromium before M146 does not read `~/.local/share/pki/nssdb`, so use M146 or later where that is
-  the database. What
-  the command writes to the database is kept where `filesystem_mode` keeps writes to that path, and
-  discarded where it does not. A database the runner user cannot write, or one too large to copy,
-  gets no slot, and the step warns; use `proxy_engine: universal` for Chromium there. Neither
-  happens on a GitHub-hosted runner.
-- Only the NSS database under the step's own `HOME` carries the slot. Chromium started under another
-  `HOME` inside the command (`HOME=/tmp chromium`, `export HOME=...`) does not trust the CA, so
-  leave `HOME` alone within the command. A Firefox carrying Mozilla's own root list, such as
-  Playwright's or the one Selenium drives, reads a per-profile database and does not trust the CA;
-  use `proxy_engine: universal` or an `allowed_tls_rules` passthrough for it.
-- A command that changes the CA's own trust in the NSS database (`certutil -M`), or exports it and
-  imports it back, copies the CA into the runner's database. Where `filesystem_mode` would keep the
-  write, that fails the step and nothing is written back; `fail_on_ca_residue: false` makes it a
-  warning and writes the copy back. Where the write would be discarded, the copy goes with it. A
+- Chromium trusts the CA only through the NSS database under the step's own `HOME`, so leave `HOME`
+  alone within the command (`HOME=/tmp chromium` does not trust it). A Chromium before M146 does not
+  read `~/.local/share/pki/nssdb`, so use M146 or later where that is the database. A database the
+  runner user cannot write, or one too large to copy, gets no slot, and the step warns; use
+  `proxy_engine: universal` for Chromium there. Neither happens on a GitHub-hosted runner. See
+  [Chromium](./docs/reference.md#chromium).
+- A Firefox carrying Mozilla's own root list, such as Playwright's or the one Selenium drives, reads
+  a per-profile database and does not trust the CA; use `proxy_engine: universal` or an
+  `allowed_tls_rules` passthrough for it.
+- A command that changes the CA's own trust in the NSS database (`certutil -M`) copies the CA into
+  the runner's database, which fails the step where `filesystem_mode` would keep the write. A
   command cannot remove the database's directory (`rm -rf ~/.pki`) either, since it is a mount point
-  inside the sandbox. A parallel step outside any sandbox can, under
-  `filesystem_mode: persistent`; Chromium in the Buildcage step then stops trusting the CA, and the
-  step warns.
+  inside the sandbox.
 - The CA is added to a store that already exists, never created. A command whose filesystem has
   nothing resembling a system CA bundle at a well-known path has nothing to add to, which matters
   only to a tool that needs TLS trust for something.
@@ -741,29 +711,14 @@ reported as blocked; see
 ### The Job Summary size cap
 
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
-the whole summary rather than truncating it. The report is written first; what the command wrote
-follows it, cut at a line boundary with a note and a warning when it does not fit in what is left.
-A note and a warning replace what the command wrote when it is over 1 MiB on its own, as GitHub
-would drop it whole; the step does not fail. When the report itself, with its Filesystem Activity
-section if the filesystem audit was on, would pass the limit, its parts give way in this order: the
-file access details, the timeline, the known blocked hosts table, the Filesystem Activity table, the
-AWS keys table, the allowed table, the blocked and failed table, the ⚠️ tables of requests
-`restrict` would block, and last the `restrict` example. A part that does not fit is cut at a line
-boundary with a note after what is kept, or replaced by the note when nothing of it fits; the known
-blocked hosts table and the example are only ever replaced whole. Once one of the other traffic
-tables is cut, the timeline and the known blocked hosts table are left out under the same note. The
-Filesystem Activity section follows the same rule: once its table is cut, the details are left out
-under its note. The report is written to the Job Summary only, so what was cut is recovered from the
-[traffic artifact](./docs/reference.md#traffic-artifact), or the filesystem audit's own artifact for
-its section; when neither was uploaded, it is not kept anywhere.
+the whole summary rather than truncating it. The report is written first, and what the command
+wrote is cut to fit what is left, with a note and a warning; the step does not fail. A report that
+would pass the limit on its own gives up its parts in a fixed order, the `restrict` example last.
+What was cut is recovered from the [traffic artifact](./docs/reference.md#traffic-artifact), or the
+filesystem audit's own artifact, and is not kept anywhere when neither was uploaded. The order is in
+[The Job Summary size cap](./docs/reference.md#the-job-summary-size-cap).
 
 ## FAQ
-
-**Can I keep `inspect` but leave a few hosts undecrypted?**
-
-Yes, that is what `allowed_tls_rules` is for. The SNI and port are checked and the connection passes
-through untouched, so a JVM build or a tool that pins a certificate can sit inside an otherwise
-inspected step. Those hosts are enforced at host-and-port granularity, the same as `universal`.
 
 **A host only ever gets looked up, never connected to. How do I write a rule for it?**
 
@@ -771,12 +726,6 @@ The report gives it a row with `DNS` as the rule kind and no port. If you want i
 unreachable without failing the step, put the name in `known_blocked_rules`, which is the one input
 where a rule may omit the port. If the command actually needs it, write an ordinary host or URL rule
 and the lookup is reported as allowed.
-
-**One registry needs several domains. How do I find them all?**
-
-Run `audit` and read the report. PyPI, for example, uses both `pypi.org` and
-`files.pythonhosted.org`, and the audit report lists every domain the command touched, so the
-generated allowlist already has them.
 
 **My step's outputs disappear under `filesystem_mode: ephemeral`.**
 
@@ -810,13 +759,13 @@ firewall-enabled runner image.
 
 ## Documentation
 
-| Doc                                            | What's in it                                                       |
-| ---------------------------------------------- | ------------------------------------------------------------------ |
-| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output      |
-| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it                |
-| [AWS Access Key Check](./docs/aws.md)          | What `aws_key_check` stops, how to adopt it, and its block reasons |
-| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance  |
-| [Development Guide](./docs/development.md)     | Local usage, testing, logs, and the repository layout              |
+| Doc                                            | What's in it                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| [Reference](./docs/reference.md)               | Every input, the rule syntax in full, the report's own output       |
+| [Filesystem Audit](./docs/filesystem-audit.md) | What `filesystem_audit` records, and how to read it                 |
+| [AWS Access Key Check](./docs/aws.md)          | What `aws_key_check` stops, how to adopt it, and its block reasons  |
+| [Security Details](./docs/security.md)         | Architecture and threat model for every engine, attack resistance   |
+| [Development Guide](./docs/development.md)     | Working on Buildcage itself: setup, local runs, tests and the rules |
 
 ## Contributing
 
