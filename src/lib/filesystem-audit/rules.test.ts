@@ -35,6 +35,14 @@ describe("globPattern", () => {
     expect(globPattern(String.raw`./a\x41`)).toBeUndefined();
   });
 
+  it("refuses an escape for a character the summary writes otherwise", () => {
+    expect(globPattern(String.raw`./\u{41}`)).toBeUndefined();
+    expect(globPattern(String.raw`./a\u{a}`)).toBeUndefined();
+    expect(globPattern(String.raw`./a\u{0a0}`)).toBeUndefined();
+    expect(globPattern(String.raw`./a\u{dc80}`)).toBeUndefined();
+    expect(globPattern(String.raw`./a\[1\]`)).toBeUndefined();
+  });
+
   it("matches a trailing /** as the directory and everything under it", () => {
     expect(matches("./dist/**", "./dist")).toBe(true);
     expect(matches("./dist/**", "./dist/a/b")).toBe(true);
@@ -114,6 +122,17 @@ describe("parseExpectedRules", () => {
     expect(named.path.test("/proc/selfx")).toBe(false);
   });
 
+  it("takes a trailing / or /., a memfd's name and a program's as written", () => {
+    const [slash, dot, memfd, named] = parse(
+      '* r /missing/\n* r ./a/.\n* R memfd:"a//b"\na//b R ./x',
+    ).rules;
+    expect(slash.path.test("/missing/")).toBe(true);
+    expect(slash.path.test("/missing")).toBe(false);
+    expect(dot.path.test("./a/.")).toBe(true);
+    expect(memfd.path.test('memfd:"a//b"')).toBe(true);
+    expect(named.program!.test("a//b")).toBe(true);
+  });
+
   it.each([
     ["* R", "input:1: expected a program, an access and a path, got 2 fields"],
     ["* R ./a b", "input:1: expected a program, an access and a path, got 4 fields"],
@@ -123,7 +142,13 @@ describe("parseExpectedRules", () => {
     [String.raw`* R memfd:"a\"`, "input:1: a quote is not closed"],
     ['* R memfd:"a"b', "input:1: a closing quote must end its field"],
     ['* R "./a"b', "input:1: a closing quote must end its field"],
-    [String.raw`* R ./a\q`, String.raw`input:1: "./a\\q" holds an unknown escape`],
+    [String.raw`* R ./a\q`, String.raw`input:1: "./a\\q" holds an escape the summary never writes`],
+    [
+      String.raw`\u{41} R ./a`,
+      String.raw`input:1: "\\u{41}" holds an escape the summary never writes`,
+    ],
+    ["* R ./a//b", 'input:1: "./a//b" holds an empty or "." component'],
+    ["* R /a/./b", 'input:1: "/a/./b" holds an empty or "." component'],
     ["* R /proc/1/environ", 'input:1: "/proc/1/environ" names a process or a thread in /proc'],
     ["* R /proc/12", 'input:1: "/proc/12" names a process'],
     ["* R /proc/<pid>/task/3/stat", 'input:1: "/proc/<pid>/task/3/stat" names a process'],

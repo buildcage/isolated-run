@@ -489,11 +489,12 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
   `bash X /usr/bin/curl`.
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
-  `memfd:"name"`, and a deleted file without its ` (deleted)`. `*` matches within one component of
-  a path, and `**` across them, as a whole component any number of them: `./dist/**` matches
-  `./dist` and everything under it. Inside a component, `**` still crosses them: `./dist/**.js`
-  takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as `\*`, which
-  matches only a star. Regular expressions are not supported.
+  `memfd:"name"`, and a deleted file without its ` (deleted)`. A name a command passed keeps its
+  trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches within one
+  component of a path, and `**` across them, as a whole component any number of them: `./dist/**`
+  matches `./dist` and everything under it. Inside a component, `**` still crosses them:
+  `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as
+  `\*`, which matches only a star. Regular expressions are not supported.
 - **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
   included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
   process's threads. A process the recording has no `nspid` for shows its own directory as
@@ -510,7 +511,8 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 The step fails before the command runs when the rules are set without `filesystem_audit: record`,
 and on a line that is not a rule, with `Invalid expected_filesystem_rules at <where>: <reason>`:
 other than three fields, a quote not closed or not ending its field, an access of other letters,
-an escape the summary never writes, or a number or `thread-self` in a `/proc` path. `<where>` is
+an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component inside a
+path (`a//b`, `a/./b`), or a number or `thread-self` in a `/proc` path. `<where>` is
 `input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of the config
 file, or `config` where YAML may have joined the value's lines, as outside a `|` block.
 

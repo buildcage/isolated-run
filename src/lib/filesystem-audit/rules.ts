@@ -16,7 +16,7 @@
  */
 
 import { SandboxError } from "../errors.ts";
-import { unescapeDisplay } from "./escape.ts";
+import { escapeForDisplay, unescapeDisplay } from "./escape.ts";
 import { MEMFD_PREFIX, unnumbered } from "./paths.ts";
 import { BIT, ORDER } from "./record.ts";
 
@@ -99,8 +99,9 @@ const ANY_DIRS = "(?:[\\s\\S]*/)?";
 
 /**
  * A glob as a regular expression over a whole name, both escaped as the
- * summary escapes them. Undefined when the glob holds an escape that stands
- * for no character, such as `\q`.
+ * summary escapes them. Undefined when the glob holds an escape the summary
+ * never writes: one that stands for no character, such as `\q`, or one for a
+ * character it writes otherwise, such as `\u{41}` for `A`.
  */
 export function globPattern(glob: string): RegExp | undefined {
   let out = "";
@@ -129,7 +130,8 @@ export function globPattern(glob: string): RegExp | undefined {
     if (c === "\\") {
       ESCAPE.lastIndex = i;
       c = ESCAPE.exec(glob)![0];
-      if (unescapeDisplay(c) === undefined) return undefined;
+      const char = unescapeDisplay(c);
+      if (char === undefined || escapeForDisplay(char) !== c) return undefined;
     }
     i += c.length;
     out += c.replace(SPECIAL, "\\$&");
@@ -140,6 +142,10 @@ export function globPattern(glob: string): RegExp | undefined {
 // The summary never shows a /proc number or thread-self, so a rule naming one
 // would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
+
+// The tracer drops an empty or "." component before a path's last, and the
+// kernel never writes one.
+const UNTIDY = /\/\.?\//;
 
 // /proc/<pid>/ in a rule is any process's directory, the one that made the
 // access as well, which the summary shows as /proc/self: such a name is tried
@@ -196,9 +202,19 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         );
       const glob = (field: string): RegExp => {
         const pattern = globPattern(field);
-        if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
+        if (!pattern)
+          throw invalidRules(
+            ref,
+            `${JSON.stringify(field)} holds an escape the summary never writes`,
+          );
         return pattern;
       };
+      // Not the program: one that ran nothing goes by its own name, which may hold "//".
+      if (!path.startsWith(MEMFD_PREFIX) && UNTIDY.test(path))
+        throw invalidRules(
+          ref,
+          `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`,
+        );
       for (const name of [program, path])
         if (procByNumber(name))
           throw invalidRules(

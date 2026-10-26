@@ -72625,12 +72625,16 @@ function globPattern(glob) {
 			continue;
 		}
 		let c = glob[i];
-		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
+		if (c === "\\") {
+			ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0];
+			let char = unescapeDisplay(c);
+			if (char === void 0 || escapeForDisplay(char) !== c) return;
+		}
 		i += c.length, out += c.replace(SPECIAL, "\\$&");
 	}
 	return RegExp(`^${out}$`);
 }
-const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72654,9 +72658,10 @@ function parseExpectedRules(sources) {
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
 		let glob = (field) => {
 			let pattern = globPattern(field);
-			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
+			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes`);
 			return pattern;
 		};
+		if (!path.startsWith("memfd:") && UNTIDY.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`);
 		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
 		rules.push({
 			ref,
