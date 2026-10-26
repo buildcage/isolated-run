@@ -48,11 +48,13 @@ import {
   readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
   readRunCommand,
+  readStepLabel,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { commandSummaryDroppedMessage, commandSummaryDroppedNote } from "./report.ts";
+import { ACTION_INPUT_ENV_KEYS } from "./sandbox/env-loader.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { checkFilesystemAuditHost } from "./sandbox/filesystem-audit-host.ts";
 import {
@@ -133,6 +135,7 @@ const realDeps = {
   readFailOnBlocked,
   readAwsKeyInputs,
   readTrafficArtifactInputs,
+  readStepLabel,
   saveWriteThroughForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -313,6 +316,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const failOnBlocked = deps.readFailOnBlocked();
   const trafficArtifact = deps.readTrafficArtifactInputs();
   const rules = deps.readRuleInputs();
+  const stepLabel = deps.readStepLabel();
 
   // Suppresses annotations outside a real action run, as writeReportSummary does.
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
@@ -346,6 +350,11 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   // Unlike the checks above, fails in audit too.
   const aws = deps.readAwsKeyInputs({ proxyEngine }, env);
 
+  // Every input is read. A list input config_file added to can be past the
+  // 128 KiB one variable may hold, and each command run from here would
+  // otherwise inherit it and fail to start with E2BIG.
+  for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
+
   return {
     actionRef,
     reportActionRef,
@@ -363,6 +372,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     failOnBlocked,
     trafficArtifact,
     rules,
+    stepLabel,
     annotation,
     aws,
   };
@@ -539,6 +549,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,
+    stepLabel: inputs.stepLabel,
     moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
     verdictItems: readAudit.verdictItems,
     commandSummaryBytes,

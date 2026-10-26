@@ -41,6 +41,7 @@ const mocks = {
   readFailOnBlocked: vi.fn(),
   readAwsKeyInputs: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
+  readStepLabel: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -318,12 +319,14 @@ describe("runSandboxStep", () => {
   it("hands the report the inputs read up front", async () => {
     mocks.readFailOnBlocked.mockReturnValue(false);
     mocks.readTrafficArtifactInputs.mockReturnValue({ upload: true, retentionDays: 7 });
+    mocks.readStepLabel.mockReturnValue("build");
 
     await runSandboxStep(ENV, deps);
 
     expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
       failOnBlocked: false,
       trafficArtifact: { upload: true, retentionDays: 7 },
+      stepLabel: "build",
     });
   });
 
@@ -979,6 +982,7 @@ describe("runSandboxStep", () => {
 
 describe("readStepInputs", () => {
   it("reads every input and checks the rules, before any privileged check", () => {
+    mocks.readStepLabel.mockReturnValue("build");
     const inputs = readStepInputs(ENV, deps);
 
     expect(inputs).toMatchObject({
@@ -987,12 +991,25 @@ describe("readStepInputs", () => {
       proxyEngine: "universal",
       filesystemMode: "persistent",
       rules: { httpsRules: ["example.com:443"] },
+      stepLabel: "build",
       annotation,
     });
     expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();
     expect(mocks.readAwsKeyInputs).toHaveBeenCalled();
     expect(mocks.pinHostCommands).not.toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+  });
+
+  it("drops this action's inputs from env once read, so no command it runs inherits them", () => {
+    const env = {
+      ...ENV,
+      INPUT_RUN: "echo hello",
+      INPUT_EXPECTED_FILESYSTEM_RULES: "r /etc/**\n".repeat(20_000),
+      INPUT_DIR: "the workflow's own",
+    };
+    readStepInputs(env, deps);
+
+    expect(env).toStrictEqual({ ...ENV, INPUT_DIR: "the workflow's own" });
   });
 });
 
