@@ -72515,9 +72515,9 @@ function relativize(path, prefixes) {
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
-	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
-		if (path === alt) return first;
-		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	for (let spellings of [prefixes.workspace, prefixes.home]) for (let spelling of spellings) {
+		if (path === spelling) return spellings[0];
+		if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
 	}
 	return path;
 }
@@ -73090,9 +73090,9 @@ function createAuditSummary(prefixes) {
 			images.delete(proc);
 		}
 	}, shownPrefixes = {
-		workspace: prefixes.workspace.map(escapePath),
-		home: prefixes.home.map(escapePath)
-	}, fanout = prefixes.fanout ?? 3, home = shownPrefixes.home.slice(0, 1), keep = [
+		workspace: prefixes.workspace.slice(0, 1).map(escapePath),
+		home: prefixes.home.slice(0, 1).map(escapePath)
+	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
 		"/tmp",
@@ -73104,9 +73104,9 @@ function createAuditSummary(prefixes) {
 		"/etc",
 		"/root",
 		"…",
-		...shownPrefixes.workspace.slice(0, 1),
-		...home,
-		...[...home, "/root"].flatMap((h) => SENSITIVE_IN_HOME.map((dir) => `${h}/${dir}`))
+		...shownPrefixes.workspace,
+		...shownPrefixes.home,
+		...[...shownPrefixes.home, "/root"].flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
 		fanout,
 		keep,

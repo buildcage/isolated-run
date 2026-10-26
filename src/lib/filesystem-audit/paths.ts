@@ -93,13 +93,15 @@ export function relativize(path: string, prefixes: Prefixes): string {
 
 // The workspace and $HOME may each be reached by two spellings (as given and
 // with symlinks resolved); fold a path onto the first so one file keys once.
+// The workspace goes first, as in relativize: a path in it stays there even
+// where a spelling of $HOME holds it.
 export function canonical(path: string, prefixes: Prefixes): string {
   const variable = prefixes.runnerFiles?.get(path);
   if (variable) return RUNNER_FILE + variable;
-  for (const [first, ...rest] of [prefixes.workspace, prefixes.home]) {
-    for (const alt of rest) {
-      if (path === alt) return first;
-      if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+  for (const spellings of [prefixes.workspace, prefixes.home]) {
+    for (const spelling of spellings) {
+      if (path === spelling) return spellings[0];
+      if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
     }
   }
   return path;
