@@ -72634,6 +72634,14 @@ function globPattern(glob) {
 	}
 	return RegExp(`^${out}$`);
 }
+function fixedComponents(glob) {
+	for (let i = 0; i < glob.length; i++) if (glob[i] === "\\") ESCAPE.lastIndex = i, i += ESCAPE.exec(glob)[0].length - 1;
+	else if (glob[i] === "*") {
+		let end = glob.lastIndexOf("/", i);
+		return end === -1 ? [] : glob.slice(0, end).split("/");
+	}
+	return glob.split("/");
+}
 const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
@@ -72667,6 +72675,7 @@ function parseExpectedRules(sources) {
 			ref,
 			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
 			path: anyProcess(path, glob(path)),
+			pathStart: fixedComponents(path),
 			...accessBits(access)
 		});
 	});
@@ -72678,12 +72687,38 @@ function takes(rule, bit, failed, perm) {
 var RuleMatcher = class {
 	cache = new Map();
 	rules;
+	starts = {
+		rules: [],
+		next: new Map()
+	};
 	constructor(rules) {
-		this.rules = rules;
+		this.rules = rules, rules.forEach(({ pathStart }, i) => {
+			let node = this.starts;
+			for (let part of pathStart) {
+				let next = node.next.get(part);
+				next || node.next.set(part, next = {
+					rules: [],
+					next: new Map()
+				}), node = next;
+			}
+			node.rules.push(i);
+		});
+	}
+	startingAt(path, into) {
+		let node = this.starts;
+		for (let part of path.split("/")) {
+			for (let i of node.rules) into.add(i);
+			if (node = node.next.get(part), !node) return;
+		}
+		for (let i of node.rules) into.add(i);
+	}
+	candidates(path) {
+		let found = new Set();
+		return this.startingAt(path, found), OWN_DIRECTORY.test(path) && this.startingAt(path.replace(OWN_DIRECTORY, "/proc/<pid>"), found), [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
 	}
 	match(program, path, bits, failed, perm) {
 		let key = `${program}\0${path}`, candidates = this.cache.get(key);
-		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
+		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.candidates(path).filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
 		let unmatched = 0, ref;
 		for (let c of ORDER) {
 			let bit = BIT[c];
