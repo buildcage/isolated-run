@@ -16,7 +16,7 @@ export const UPLOAD_DIR = "/var/tmp/buildcage-0/filesystem-audit-deadbeef";
 export const CLEAN = `${UPLOAD_DIR}/filesystem-audit.jsonl`;
 
 // The proposed rules, uploaded beside it.
-export const RULES = `${UPLOAD_DIR}/expected-filesystem-rules.yml`;
+export const RULES = `${UPLOAD_DIR}/expected-filesystem-rules-to-add.txt`;
 
 export const AUDIT = {
   outPath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl",

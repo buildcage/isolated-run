@@ -7,9 +7,16 @@ import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { DELETED_MARK, sortKey } from "./paths.ts";
-import { UPLOAD_NOTE, type ProposedRules } from "./proposed-rules.ts";
-import type { AuditSummary, KilledRow, PathRow, Row, RuleRow } from "./reduce.ts";
-import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
+import { UPLOAD_NOTE, type ProposedState } from "./proposed-rules.ts";
+import {
+  recordedNoFileAccess,
+  type AuditSummary,
+  type KilledRow,
+  type PathRow,
+  type Row,
+  type RuleRow,
+} from "./reduce.ts";
+import { CONFIG_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./rules.ts";
 
 const LEGEND =
   "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused";
@@ -108,8 +115,10 @@ export interface RenderOptions {
   legendNote?: string;
   /** Where the skipped-hooks note links to. */
   skippedHooksUrl?: string;
-  /** Whether expected_filesystem_rules were given, which leaves only what they did not take. */
-  expected?: boolean;
+  /** What the accesses are matched against, so that only those no rule took
+   *  show: "given" for expected_filesystem_rules, "empty" for no rules under
+   *  fail_on_unexpected_file_access. */
+  expected?: "given" | "empty";
   /** The folded element on the proposed rules, before the closing line. */
   rulesNote?: string;
 }
@@ -224,7 +233,10 @@ function detailsBlock(
 
 // What expected_filesystem_rules did not take, as rules would spell it, or
 // why there is no table.
-function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): SummaryBlock {
+function unexpectedBlock(
+  summary: AuditSummary,
+  { priorities, expected }: RenderOptions,
+): SummaryBlock {
   const { proposed, matched } = summary;
   const block = {
     id: FILESYSTEM_BLOCK.unexpected,
@@ -232,7 +244,10 @@ function unexpectedBlock(summary: AuditSummary, { priorities }: RenderOptions): 
     level: 2,
     section: SECTION,
   };
-  const took = `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+  const took =
+    expected === "empty"
+      ? `<sub>\`${EXPECTED_RULES_INPUT}\` is empty, so every access is unexpected.</sub>\n\n`
+      : `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
   if (!proposed)
     return {
       ...block,
@@ -271,7 +286,7 @@ export function renderAuditSummaryBlocks(
   summary: AuditSummary,
   opts: RenderOptions,
 ): SummaryBlock[] {
-  const { ended, lost, hostMissed, paths, details, killed, pathsCut } = summary;
+  const { ended, lost, hostMissed, paths, killed, pathsCut } = summary;
   const killedLine = killedNote(killed);
   const top = [
     heading(opts.title),
@@ -286,7 +301,7 @@ export function renderAuditSummaryBlocks(
     text,
     cut: "keep",
   });
-  if (details?.length === 0 && !killed.length)
+  if (recordedNoFileAccess(summary) && !killed.length)
     return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
@@ -325,59 +340,84 @@ export type RecordArtifact = UploadedArtifact | "not-requested" | "upload-failed
 const artifactLink = ({ name, url }: UploadedArtifact): string =>
   url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
 
+/** What the summary says of the proposed rules: the artifact that holds them,
+ *  or why there are none. */
+export type Proposal = UploadedArtifact | Exclude<ProposedState, "written"> | "lost";
+
+/**
+ * The proposed rules' state once the upload is done. A failed upload loses
+ * only a written file, so only that becomes "lost": a state with no file keeps
+ * its own reason, and the closing line says the upload failed.
+ */
+export function proposalOf(state: ProposedState, artifact: RecordArtifact): Proposal {
+  if (state !== "written") return state;
+  return typeof artifact === "object" ? artifact : "lost";
+}
+
 /**
  * The folded note on the proposed rules: where the file is, or why there is
- * none, and how to use one.
+ * none, and how to use one. Undefined where there is nothing to propose: no
+ * access recorded, or none outside the rules.
  */
 export function rulesNote(
-  artifact: RecordArtifact,
-  rules: ProposedRules,
-  { fileName, guideUrl, given }: { fileName: string; guideUrl: string; given: boolean },
-): string {
+  proposal: Proposal,
+  {
+    fileName,
+    guideUrl,
+    given,
+  }: {
+    fileName: string;
+    guideUrl: string;
+    /** Whether expected_filesystem_rules were given. */
+    given: boolean;
+  },
+): string | undefined {
+  if (proposal === "nothing-to-add") return undefined;
   const file = `\`${fileName}\``;
   const intro = given
     ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.`
     : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`;
   const holds = given
-    ? "the rules given plus one for each access they did not take"
+    ? "a rule for each access the rules did not take"
     : "a rule for each access this run made";
   let where: string;
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
-  if (artifact === "not-requested") {
+  if (proposal === "not-requested") {
     where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`;
     steps = true;
-  } else if (artifact === "upload-failed")
+  } else if (proposal === "lost")
     where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
-  else if (rules === "too-many-paths")
+  else if (proposal === "too-many-paths")
     where = "No rules were proposed: the accesses touched too many distinct paths.";
-  else if (rules === "write-failed") where = "The proposed rules could not be written.";
-  else if (rules === "none") where = "No rules were proposed, as no file access was recorded.";
+  else if (proposal === "write-failed") where = "The proposed rules could not be written.";
+  else if (proposal === "not-prepared")
+    where = "No rules were proposed, as the artifact could not be prepared.";
   else {
-    where = `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`;
+    where = `${file} in this run's ${artifactLink(proposal)} holds ${holds}.`;
     steps = true;
   }
   return (
     "<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
     `${intro}\n\n` +
-    (steps ? useSteps(where, fileName) : `${where}\n\n`) +
+    (steps ? useSteps(where) : `${where}\n\n`) +
     `[How to write the rules](${guideUrl})\n\n` +
     "</details>\n"
   );
 }
 
-// How to put the proposed file to use, after where it is.
-function useSteps(where: string, fileName: string): string {
+// How to put the proposed rules to use, after where they are: in the
+// workflow, or with many rules, in a config file.
+function useSteps(where: string): string {
   return (
-    `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point \`config_file\` at it:\n\n` +
-    `\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\n` +
-    "Or copy its rules into the config file the step already uses, or into the workflow:\n\n" +
+    `${where} Review the rules, using \`**\` for the paths that change between runs, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the config file the step uses. With many rules, a config file keeps them out of the workflow; name it in \`config_file\`:\n\n` +
+    `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
     "```yaml\n" +
+    `# ${CONFIG_FILE_EXAMPLE}\n` +
     "filesystem_audit: record\n" +
     `${UPLOAD_NOTE}\n` +
     "upload_filesystem_audit_artifact: true\n" +
     `${EXPECTED_RULES_INPUT}: |\n` +
-    `  # The reviewed rules from ${fileName}, such as:\n` +
     "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
     "  /usr/local/bin/node  R    ~/.npmrc\n" +
     "```\n\n"

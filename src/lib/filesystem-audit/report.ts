@@ -27,9 +27,10 @@ import {
 } from "./artifact.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { openWriter, readLines } from "./line-file.ts";
-import { writeProposedRules } from "./proposed-rules.ts";
+import { writeProposedRules, type ProposedState } from "./proposed-rules.ts";
 import {
   createAuditSummary,
+  recordedNoFileAccess,
   reduceRecording,
   type AuditSummary,
   type ReducedRecording,
@@ -39,6 +40,7 @@ import {
   filesystemLegendNote,
   filesystemTruncationNote,
   renderAuditSummaryBlocks,
+  proposalOf,
   rulesNote,
   unreadableSummaryBlocks,
   type RecordArtifact,
@@ -71,9 +73,6 @@ export interface FilesystemAuditReportOptions {
   failClosed: boolean;
   /** expected_filesystem_rules, undefined when none were given. */
   rules?: ExpectedRules;
-  /** Every line expected_filesystem_rules was given, comments included, which
-   *  the proposed rules keep. */
-  givenLines?: string[];
   /** fail_on_unexpected_file_access: an access no rule takes fails the step. */
   failOnUnexpected?: boolean;
 }
@@ -161,8 +160,6 @@ export interface ReadStepFilesystemAudit {
   /** The traffic report's verdict items: the accesses no rule took, if any,
    *  as a caution when they fail the step. */
   verdictItems: VerdictItems;
-  /** The proposed rules file's name, when the artifact is to hold it. */
-  rulesFile?: string;
   /** Uploads the stripped copy, sets the output and returns the artifact as
    *  it is. Never throws. */
   upload: () => Promise<RecordArtifact>;
@@ -174,6 +171,12 @@ export interface ReadStepFilesystemAudit {
     stepLabel: string | undefined,
   ) => SummaryBlock[];
 }
+
+const NO_RULES: ExpectedRules = { rules: [] };
+
+/** The filesystem audit guide at the ref the step runs. */
+export const filesystemAuditGuide = (actionRepo: string, actionRef: string): string =>
+  `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
 
 /**
  * Reads the recording. Never throws, so the traffic report that follows is
@@ -193,13 +196,15 @@ export function readStepFilesystemAudit(
     actionRepo,
     actionRef,
     failClosed,
-    rules,
-    givenLines = rules?.lines ?? [],
+    rules: givenRules,
     failOnUnexpected = false,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): ReadStepFilesystemAudit {
   const deps = { ...realDeps, ...overrides };
+  // Under fail_on_unexpected_file_access, a step without rules has every
+  // access unexpected.
+  const rules = givenRules ?? (failOnUnexpected ? NO_RULES : undefined);
   const setOutput = (artifactName: string) => {
     try {
       deps.setOutput(artifactName);
@@ -297,11 +302,22 @@ export function readStepFilesystemAudit(
     process.exitCode = 1;
     incomplete = checkIncomplete;
   }
-  const proposed = prepared
-    ? writeProposedRules(summary, givenLines, audit.rulesPath, annotation, deps.writeFile)
-    : "none";
   const given = rules !== undefined;
-  const unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {};
+  // Nothing to add where no file access was recorded, or none fell outside
+  // the rules, even where the recording misses some: what it lacks cannot be
+  // proposed.
+  const nothingToAdd =
+    summary !== undefined && (recordedNoFileAccess(summary) || (given && summary.unexpected === 0));
+  const proposed: ProposedState = nothingToAdd
+    ? "nothing-to-add"
+    : !upload
+      ? "not-requested"
+      : !prepared
+        ? "not-prepared"
+        : writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile);
+  const unexpected = given
+    ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === undefined)
+    : {};
   // An incomplete check exists only under fail_on_unexpected_file_access, so
   // the unexpected accesses are a caution then too.
   const verdictItems = incomplete.caution
@@ -309,13 +325,12 @@ export function readStepFilesystemAudit(
     : unexpected;
   const artifactOf = (uploaded: UploadedArtifact | undefined): RecordArtifact =>
     !upload ? "not-requested" : uploaded ? uploaded : "upload-failed";
-  const guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+  const guide = filesystemAuditGuide(actionRepo, actionRef);
   return {
     expected: artifactOf(
       written ? { name: filesystemAuditArtifactName(containerName) } : undefined,
     ),
     verdictItems,
-    ...(proposed === "written" && { rulesFile: basename(audit.rulesPath) }),
     upload: async () => {
       let uploaded: UploadedArtifact | undefined;
       try {
@@ -347,11 +362,11 @@ export function readStepFilesystemAudit(
           cutNote,
           legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
           skippedHooksUrl: `${guide}#skipped-hooks`,
-          expected: given,
-          rulesNote: rulesNote(artifact, proposed, {
+          ...(given && { expected: givenRules ? "given" : "empty" }),
+          rulesNote: rulesNote(proposalOf(proposed, artifact), {
             fileName: basename(audit.rulesPath),
             guideUrl: `${guide}#expected-accesses`,
-            given,
+            given: givenRules !== undefined,
           }),
         });
       } catch (e) {
@@ -374,6 +389,7 @@ function reportUnexpected(
   summary: AuditSummary | undefined,
   failOnUnexpected: boolean,
   annotation: Annotation,
+  empty: boolean,
 ): VerdictItems {
   if (!summary?.unexpected) return {};
   const n = summary.proposed?.length;
@@ -382,10 +398,11 @@ function reportUnexpected(
     n === undefined
       ? "unexpected file accesses (too many to list)"
       : `${n} unexpected file access${es}`;
+  const outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT;
   const message =
     n === undefined
-      ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.`
-      : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+      ? `File accesses fell outside ${outside}${empty ? "," : ""} on too many distinct paths to list.`
+      : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
     process.exitCode = 1;

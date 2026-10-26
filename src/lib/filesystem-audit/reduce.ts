@@ -144,6 +144,11 @@ export interface AuditSummary {
   unexpected: number;
 }
 
+/** Whether the recording holds no file access at all, which leaves the
+ *  summary saying only that, and nothing to propose rules from. */
+export const recordedNoFileAccess = (summary: AuditSummary): boolean =>
+  summary.details?.length === 0;
+
 /**
  * Reduces a recording to an AuditSummary in two passes over its records:
  * `observe` each in order, then `add` each in the same order, with `counted`

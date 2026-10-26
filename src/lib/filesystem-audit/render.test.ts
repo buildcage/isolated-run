@@ -434,7 +434,7 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
         startedAt: undefined,
         priorities: FILESYSTEM_PRIORITIES,
         cutNote: () => "",
-        expected: true,
+        expected: "given",
       }),
     );
     expect(md).toContain(
@@ -480,7 +480,7 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
         startedAt: undefined,
         priorities: FILESYSTEM_PRIORITIES,
         cutNote: () => "",
-        expected: true,
+        expected: "given",
       }),
     );
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 3 more | W | `/tmp/**` |\n");

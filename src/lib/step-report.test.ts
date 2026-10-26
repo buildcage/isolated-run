@@ -157,7 +157,6 @@ describe("reportStepTraffic", () => {
     await reportStepTraffic(
       options({
         extraInputs,
-        omittedExampleNote: "_Shorter with x._",
         verdictItems: { warning: ["1 unexpected file access"] },
       }),
       deps,
@@ -169,7 +168,6 @@ describe("reportStepTraffic", () => {
       actionRef: "v1",
       runCommand: "npm ci",
       extraInputs: ["aws_key_check: true"],
-      omittedExampleNote: "_Shorter with x._",
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,

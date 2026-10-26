@@ -43,7 +43,7 @@ details.
 | `upload_filesystem_audit_artifact` | `false`      | Upload the filesystem audit's full record as an artifact (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                     |
 | `filesystem_audit_retention_days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
 | `expected_filesystem_rules`        | empty        | The file accesses the step is expected to make (**experimental**); the summary then lists only those outside them. Requires `filesystem_audit: record`. See [Filesystem audit](#filesystem-audit).                                                                          |
-| `fail_on_unexpected_file_access`   | `false`      | Fail the step when an access fell outside `expected_filesystem_rules` or could not be checked against them, in `audit` mode too                                                                                                                                             |
+| `fail_on_unexpected_file_access`   | `false`      | Fail the step when an access fell outside `expected_filesystem_rules` (any access, when there are none) or could not be checked against them, in `audit` mode too. Needs `filesystem_audit: record`                                                                         |
 | `writable`                         | empty        | Deprecated: the former name of `write_through`. Still works; set `write_through` instead.                                                                                                                                                                                   |
 | `label`                            | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                                                              |
 | `upload_traffic_artifact`          | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                                                                  |
@@ -855,8 +855,9 @@ short form.
   `<program> <access> <path>` rule per line, and is combined with a config file's as the other rule
   inputs are. With it, the section lists only the accesses outside the rules, the verdict counts
   them, and a warning names them; `fail_on_unexpected_file_access: true` fails the step instead, in
-  `audit` mode too. The artifact marks each line with the rule that took it or as unexpected, and
-  holds `expected-filesystem-rules.yml`, a config file of proposed rules. See
+  `audit` mode too. The artifact marks each line with the rule that took it or as unexpected, and,
+  where a recorded access fell outside the rules, holds `expected-filesystem-rules-to-add.txt`, a
+  rule for each such access. See
   [Expected accesses](./filesystem-audit.md#expected-accesses).
 
 ## CA trust variables

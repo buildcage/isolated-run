@@ -68,8 +68,6 @@ export interface ReportStepOptions {
   runCommand: string;
   /** See ExampleStepOptions.extraInputs; read off the report. */
   extraInputs?: (report: Report) => string[];
-  /** See ComputeReportOutcomesOptions.omittedExampleNote. */
-  omittedExampleNote?: string;
   failOnBlocked: boolean;
   trafficArtifact: TrafficArtifactInputs;
   /** The step's own environment, which is where the summary's destinations
@@ -109,7 +107,6 @@ export async function reportStepTraffic(
     actionRef,
     runCommand,
     extraInputs,
-    omittedExampleNote,
     failOnBlocked,
     trafficArtifact,
     env,
@@ -172,7 +169,6 @@ export async function reportStepTraffic(
           actionRef,
           runCommand,
           extraInputs: extraInputs?.(report),
-          omittedExampleNote,
           actionVersion: readActionVersion(containerName, proxyEngine),
           stepLabel,
           failOnBlocked,

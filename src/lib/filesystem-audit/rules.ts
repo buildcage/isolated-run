@@ -22,8 +22,8 @@ import { BIT, ORDER } from "./record.ts";
 
 export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
 
-/** Where the summary's examples commit the proposed rules file. */
-export const RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml";
+/** Where the summary's example keeps the rules in a config file. */
+export const CONFIG_FILE_EXAMPLE = "path/to/buildcage.yml";
 
 /** What a rule's program or path field takes, by the name the summary shows. */
 export interface NameMatcher {
@@ -45,8 +45,6 @@ export interface ExpectedRule {
 
 export interface ExpectedRules {
   rules: ExpectedRule[];
-  /** Every line as written, comments and blank lines included, trimmed. */
-  lines: string[];
 }
 
 /** A list of rules and where its first line sits. */
@@ -179,11 +177,9 @@ function accessBits(access: string): { ok: number; failed: number; perm: number 
  */
 export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
   const rules: ExpectedRule[] = [];
-  const lines: string[] = [];
   for (const { text, origin, firstLine } of sources) {
     text.split("\n").forEach((raw, n) => {
       const line = raw.trim();
-      lines.push(line);
       if (line === "" || line.startsWith("#")) return;
       const ref = firstLine === undefined ? origin : `${origin}:${firstLine + n}`;
       const parts = fields(line, ref);
@@ -217,8 +213,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
       });
     });
   }
-  while (lines.length > 0 && lines.at(-1) === "") lines.pop();
-  return { rules, lines };
+  return { rules };
 }
 
 /** Whether `rule` takes an access of these bits with this outcome. */

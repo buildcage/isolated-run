@@ -23,7 +23,6 @@ import {
 } from "#core/lib/report/render/fit-step-summary.ts";
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
-import { TRAFFIC_BLOCK } from "#core/lib/report/render/traffic-parts.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
@@ -902,19 +901,6 @@ describe("writeReportSummary", () => {
 
     expect(written[0]).toContain(restrictExampleTruncationNote(true));
     expect(written[0]).toContain(hostTableTruncationNote(true));
-  });
-
-  it("adds the step's own note after the notice of an example too large to print", () => {
-    const { blocks } = computeReportOutcomes(
-      report({
-        parameters: reportParams({ mode: "audit" }),
-        passed: [{ host: "a.example.com", port: "443", ruleType: "HTTPS", reason: "-", count: 1 }],
-      }),
-      options({ omittedExampleNote: "_Shorter with x._" }),
-    );
-    expect(blocks.find((b) => b.id === TRAFFIC_BLOCK.example)?.notice).toBe(
-      `${restrictExampleTruncationNote(false)}\n_Shorter with x._\n`,
-    );
   });
 
   it("gives Restrict Would Block's key and host tables one cut notice between them", async () => {

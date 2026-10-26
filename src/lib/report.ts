@@ -14,7 +14,6 @@ import {
   SAFETY_MARGIN_BYTES,
   STEP_SUMMARY_LIMIT_BYTES,
   wholeBlock,
-  withNotices,
   type SummaryBlock,
 } from "#core/lib/report/render/fit-step-summary.ts";
 import {
@@ -79,9 +78,6 @@ export interface ComputeReportOutcomesOptions {
   runCommand?: string;
   /** See ExampleStepOptions.extraInputs. */
   extraInputs?: string[];
-  /** A sentence printed after the notice that the restrict example was too
-   *  large to print. */
-  omittedExampleNote?: string;
   /** The verdict's items from the rest of the step's summary; see renderVerdict. */
   verdictItems?: VerdictItems;
   actionVersion?: string;
@@ -107,7 +103,6 @@ export function computeReportOutcomes(
     actionRef,
     runCommand,
     extraInputs,
-    omittedExampleNote,
     actionVersion,
     artifactAvailable,
     verdictItems = {},
@@ -143,9 +138,7 @@ export function computeReportOutcomes(
     passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
     awsKeysBlocks(keys, { priority: AWS_KEYS_PRIORITY, artifactAvailable }),
     knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
-    omittedExampleNote
-      ? withNotices(example, ({ notice }) => `${notice}\n${omittedExampleNote}\n`)
-      : example,
+    example,
     noCommunicationBlocks(report),
     communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
     engineNoteBlocks(report),

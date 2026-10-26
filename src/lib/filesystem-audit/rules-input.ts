@@ -37,9 +37,6 @@ export interface GivenRules {
   /** The rules to match, undefined where every line is a comment or blank,
    *  which the step treats as unset. */
   expected: ExpectedRules | undefined;
-  /** Every line as written, which the proposed rules and the restrict example
-   *  keep either way. */
-  lines: string[];
 }
 
 /**
@@ -53,14 +50,15 @@ export function readExpectedFilesystemRules(
   config: ConfigValueOrigin | undefined,
   filesystemAudit: FilesystemAudit,
 ): GivenRules | undefined {
-  const rules = parseExpectedRules(ruleSources(value, config));
-  if (rules.lines.length === 0) return undefined;
-  if (rules.rules.length === 0) return { expected: undefined, lines: rules.lines };
+  const sources = ruleSources(value, config);
+  if (sources.length === 0) return undefined;
+  const rules = parseExpectedRules(sources);
+  if (rules.rules.length === 0) return { expected: undefined };
   if (filesystemAudit !== "record") {
     throw new SandboxError(
       `${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`,
       "INVALID_EXPECTED_FILESYSTEM_RULES",
     );
   }
-  return { expected: rules, lines: rules.lines };
+  return { expected: rules };
 }

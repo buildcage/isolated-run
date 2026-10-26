@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { feed, machinery, SCRATCH_BASE, shell, PREFIXES } from "../test/filesystem-audit.ts";
-import { expectedRulesFile } from "./proposed-rules.ts";
+import { RULES_TO_ADD_HEADER, rulesToAdd } from "./proposed-rules.ts";
 import { reduceRecording, type AuditSummary, type SummaryOptions } from "./reduce.ts";
 import { parseExpectedRules, RuleMatcher } from "./rules.ts";
 
@@ -261,8 +261,8 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
       { kind: "read", pid: 4, comm: "tool", path: "/work/dir/c" },
     );
     expect(rows(summary)).toStrictEqual(["./tool R ./dir/**", "tool X ./tool"]);
-    const file = expectedRulesFile([], summary.proposed!)!;
-    const added = file.split("\n").slice(4, -1);
+    const file = rulesToAdd(summary.proposed!);
+    const added = file.split("\n").slice(RULES_TO_ADD_HEADER.length, -1);
     expect(added).toHaveLength(summary.proposed!.length);
     expect(new Set(added).size).toBe(added.length);
   });

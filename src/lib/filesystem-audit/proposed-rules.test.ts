@@ -1,134 +1,72 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-import { expectedRulesFile, givenRules, UPLOAD_NOTE } from "./proposed-rules.ts";
+import { RULES_TO_ADD_HEADER, rulesToAdd, writeProposedRules } from "./proposed-rules.ts";
 import { parseExpectedRules } from "./rules.ts";
 
-describe("givenRules", () => {
-  const heading = "# Not matched in this run";
-
-  it("drops the heading wherever it stands, with the blank lines around it", () => {
-    expect(givenRules([heading, "* R ./a"])).toStrictEqual(["* R ./a"]);
-    expect(givenRules(["* R ./a", "", heading])).toStrictEqual(["* R ./a"]);
-    expect(givenRules(["* R ./a", heading, "* R ./b"])).toStrictEqual(["* R ./a", "* R ./b"]);
-    expect(givenRules(["* R ./a", "", heading, "", "", "* R ./b"])).toStrictEqual([
-      "* R ./a",
-      "* R ./b",
-    ]);
-  });
-
-  it("drops each heading when the workflow's and the config file's rules both carry one", () => {
-    expect(givenRules(["* R ./a", heading, "* R ./b", "", heading, "* R ./c"])).toStrictEqual([
-      "* R ./a",
-      "* R ./b",
-      "* R ./c",
-    ]);
-  });
-
-  it("keeps blank lines that stand between rules", () => {
-    expect(givenRules(["* R ./a", "", "* R ./b"])).toStrictEqual(["* R ./a", "", "* R ./b"]);
-  });
+const row = (program: string, flags: string, path: string) => ({
+  program: { path: program },
+  commands: [],
+  flags,
+  path: { path },
 });
 
-describe("expectedRulesFile", () => {
-  const row = (program: string, flags: string, path: string) => ({
-    program: { path: program },
-    commands: [],
-    flags,
-    path: { path },
-  });
+// The file's rule lines, without the header.
+const ruleLines = (file: string): string[] =>
+  file.split("\n").slice(RULES_TO_ADD_HEADER.length, -1);
 
-  it("has nothing to write for no rules and nothing proposed", () => {
-    expect(expectedRulesFile([], [])).toBeUndefined();
-  });
-
-  it("writes the proposed rules in columns as a config_file", () => {
+describe("rulesToAdd", () => {
+  it("writes the proposed rules in columns under the header", () => {
     expect(
-      expectedRulesFile(
-        [],
-        [
-          row("/usr/bin/node", "RW", "./node_modules/**"),
-          row("bash", "Rr!", "/proc/<pid>/status"),
-          row("/opt/my tool", "R", "#x"),
-          row("bash", "R", "/proc/<pid>"),
-        ],
-      ),
+      rulesToAdd([
+        row("/usr/bin/node", "RW", "./node_modules/**"),
+        row("bash", "Rr!", "/proc/<pid>/status"),
+        row("/opt/my tool", "R", "#x"),
+        row("bash", "R", "/proc/<pid>"),
+      ]),
     ).toBe(
       [
-        "filesystem_audit: record",
-        UPLOAD_NOTE,
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  /usr/bin/node   RW   ./node_modules/**",
-        "  bash            Rr!  /proc/<pid>/status",
-        '  "/opt/my tool"  R    "#x"',
-        "  bash            R    /proc/<pid>",
+        ...RULES_TO_ADD_HEADER,
+        "/usr/bin/node   RW   ./node_modules/**",
+        "bash            Rr!  /proc/<pid>/status",
+        '"/opt/my tool"  R    "#x"',
+        "bash            R    /proc/<pid>",
         "",
       ].join("\n"),
     );
   });
 
+  it("reads back as the same rules, header and all, when added to expected_filesystem_rules", () => {
+    const file = rulesToAdd([row("bash", "R", "./c"), row("*", "W", "./d/**")]);
+    const { rules } = parseExpectedRules([{ text: file, origin: "input", firstLine: 1 }]);
+    expect(rules.map((r) => r.ref)).toStrictEqual(["input:3", "input:4"]);
+  });
+
   it("leaves a memfd's name holding a blank as it is quoted already, so the rule reads back", () => {
-    const file = expectedRulesFile([], [row('memfd:"a b"', "X", 'memfd:"a b"')])!;
-    const line = file.split("\n")[4];
-    expect(line).toBe('  memfd:"a b"  X  memfd:"a b"');
+    const [line] = ruleLines(rulesToAdd([row('memfd:"a b"', "X", 'memfd:"a b"')]));
+    expect(line).toBe('memfd:"a b"  X  memfd:"a b"');
     const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
     expect(rule.program!.test('memfd:"a b"')).toBe(true);
     expect(rule.path.test('memfd:"a b"')).toBe(true);
   });
 
   it("quotes a process's empty name, so the rule reads back", () => {
-    const file = expectedRulesFile([], [row("", "R", "./x")])!;
-    const line = file.split("\n")[4];
-    expect(line).toBe('  ""  R  ./x');
+    const [line] = ruleLines(rulesToAdd([row("", "R", "./x")]));
+    expect(line).toBe('""  R  ./x');
     const [rule] = parseExpectedRules([{ text: line, origin: "input", firstLine: 1 }]).rules;
     expect(rule.program!.test("")).toBe(true);
   });
+});
 
-  it("keeps the rules given as written, then adds what they did not take", () => {
-    expect(expectedRulesFile(["# npm", "* R ./a", "", "* W ./b"], [row("bash", "R", "./c")])).toBe(
-      [
-        "filesystem_audit: record",
-        UPLOAD_NOTE,
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  # npm",
-        "  * R ./a",
-        "",
-        "  * W ./b",
-        "",
-        "  # Not matched in this run",
-        "  bash  R  ./c",
-        "",
-      ].join("\n"),
-    );
-  });
+describe("writeProposedRules", () => {
+  const summary = (proposed: unknown[]) =>
+    ({ proposed }) as unknown as Parameters<typeof writeProposedRules>[0];
+  const annotation = () => ({ warning: vi.fn() }) as never;
 
-  it("leaves out an earlier run's heading, and the blank lines around it, among the rules given", () => {
-    const given = ["* R ./a", "", "", "# Not matched in this run", "", "bash R ./c"];
+  it("writes the rules to add", () => {
+    const writeFile = vi.fn();
     expect(
-      expectedRulesFile(given, [row("bash", "W", "./d")])
-        ?.split("\n")
-        .slice(4),
-    ).toStrictEqual([
-      "  * R ./a",
-      "  bash R ./c",
-      "",
-      "  # Not matched in this run",
-      "  bash  W  ./d",
-      "",
-    ]);
-  });
-
-  it("writes the rules given alone when they took everything", () => {
-    expect(expectedRulesFile(["* R ./a"], [])).toBe(
-      [
-        "filesystem_audit: record",
-        UPLOAD_NOTE,
-        "upload_filesystem_audit_artifact: true",
-        "expected_filesystem_rules: |",
-        "  * R ./a",
-        "",
-      ].join("\n"),
-    );
+      writeProposedRules(summary([row("bash", "R", "./c")]), "/x", annotation(), writeFile),
+    ).toBe("written");
+    expect(writeFile).toHaveBeenCalledWith("/x", rulesToAdd([row("bash", "R", "./c")]));
   });
 });

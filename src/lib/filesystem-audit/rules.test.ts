@@ -64,16 +64,10 @@ describe("globPattern", () => {
 });
 
 describe("parseExpectedRules", () => {
-  it("compiles each rule with where it was written, and keeps every line", () => {
-    const { rules, lines } = parse(
+  it("compiles each rule with where it was written", () => {
+    const { rules } = parse(
       "  # npm\n/usr/bin/node  RWr  ./node_modules/**\n\n*\tw!\t$GITHUB_OUTPUT\n\n",
     );
-    expect(lines).toStrictEqual([
-      "# npm",
-      "/usr/bin/node  RWr  ./node_modules/**",
-      "",
-      "*\tw!\t$GITHUB_OUTPUT",
-    ]);
     expect(rules).toMatchObject([
       { ref: "input:2", ok: BIT.R | BIT.W, failed: BIT.R, perm: 0 },
       { ref: "input:4", program: undefined, ok: 0, failed: 0, perm: BIT.W },
