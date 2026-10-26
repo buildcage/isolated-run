@@ -171,12 +171,15 @@ const UNTIDY = /\/\.?\//;
 // again as /proc/<pid>.
 const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
 const OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/;
+const asAnyProcess = (name: string): string | undefined =>
+  OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : undefined;
 const anyProcess = (glob: string, pattern: RegExp): NameMatcher =>
   ANY_PROCESS.test(glob)
     ? {
-        test: (name) =>
-          pattern.test(name) ||
-          (OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>"))),
+        test: (name) => {
+          const any = asAnyProcess(name);
+          return pattern.test(name) || (any !== undefined && pattern.test(any));
+        },
       }
     : pattern;
 
@@ -303,8 +306,8 @@ export class RuleMatcher {
     const found = new Set<number>();
     this.startingAt(path, found);
     // A /proc/<pid>/ rule takes the accessing process's own directory too.
-    if (OWN_DIRECTORY.test(path))
-      this.startingAt(path.replace(OWN_DIRECTORY, "/proc/<pid>"), found);
+    const any = asAnyProcess(path);
+    if (any !== undefined) this.startingAt(any, found);
     return [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
   }
 

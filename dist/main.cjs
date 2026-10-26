@@ -72642,7 +72642,10 @@ function fixedComponents(glob) {
 	}
 	return glob.split("/");
 }
-const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, asAnyProcess = (name) => OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : void 0, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => {
+	let any = asAnyProcess(name);
+	return pattern.test(name) || any !== void 0 && pattern.test(any);
+} } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72714,7 +72717,9 @@ var RuleMatcher = class {
 	}
 	candidates(path) {
 		let found = new Set();
-		return this.startingAt(path, found), OWN_DIRECTORY.test(path) && this.startingAt(path.replace(OWN_DIRECTORY, "/proc/<pid>"), found), [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
+		this.startingAt(path, found);
+		let any = asAnyProcess(path);
+		return any !== void 0 && this.startingAt(any, found), [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
 	}
 	match(program, path, bits, failed, perm) {
 		let key = `${program}\0${path}`, candidates = this.cache.get(key);

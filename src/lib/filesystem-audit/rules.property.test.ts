@@ -15,6 +15,8 @@ const parts = [
   "a*",
   "*b",
   "\\*",
+  "\\\\",
+  "\\\\*",
   "<pid>",
   "self",
   "proc",
@@ -22,7 +24,10 @@ const parts = [
 ];
 const starts = ["/", "./", "~/", "…/", "", "/proc/", "/proc/self/", "/proc/<pid>/"];
 
-const nameArb = fc
+// Names that are no path, which the tree still splits at each "/".
+const others = ['memfd:"a/b"', 'memfd:"a/*"', 'memfd:"a\\"b"', "memfd:**", "$GITHUB_OUTPUT"];
+
+const pathArb = fc
   .tuple(
     fc.constantFrom(...starts),
     fc.array(fc.constantFrom(...parts.filter((p) => !p.includes("*") || p === "\\*")), {
@@ -31,7 +36,11 @@ const nameArb = fc
     fc.boolean(),
   )
   .map(([start, rest, slash]) => `${start}${rest.join("/")}${slash ? "/" : ""}`);
-const globArb = fc
+const nameArb = fc.oneof(
+  pathArb,
+  fc.constantFrom(...others.filter((o) => !o.includes("*") || o.includes("\\*"))),
+);
+const pathGlobArb = fc
   .tuple(
     fc.constantFrom(...starts),
     fc.array(fc.constantFrom(...parts), { maxLength: 4 }),
@@ -39,6 +48,7 @@ const globArb = fc
   )
   .map(([start, rest, slash]) => `${start}${rest.join("/")}${slash ? "/" : ""}`)
   .filter((g) => g !== "" && !/\/\.?\//.test(g));
+const globArb = fc.oneof(pathGlobArb, fc.constantFrom(...others));
 
 // The first rule taking a read, trying every rule in order.
 function linear(rules: ExpectedRule[], program: string, path: string): string | undefined {
@@ -58,7 +68,11 @@ describe("RuleMatcher", () => {
         }),
         fc.array(fc.tuple(fc.constantFrom("/bin/a", "/bin/b"), nameArb), { maxLength: 20 }),
         (lines, accesses) => {
-          const text = lines.map(([program, path]) => `${program} R "${path}"`).join("\n");
+          const text = lines
+            .map(
+              ([program, path]) => `${program} R ${path.startsWith("memfd:") ? path : `"${path}"`}`,
+            )
+            .join("\n");
           const { rules } = parseExpectedRules([{ text, origin: "input", firstLine: 1 }]);
           const matcher = new RuleMatcher(rules);
           for (const [program, path] of accesses)
