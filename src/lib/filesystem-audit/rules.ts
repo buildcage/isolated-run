@@ -209,7 +209,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
           );
         return pattern;
       };
-      // A program that ran nothing goes by its own name, which may hold "//".
+      // Not the program: one that ran nothing goes by its own name, which may hold "//".
       if (!path.startsWith(MEMFD_PREFIX) && UNTIDY.test(path))
         throw invalidRules(
           ref,
