@@ -88,7 +88,7 @@ inputs:
     required: false
     default: ""
   fail_on_unexpected_file_access:
-    description: "Fail the step if an access fell outside expected_filesystem_rules or could not be checked against them, in audit mode too. Default false."
+    description: "Fail the step if an access fell outside expected_filesystem_rules (any access, when there are none) or could not be checked against them, in audit mode too. Needs filesystem_audit: record. Default false."
     required: false
   label:
     description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"

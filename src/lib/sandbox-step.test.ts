@@ -8,7 +8,6 @@ import type { RecordArtifact } from "./filesystem-audit/render.ts";
 import type { ReadStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { parseExpectedRules } from "./filesystem-audit/rules.ts";
 import {
-  EXAMPLE_RULES_FILE_NOTE,
   finalizeStep,
   preflight,
   readStepInputs,
@@ -190,9 +189,9 @@ function orderOf(mock: { mock: { invocationCallOrder: number[] } }): number {
 }
 
 // expected_filesystem_rules as readExpectedFilesystemRules gives them.
-function givenRules(text: string) {
-  const parsed = parseExpectedRules([{ text, origin: "input", firstLine: 1 }]);
-  return { expected: parsed.rules.length ? parsed : undefined, lines: parsed.lines };
+function givenRules(text: string, origin: "input" | "config" = "input") {
+  const parsed = parseExpectedRules([{ text, origin, firstLine: 1 }]);
+  return { expected: parsed.rules.length ? parsed : undefined };
 }
 
 describe("runSandboxStep", () => {
@@ -345,33 +344,39 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("warns that fail_on_unexpected_file_access has nothing to fail on without rules", async () => {
+  it("refuses fail_on_unexpected_file_access without filesystem_audit: record, before any setup", async () => {
     mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
 
-    await runSandboxStep(ENV, deps);
-
-    expect(annotation.warning).toHaveBeenCalledWith(
-      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow(
+      "fail_on_unexpected_file_access needs filesystem_audit: record",
     );
+    expect(mocks.checkScratchBaseParent).not.toHaveBeenCalled();
   });
 
-  it("runs as if rules all commented out were unset, keeps their lines, and warns of them once", async () => {
+  it("runs as if rules all commented out were unset, and warns of them once, fail_on_unexpected_file_access's effect included", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
     mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
     mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("# node R ./a"));
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.readStepFilesystemAudit.mock.calls[0][0]).toMatchObject({
-      rules: undefined,
-      givenLines: ["# node R ./a"],
-    });
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0]).toMatchObject({ rules: undefined });
     // Once, for the one cause.
     expect(annotation.warning).toHaveBeenCalledWith(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set, " +
+        "and fail_on_unexpected_file_access fails it on every file access.",
     );
-    expect(annotation.warning).not.toHaveBeenCalledWith(
-      expect.stringContaining("fail_on_unexpected_file_access is true"),
+    expect(annotation.warning).toHaveBeenCalledTimes(2);
+  });
+
+  it("warns of rules all commented out without fail_on_unexpected_file_access", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("# node R ./a"));
+
+    await runSandboxStep(ENV, deps);
+
+    expect(annotation.warning).toHaveBeenCalledWith(
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
     );
   });
 
@@ -608,41 +613,19 @@ describe("runSandboxStep", () => {
     ]);
   });
 
-  it("points the restrict example to the proposed rules only where the artifact holds them and config_file works", async () => {
+  it("leaves the step's expected rules out of the restrict example, pointing to the guide", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
-    mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("node R ./a"));
-    const uploaded = () =>
-      readAudit({ rulesFile: "rules.yml", upload: vi.fn(async () => ({ name: "audit" })) });
-    const example = async (env: NodeJS.ProcessEnv, read: object = uploaded()) => {
-      mocks.reportStepTraffic.mockClear();
-      mocks.readStepFilesystemAudit.mockReturnValue(read);
-      await runSandboxStep(env, deps);
-      return mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] }) as string[];
-    };
+    mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("node R ./a", "config"));
 
-    expect(await example(ENV)).toContain("config_file: path/to/expected-filesystem-rules.yml");
-    expect(await example({ ...ENV, GITHUB_EVENT_NAME: "pull_request_target" })).toContain(
-      "expected_filesystem_rules: |",
+    await runSandboxStep(ENV, deps);
+
+    const inputs: string[] = mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] });
+    expect(inputs.join("\n")).not.toContain("node R ./a");
+    expect(inputs).toContainEqual(
+      expect.stringMatching(
+        /^# See https:\/\/github\.com\/buildcage\/isolated-run\/blob\/.+\/docs\/filesystem-audit\.md#expected-accesses$/,
+      ),
     );
-    expect(await example(ENV, readAudit({ rulesFile: "rules.yml" }))).toContain(
-      "expected_filesystem_rules: |",
-    );
-  });
-
-  it("says the rules can be a file only where uploading the record would make the example name one", async () => {
-    mocks.readFilesystemAuditInput.mockReturnValue("record");
-    const note = async (env: NodeJS.ProcessEnv, upload = false, rules = "node R ./a") => {
-      mocks.reportStepTraffic.mockClear();
-      mocks.readFilesystemAuditArtifactInputs.mockReturnValue({ upload });
-      mocks.readExpectedFilesystemRules.mockReturnValue(rules ? givenRules(rules) : undefined);
-      await runSandboxStep(env, deps);
-      return mocks.reportStepTraffic.mock.calls[0][0].omittedExampleNote;
-    };
-
-    expect(await note(ENV)).toBe(EXAMPLE_RULES_FILE_NOTE);
-    expect(await note(ENV, true)).toBeUndefined();
-    expect(await note({ ...ENV, GITHUB_EVENT_NAME: "workflow_run" })).toBeUndefined();
-    expect(await note(ENV, false, "")).toBeUndefined();
   });
 
   it("pulls the image by verified digest, under the action's own repository", async () => {

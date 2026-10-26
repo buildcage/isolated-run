@@ -409,7 +409,7 @@ function filesystemAuditPaths(containerName, scratchBase) {
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
 		uploadDir,
 		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
-		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules.yml")
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
 	};
 }
 function readPid(readFile, pidFilePath) {

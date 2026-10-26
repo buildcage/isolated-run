@@ -98,7 +98,9 @@ The step writes every destination the command contacted to the Job Summary:
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
 command actually did. A request whose method, host or path a rule would read as a wildcard is listed
 under it rather than written in, since copying it would permit more than was sent. The step it
-writes also keeps `filesystem_mode`, `write_through` and `filesystem_audit` when the run set them.
+writes also keeps `filesystem_mode`, `write_through` and `filesystem_audit` when the run set them,
+from a config file too, as it names no `config_file`. It leaves out `expected_filesystem_rules`,
+with a comment to add the step's back.
 
 ### 2. Enforce the allowlist
 
@@ -480,10 +482,10 @@ kills the thread that made it, and while the step runs every system call on the 
 included, costs a little more. See [Filesystem audit](./docs/filesystem-audit.md)
 for how to use and read it.
 
-Once a step's accesses are known, `expected_filesystem_rules` lists them, one
-`<program> <access> <path>` rule per line, and the section then shows only the accesses outside
-them. Each uploaded artifact holds a proposed set to start from; see
-[Expected accesses](./docs/filesystem-audit.md#expected-accesses).
+Once a step's accesses are known, `expected_filesystem_rules` lists them, one `<program> <access>
+<path>` rule per line, and the section then shows only the accesses outside them. The uploaded
+artifact holds a proposed set to start from, and, once rules are set, the rules to add whenever an
+access falls outside them; see [Expected accesses](./docs/filesystem-audit.md#expected-accesses).
 
 ## AWS access key check
 

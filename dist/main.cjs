@@ -72585,7 +72585,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", CONFIG_FILE_EXAMPLE = "path/to/buildcage.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -72644,10 +72644,10 @@ function accessBits(access) {
 	return bits;
 }
 function parseExpectedRules(sources) {
-	let rules = [], lines = [];
+	let rules = [];
 	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
 		let line = raw.trim();
-		if (lines.push(line), line === "" || line.startsWith("#")) return;
+		if (line === "" || line.startsWith("#")) return;
 		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
 		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
@@ -72665,11 +72665,7 @@ function parseExpectedRules(sources) {
 			...accessBits(access)
 		});
 	});
-	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
-	return {
-		rules,
-		lines
-	};
+	return { rules };
 }
 function takes(rule, bit, failed, perm) {
 	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
@@ -72698,406 +72694,27 @@ var RuleMatcher = class {
 };
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
-function givenRules(written) {
-	let out = [], afterHeading = !1;
-	for (let line of written) if (line === "# Not matched in this run") {
-		for (; out.at(-1) === "";) out.pop();
-		afterHeading = !0;
-	} else (!afterHeading || line !== "") && (out.push(line), afterHeading = !1);
-	return out;
-}
-function expectedRulesFile(written, proposed) {
-	let given = givenRules(written), rows = proposed.map((r) => [
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} took in this run.`, `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`];
+function rulesToAdd(proposed) {
+	let rows = proposed.map((r) => [
 		ruleField(r.program.path),
 		r.flags,
 		ruleField(r.path.path)
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
-		...given,
-		"",
-		"# Not matched in this run",
-		...added
-	];
-	if (lines.length !== 0) return [
-		"filesystem_audit: record",
-		UPLOAD_NOTE,
-		"upload_filesystem_audit_artifact: true",
-		`${EXPECTED_RULES_INPUT}: |`,
-		...lines.map((line) => line ? `  ${line}` : ""),
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)];
+	return [
+		...RULES_TO_ADD_HEADER,
+		...rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`),
 		""
 	].join("\n");
 }
-function writeProposedRules(summary, given, path, annotation, writeFile) {
+function writeProposedRules(summary, path, annotation, writeFile) {
 	if (!summary) return "write-failed";
 	if (summary.proposedCut) return "too-many-paths";
-	let file = expectedRulesFile(given, summary.proposed);
-	if (file === void 0) return "none";
 	try {
-		return writeFile(path, file), "written";
+		return writeFile(path, rulesToAdd(summary.proposed)), "written";
 	} catch (e) {
 		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
 	}
-}
-//#endregion
-//#region src/lib/filesystem-audit/render.ts
-const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
-function firstOf(names, shown) {
-	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
-}
-function killedNote(rows) {
-	let killed = inRecordingOrder(rows);
-	if (!killed.length) return;
-	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
-	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${firstOf(comms, 3)}` : ""}.`;
-}
-function skippedNote(count, url) {
-	let why = url ? ` [Why](${url})` : "";
-	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
-> accesses may be missing from this summary and from the artifact.${why}`;
-}
-const SECTION = "filesystem", FILESYSTEM_BLOCK = {
-	unexpected: "filesystem-unexpected",
-	paths: "filesystem-paths",
-	log: "filesystem-log"
-}, keyed = (rows) => rows.map((row) => {
-	let [cat, path] = sortKey(row.path);
-	return {
-		row,
-		cat,
-		path
-	};
-}), byRecording = (a, b) => a.row.agg.seq - b.row.agg.seq || a.cat - b.cat || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.row.comm < b.row.comm ? -1 : 1);
-function inRecordingOrder(rows) {
-	return keyed(rows).sort(byRecording).map((k) => k.row);
-}
-function byProgramAndPath(paths) {
-	return keyed(paths).sort(byRecording).sort((a, b) => a.row.program.rank - b.row.program.rank || a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
-}
-function accessRows(rows) {
-	return markdownRows([
-		"Program",
-		"Command",
-		"Access",
-		"Path"
-	], rows.map((r) => [
-		pathCell(r.program),
-		firstOf(r.commands.map(codeCell), 3),
-		r.flags,
-		pathCell(r.path)
-	]));
-}
-function pathsBlock(rows, cause, { priorities, cutNote }) {
-	let block = {
-		id: FILESYSTEM_BLOCK.paths,
-		priority: priorities[FILESYSTEM_BLOCK.paths],
-		level: 2,
-		section: SECTION
-	};
-	if (!rows) return {
-		...block,
-		cut: "atomic",
-		text: cutNote(cause)
-	};
-	let md = accessRows(rows.map((r) => ({
-		...r,
-		path: r
-	})));
-	return {
-		...block,
-		cut: "lines",
-		head: 6,
-		text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
-	};
-}
-const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
-	let log = {
-		id: FILESYSTEM_BLOCK.log,
-		priority: priorities[FILESYSTEM_BLOCK.log],
-		level: 3,
-		section: SECTION,
-		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
-		close: "</details>\n"
-	};
-	if (!details) return {
-		...log,
-		cut: "atomic",
-		text: cutNote(detailsCut)
-	};
-	let rows = inRecordingOrder([...details, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
-		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
-		"flags",
-		"command",
-		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
-	return {
-		...log,
-		cut: "lines",
-		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
-	};
-}
-function unexpectedBlock(summary, { priorities }) {
-	let { proposed, matched } = summary, block = {
-		id: FILESYSTEM_BLOCK.unexpected,
-		priority: priorities[FILESYSTEM_BLOCK.unexpected],
-		level: 2,
-		section: SECTION
-	}, took = `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
-	if (!proposed) return {
-		...block,
-		cut: "atomic",
-		text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took
-	};
-	if (proposed.length === 0) return {
-		...block,
-		cut: "atomic",
-		text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`
-	};
-	let md = accessRows(proposed);
-	return {
-		...block,
-		cut: "lines",
-		head: 8,
-		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
-	};
-}
-const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
-function renderAuditSummaryBlocks(summary, opts) {
-	let { ended, lost, hostMissed, paths, details, killed, pathsCut } = summary, killedLine = killedNote(killed), top = [
-		heading(opts.title),
-		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
-		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
-		...killedLine ? [killedLine] : []
-	].join("\n\n"), frame = (text) => ({
-		priority: 0,
-		level: 1,
-		section: SECTION,
-		text,
-		cut: "keep"
-	});
-	if (details?.length === 0 && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
-	let blocks = [frame(`${top}\n\n`)];
-	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
-	else {
-		let rows = paths && byProgramAndPath(paths);
-		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts));
-	}
-	return opts.rulesNote && blocks.push(frame(`\n${opts.rulesNote}`)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
-}
-function unreadableSummaryBlocks(title) {
-	return [{
-		priority: 0,
-		level: 1,
-		section: SECTION,
-		text: `${heading(title)}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
-> artifact was uploaded.\n`,
-		cut: "keep"
-	}];
-}
-const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
-function rulesNote(artifact, rules, { fileName, guideUrl, given }) {
-	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.` : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`, holds = given ? "the rules given plus one for each access they did not take" : "a rule for each access this run made", where, steps = !1;
-	return artifact === "not-requested" ? (where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`, steps = !0) : artifact === "upload-failed" ? where = `This run's ${file} was lost, as the artifact could not be uploaded.` : rules === "too-many-paths" ? where = "No rules were proposed: the accesses touched too many distinct paths." : rules === "write-failed" ? where = "The proposed rules could not be written." : rules === "none" ? where = "No rules were proposed, as no file access was recorded." : (where = `${file} in this run's ${artifactLink(artifact)} holds ${holds}.`, steps = !0), `<details>
-<summary>📝 Expected filesystem rules</summary>
-
-${intro}\n\n` + (steps ? useSteps(where, fileName) : `${where}\n\n`) + `[How to write the rules](${guideUrl})\n\n</details>
-`;
-}
-function useSteps(where, fileName) {
-	return `${where} Review it, using \`**\` for the paths that change between runs, commit it, and point \`config_file\` at it:\n\n\`\`\`yaml\nconfig_file: ${RULES_FILE_EXAMPLE}\n\`\`\`\n\nOr copy its rules into the config file the step already uses, or into the workflow:
-
-\`\`\`yaml
-filesystem_audit: record
-${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true
-${EXPECTED_RULES_INPUT}: |\n  # The reviewed rules from ${fileName}, such as:\n  /usr/local/bin/node  RWD  ./node_modules/**
-  /usr/local/bin/node  R    ~/.npmrc
-\`\`\`
-
-`;
-}
-function filesystemLegendNote(artifact, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
-}
-function filesystemTruncationNote(artifact, cause = "size") {
-	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
-	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
-}
-//#endregion
-//#region src/lib/summary-priorities.ts
-const TRAFFIC_PRIORITIES = {
-	[TRAFFIC_BLOCK.example]: 1,
-	[TRAFFIC_BLOCK.blocked]: 3,
-	[TRAFFIC_BLOCK.passed]: 4,
-	[TRAFFIC_BLOCK.known]: 8,
-	[TRAFFIC_BLOCK.log]: 9
-}, FILESYSTEM_PRIORITIES = {
-	[FILESYSTEM_BLOCK.unexpected]: 6,
-	[FILESYSTEM_BLOCK.paths]: 6,
-	[FILESYSTEM_BLOCK.log]: 10
-};
-//#endregion
-//#region src/lib/report.ts
-function reportTitle(label, title = "Outbound Traffic Report") {
-	return label ? `${title} — ${label}` : title;
-}
-function summaryFooter(actionRepo) {
-	return trafficFrame(`\n${reportFooter(actionRepo)}`);
-}
-function missingReportFrame(title, isAudit) {
-	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
-}
-function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, omittedExampleNote, actionVersion, artifactAvailable, verdictItems = {} }) {
-	let emissions = describeReportOutcomes(report, {
-		failOnBlocked: failOnBlocked ?? !1,
-		engineLabel: "sandbox"
-	}), wouldBlock = describeWouldBlock(report.timeline);
-	wouldBlock && emissions.push(wouldBlock);
-	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable), example = restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
-		stepName: "Start isolated-run",
-		runCommand,
-		extraInputs,
-		actionVersion
-	});
-	return {
-		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), {
-			caution: verdictItems.caution,
-			warning: [...wouldBlockVerdictItems(report.timeline), ...verdictItems.warning ?? []]
-		}), [
-			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
-			wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
-				priority: 2,
-				artifactAvailable
-			}),
-			awsTroubleshootingBlocks(report, actionRepo, actionRef),
-			passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
-			awsKeysBlocks(keys, {
-				priority: 5,
-				artifactAvailable
-			}),
-			knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
-			omittedExampleNote ? withNotices(example, ({ notice }) => `${notice}\n${omittedExampleNote}\n`) : example,
-			noCommunicationBlocks(report),
-			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
-			engineNoteBlocks(report)
-		]),
-		emissions
-	};
-}
-const realDeps$4 = {
-	appendFile: node_fs.appendFileSync,
-	fileSize: (path) => (0, node_fs.statSync)(path).size,
-	writeSummary: writeStepSummary
-};
-function summarySize(path, fileSize) {
-	if (!path) return 0;
-	try {
-		return fileSize(path);
-	} catch {
-		return 0;
-	}
-}
-const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
-function commandSummaryDroppedMessage(size) {
-	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit.`;
-}
-function commandSummaryDroppedNote(size) {
-	return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");
-}
-function cutCommandSummary(summary, room) {
-	if (summary.length <= room) return summary;
-	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
-	if (keep < 0) return Buffer.alloc(0);
-	let end = summary.subarray(0, keep).lastIndexOf(10);
-	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
-}
-function moveCommandSummaryLast(path, commandBytes) {
-	if (commandBytes === 0) return !1;
-	let cut = !1;
-	return rewriteRunnerFile(path, (file) => {
-		let command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
-		if (ours.length !== 0 || kept !== command) return cut = kept !== command, Buffer.concat([
-			ours,
-			kept.length > 0 ? separator : Buffer.alloc(0),
-			kept
-		]);
-	}), cut;
-}
-function fullReportLocation(artifactAvailable) {
-	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
-}
-function reportDidNotFitMessage(artifactAvailable) {
-	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
-}
-function reportDidNotFitLine(artifactAvailable) {
-	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
-}
-async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
-	let { fileSize, writeSummary } = {
-		...realDeps$4,
-		...overrides
-	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
-		usedBytes: used,
-		onCut: (b) => {
-			b.id !== void 0 && cutIds.add(b.id);
-		}
-	}), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
-	return frames <= room && used + bytes(fitted) <= 1048576 ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && bytes(fallbackLine) <= room && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
-		cutIds,
-		wrote
-	};
-}
-async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
-	let { appendFile, fileSize, writeSummary } = {
-		...realDeps$4,
-		...overrides
-	}, outcomes = computeReportOutcomes(report, {
-		...options,
-		artifactAvailable
-	});
-	applyOutcomeAnnotations(annotation, outcomes.emissions);
-	let { cutIds, wrote } = await writeSummaryBlocks([...outcomes.blocks, ...extraBlocks], env, {
-		fileSize,
-		writeSummary,
-		commandBytes,
-		fallbackLine: reportDidNotFitLine(artifactAvailable)
-	});
-	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
-}
-//#endregion
-//#region src/lib/filesystem-audit/line-file.ts
-const CHUNK_BYTES = 1 << 20;
-function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(chunkBytes), carry = [];
-		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
-			start < n && carry.push(Buffer.from(chunk.subarray(start)));
-		}
-		onLine(Buffer.concat(carry).toString("utf8"));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function openWriter(path, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		let data = Buffer.from(pending.join(""));
-		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
-		pending = [], size = 0;
-	};
-	return {
-		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
-		},
-		close: () => {
-			try {
-				flush();
-			} finally {
-				(0, node_fs.closeSync)(fd);
-			}
-		}
-	};
 }
 //#endregion
 //#region src/lib/filesystem-audit/command.ts
@@ -73445,7 +73062,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, LIMITS = {
 	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
-}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/");
+}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0;
 function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
@@ -73735,6 +73352,369 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 	};
 }
 //#endregion
+//#region src/lib/filesystem-audit/render.ts
+const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
+function firstOf(names, shown) {
+	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
+}
+function killedNote(rows) {
+	let killed = inRecordingOrder(rows);
+	if (!killed.length) return;
+	let comms = [...new Set(killed.map((r) => r.comm).filter(Boolean))].map(codeSpan);
+	return `> 🚫 Killed for a 32-bit system call${comms.length ? `: ${firstOf(comms, 3)}` : ""}.`;
+}
+function skippedNote(count, url) {
+	let why = url ? ` [Why](${url})` : "";
+	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
+> accesses may be missing from this summary and from the artifact.${why}`;
+}
+const SECTION = "filesystem", FILESYSTEM_BLOCK = {
+	unexpected: "filesystem-unexpected",
+	paths: "filesystem-paths",
+	log: "filesystem-log"
+}, keyed = (rows) => rows.map((row) => {
+	let [cat, path] = sortKey(row.path);
+	return {
+		row,
+		cat,
+		path
+	};
+}), byRecording = (a, b) => a.row.agg.seq - b.row.agg.seq || a.cat - b.cat || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.row.comm < b.row.comm ? -1 : 1);
+function inRecordingOrder(rows) {
+	return keyed(rows).sort(byRecording).map((k) => k.row);
+}
+function byProgramAndPath(paths) {
+	return keyed(paths).sort(byRecording).sort((a, b) => a.row.program.rank - b.row.program.rank || a.cat - b.cat || (a.path < b.path ? -1 : +(a.path > b.path))).map((k) => k.row);
+}
+function accessRows(rows) {
+	return markdownRows([
+		"Program",
+		"Command",
+		"Access",
+		"Path"
+	], rows.map((r) => [
+		pathCell(r.program),
+		firstOf(r.commands.map(codeCell), 3),
+		r.flags,
+		pathCell(r.path)
+	]));
+}
+function pathsBlock(rows, cause, { priorities, cutNote }) {
+	let block = {
+		id: FILESYSTEM_BLOCK.paths,
+		priority: priorities[FILESYSTEM_BLOCK.paths],
+		level: 2,
+		section: SECTION
+	};
+	if (!rows) return {
+		...block,
+		cut: "atomic",
+		text: cutNote(cause)
+	};
+	let md = accessRows(rows.map((r) => ({
+		...r,
+		path: r
+	})));
+	return {
+		...block,
+		cut: "lines",
+		head: 6,
+		text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
+	};
+}
+const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
+function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
+	let log = {
+		id: FILESYSTEM_BLOCK.log,
+		priority: priorities[FILESYSTEM_BLOCK.log],
+		level: 3,
+		section: SECTION,
+		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
+		close: "</details>\n"
+	};
+	if (!details) return {
+		...log,
+		cut: "atomic",
+		text: cutNote(detailsCut)
+	};
+	let rows = inRecordingOrder([...details, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
+		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
+		"flags",
+		"command",
+		"path"
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+	return {
+		...log,
+		cut: "lines",
+		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
+	};
+}
+function unexpectedBlock(summary, { priorities, expected }) {
+	let { proposed, matched } = summary, block = {
+		id: FILESYSTEM_BLOCK.unexpected,
+		priority: priorities[FILESYSTEM_BLOCK.unexpected],
+		level: 2,
+		section: SECTION
+	}, took = expected === "empty" ? `<sub>\`${EXPECTED_RULES_INPUT}\` is empty, so every access is unexpected.</sub>\n\n` : `<sub>${operations(matched)} matched \`${EXPECTED_RULES_INPUT}\`.</sub>\n\n`;
+	if (!proposed) return {
+		...block,
+		cut: "atomic",
+		text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took
+	};
+	if (proposed.length === 0) return {
+		...block,
+		cut: "atomic",
+		text: `No access fell outside \`${EXPECTED_RULES_INPUT}\`.\n\n${took}`
+	};
+	let md = accessRows(proposed);
+	return {
+		...block,
+		cut: "lines",
+		head: 8,
+		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
+	};
+}
+const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
+function renderAuditSummaryBlocks(summary, opts) {
+	let { ended, lost, hostMissed, paths, killed, pathsCut } = summary, killedLine = killedNote(killed), top = [
+		heading(opts.title),
+		...ended && !lost ? [] : ["> ❗ **This record is incomplete.** The tracer's buffers filled up or it did not stop cleanly, so\n> some accesses are missing from this summary and from the artifact."],
+		...hostMissed ? [skippedNote(hostMissed, opts.skippedHooksUrl)] : [],
+		...killedLine ? [killedLine] : []
+	].join("\n\n"), frame = (text) => ({
+		priority: 0,
+		level: 1,
+		section: SECTION,
+		text,
+		cut: "keep"
+	});
+	if (recordedNoFileAccess(summary) && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
+	let blocks = [frame(`${top}\n\n`)];
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
+	else {
+		let rows = paths && byProgramAndPath(paths);
+		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts));
+	}
+	return opts.rulesNote && blocks.push(frame(`\n${opts.rulesNote}`)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
+}
+function unreadableSummaryBlocks(title) {
+	return [{
+		priority: 0,
+		level: 1,
+		section: SECTION,
+		text: `${heading(title)}\n\n> ❗ **The recording could not be read**, so this summary has none of its accesses and no
+> artifact was uploaded.\n`,
+		cut: "keep"
+	}];
+}
+const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url})` : `filesystem audit artifact (\`${name}\`)`;
+function proposalOf(state, artifact) {
+	return state === "written" ? typeof artifact == "object" ? artifact : "lost" : state;
+}
+function rulesNote(proposal, { fileName, guideUrl, given }) {
+	if (proposal === "nothing-to-add") return;
+	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.` : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`, holds = given ? "a rule for each access the rules did not take" : "a rule for each access this run made", where, steps = !1;
+	return proposal === "not-requested" ? (where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`, steps = !0) : proposal === "lost" ? where = `This run's ${file} was lost, as the artifact could not be uploaded.` : proposal === "too-many-paths" ? where = "No rules were proposed: the accesses touched too many distinct paths." : proposal === "write-failed" ? where = "The proposed rules could not be written." : proposal === "not-prepared" ? where = "No rules were proposed, as the artifact could not be prepared." : (where = `${file} in this run's ${artifactLink(proposal)} holds ${holds}.`, steps = !0), `<details>
+<summary>📝 Expected filesystem rules</summary>
+
+${intro}\n\n` + (steps ? useSteps(where) : `${where}\n\n`) + `[How to write the rules](${guideUrl})\n\n</details>
+`;
+}
+function useSteps(where) {
+	return `${where} Review the rules, using \`**\` for the paths that change between runs, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the config file the step uses. With many rules, a config file keeps them out of the workflow; name it in \`config_file\`:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n\`\`\`yaml
+# ${CONFIG_FILE_EXAMPLE}\nfilesystem_audit: record
+# Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.\nupload_filesystem_audit_artifact: true
+${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
+  /usr/local/bin/node  R    ~/.npmrc
+\`\`\`
+
+`;
+}
+function filesystemLegendNote(artifact, guideUrl) {
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
+}
+function filesystemTruncationNote(artifact, cause = "size") {
+	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
+	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
+}
+//#endregion
+//#region src/lib/summary-priorities.ts
+const TRAFFIC_PRIORITIES = {
+	[TRAFFIC_BLOCK.example]: 1,
+	[TRAFFIC_BLOCK.blocked]: 3,
+	[TRAFFIC_BLOCK.passed]: 4,
+	[TRAFFIC_BLOCK.known]: 8,
+	[TRAFFIC_BLOCK.log]: 9
+}, FILESYSTEM_PRIORITIES = {
+	[FILESYSTEM_BLOCK.unexpected]: 6,
+	[FILESYSTEM_BLOCK.paths]: 6,
+	[FILESYSTEM_BLOCK.log]: 10
+};
+//#endregion
+//#region src/lib/report.ts
+function reportTitle(label, title = "Outbound Traffic Report") {
+	return label ? `${title} — ${label}` : title;
+}
+function summaryFooter(actionRepo) {
+	return trafficFrame(`\n${reportFooter(actionRepo)}`);
+}
+function missingReportFrame(title, isAudit) {
+	return trafficFrame(reportHeading(title, isAudit) + "> ❗ **No traffic report could be written** for this step, so this summary has none of its traffic.\n");
+}
+function computeReportOutcomes(report, { stepLabel, failOnBlocked, actionRepo, actionRef, runCommand, extraInputs, actionVersion, artifactAvailable, verdictItems = {} }) {
+	let emissions = describeReportOutcomes(report, {
+		failOnBlocked: failOnBlocked ?? !1,
+		engineLabel: "sandbox"
+	}), wouldBlock = describeWouldBlock(report.timeline);
+	wouldBlock && emissions.push(wouldBlock);
+	let keys = awsKeys(report.timeline), fit = partFits(TRAFFIC_PRIORITIES, artifactAvailable), example = restrictExampleBlocks(report, actionRepo, actionRef, fit(TRAFFIC_BLOCK.example), {
+		stepName: "Start isolated-run",
+		runCommand,
+		extraInputs,
+		actionVersion
+	});
+	return {
+		blocks: stackTrafficBlocks(trafficHeadingBlock(report, reportTitle(stepLabel), {
+			caution: verdictItems.caution,
+			warning: [...wouldBlockVerdictItems(report.timeline), ...verdictItems.warning ?? []]
+		}), [
+			blockedHostsBlocks(report, fit(TRAFFIC_BLOCK.blocked)),
+			wouldBlockTables(report.timeline, blockedKeys(report.timeline, keys), {
+				priority: 2,
+				artifactAvailable
+			}),
+			awsTroubleshootingBlocks(report, actionRepo, actionRef),
+			passedHostsBlocks(report, fit(TRAFFIC_BLOCK.passed)),
+			awsKeysBlocks(keys, {
+				priority: 5,
+				artifactAvailable
+			}),
+			knownBlockedBlocks(report, fit(TRAFFIC_BLOCK.known)),
+			example,
+			noCommunicationBlocks(report),
+			communicationDetailsBlocks(report, fit(TRAFFIC_BLOCK.log), awsKeyLineNote(keys)),
+			engineNoteBlocks(report)
+		]),
+		emissions
+	};
+}
+const realDeps$4 = {
+	appendFile: node_fs.appendFileSync,
+	fileSize: (path) => (0, node_fs.statSync)(path).size,
+	writeSummary: writeStepSummary
+};
+function summarySize(path, fileSize) {
+	if (!path) return 0;
+	try {
+		return fileSize(path);
+	} catch {
+		return 0;
+	}
+}
+const COMMAND_SEPARATOR = Buffer.from("\n\n---\n\n", "utf8"), COMMAND_SUMMARY_CUT_MESSAGE = "This step's own Job Summary was cut to fit GitHub's size limit after the buildcage report.", COMMAND_SUMMARY_CUT_NOTE = Buffer.from(`\n> ⚠️ ${COMMAND_SUMMARY_CUT_MESSAGE}\n`, "utf8");
+function commandSummaryDroppedMessage(size) {
+	return `This step's own Job Summary was dropped: at ${Math.ceil(size / 1024)} KiB it was over GitHub's 1 MiB limit.`;
+}
+function commandSummaryDroppedNote(size) {
+	return Buffer.from(`> ⚠️ ${commandSummaryDroppedMessage(size)}\n`, "utf8");
+}
+function cutCommandSummary(summary, room) {
+	if (summary.length <= room) return summary;
+	let keep = room - COMMAND_SUMMARY_CUT_NOTE.length;
+	if (keep < 0) return Buffer.alloc(0);
+	let end = summary.subarray(0, keep).lastIndexOf(10);
+	return Buffer.concat([summary.subarray(0, end + 1), COMMAND_SUMMARY_CUT_NOTE]);
+}
+function moveCommandSummaryLast(path, commandBytes) {
+	if (commandBytes === 0) return !1;
+	let cut = !1;
+	return rewriteRunnerFile(path, (file) => {
+		let command = file.subarray(0, commandBytes), ours = file.subarray(commandBytes), separator = ours.length > 0 ? COMMAND_SEPARATOR : Buffer.alloc(0), kept = cutCommandSummary(command, 1040384 - ours.length - separator.length);
+		if (ours.length !== 0 || kept !== command) return cut = kept !== command, Buffer.concat([
+			ours,
+			kept.length > 0 ? separator : Buffer.alloc(0),
+			kept
+		]);
+	}), cut;
+}
+function fullReportLocation(artifactAvailable) {
+	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+}
+function reportDidNotFitMessage(artifactAvailable) {
+	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
+}
+function reportDidNotFitLine(artifactAvailable) {
+	return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
+}
+async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine, ...overrides } = {}) {
+	let { fileSize, writeSummary } = {
+		...realDeps$4,
+		...overrides
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
+		usedBytes: used,
+		onCut: (b) => {
+			b.id !== void 0 && cutIds.add(b.id);
+		}
+	}), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
+	return frames <= room && used + bytes(fitted) <= 1048576 ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && bytes(fallbackLine) <= room && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
+		cutIds,
+		wrote
+	};
+}
+async function writeReportSummary(report, annotation, { extraBlocks = [], commandBytes, ...options }, artifactAvailable, env, overrides = {}) {
+	let { appendFile, fileSize, writeSummary } = {
+		...realDeps$4,
+		...overrides
+	}, outcomes = computeReportOutcomes(report, {
+		...options,
+		artifactAvailable
+	});
+	applyOutcomeAnnotations(annotation, outcomes.emissions);
+	let { cutIds, wrote } = await writeSummaryBlocks([...outcomes.blocks, ...extraBlocks], env, {
+		fileSize,
+		writeSummary,
+		commandBytes,
+		fallbackLine: reportDidNotFitLine(artifactAvailable)
+	});
+	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+}
+//#endregion
+//#region src/lib/filesystem-audit/line-file.ts
+const CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = [];
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
+		}
+		onLine(Buffer.concat(carry).toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
+}
+//#endregion
 //#region src/lib/filesystem-audit/report.ts
 const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
 	readLines,
@@ -73766,12 +73746,12 @@ function runnerFiles(env, mediated, realpath) {
 	}
 	return out;
 }
-const NONE = { blocks: () => [] };
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed, rules, givenLines = rules?.lines ?? [], failOnUnexpected = !1 }, overrides = {}) {
+const NONE = { blocks: () => [] }, NO_RULES = { rules: [] }, filesystemAuditGuide = (actionRepo, actionRef) => `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
-	}, setOutput = (artifactName) => {
+	}, rules = givenRules ?? (failOnUnexpected ? NO_RULES : void 0), setOutput = (artifactName) => {
 		try {
 			deps.setOutput(artifactName);
 		} catch (e) {
@@ -73784,19 +73764,19 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
 	});
 	if (!audit) return settled(NONE);
-	let options = {
-		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-		home: prefixes(env.HOME, deps.realpath),
-		runnerFiles: runnerFiles(env, mediated, deps.realpath),
-		...rules && { rules: new RuleMatcher(rules.rules) },
-		propose: upload
-	}, cleanPath = audit.stepPath, prepared = upload;
+	let cleanPath = audit.stepPath, prepared = upload;
 	if (upload) try {
 		deps.makeDir(audit.uploadDir);
 	} catch (e) {
 		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), prepared = !1;
 	}
-	let checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	let options = {
+		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
+		home: prefixes(env.HOME, deps.realpath),
+		runnerFiles: runnerFiles(env, mediated, deps.realpath),
+		...rules && { rules: new RuleMatcher(rules.rules) },
+		propose: prepared
+	}, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
@@ -73805,11 +73785,10 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete)) : settled(NONE);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
 	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
-	let proposed = prepared ? writeProposedRules(summary, givenLines, audit.rulesPath, annotation, deps.writeFile) : "none", given = rules !== void 0, unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+	let given = rules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === void 0) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
-		...proposed === "written" && { rulesFile: (0, node_path.basename)(audit.rulesPath) },
 		upload: async () => {
 			let uploaded;
 			try {
@@ -73830,11 +73809,11 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					cutNote,
 					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
 					skippedHooksUrl: `${guide}#skipped-hooks`,
-					expected: given,
-					rulesNote: rulesNote(artifact, proposed, {
+					...given && { expected: givenRules ? "given" : "empty" },
+					rulesNote: rulesNote(proposalOf(proposed, artifact), {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						given
+						given: givenRules !== void 0
 					})
 				});
 			} catch (e) {
@@ -73846,9 +73825,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		}
 	};
 }
-function reportUnexpected(summary, failOnUnexpected, annotation) {
+function reportUnexpected(summary, failOnUnexpected, annotation, empty) {
 	if (!summary?.unexpected) return {};
-	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, message = n === void 0 ? `File accesses fell outside ${EXPECTED_RULES_INPUT} on too many distinct paths to list.` : `${n} file access${es} fell outside ${EXPECTED_RULES_INPUT}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, message = n === void 0 ? `File accesses fell outside ${outside}${empty ? "," : ""} on too many distinct paths to list.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
 	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
@@ -73909,18 +73888,12 @@ function ruleSources(value, config) {
 	}].filter((source) => source.text.trim());
 }
 function readExpectedFilesystemRules(value, config, filesystemAudit) {
-	let rules = parseExpectedRules(ruleSources(value, config));
-	if (rules.lines.length !== 0) {
-		if (rules.rules.length === 0) return {
-			expected: void 0,
-			lines: rules.lines
-		};
-		if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
-		return {
-			expected: rules,
-			lines: rules.lines
-		};
-	}
+	let sources = ruleSources(value, config);
+	if (sources.length === 0) return;
+	let rules = parseExpectedRules(sources);
+	if (rules.rules.length === 0) return { expected: void 0 };
+	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+	return { expected: rules };
 }
 //#endregion
 //#region src/lib/sandbox/symlinks.ts
@@ -74048,11 +74021,11 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 }
 //#endregion
 //#region src/lib/filesystem-example-inputs.ts
-function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedRulesLines, failOnUnexpectedFileAccess }, rulesFile) {
+function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
 	let lines = [];
 	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...givenRules(expectedRulesLines).map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config_file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail_on_unexpected_file_access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 //#endregion
 //#region src/lib/filesystem-audit/mode.ts
@@ -74695,7 +74668,7 @@ function filesystemAuditPaths(containerName, scratchBase) {
 		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
 		uploadDir,
 		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
-		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules.yml")
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
 	};
 }
 function readPid(readFile, pidFilePath) {
@@ -77258,7 +77231,7 @@ const realDeps$1 = {
 	setTrafficArtifactOutput,
 	readStepLabel
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, omittedExampleNote, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
+async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
 	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput, readStepLabel } = {
 		...realDeps$1,
 		...overrides
@@ -77280,7 +77253,6 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 			actionRef,
 			runCommand,
 			extraInputs: extraInputs?.(report),
-			omittedExampleNote,
 			actionVersion: readActionVersion(containerName, proxyEngine),
 			stepLabel,
 			failOnBlocked,
@@ -77437,10 +77409,11 @@ function readStepInputs(env, deps) {
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, expectedRulesLines = givenRules?.lines ?? [], failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail_on_unexpected_file_access needs filesystem_audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules ? annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.") : failOnUnexpectedFileAccess && !expectedFilesystemRules && annotation.warning("fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.");
+	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail_on_unexpected_file_access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
@@ -77463,7 +77436,6 @@ function readStepInputs(env, deps) {
 		filesystemAudit,
 		filesystemAuditArtifact,
 		expectedFilesystemRules,
-		expectedRulesLines,
 		failOnUnexpectedFileAccess,
 		failOnCaResidue,
 		failOnBlocked,
@@ -77493,7 +77465,6 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 		composeFiles: resolveComposeFiles(localOverride)
 	};
 }
-const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
 	deps.withLogGroup("buildcage: Configured ACL Rules", () => {
 		deps.logRules("HTTPS", rules.httpsRules), deps.logRules("HTTP", rules.httpRules), deps.logRules("IP", rules.ipRules), deps.logRules("URL", rules.urlRules), deps.logRules("TLS", rules.tlsRules), deps.logRules("Known-blocked (informational only, not sent to proxy ACL)", rules.knownBlockedRules), aws.key && deps.log("AWS access key check: on"), aws.roleAccounts.length > 0 && deps.log(`AWS role accounts: ${aws.roleAccounts.join(" ")}`);
@@ -77529,7 +77500,6 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		failClosed: proxyMode !== "audit" && failOnBlocked,
 		rules: inputs.expectedFilesystemRules,
-		givenLines: inputs.expectedRulesLines,
 		failOnUnexpected: inputs.failOnUnexpectedFileAccess
 	}), artifact = cancelled ? readAudit.expected : await readAudit.upload();
 	return await deps.reportStepTraffic({
@@ -77548,8 +77518,7 @@ async function finalizeStep(run, deps) {
 		actionRepo,
 		actionRef: reportActionRef,
 		runCommand: inputs.runInput,
-		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, typeof artifact == "object" && configFileAllowed(env) ? readAudit.rulesFile : void 0)],
-		omittedExampleNote: inputs.expectedRulesLines.length && !inputs.filesystemAuditArtifact.upload && configFileAllowed(env) ? "_Set upload_filesystem_audit_artifact: true and the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._" : void 0,
+		extraInputs: (report) => [...awsExampleInputs(inputs.aws, report.timeline), ...filesystemExampleInputs(inputs, filesystemAuditGuide(actionRepo, reportActionRef))],
 		failOnBlocked,
 		trafficArtifact: inputs.trafficArtifact,
 		env,

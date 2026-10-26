@@ -79,14 +79,13 @@ describe("readStepFilesystemAudit", () => {
       "```\n\n</details>\n\n<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
         "List the file accesses this step is expected to make in `expected_filesystem_rules`, " +
         "and this section then shows only the ones outside them.\n\n" +
-        "`expected-filesystem-rules.yml` in this run's filesystem audit artifact " +
+        "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
         "(`buildcage-filesystem-audit-deadbeef`) holds a rule for each access this run made. " +
-        "Review it, using `**` for the paths that change between runs, commit it, " +
-        "and point `config_file` at it:\n\n" +
-        "```yaml\nconfig_file: path/to/expected-filesystem-rules.yml\n```\n\n" +
-        "Or copy its rules into the config file the step already uses, or into the workflow:\n\n" +
-        `\`\`\`yaml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n` +
-        "  # The reviewed rules from expected-filesystem-rules.yml, such as:\n",
+        "Review the rules, using `**` for the paths that change between runs, and add them to " +
+        "`expected_filesystem_rules`, under `with:` or in the config file the step uses. " +
+        "With many rules, a config file keeps them out of the workflow; name it in `config_file`:\n\n" +
+        "```yaml\nconfig_file: path/to/buildcage.yml\n```\n\n" +
+        `\`\`\`yaml\n# path/to/buildcage.yml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n`,
     );
     // Below them, not under the heading.
     expect(summaries[0]).toContain(
@@ -309,13 +308,19 @@ describe("readStepFilesystemAudit", () => {
   it("warns and uploads nothing when the step's directory cannot be made", async () => {
     const note = annotation();
     const opened: string[] = [];
+    const proposing: (boolean | undefined)[] = [];
     const {
       deps: d,
       uploads,
       ruleFiles,
+      summaries,
     } = deps({
       makeDir: () => {
         throw new Error("EEXIST");
+      },
+      createSummary: (options) => {
+        proposing.push(options.propose);
+        return createAuditSummary(options);
       },
       openWriter: (path) => {
         opened.push(path);
@@ -325,7 +330,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     // One warning: neither file is attempted in a directory that is not there.
@@ -335,6 +340,11 @@ describe("readStepFilesystemAudit", () => {
     expect(opened).toEqual([]);
     expect(ruleFiles).toEqual([]);
     expect(uploads).toEqual([]);
+    // Nor are rules gathered for a file that cannot be written.
+    expect(proposing).toEqual([false]);
+    expect(summaries[0]).toContain(
+      "No rules were proposed, as the artifact could not be prepared.",
+    );
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {

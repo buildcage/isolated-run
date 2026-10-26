@@ -19,7 +19,8 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  *   INVALID_FILESYSTEM_AUDIT          filesystem_audit input was neither off nor record
  *   INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS  filesystem_audit_retention_days was not a whole number above zero
  *   FILESYSTEM_AUDIT_UNAVAILABLE      filesystem_audit: record, but the tracer could not be extracted, started or attached
- *   INVALID_EXPECTED_FILESYSTEM_RULES expected_filesystem_rules held a line that is not a rule, or was set without filesystem_audit: record
+ *   INVALID_EXPECTED_FILESYSTEM_RULES expected_filesystem_rules held a line that is not a rule, or the rules
+ *                                     or fail_on_unexpected_file_access were set without filesystem_audit: record
  *   FILESYSTEM_INPUT_CONFLICT         filesystem_mode/write_through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)

@@ -354,8 +354,8 @@ jobs:
               exit 1
             fi
 
-      # A step's proposed expected_filesystem_rules, given back to the same
-      # command through config_file, take every access it makes again.
+      # A step's proposed expected_filesystem_rules, added to a config file for
+      # the same command, take every access it makes again.
       - name: Record a step for its proposed rules
         id: rules_record
         if: matrix.enforcement
@@ -379,10 +379,14 @@ jobs:
           name: ${{ steps.rules_record.outputs.filesystem_audit_artifact_name }}
           path: ${{ runner.temp }}/rules
 
-      - name: Use the proposed rules as the config file
+      - name: Add the proposed rules to a config file
         if: matrix.enforcement
         run: |
-          cp "$RUNNER_TEMP"/rules/expected-filesystem-rules.yml e2e-config/expected-rules.yml
+          {
+            echo "filesystem_audit: record"
+            echo "expected_filesystem_rules: |"
+            grep -v '^#' "$RUNNER_TEMP"/rules/expected-filesystem-rules-to-add.txt | sed 's/^/  /'
+          } > e2e-config/expected-rules.yml
           cat e2e-config/expected-rules.yml
 
       - name: Run the same command with the proposed rules
@@ -406,6 +410,11 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/rules-summary.md"
           grep -qF 'No access fell outside `expected_filesystem_rules`.' "$RUNNER_TEMP/rules-summary.md"
+          # Nothing is left to add, so no rules are proposed or pointed to.
+          if grep -qF 'Expected filesystem rules' "$RUNNER_TEMP/rules-summary.md"; then
+            echo "::error::a run whose rules took every access still shows the Expected filesystem rules element"
+            exit 1
+          fi
 
       # Run here so the failed-start checks below find no file of these steps.
       - name: The post step removes the rules steps' files

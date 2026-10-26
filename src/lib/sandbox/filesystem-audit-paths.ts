@@ -25,7 +25,7 @@ export function filesystemAuditPaths(
     pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
     uploadDir,
     stepPath: join(uploadDir, "filesystem-audit.jsonl"),
-    rulesPath: join(uploadDir, "expected-filesystem-rules.yml"),
+    rulesPath: join(uploadDir, "expected-filesystem-rules-to-add.txt"),
   };
 }
 

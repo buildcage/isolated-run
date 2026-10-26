@@ -31,7 +31,7 @@ import { readLocalImageOverride, resolveComposeFiles } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
-import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import { filesystemAuditGuide, readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
 import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import { filesystemExampleInputs } from "./filesystem-example-inputs.ts";
@@ -298,8 +298,12 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     filesystemAudit,
   );
   const expectedFilesystemRules = givenRules?.expected;
-  const expectedRulesLines = givenRules?.lines ?? [];
   const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+  if (failOnUnexpectedFileAccess && filesystemAudit !== "record")
+    throw new SandboxError(
+      "fail_on_unexpected_file_access needs filesystem_audit: record, which records the accesses it checks.",
+      "INVALID_EXPECTED_FILESYSTEM_RULES",
+    );
   // Before saveWriteThroughForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-write-through.ts.
@@ -317,11 +321,10 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   }
   if (givenRules && !expectedFilesystemRules) {
     annotation.warning(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
-    );
-  } else if (failOnUnexpectedFileAccess && !expectedFilesystemRules) {
-    annotation.warning(
-      "fail_on_unexpected_file_access is true, but expected_filesystem_rules is empty, so no file access can fail the step.",
+      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set" +
+        (failOnUnexpectedFileAccess
+          ? ", and fail_on_unexpected_file_access fails it on every file access."
+          : "."),
     );
   }
 
@@ -355,7 +358,6 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     filesystemAudit,
     filesystemAuditArtifact,
     expectedFilesystemRules,
-    expectedRulesLines,
     failOnUnexpectedFileAccess,
     failOnCaResidue,
     failOnBlocked,
@@ -430,16 +432,6 @@ async function resolveProxyImage(
   deps.log(`buildcage: proxy image: ${imageRef}`);
   return { imageRef, pullPolicy, composeFiles: resolveComposeFiles(localOverride) };
 }
-
-/** Said where the restrict example is too large to print while it lists the
- *  expected rules, when uploading the record would name them as a file. */
-export const EXAMPLE_RULES_FILE_NOTE =
-  "_Set upload_filesystem_audit_artifact: true and the example names the uploaded expected_filesystem_rules file under config_file instead of listing the rules._";
-
-// config_file refuses pull_request_target, and workflow_run when a pull
-// request started it, which is not worth reading the payload for here.
-const configFileAllowed = (env: NodeJS.ProcessEnv): boolean =>
-  !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 
 function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
   deps.withLogGroup("buildcage: Configured ACL Rules", () => {
@@ -518,7 +510,6 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     actionRef: reportActionRef,
     failClosed: proxyMode !== "audit" && failOnBlocked,
     rules: inputs.expectedFilesystemRules,
-    givenLines: inputs.expectedRulesLines,
     failOnUnexpected: inputs.failOnUnexpectedFileAccess,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
@@ -543,17 +534,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     runCommand: inputs.runInput,
     extraInputs: (report) => [
       ...awsExampleInputs(inputs.aws, report.timeline),
-      ...filesystemExampleInputs(
-        inputs,
-        typeof artifact === "object" && configFileAllowed(env) ? readAudit.rulesFile : undefined,
-      ),
+      ...filesystemExampleInputs(inputs, filesystemAuditGuide(actionRepo, reportActionRef)),
     ],
-    omittedExampleNote:
-      inputs.expectedRulesLines.length &&
-      !inputs.filesystemAuditArtifact.upload &&
-      configFileAllowed(env)
-        ? EXAMPLE_RULES_FILE_NOTE
-        : undefined,
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,

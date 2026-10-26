@@ -11,7 +11,8 @@ describe("filesystemAuditPaths", () => {
       pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234.pid",
       uploadDir: "/var/tmp/buildcage-0/filesystem-audit-abcd1234",
       stepPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234/filesystem-audit.jsonl",
-      rulesPath: "/var/tmp/buildcage-0/filesystem-audit-abcd1234/expected-filesystem-rules.yml",
+      rulesPath:
+        "/var/tmp/buildcage-0/filesystem-audit-abcd1234/expected-filesystem-rules-to-add.txt",
     });
   });
 });

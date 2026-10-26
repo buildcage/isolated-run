@@ -159,7 +159,8 @@ From the top:
   same clock as the traffic report's Communication details, so a file access can be matched to a
   request.
 - **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
-  them; see [Expected accesses](#expected-accesses).
+  them. It shows only when the run recorded a file access, and with rules, one outside them; see
+  [Expected accesses](#expected-accesses).
 - The closing line explains the `./`, `~/` and `dir/**` notations, links to the artifact that holds
   the full record and links to this section. Where there is no artifact, it says how to ask for
   one, or that the upload failed.
@@ -374,13 +375,42 @@ Like the audit itself, the rules never block an access.
 ### Setting up a baseline
 
 1. Run the step with the audit on and `upload_filesystem_audit_artifact: true`. The artifact then
-   holds `expected-filesystem-rules.yml`, a [config file](./reference.md#config-file) with a rule
-   for each access the run made, folded as the accessed paths are, and the **Expected filesystem
-   rules** element of the summary links to it:
+   holds `expected-filesystem-rules-to-add.txt`, a rule for each access the run made, folded as the
+   accessed paths are, and the **Expected filesystem rules** element of the summary links to it:
+
+   ```text
+   # Rules for the file accesses no expected_filesystem_rules took in this run.
+   # Review them, then add them to expected_filesystem_rules, under with: or in a config_file.
+   /usr/local/bin/node  RWD  ./node_modules/**
+   /usr/local/bin/node  R    ~/.npmrc
+   bash                 X    /usr/local/bin/node
+   ```
+
+2. Review the rules. A path that changes from run to run, such as a temporary file with a random
+   name, or a directory where a run touched two files and the next will touch a third, needs `*` or
+   `**` to match the next run too. A broad rule such as `~/**` also matches what is worth seeing,
+   such as `~/.ssh`, so widen no further than needed.
+3. Add the rule lines to `expected_filesystem_rules`, without the file's two comment lines:
 
    ```yaml
+   - uses: buildcage/isolated-run@<sha>
+     with:
+       filesystem_audit: record
+       upload_filesystem_audit_artifact: true
+       expected_filesystem_rules: |
+         /usr/local/bin/node  RWD  ./node_modules/**
+         /usr/local/bin/node  R    ~/.npmrc
+         bash                 X    /usr/local/bin/node
+       run: npm ci
+   ```
+
+   With many rules, a [config file](./reference.md#config-file) keeps them out of the workflow.
+   Name it in `config_file`, and put the same keys in it:
+
+   ```yaml
+   # path/to/buildcage.yml
    filesystem_audit: record
-   # Uploads the full record and the next proposed rules each run; keep this key while you want them.
+   # Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.
    upload_filesystem_audit_artifact: true
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
@@ -388,55 +418,42 @@ Like the audit itself, the rules never block an access.
      bash                 X    /usr/local/bin/node
    ```
 
-2. Review the rules. A path that changes from run to run, such as a temporary file with a random
-   name, or a directory where a run touched two files and the next will touch a third, needs `*` or
-   `**` to match the next run too. A broad rule such as `~/**` also matches what is worth seeing,
-   such as `~/.ssh`, so widen no further than needed.
-3. Commit the file and name it in `config_file`:
+   A step matches the workflow's and the config file's rules together, so a rule can sit in either.
+   On `pull_request_target`, and on a `workflow_run` a pull request started, a config file cannot be
+   used, so the rules go under `with:` there.
 
-   ```yaml
-   - uses: buildcage/isolated-run@<sha>
-     with:
-       config_file: path/to/expected-filesystem-rules.yml
-       run: npm ci
-   ```
-
-   Where the step already has a config file, add the file's keys to it instead. Or set the rules in
-   the workflow itself, under `with:`, which is the only way on `pull_request_target` and on a
-   `workflow_run` a pull request started, where a config file cannot be used. Keep the rules in one
-   place: a step matches the workflow's and the config file's rules together and proposes both, so
-   naming that file while the workflow still lists its own rules ends up with every rule twice.
-
-4. Once the baseline holds steady, set `fail_on_unexpected_file_access: true` to fail the step on
-   an access outside it. The file also keeps `upload_filesystem_audit_artifact: true`: each run
-   then uploads an artifact holding every path the step touched, and the next proposed file with
-   it, as below. Keep the key while you want those files, and drop it when you do not.
+4. Once the baseline holds steady, set `fail_on_unexpected_file_access: true` to fail the step on an
+   access outside it. Keep `upload_filesystem_audit_artifact: true` while you want new rules
+   proposed: each run then uploads an artifact holding every path the step touched, and for a run
+   with an access outside the rules, it also holds the rules to add, as below. Drop the key when you
+   do not.
 
 ### Keeping it up to date
 
-A run with rules and `upload_filesystem_audit_artifact: true` proposes a file too: the rules given,
-each line trimmed, then, under a `# Not matched in this run` line, a rule for each access they did
-not take; where they took every access, the file holds only the rules given. When the summary shows
-unexpected accesses, download the file and compare it with the committed one: commit the rules a
-change you know of explains, such as a dependency update, and look into the rest.
+A run with rules and `upload_filesystem_audit_artifact: true` proposes a file only when a recorded
+access fell outside them. It holds a rule for each access the rules did not take, whether they are
+set under `with:` or in a config file, so it never repeats a rule you have. Review those rules: add
+the ones a change you know of explains, such as a dependency update, where the step keeps its
+rules, and look into the rest. Under `fail_on_unexpected_file_access`, a run that fails on an access
+the rules should have taken still proposes the file, so the rules can be fixed from it.
 
 Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
-your own rules already take. A new `dir/**` that covers one of your narrower rules is left beside
-it: the comparison shows both, and you decide which to keep. A `# Not matched in this run` line
-committed with the file, and the blank lines around it, are dropped from the next one and from the
-traffic report's **Switch to restrict mode** example.
+your own rules already take. A proposed `dir/**` may cover one of your narrower rules; adding it
+leaves both, and you decide which to keep.
 
-No file is proposed when the run recorded no access, when the accesses touched too many distinct
-paths, when the file could not be written, or when the artifact could not be prepared or uploaded;
-the **Expected filesystem rules** element says which.
+A run where no recorded access fell outside the rules proposes no file, and its summary leaves out
+the **Expected filesystem rules** element. This includes a recording that misses accesses, which the
+summary's opening note reports: accesses not recorded leave nothing to propose. No file is proposed
+either when the accesses touched too many distinct paths, when the file could not be written, or
+when the artifact could not be prepared or uploaded; the element then says which.
 
-The traffic report's **Switch to restrict mode** example keeps the rules. Where the run's artifact
-holds the file, the example names it in `config_file` at `path/to/expected-filesystem-rules.yml`,
-for you to commit there. On `pull_request_target` or `workflow_run`, or without the file, it lists
-the rules under `with:`, or, where that is too large to print, says that uploading the artifact
-would name the file instead. Neither form sets `upload_filesystem_audit_artifact`, so add it back
-to keep getting proposed files. It adds `fail_on_unexpected_file_access: true` when the step set
-it.
+The traffic report's **Switch to restrict mode** example stands for the whole step, with no
+`config_file`: the settings the step took from a config file are written under `with:`, so remove
+the step's `config_file` line when you paste it. It leaves out `expected_filesystem_rules`, which
+the summary's **Expected filesystem rules** element proposes, and where the step has rules, a
+comment says to add them back, under `with:` or in a config file. It also leaves out
+`upload_filesystem_audit_artifact`, which you add back to keep getting proposed rules, and adds
+`fail_on_unexpected_file_access: true` when the step set it.
 
 ### What the summary shows
 
@@ -447,8 +464,10 @@ it.
 - `fail_on_unexpected_file_access: true` fails the step instead, in `audit` mode too, with the
   verdict as a caution rather than a warning. It also fails the step when not every access could be
   checked against the rules: when the recording could not be read or summarized, or misses some
-  accesses. The verdict then says `file access check incomplete`. Skipped hooks do not fail it;
-  see [Skipped hooks](#skipped-hooks).
+  accesses. The verdict then says `file access check incomplete`. Without rules, it counts every
+  access as unexpected, so a step that sets it and loses its rules fails rather than passing
+  unchecked. It needs `filesystem_audit: record`, and the step fails before it starts without it.
+  Skipped hooks do not fail it; see [Skipped hooks](#skipped-hooks).
 - In the artifact, each line the rules were matched against carries `rule`, where the rule that
   took it was written, or `unexpected`; see [Fields](#fields).
 

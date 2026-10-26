@@ -59,7 +59,6 @@ describe("readExpectedFilesystemRules", () => {
   it("reads the workflow's rules, then config_file's, by their own lines", () => {
     const rules = read("proxy_mode: audit\nexpected_filesystem_rules: |\n  * W ./b\n", "* R ./a\n");
     expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["input:1", "config:3"]);
-    expect(rules?.lines).toStrictEqual(["* R ./a", "", "* W ./b"]);
   });
 
   it("reads config_file's rules under an alias, by the anchor's lines", () => {
@@ -75,7 +74,6 @@ describe("readExpectedFilesystemRules", () => {
   it("holds no rules to match where every line is a comment or blank, whatever the audit", () => {
     expect(readExpectedFilesystemRules("# * R ./a\n\n", undefined, "off")).toStrictEqual({
       expected: undefined,
-      lines: ["# * R ./a"],
     });
   });
 
