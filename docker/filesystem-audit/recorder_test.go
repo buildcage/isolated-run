@@ -81,6 +81,38 @@ func TestRecorderLogsItsTotalsAsOneGroup(t *testing.T) {
 	}
 }
 
+// The step log is relayed to the action's own, where a line starting "::"
+// is a workflow command, so nothing the sandbox names may reach it.
+func TestRecorderLogsNothingTheSandboxNamed(t *testing.T) {
+	const injected = "\n::error::injected\n"
+	r, out, log := newTestRecorder()
+	events := []event{
+		{kind: filesystemAuditKindK_EXEC, pid: 9, data: []byte("/bin/" + injected + "\x00")},
+		{kind: filesystemAuditKindK_OPEN, pid: 9, flags: unix.O_RDONLY, data: []byte("/etc/" + injected + "\x00")},
+		openName(11, injected),
+		openResult(11, -int32(unix.ENOENT)),
+		waitingOpen(12, "/tmp/"+injected),
+	}
+	for i := range events {
+		events[i].comm = injected
+	}
+	add(t, r, events...)
+	if err := r.finish(loss{}); err != nil {
+		t.Fatal(err)
+	}
+	// The exec, the open, the failed open, the open left waiting, and the end.
+	got := lines(t, out)
+	if len(got) != 5 || got[2]["failed"] != true || got[3]["path"] != "/tmp/"+injected {
+		t.Fatalf("recording = %v, want each record under the names it was given", got)
+	}
+	for _, l := range strings.Split(strings.TrimSuffix(log.String(), "\n"), "\n") {
+		if strings.Contains(l, "injected") ||
+			!strings.HasPrefix(l, "filesystem-audit: ") && l != "::group::buildcage: filesystem audit totals" && l != "::endgroup::" {
+			t.Fatalf("log = %q, want only the tracer's own lines", log)
+		}
+	}
+}
+
 // Each line's "t" is its boot stamp plus the offset at that stamp.
 func TestRecorderTimesALineByItsOffset(t *testing.T) {
 	out := &bytes.Buffer{}
