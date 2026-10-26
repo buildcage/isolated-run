@@ -77415,7 +77415,7 @@ function readStepInputs(env, deps) {
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail_on_unexpected_file_access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
-	deps.checkUrlAndTlsRuleSupport({
+	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
 		proxyMode,
 		urlRules,
@@ -77424,10 +77424,7 @@ function readStepInputs(env, deps) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning);
-	let aws = deps.readAwsKeyInputs({ proxyEngine }, env);
-	for (let key of ACTION_INPUT_ENV_KEYS) delete env[key];
-	return {
+	}, annotation.warning), {
 		actionRef,
 		reportActionRef,
 		actionRepo,
@@ -77446,7 +77443,7 @@ function readStepInputs(env, deps) {
 		rules,
 		stepLabel,
 		annotation,
-		aws
+		aws: deps.readAwsKeyInputs({ proxyEngine }, env)
 	};
 }
 function preflight({ filesystemMode, writeThroughInput, filesystemAudit, annotation }, env, deps) {
@@ -77536,7 +77533,9 @@ async function runSandboxStep(env, overrides = {}) {
 	let deps = {
 		...realDeps,
 		...overrides
-	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
+	}, inputs = readStepInputs(env, deps);
+	for (let key of ACTION_INPUT_ENV_KEYS) delete env[key];
+	let { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {

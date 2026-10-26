@@ -316,6 +316,25 @@ describe("runSandboxStep", () => {
     expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toBeUndefined();
   });
 
+  it("drops this action's inputs from env once every one is read", async () => {
+    const env = {
+      ...ENV,
+      INPUT_RUN: "echo hello",
+      INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a\n".repeat(20_000),
+      INPUT_DIR: "the workflow's own",
+    };
+    let lastRead: string | undefined;
+    mocks.readAwsKeyInputs.mockImplementation((_: unknown, e: NodeJS.ProcessEnv) => {
+      lastRead = e.INPUT_RUN;
+      return { key: "", roleAccounts: [] };
+    });
+
+    await runSandboxStep(env, deps);
+
+    expect(lastRead).toBe("echo hello");
+    expect(env).toStrictEqual({ ...ENV, INPUT_DIR: "the workflow's own" });
+  });
+
   it("hands the report the inputs read up front", async () => {
     mocks.readFailOnBlocked.mockReturnValue(false);
     mocks.readTrafficArtifactInputs.mockReturnValue({ upload: true, retentionDays: 7 });
@@ -998,18 +1017,6 @@ describe("readStepInputs", () => {
     expect(mocks.readAwsKeyInputs).toHaveBeenCalled();
     expect(mocks.pinHostCommands).not.toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
-  });
-
-  it("drops this action's inputs from env once read, so no command it runs inherits them", () => {
-    const env = {
-      ...ENV,
-      INPUT_RUN: "echo hello",
-      INPUT_EXPECTED_FILESYSTEM_RULES: "r /etc/**\n".repeat(20_000),
-      INPUT_DIR: "the workflow's own",
-    };
-    readStepInputs(env, deps);
-
-    expect(env).toStrictEqual({ ...ENV, INPUT_DIR: "the workflow's own" });
   });
 });
 

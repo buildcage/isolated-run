@@ -350,11 +350,6 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   // Unlike the checks above, fails in audit too.
   const aws = deps.readAwsKeyInputs({ proxyEngine }, env);
 
-  // Every input is read. A list input config_file added to can be past the
-  // 128 KiB one variable may hold, and each command run from here would
-  // otherwise inherit it and fail to start with E2BIG.
-  for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
-
   return {
     actionRef,
     reportActionRef,
@@ -571,6 +566,9 @@ export async function runSandboxStep(
 ): Promise<number> {
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
+  // config_file can push a list input past the 128 KiB one variable may hold,
+  // which fails every exec that inherits it with E2BIG.
+  for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
   const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
