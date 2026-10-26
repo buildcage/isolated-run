@@ -218,7 +218,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // "…" stands for the unknown start of a cut or relative name, so it folds
   // only as the kept directories do, not for having three such names under it.
   // Where secrets and other processes' descriptors live, a "dir/**" rule
-  // proposed from a few reads would take every later one.
+  // proposed from a few reads would take every later one. A path reaches the
+  // tree in the first spelling of the workspace and $HOME (see canonical).
+  const home = shownPrefixes.home.slice(0, 1);
   const keep = [
     "/",
     "/home",
@@ -231,11 +233,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/etc",
     "/root",
     "…",
-    ...shownPrefixes.workspace,
-    ...shownPrefixes.home,
-    ...[...shownPrefixes.home, "/root"].flatMap((home) =>
-      SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`),
-    ),
+    ...shownPrefixes.workspace.slice(0, 1),
+    ...home,
+    ...[...home, "/root"].flatMap((h) => SENSITIVE_IN_HOME.map((dir) => `${h}/${dir}`)),
   ].map(components);
   const relLength = (path: string): number => relativize(path, shownPrefixes).length;
   // The fewest bytes a row of each part prints in.

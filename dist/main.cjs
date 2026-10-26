@@ -73092,7 +73092,7 @@ function createAuditSummary(prefixes) {
 	}, shownPrefixes = {
 		workspace: prefixes.workspace.map(escapePath),
 		home: prefixes.home.map(escapePath)
-	}, fanout = prefixes.fanout ?? 3, keep = [
+	}, fanout = prefixes.fanout ?? 3, home = shownPrefixes.home.slice(0, 1), keep = [
 		"/",
 		"/home",
 		"/tmp",
@@ -73104,9 +73104,9 @@ function createAuditSummary(prefixes) {
 		"/etc",
 		"/root",
 		"…",
-		...shownPrefixes.workspace,
-		...shownPrefixes.home,
-		...[...shownPrefixes.home, "/root"].flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
+		...shownPrefixes.workspace.slice(0, 1),
+		...home,
+		...[...home, "/root"].flatMap((h) => SENSITIVE_IN_HOME.map((dir) => `${h}/${dir}`))
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
 		fanout,
 		keep,
