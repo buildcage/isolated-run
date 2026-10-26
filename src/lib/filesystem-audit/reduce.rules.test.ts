@@ -100,6 +100,32 @@ describe("createAuditSummary: expected_filesystem_rules", () => {
     expect(summary).toMatchObject({ matched: 1, unexpected: 2 });
   });
 
+  it("proposes a rule per file read where secrets live, as the summary shows them", () => {
+    const { summary } = marked(
+      { propose: true },
+      ...["hosts", "resolv.conf", "nsswitch.conf"].map((f) => ({
+        kind: "read",
+        pid: 3,
+        comm: "node",
+        path: `/etc/${f}`,
+      })),
+      ...["config", "id_rsa", "known_hosts"].map((f) => ({
+        kind: "read",
+        pid: 3,
+        comm: "node",
+        path: `/home/u/.ssh/${f}`,
+      })),
+    );
+    expect(rows(summary)).toStrictEqual([
+      "node R ~/.ssh/config",
+      "node R ~/.ssh/id_rsa",
+      "node R ~/.ssh/known_hosts",
+      "node R /etc/hosts",
+      "node R /etc/nsswitch.conf",
+      "node R /etc/resolv.conf",
+    ]);
+  });
+
   it("proposes a directory a program read on its way to the files in it", () => {
     const listing = [
       { kind: "read", pid: 3, comm: "ls", path: "/work/d" },

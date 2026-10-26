@@ -126,14 +126,14 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | `bash`                | `bash`         | X      | `/usr/local/bin/node` |
 | `/usr/local/bin/node` | `node[npm ci]` | RWD    | `./node_modules/**`   |
 | `/usr/local/bin/node` | `node[npm ci]` | R      | `./package.json`      |
-| `/usr/local/bin/node` | `node[npm ci]` | Rr!    | `/etc/**`             |
+| `/usr/local/bin/node` | `node[npm ci]` | R      | `/etc/hosts`          |
 | `/usr/local/bin/node` | `node[npm ci]` | X      | `/usr/bin/dash`       |
 
 ▶ 🔍 File access details
 first-last access since the proxy started · flags · command · path
 00:00.401:           X   bash         /usr/local/bin/node
 00:00.412:           R   node[npm ci] ./package.json
-00:00.415-00:00.418: Rr! node[npm ci] /etc/**
+00:00.415:           R   node[npm ci] /etc/hosts
 00:00.530-00:41.207: RWD node[npm ci] ./node_modules/**
 00:00.531-00:40.982: X   node[npm ci] /usr/bin/dash
 
@@ -170,7 +170,7 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 ### What to look for
 
 - **A credential file read by something other than its tool.** A row such as `R ~/.npmrc`,
-  `R ~/.ssh/**` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
+  `R ~/.ssh/id_rsa` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
   every run, and npm and a package's install script both show as `node`, so the program alone does
   not tell them apart. The Command column does: npm renames itself after what it runs, as
   `node[npm ci]`, while a script it starts shows as plain `node`. The artifact, if uploaded, also
@@ -203,7 +203,7 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 | `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path       |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
-  `/etc/**` means reads and writes under `/etc` succeeded and at least one read was refused.
+  `~/.cache/**` means reads and writes under `~/.cache` succeeded and at least one read was refused.
 - A failed open shows what it asked for: `w` to write, create or truncate, `r` to read, and both
   for one opened to read and write.
 - A row's flags do not say which action came first; the artifact has every access in order.
@@ -274,6 +274,10 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 
 - `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
   `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
+- `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`, `~/.gnupg`, the same
+  directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`, which hold secrets
+  or another process's descriptors, so a rule proposed for a read there names only the file read.
+  A directory below one still folds, as `/etc/ssl/**`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule

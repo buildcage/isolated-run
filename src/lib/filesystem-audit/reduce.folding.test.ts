@@ -88,15 +88,44 @@ describe("createAuditSummary: folding", () => {
     }
   });
 
+  it("never folds a directory where secrets or another process's descriptors live", () => {
+    for (const dir of [
+      "/etc",
+      "/root",
+      "/home/u/.ssh",
+      "/home/u/.aws",
+      "/home/u/.config",
+      "/home/u/.docker",
+      "/home/u/.kube",
+      "/home/u/.gnupg",
+      "/root/.ssh",
+      "/proc/9/fd",
+      "/proc/9/task/10/fd",
+    ]) {
+      const summary = summarize(
+        ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` })),
+      );
+      expect(detailRows(summary).some((l) => l.endsWith("/**"))).toBe(false);
+    }
+    // What lies below one still folds.
+    expect(
+      detailRows(
+        summarize(
+          ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `/etc/a/${leaf}` })),
+        ),
+      ),
+    ).toEqual(["R c /etc/a/**"]);
+  });
+
   it("keeps a refusal beside a success, and a plain failure only where nothing succeeded", () => {
     const summary = summarize([
-      { kind: "read", comm: "c", path: "/etc/passwd" },
-      { kind: "read", comm: "c", path: "/etc/hosts" },
-      { kind: "open", failed: true, comm: "c", path: "/etc/shadow", err: 13 },
-      { kind: "open", failed: true, comm: "c", path: "/etc/missing", err: 2 },
-      { kind: "write", comm: "c", path: "/etc/cron.d/evil" },
+      { kind: "read", comm: "c", path: "/opt/passwd" },
+      { kind: "read", comm: "c", path: "/opt/hosts" },
+      { kind: "open", failed: true, comm: "c", path: "/opt/shadow", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/opt/missing", err: 2 },
+      { kind: "write", comm: "c", path: "/opt/cron.d/evil" },
     ]);
-    expect(detailRows(summary)).toEqual(["RWr! c /etc/**"]);
+    expect(detailRows(summary)).toEqual(["RWr! c /opt/**"]);
   });
 
   it("keeps a refused directory open beside the reads below it", () => {
