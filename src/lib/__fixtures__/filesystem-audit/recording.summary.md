@@ -3,7 +3,7 @@
 
 > 🚫 Killed for a 32-bit system call: `int80`.
 
-### 📂 Accessed Paths (114)
+### 📂 Accessed Paths (117)
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
@@ -96,7 +96,10 @@
 | `/usr/bin/chmod` | `chmod` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
 | `/usr/bin/chown` | `chown` | a! | `./root-owned.txt` |
 | `/usr/bin/chown` | `chown` | W | `/dev/null` |
-| `/usr/bin/chown` | `chown` | R | `/etc/**` |
+| `/usr/bin/chown` | `chown` | R | `/etc/group` |
+| `/usr/bin/chown` | `chown` | R | `/etc/locale.alias` |
+| `/usr/bin/chown` | `chown` | R | `/etc/nsswitch.conf` |
+| `/usr/bin/chown` | `chown` | R | `/etc/passwd` |
 | `/usr/bin/chown` | `chown` | R | `/usr/lib/locale/**` |
 | `/usr/bin/chown` | `chown` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
 | `/usr/bin/ln` | `ln` | w | `./hostname-link` |
@@ -183,8 +186,11 @@
 00:06.606:           W   chmod      /dev/null
 00:06.607:           X   bash       /usr/bin/chown
 00:06.608:           R   chown      /usr/lib/locale/**
-00:06.608:           R   chown      /etc/**
+00:06.608:           R   chown      /etc/locale.alias
 00:06.608:           R   chown      /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache
+00:06.608:           R   chown      /etc/nsswitch.conf
+00:06.608:           R   chown      /etc/passwd
+00:06.608:           R   chown      /etc/group
 00:06.608:           a!  chown      ./root-owned.txt
 00:06.608:           W   chown      /dev/null
 00:06.610:           w!  mkdir      ./root-owned/x

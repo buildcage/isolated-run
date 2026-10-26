@@ -39,6 +39,7 @@ import { createStripper } from "./strip.ts";
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
 const DEFAULT_FANOUT = 3;
+const SENSITIVE_IN_HOME = [".ssh", ".aws", ".config", ".docker", ".kube", ".gnupg"];
 // A killed syscall's details row names it where a path would be.
 const SYSCALL_PREFIX = "syscall:";
 
@@ -216,16 +217,22 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   // "…" stands for the unknown start of a cut or relative name, so it folds
   // only as the kept directories do, not for having three such names under it.
+  // Where secrets and other processes' descriptors live, a "dir/**" rule
+  // proposed from a few reads would take every later one.
   const keep = [
     "/",
     "/home",
     "/tmp",
     "/proc",
     "/proc/<pid>",
+    "/proc/<pid>/fd",
     "/proc/self",
+    "/etc",
+    "/root",
     "…",
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
+    ...shownPrefixes.home.flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`)),
   ].map(components);
   const relLength = (path: string): number => relativize(path, shownPrefixes).length;
   // The fewest bytes a row of each part prints in.

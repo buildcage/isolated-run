@@ -73057,7 +73057,14 @@ function createStripper(scratchBase) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/reduce.ts
-const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, LIMITS = {
+const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
+	".ssh",
+	".aws",
+	".config",
+	".docker",
+	".kube",
+	".gnupg"
+], LIMITS = {
 	bytes: STEP_SUMMARY_LIMIT_BYTES,
 	loose: 307200,
 	nodes: 2e5,
@@ -73091,10 +73098,14 @@ function createAuditSummary(prefixes) {
 		"/tmp",
 		"/proc",
 		"/proc/<pid>",
+		"/proc/<pid>/fd",
 		"/proc/self",
+		"/etc",
+		"/root",
 		"…",
 		...shownPrefixes.workspace,
-		...shownPrefixes.home
+		...shownPrefixes.home,
+		...shownPrefixes.home.flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
 		fanout,
 		keep,
