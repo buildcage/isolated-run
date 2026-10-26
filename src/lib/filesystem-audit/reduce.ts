@@ -446,10 +446,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const own = canonical(c.path, prefixes);
       const path = c.path === r.path ? marked(r, own) : own;
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
-      // relative one there is d_path's pipe:, socket: or anon_inode: target, or
-      // an attribute change whose directory descriptor closed meanwhile, which
-      // is lost; a failed one may keep the relative name it was given, and so
-      // may a run whose file the tracer did not see.
+      // relative one there is d_path's pipe:, socket: or anon_inode: target;
+      // a failed one may keep the relative name it was given, and so may a run
+      // whose file the tracer did not see.
       if (!c.failed && r.kind !== "exec" && !hasKnownStart(path)) continue;
       // A read of what the process loaded prints nothing.
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
