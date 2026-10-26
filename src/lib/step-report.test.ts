@@ -21,7 +21,6 @@ const mocks = {
   moveCommandSummaryLast: vi.fn(),
   uploadTrafficArtifact: vi.fn(),
   setTrafficArtifactOutput: vi.fn(),
-  readStepLabel: vi.fn(),
 };
 
 // Every step is replaced, so the cast only says what the shape already is.
@@ -43,6 +42,7 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
     actionRepo: "buildcage/isolated-run",
     actionRef: "v1",
     runCommand: "npm ci",
+    stepLabel: "build",
     failOnBlocked: true,
     trafficArtifact: { upload: false },
     ...overrides,
@@ -56,7 +56,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.fetchReport.mockResolvedValue({ engine: "inspect" });
   mocks.readActionVersion.mockReturnValue("1.2.3");
-  mocks.readStepLabel.mockReturnValue("build");
 });
 
 afterEach(() => {

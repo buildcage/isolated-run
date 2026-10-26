@@ -48,11 +48,13 @@ import {
   readFilesystemAuditArtifactInputs,
   readFilesystemInputs,
   readRunCommand,
+  readStepLabel,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { commandSummaryDroppedMessage, commandSummaryDroppedNote } from "./report.ts";
+import { ACTION_INPUT_ENV_KEYS } from "./sandbox/env-loader.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { checkFilesystemAuditHost } from "./sandbox/filesystem-audit-host.ts";
 import {
@@ -133,6 +135,7 @@ const realDeps = {
   readFailOnBlocked,
   readAwsKeyInputs,
   readTrafficArtifactInputs,
+  readStepLabel,
   saveWriteThroughForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -313,6 +316,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const failOnBlocked = deps.readFailOnBlocked();
   const trafficArtifact = deps.readTrafficArtifactInputs();
   const rules = deps.readRuleInputs();
+  const stepLabel = deps.readStepLabel();
 
   // Suppresses annotations outside a real action run, as writeReportSummary does.
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
@@ -363,6 +367,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     failOnBlocked,
     trafficArtifact,
     rules,
+    stepLabel,
     annotation,
     aws,
   };
@@ -539,6 +544,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failOnBlocked,
     trafficArtifact: inputs.trafficArtifact,
     env,
+    stepLabel: inputs.stepLabel,
     moreBlocks: (startedAt, stepLabel) => readAudit.blocks(startedAt, artifact, stepLabel),
     verdictItems: readAudit.verdictItems,
     commandSummaryBytes,
@@ -560,6 +566,9 @@ export async function runSandboxStep(
 ): Promise<number> {
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
+  // config_file can push a list input past the 128 KiB one variable may hold,
+  // which fails every exec that inherits it with E2BIG.
+  for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
   const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);

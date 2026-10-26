@@ -41,6 +41,7 @@ const mocks = {
   readFailOnBlocked: vi.fn(),
   readAwsKeyInputs: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
+  readStepLabel: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -315,15 +316,36 @@ describe("runSandboxStep", () => {
     expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toBeUndefined();
   });
 
+  it("drops this action's inputs from env once every one is read", async () => {
+    const env = {
+      ...ENV,
+      INPUT_RUN: "echo hello",
+      INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a\n".repeat(20_000),
+      INPUT_DIR: "the workflow's own",
+    };
+    let lastRead: string | undefined;
+    mocks.readAwsKeyInputs.mockImplementation((_: unknown, e: NodeJS.ProcessEnv) => {
+      lastRead = e.INPUT_RUN;
+      return { key: "", roleAccounts: [] };
+    });
+
+    await runSandboxStep(env, deps);
+
+    expect(lastRead).toBe("echo hello");
+    expect(env).toStrictEqual({ ...ENV, INPUT_DIR: "the workflow's own" });
+  });
+
   it("hands the report the inputs read up front", async () => {
     mocks.readFailOnBlocked.mockReturnValue(false);
     mocks.readTrafficArtifactInputs.mockReturnValue({ upload: true, retentionDays: 7 });
+    mocks.readStepLabel.mockReturnValue("build");
 
     await runSandboxStep(ENV, deps);
 
     expect(mocks.reportStepTraffic.mock.calls[0][0]).toMatchObject({
       failOnBlocked: false,
       trafficArtifact: { upload: true, retentionDays: 7 },
+      stepLabel: "build",
     });
   });
 
@@ -979,6 +1001,7 @@ describe("runSandboxStep", () => {
 
 describe("readStepInputs", () => {
   it("reads every input and checks the rules, before any privileged check", () => {
+    mocks.readStepLabel.mockReturnValue("build");
     const inputs = readStepInputs(ENV, deps);
 
     expect(inputs).toMatchObject({
@@ -987,6 +1010,7 @@ describe("readStepInputs", () => {
       proxyEngine: "universal",
       filesystemMode: "persistent",
       rules: { httpsRules: ["example.com:443"] },
+      stepLabel: "build",
       annotation,
     });
     expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();

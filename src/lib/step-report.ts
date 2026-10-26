@@ -16,7 +16,6 @@ import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
-import { readStepLabel } from "./inputs.ts";
 import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
   COMMAND_SUMMARY_CUT_MESSAGE,
@@ -43,7 +42,6 @@ export interface ReportStepDeps {
   moveCommandSummaryLast: typeof moveCommandSummaryLast;
   uploadTrafficArtifact: typeof uploadTrafficArtifact;
   setTrafficArtifactOutput: typeof setTrafficArtifactOutput;
-  readStepLabel: typeof readStepLabel;
 }
 
 const realDeps: ReportStepDeps = {
@@ -54,7 +52,6 @@ const realDeps: ReportStepDeps = {
   moveCommandSummaryLast,
   uploadTrafficArtifact,
   setTrafficArtifactOutput,
-  readStepLabel,
 };
 
 export interface ReportStepOptions {
@@ -66,6 +63,8 @@ export interface ReportStepOptions {
   actionRepo: string;
   actionRef: string;
   runCommand: string;
+  /** The `label` input, for the summary's titles. */
+  stepLabel?: string;
   /** See ExampleStepOptions.extraInputs; read off the report. */
   extraInputs?: (report: Report) => string[];
   failOnBlocked: boolean;
@@ -106,6 +105,7 @@ export async function reportStepTraffic(
     actionRepo,
     actionRef,
     runCommand,
+    stepLabel,
     extraInputs,
     failOnBlocked,
     trafficArtifact,
@@ -124,7 +124,6 @@ export async function reportStepTraffic(
     moveCommandSummaryLast,
     uploadTrafficArtifact,
     setTrafficArtifactOutput,
-    readStepLabel,
   } = { ...realDeps, ...overrides };
 
   const fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked);
@@ -138,7 +137,6 @@ export async function reportStepTraffic(
 
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.
-  const stepLabel = readStepLabel();
   const rest = moreBlocks(report?.startedAt, stepLabel);
   const footer = [summaryFooter(actionRepo)];
   const writeRest = () =>
