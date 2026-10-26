@@ -86,18 +86,24 @@ func TestRecorderLogsItsTotalsAsOneGroup(t *testing.T) {
 func TestRecorderLogsNothingTheSandboxNamed(t *testing.T) {
 	const injected = "\n::error::injected\n"
 	r, out, log := newTestRecorder()
-	add(t, r,
-		event{kind: filesystemAuditKindK_EXEC, pid: 9, comm: injected, data: []byte("/bin/" + injected + "\x00")},
-		event{kind: filesystemAuditKindK_OPEN, pid: 9, comm: injected, flags: unix.O_RDONLY, data: []byte("/etc/" + injected + "\x00")},
+	events := []event{
+		{kind: filesystemAuditKindK_EXEC, pid: 9, data: []byte("/bin/" + injected + "\x00")},
+		{kind: filesystemAuditKindK_OPEN, pid: 9, flags: unix.O_RDONLY, data: []byte("/etc/" + injected + "\x00")},
 		openName(11, injected),
 		openResult(11, -int32(unix.ENOENT)),
 		waitingOpen(12, "/tmp/"+injected),
-	)
+	}
+	for i := range events {
+		events[i].comm = injected
+	}
+	add(t, r, events...)
 	if err := r.finish(loss{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "::error::injected") {
-		t.Fatalf("recording = %q, want the names it was given", out)
+	// The exec, the open, the failed open, the open left waiting, and the end.
+	got := lines(t, out)
+	if len(got) != 5 || got[2]["failed"] != true || got[3]["path"] != "/tmp/"+injected {
+		t.Fatalf("recording = %v, want each record under the names it was given", got)
 	}
 	for _, l := range strings.Split(strings.TrimSuffix(log.String(), "\n"), "\n") {
 		if strings.Contains(l, "injected") ||
