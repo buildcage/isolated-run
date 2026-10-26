@@ -226,13 +226,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/proc",
     "/proc/<pid>",
     "/proc/<pid>/fd",
+    "/proc/<pid>/task/<tid>/fd",
     "/proc/self",
     "/etc",
     "/root",
     "…",
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
-    ...shownPrefixes.home.flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`)),
+    ...[...shownPrefixes.home, "/root"].flatMap((home) =>
+      SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`),
+    ),
   ].map(components);
   const relLength = (path: string): number => relativize(path, shownPrefixes).length;
   // The fewest bytes a row of each part prints in.

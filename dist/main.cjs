@@ -73099,13 +73099,14 @@ function createAuditSummary(prefixes) {
 		"/proc",
 		"/proc/<pid>",
 		"/proc/<pid>/fd",
+		"/proc/<pid>/task/<tid>/fd",
 		"/proc/self",
 		"/etc",
 		"/root",
 		"…",
 		...shownPrefixes.workspace,
 		...shownPrefixes.home,
-		...shownPrefixes.home.flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
+		...[...shownPrefixes.home, "/root"].flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
 	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
 		fanout,
 		keep,

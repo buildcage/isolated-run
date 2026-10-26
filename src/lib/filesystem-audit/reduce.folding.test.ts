@@ -98,7 +98,9 @@ describe("createAuditSummary: folding", () => {
       "/home/u/.docker",
       "/home/u/.kube",
       "/home/u/.gnupg",
+      "/root/.ssh",
       "/proc/9/fd",
+      "/proc/9/task/10/fd",
     ]) {
       const summary = summarize(
         ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` })),

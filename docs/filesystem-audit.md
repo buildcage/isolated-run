@@ -203,7 +203,7 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 | `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path       |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
-  `./dist/**` means reads and writes under `./dist` succeeded and at least one read was refused.
+  `~/.cache/**` means reads and writes under `~/.cache` succeeded and at least one read was refused.
 - A failed open shows what it asked for: `w` to write, create or truncate, `r` to read, and both
   for one opened to read and write.
 - A row's flags do not say which action came first; the artifact has every access in order.
@@ -274,9 +274,10 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 
 - `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
   `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
-- Where secrets or another process's descriptors live, so a rule proposed for a read there names
-  that file alone: `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`,
-  `~/.gnupg` and `/proc/<pid>/fd`. A directory below one still folds: `/etc/ssl/**`.
+- `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`, `~/.gnupg`, the same
+  directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`, which hold secrets
+  or another process's descriptors, so a rule proposed for a read there names only the file read.
+  A directory below one still folds, as `/etc/ssl/**`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
