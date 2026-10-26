@@ -205,22 +205,22 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (!pattern)
           throw invalidRules(
             ref,
-            `${JSON.stringify(field)} holds an escape the summary never writes; write a name as the summary shows it`,
+            `${JSON.stringify(field)} holds an escape the summary never writes`,
           );
         return pattern;
       };
-      for (const name of [program, path]) {
-        if (!name.startsWith(MEMFD_PREFIX) && UNTIDY.test(name))
-          throw invalidRules(
-            ref,
-            `${JSON.stringify(name)} holds an empty or "." component, which the summary never shows`,
-          );
+      // A program that ran nothing goes by its own name, which may hold "//".
+      if (!path.startsWith(MEMFD_PREFIX) && UNTIDY.test(path))
+        throw invalidRules(
+          ref,
+          `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`,
+        );
+      for (const name of [program, path])
         if (procByNumber(name))
           throw invalidRules(
             ref,
             `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`,
           );
-      }
       rules.push({
         ref,
         program: program === "*" ? undefined : anyProcess(program, glob(program)),

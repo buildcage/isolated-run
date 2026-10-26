@@ -486,11 +486,11 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`, and a deleted file without its ` (deleted)`. A name a command passed keeps its
-  trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches within one component of
-  a path, and `**` across them, as a whole component any number of them: `./dist/**` matches
-  `./dist` and everything under it. Inside a component, `**` still crosses them: `./dist/**.js`
-  takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as `\*`, which
-  matches only a star. Regular expressions are not supported.
+  trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches within one
+  component of a path, and `**` across them, as a whole component any number of them: `./dist/**`
+  matches `./dist` and everything under it. Inside a component, `**` still crosses them:
+  `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as
+  `\*`, which matches only a star. Regular expressions are not supported.
 - **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
   included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
   process's threads. A process the recording has no `nspid` for shows its own directory as

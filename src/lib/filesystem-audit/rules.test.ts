@@ -122,12 +122,15 @@ describe("parseExpectedRules", () => {
     expect(named.path.test("/proc/selfx")).toBe(false);
   });
 
-  it("takes a trailing / or /. and a memfd's name as written", () => {
-    const [slash, dot, memfd] = parse('* r /missing/\n* r ./a/.\n* R memfd:"a//b"').rules;
+  it("takes a trailing / or /., a memfd's name and a program's as written", () => {
+    const [slash, dot, memfd, named] = parse(
+      '* r /missing/\n* r ./a/.\n* R memfd:"a//b"\na//b R ./x',
+    ).rules;
     expect(slash.path.test("/missing/")).toBe(true);
     expect(slash.path.test("/missing")).toBe(false);
     expect(dot.path.test("./a/.")).toBe(true);
     expect(memfd.path.test('memfd:"a//b"')).toBe(true);
+    expect(named.program!.test("a//b")).toBe(true);
   });
 
   it.each([
@@ -146,7 +149,6 @@ describe("parseExpectedRules", () => {
     ],
     ["* R ./a//b", 'input:1: "./a//b" holds an empty or "." component'],
     ["* R /a/./b", 'input:1: "/a/./b" holds an empty or "." component'],
-    ["./x//y X ./out", 'input:1: "./x//y" holds an empty or "." component'],
     ["* R /proc/1/environ", 'input:1: "/proc/1/environ" names a process or a thread in /proc'],
     ["* R /proc/12", 'input:1: "/proc/12" names a process'],
     ["* R /proc/<pid>/task/3/stat", 'input:1: "/proc/<pid>/task/3/stat" names a process'],

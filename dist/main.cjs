@@ -72658,13 +72658,11 @@ function parseExpectedRules(sources) {
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
 		let glob = (field) => {
 			let pattern = globPattern(field);
-			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes; write a name as the summary shows it`);
+			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes`);
 			return pattern;
 		};
-		for (let name of [program, path]) {
-			if (!name.startsWith("memfd:") && UNTIDY.test(name)) throw invalidRules(ref, `${JSON.stringify(name)} holds an empty or "." component, which the summary never shows`);
-			if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
-		}
+		if (!path.startsWith("memfd:") && UNTIDY.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`);
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
 		rules.push({
 			ref,
 			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
