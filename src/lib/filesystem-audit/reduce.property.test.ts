@@ -1,11 +1,17 @@
 import fc from "fast-check";
 import { describe, it, expect } from "vitest";
 
-import { dropWalkedDirs, renderFilesystemAuditSummary } from "../test/filesystem-audit.ts";
+import {
+  PREFIXES as SHARED_PREFIXES,
+  detailsBlockRows,
+  dropWalkedDirs,
+  jsonl,
+  renderFilesystemAuditSummary,
+} from "../test/filesystem-audit.ts";
 import { keyOf } from "./fold-tree.ts";
 
 const START = 1_791_244_800; // epoch seconds
-const PREFIXES = { workspace: ["/work"], home: ["/home/u"], startedAt: START };
+const PREFIXES = { ...SHARED_PREFIXES, startedAt: START };
 
 // Up to two minutes after the start, so every time prints as MM:SS.mmm, plus an
 // unparsable value standing in for a damaged record.
@@ -49,13 +55,7 @@ const recordArb = fc.record(
   { requiredKeys: ["comm", "kind", "path"] },
 );
 const recordsArb = fc.array(recordArb, { maxLength: 40 });
-const toJsonl = (rs: object[]): string => rs.map((r) => JSON.stringify(r)).join("\n");
-const jsonlArb = recordsArb.map(toJsonl);
-
-function rows(md: string): string[] {
-  const block = md.match(/```\n([\s\S]*?)\n```/);
-  return block ? block[1].split("\n") : [];
-}
+const jsonlArb = recordsArb.map((rs) => jsonl(...rs));
 
 const TIME = /^(\d\d):(\d\d)\.(\d{3})(?:-(\d\d):(\d\d)\.(\d{3}))?:/;
 const ms = (m: string, sec: string, milli: string): number =>
@@ -64,8 +64,8 @@ const ms = (m: string, sec: string, milli: string): number =>
 describe("createAuditSummary: properties", () => {
   it("always leads with the heading and emits only well-formed rows", () => {
     fc.assert(
-      fc.property(jsonlArb, (jsonl) => {
-        const md = renderFilesystemAuditSummary(jsonl, PREFIXES);
+      fc.property(jsonlArb, (text) => {
+        const md = renderFilesystemAuditSummary(text, PREFIXES);
         expect(md.startsWith("\n## Filesystem Activity Report")).toBe(true);
         const block = md.match(/```\n([\s\S]*?)\n```/);
         if (block)
@@ -81,8 +81,12 @@ describe("createAuditSummary: properties", () => {
       fc.property(recordsArb, (rs) => {
         const untimed = rs.map(({ t: _t, ...r }) => r);
         const strip = (row: string): string => row.replace(TIME, "").trim().replace(/\s+/g, " ");
-        const timed = rows(renderFilesystemAuditSummary(toJsonl(rs), PREFIXES)).map(strip);
-        const plain = rows(renderFilesystemAuditSummary(toJsonl(untimed), PREFIXES)).map(strip);
+        const timed = detailsBlockRows(renderFilesystemAuditSummary(jsonl(...rs), PREFIXES)).map(
+          strip,
+        );
+        const plain = detailsBlockRows(
+          renderFilesystemAuditSummary(jsonl(...untimed), PREFIXES),
+        ).map(strip);
         expect(timed.toSorted()).toEqual(plain.toSorted());
       }),
     );
@@ -98,13 +102,13 @@ describe("createAuditSummary: properties", () => {
         .filter(stamped)
         .toSorted((a, b) => a.localeCompare(b));
       let i = 0;
-      return toJsonl(rs.map((r) => (stamped(r.t) ? { ...r, t: times[i++] } : r)));
+      return jsonl(...rs.map((r) => (stamped(r.t) ? { ...r, t: times[i++] } : r)));
     });
     fc.assert(
-      fc.property(risingArb, (jsonl) => {
+      fc.property(risingArb, (text) => {
         let prev = -1;
         let untimedSeen = false;
-        for (const row of rows(renderFilesystemAuditSummary(jsonl, PREFIXES))) {
+        for (const row of detailsBlockRows(renderFilesystemAuditSummary(text, PREFIXES))) {
           const m = row.match(TIME);
           if (!m) {
             untimedSeen = true;

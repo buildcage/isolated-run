@@ -195,11 +195,13 @@ function createAnnotation(enabled) {
 const annotate = createAnnotation(!0);
 //#endregion
 //#region src/core/lib/docker/args.ts
-function buildComposeDownArgs({ composeFile, projectName }) {
+function fileArgs(composeFiles) {
+	return composeFiles.flatMap((file) => ["-f", file]);
+}
+function buildComposeDownArgs({ composeFiles, projectName }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"down",
@@ -212,8 +214,8 @@ const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
-function resolveComposeFile(override) {
-	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
+function resolveComposeFiles(override) {
+	return override?.composeOverlay ? [DEFAULT_COMPOSE_FILE, override.composeOverlay] : [DEFAULT_COMPOSE_FILE];
 }
 //#endregion
 //#region src/core/lib/errors.ts
@@ -994,9 +996,9 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 //#endregion
 //#region src/post.ts
 async function stopProxyContainer({ containerName, projectName }) {
-	let composeFile = resolveComposeFile(await readLocalImageOverride(process.env));
+	let composeFiles = resolveComposeFiles(await readLocalImageOverride(process.env));
 	(0, node_child_process.execFileSync)(hostCommand("docker"), buildComposeDownArgs({
-		composeFile,
+		composeFiles,
 		projectName
 	}), {
 		stdio: "inherit",

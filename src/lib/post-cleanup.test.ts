@@ -5,20 +5,14 @@ import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { planPostCleanup, type PostCleanupDeps } from "./post-cleanup.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import { SANDBOX_SCRATCH_BASE, scratchDirFor } from "./sandbox/scratch-dir.ts";
+import { STEP_OWNER_ENV } from "./test/runner-host.ts";
 
 const CONTAINER = "buildcage-proxy-deadbeef";
 const STATE = { containerName: CONTAINER, ephemeralRoots: "" };
 const AUDIT = filesystemAuditPaths(CONTAINER, SANDBOX_SCRATCH_BASE);
 
-/** A real Actions step's environment, which ownerToken joins into a token. */
-const ENV = {
-  GITHUB_RUN_ID: "1",
-  GITHUB_RUN_ATTEMPT: "1",
-  GITHUB_JOB: "build",
-  GITHUB_ACTION: "buildcage",
-  RUNNER_TEMP: "/runner-1/_work/_temp",
-};
-const OWNER = "1/1/build/buildcage//runner-1/_work/_temp";
+const ENV = STEP_OWNER_ENV;
+const OWNER = `${ENV.GITHUB_RUN_ID}/${ENV.GITHUB_RUN_ATTEMPT}/${ENV.GITHUB_JOB}/${ENV.GITHUB_ACTION}/${ENV.RUNNER_TEMP}`;
 
 /** The emitter the entry point supplies; asserted on directly rather than
  *  through a console.log spy. */

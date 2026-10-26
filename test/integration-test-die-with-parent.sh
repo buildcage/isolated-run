@@ -22,7 +22,7 @@ cleanup() {
   # proxy. sandbox-step.ts writes the name to GITHUB_STATE before creating
   # the container, so nothing it started escapes this narrower one.
   local name project
-  name=$(awk '/^container_name<</{getline; print; exit}' "$WORKDIR/state.env" 2>/dev/null)
+  name=$(state_container_name "$WORKDIR/state.env")
   if [ -n "$name" ]; then
     project=$(docker inspect "$name" \
       --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)

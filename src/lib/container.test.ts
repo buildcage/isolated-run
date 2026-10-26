@@ -37,16 +37,12 @@ describe("isValidContainerName", () => {
     expect(isValidContainerName(generateContainerName())).toBe(true);
   });
 
-  it("rejects a path traversal payload", () => {
-    expect(isValidContainerName("buildcage-proxy-x/../../../..")).toBe(false);
-  });
-
-  it("rejects an uppercase-hex payload", () => {
-    expect(isValidContainerName("buildcage-proxy-ABCD1234")).toBe(false);
-  });
-
-  it("rejects a too-long suffix", () => {
-    expect(isValidContainerName("buildcage-proxy-abcd12345")).toBe(false);
+  it.each([
+    ["a path traversal payload", "buildcage-proxy-x/../../../.."],
+    ["an uppercase-hex payload", "buildcage-proxy-ABCD1234"],
+    ["a too-long suffix", "buildcage-proxy-abcd12345"],
+  ])("rejects %s", (_, name) => {
+    expect(isValidContainerName(name)).toBe(false);
   });
 });
 
@@ -207,6 +203,10 @@ describe("isContainerNotFoundError", () => {
   it("does not misclassify an ENOENT (docker not on PATH)", () => {
     expect(isContainerNotFoundError({ code: "ENOENT" })).toBe(false);
   });
+
+  it("reads a value that is not an object as some other failure, not a missing container", () => {
+    expect(isContainerNotFoundError("Error: No such object: buildcage")).toBe(false);
+  });
 });
 
 // General deriveProjectName tests live in
@@ -218,11 +218,5 @@ describe("deriveProjectName", () => {
       const projectName = deriveProjectName(generateContainerName());
       expect(projectName).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
     }
-  });
-});
-
-describe("isContainerNotFoundError on a value that is not an object", () => {
-  it("reads it as some other failure rather than a missing container", () => {
-    expect(isContainerNotFoundError("Error: No such object: buildcage")).toBe(false);
   });
 });

@@ -67,7 +67,7 @@ import type { BuiltOciSpec, MountEntry, MountinfoEntry, OverlayDirs } from "./ty
  * proxy is the sandbox's default gateway and its only nameserver, and its own
  * INPUT rules accept nothing else on that interface (see init-iptables).
  */
-const SANDBOX_IP = "198.19.255.101";
+export const SANDBOX_IP = "198.19.255.101";
 
 /**
  * The steps runSandboxedCommand sequences, injected so a test can watch their

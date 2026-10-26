@@ -27,14 +27,14 @@ import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts"
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { buildComposeEnv } from "./compose-env.ts";
-import { readLocalImageOverride, resolveComposeFile } from "./compose-file.ts";
+import { readLocalImageOverride, resolveComposeFiles } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
-import { givenRules } from "./filesystem-audit/proposed-rules.ts";
 import { readStepFilesystemAudit } from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
-import { RULES_FILE_EXAMPLE, EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
+import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
+import { filesystemExampleInputs } from "./filesystem-example-inputs.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
   CONFIG_FILE_INPUTS,
@@ -80,7 +80,7 @@ import {
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
-import { splitWriteThroughInput, WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
+import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
@@ -115,7 +115,7 @@ function onCancel(listener: () => void): () => void {
  * The steps runSandboxStep sequences, injected so a test can watch their order
  * and arguments; each is tested in its own file. Pure steps
  * (resolveWriteThroughInput, deriveProjectName, buildComposeEnv,
- * resolveComposeFile, formatFilesystemPlanLog, resolveBuildcageImageRef, and
+ * resolveComposeFiles, formatFilesystemPlanLog, resolveBuildcageImageRef, and
  * pinningPaths with realPathOf injected) run for real: a test checks the value
  * they pass on, not the call.
  */
@@ -419,51 +419,16 @@ async function resolveProxyImage(
   { actionRef, actionRepo, proxyEngine }: StepInputs,
   env: NodeJS.ProcessEnv,
   deps: SandboxStepDeps,
-): Promise<{ imageRef: string; pullPolicy: "always" | "never"; composeFile: string }> {
+): Promise<{
+  imageRef: string;
+  pullPolicy: "always" | "never";
+  composeFiles: readonly string[];
+}> {
   const localOverride = await deps.readLocalImageOverride(env);
   const { imageRef, pullPolicy } =
     localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
   deps.log(`buildcage: proxy image: ${imageRef}`);
-  return { imageRef, pullPolicy, composeFile: resolveComposeFile(localOverride) };
-}
-
-/** The filesystem inputs for the report's restrict example, each only when it
- *  is not its default, so pasting the example keeps them. The expected rules
- *  point to `rulesFile`, this run's proposed file, when it is given. */
-export function filesystemExampleInputs(
-  {
-    filesystemMode,
-    writeThroughInput,
-    filesystemAudit,
-    expectedRulesLines,
-    failOnUnexpectedFileAccess,
-  }: Pick<
-    StepInputs,
-    | "filesystemMode"
-    | "writeThroughInput"
-    | "filesystemAudit"
-    | "expectedRulesLines"
-    | "failOnUnexpectedFileAccess"
-  >,
-  rulesFile?: string,
-): string[] {
-  const lines: string[] = [];
-  if (filesystemMode !== "persistent") lines.push(`filesystem_mode: ${filesystemMode}`);
-  const paths = splitWriteThroughInput(writeThroughInput);
-  if (paths.length > 0) lines.push("write_through: |", ...paths.map((path) => `  ${path}`));
-  if (filesystemAudit !== "off") lines.push(`filesystem_audit: ${filesystemAudit}`);
-  if (rulesFile && expectedRulesLines.length)
-    lines.push(
-      `# ${rulesFile} from this run's artifact, reviewed and committed at this path`,
-      `config_file: ${RULES_FILE_EXAMPLE}`,
-    );
-  else if (expectedRulesLines.length)
-    lines.push(
-      `${EXPECTED_RULES_INPUT}: |`,
-      ...givenRules(expectedRulesLines).map((line) => (line ? `  ${line}` : "")),
-    );
-  if (failOnUnexpectedFileAccess) lines.push("fail_on_unexpected_file_access: true");
-  return lines;
+  return { imageRef, pullPolicy, composeFiles: resolveComposeFiles(localOverride) };
 }
 
 /** Said where the restrict example is too large to print while it lists the
@@ -614,7 +579,7 @@ export async function runSandboxStep(
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
-  const { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+  const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
 
   const { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } =
@@ -645,11 +610,11 @@ export async function runSandboxStep(
     env,
   );
   const stopProxy = () =>
-    deps.stopSandboxProxy({ composeFile, projectName, composeEnv, annotation });
+    deps.stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation });
 
   try {
     await deps.startSandboxProxy({
-      composeFile,
+      composeFiles,
       projectName,
       containerName,
       pullPolicy,

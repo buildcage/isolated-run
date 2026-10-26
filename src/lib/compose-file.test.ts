@@ -3,30 +3,35 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   DEFAULT_COMPOSE_FILE,
   readLocalImageOverride,
-  resolveComposeFile,
+  resolveComposeFiles,
 } from "./compose-file.ts";
 
-describe("resolveComposeFile", () => {
+describe("resolveComposeFiles", () => {
   it("uses the shipped compose file when there is no override", () => {
-    expect(resolveComposeFile(null)).toBe(DEFAULT_COMPOSE_FILE);
+    expect(resolveComposeFiles(null)).toStrictEqual([DEFAULT_COMPOSE_FILE]);
   });
 
-  // An override without BUILDCAGE_TEST_COMPOSE_FILE set: the image is
+  // An override without BUILDCAGE_TEST_COMPOSE_OVERLAY set: the image is
   // replaced, the compose file that starts it is not.
-  it("uses the shipped compose file when the override names none", () => {
+  it("uses the shipped compose file alone when the override names no overlay", () => {
     expect(
-      resolveComposeFile({ imageRef: "local:dev", pullPolicy: "never", composeFile: undefined }),
-    ).toBe(DEFAULT_COMPOSE_FILE);
-  });
-
-  it("uses the override's compose file when it names one", () => {
-    expect(
-      resolveComposeFile({
+      resolveComposeFiles({
         imageRef: "local:dev",
         pullPolicy: "never",
-        composeFile: "/repo/test/compose.test-inspect.yaml",
+        composeOverlay: undefined,
       }),
-    ).toBe("/repo/test/compose.test-inspect.yaml");
+    ).toStrictEqual([DEFAULT_COMPOSE_FILE]);
+  });
+
+  // Layered rather than substituted, so a test overlay cannot drift from what ships.
+  it("layers the override's overlay on the shipped compose file", () => {
+    expect(
+      resolveComposeFiles({
+        imageRef: "local:dev",
+        pullPolicy: "never",
+        composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
+      }),
+    ).toStrictEqual([DEFAULT_COMPOSE_FILE, "/repo/docker/compose.action.test-inspect.yaml"]);
   });
 });
 
@@ -58,14 +63,14 @@ describe("readLocalImageOverride", () => {
       await readLocalImageOverride(
         {
           BUILDCAGE_LOCAL_IMAGE_REF: "local:dev",
-          BUILDCAGE_TEST_COMPOSE_FILE: "/repo/test/compose.test-inspect.yaml",
+          BUILDCAGE_TEST_COMPOSE_OVERLAY: "/repo/docker/compose.action.test-inspect.yaml",
         },
         log,
       ),
     ).toStrictEqual({
       imageRef: "local:dev",
       pullPolicy: "never",
-      composeFile: "/repo/test/compose.test-inspect.yaml",
+      composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
     });
     // Skipping provenance verification is the one thing a reader of the log
     // must not have to infer.

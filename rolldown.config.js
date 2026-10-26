@@ -22,7 +22,7 @@ const configs = [
     codeSplitting: false,
   },
   // Also gated: post.ts's own crash-fallback cleanup reads the same
-  // BUILDCAGE_TEST_COMPOSE_FILE override as main.ts, through that same
+  // BUILDCAGE_TEST_COMPOSE_OVERLAY override as main.ts, through that same
   // function, so it needs the same build-time substitution to keep that
   // reachable only in a test build.
   // In a BUILDCAGE_BUILD_TEST_HOOKS=1 build, that gate is reachable, so its

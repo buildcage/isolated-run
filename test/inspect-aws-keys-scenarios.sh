@@ -91,6 +91,11 @@ check_status "SigV2's header to a bucket, with the start key" \
   "$($C -H "Authorization: AWS ${AKIA}TESTSTARTKEY0001:c2lnbmF0dXJl" https://bucket.s3.amazonaws.com/x)" "403"
 check_status "a SigV2 presigned URL, with the start key" \
   "$($C "https://bucket.s3.amazonaws.com/x?AWSAccessKeyId=${AKIA}TESTSTARTKEY0001&Expires=1&Signature=ab")" "403"
+# The scheme and the Credential that follows it are matched as SDKs write them.
+check_status "SigV4's header in lowercase, with the start key" \
+  "$($C -X POST -H "Authorization: aws4-hmac-sha256 Credential=${AKIA}TESTSTARTKEY0001/20261008/us-east-1/cloudformation/aws4_request, SignedHeaders=host, Signature=ab" "$CF")" "403"
+check_status "SigV4's header with SignedHeaders ahead of Credential, with the start key" \
+  "$($C -X POST -H "Authorization: AWS4-HMAC-SHA256 SignedHeaders=host, Credential=${AKIA}TESTSTARTKEY0001/20261008/us-east-1/cloudformation/aws4_request, Signature=ab" "$CF")" "403"
 check_status "SigV3's header beside the start key's" \
   "$($C -X POST -H "Authorization: $(sigv4 "${AKIA}TESTSTARTKEY0001")" -H "X-Amzn-Authorization: AWS3-HTTPS AWSAccessKeyId=${AKIA}TESTSTARTKEY0001,Algorithm=HmacSHA256,Signature=ab" "$CF")" "403"
 check_status "SigV4's parameters in a form body, the start key in the header" \
@@ -155,6 +160,12 @@ check_status "a CodeCommit credential-helper login with a key of the build's own
   "$($C -u "${AKIA}TESTATTACKER0001:20261008T000000Zab" "$CC")" "403"
 check_status "a static CodeCommit Git credential of the allowed account" "$($C -u deploy-at-111111111111:secret "$CC")" "200"
 check_status "a static CodeCommit Git credential of another account" "$($C -u deploy-at-222222222222:secret "$CC")" "403"
+check_status "a static CodeCommit Git credential naming the allowed account after another" \
+  "$($C -u x-at-222222222222-at-111111111111:secret "$CC")" "403"
+# Refused by the account lookup too, as the account read from it keeps the
+# newline, so this pins the outcome rather than the guard that sees it first.
+check_status "a static CodeCommit Git credential of the allowed account, a newline ending its user name" \
+  "$($C -H "Authorization: Basic $(printf 'deploy-at-111111111111\n:secret' | base64)" "$CC")" "403"
 check_status "a CodeCommit login with the start key and a session token" \
   "$($C -u "${AKIA}TESTSTARTKEY0001%FQoGZXIvYXdz:20261008T000000Zab" "$CC")" "200"
 check_status "a CodeCommit login named only by an allowed account ID" "$($C -u 111111111111:secret "$CC")" "403"

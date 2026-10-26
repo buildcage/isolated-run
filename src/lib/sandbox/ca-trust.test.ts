@@ -172,65 +172,217 @@ describe("writeCaTrustFiles", () => {
       ["jvmKeystore", keystore],
     ]);
   });
+
+  describe("with CA directories", () => {
+    const CA_INPUT = "/scratch/input-ca.pem";
+    const RHEL_ANCHORS = "/etc/pki/ca-trust/source/anchors";
+    const SUSE_ANCHORS = "/etc/pki/trust/anchors";
+    const SUSE_GNUTLS = "/var/lib/ca-certificates/pem";
+
+    for (const dirs of [[], [RHEL_ANCHORS], [SUSE_ANCHORS, SUSE_GNUTLS]]) {
+      it(`copies each of ${dirs.length} CA directories and adds the CA to the copy`, () => {
+        const { deps, written, copied } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, dirs);
+        const caDirs = ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir");
+
+        const want = dirs.map((destination, i) => ({ path: `/scratch/ca-dir${i}`, destination }));
+        expect(caDirs).toEqual(want);
+        expect(copied).toEqual(want.map((a) => [a.destination, a.path]));
+        for (const { path } of want) {
+          expect(written[`${path}/buildcage-proxy-ca.pem`]).toEqual({
+            contents: `${FAKE_CA}\n`,
+            mode: 0o644,
+          });
+        }
+      });
+    }
+
+    it("warns and leaves out a directory it cannot copy, keeping the rest", () => {
+      const { deps, written } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [
+        SUSE_ANCHORS,
+        SUSE_GNUTLS,
+      ]);
+      deps.copyDir = (source) => {
+        if (source === SUSE_ANCHORS)
+          throw new Error(`EACCES: permission denied, ${source}/private`);
+      };
+      const warnings: string[] = [];
+      deps.warn = (message) => warnings.push(message);
+
+      const caDirs = ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir");
+
+      expect(caDirs).toEqual([{ path: "/scratch/ca-dir1", destination: SUSE_GNUTLS }]);
+      expect(written["/scratch/ca-dir0/buildcage-proxy-ca.pem"]).toBeUndefined();
+      expect(warnings).toEqual([
+        `could not add the proxy CA to the CA directory ${SUSE_ANCHORS} ` +
+          `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it through ` +
+          "GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that " +
+          "the runner user can read it, or use proxy_engine: universal.",
+      ]);
+    });
+
+    it("leaves out a directory whose copy the CA cannot be written into", () => {
+      const { deps } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [RHEL_ANCHORS]);
+      deps.writeFile = (path) => {
+        if (path.startsWith("/scratch/ca-dir0/")) throw new Error("EACCES");
+      };
+
+      expect(ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir")).toEqual(
+        [],
+      );
+    });
+
+    it("copies the directory it resolves to, not the link", () => {
+      const anchors = "/etc/pki/ca-trust/source/anchors";
+      const { deps, copied } = fakeHost({ "/scratch/input-ca.pem": `${FAKE_CA}\n` }, [anchors]);
+      deps.realpath = (path) => (path === anchors ? "/usr/share/pki/anchors" : path);
+
+      const caDirs = ofKind(
+        writeCaTrustFiles("/scratch/input-ca.pem", "/scratch", {}, NO_JVM, deps),
+        "caDir",
+      );
+
+      expect(copied).toEqual([["/usr/share/pki/anchors", "/scratch/ca-dir0"]]);
+      expect(caDirs).toEqual([{ path: "/scratch/ca-dir0", destination: anchors }]);
+    });
+  });
+
+  describe("with JVM keystores", () => {
+    const CA = "/scratch/proxy-ca.pem";
+    const KEYTOOL = "/opt/java/bin/keytool";
+
+    function harness(keystores: string[], failKeytool = false) {
+      const copies: [string, string][] = [];
+      const exec: [string, string[], NodeJS.ProcessEnv | undefined][] = [];
+      const warnings: string[] = [];
+      const deps: CaTrustDeps = {
+        readFile: () => FAKE_CA,
+        writeFile: () => {},
+        isDirectory: () => false,
+        exists: (p) => keystores.includes(p),
+        realpath: (p) => p,
+        copyFile: (source, destination) => copies.push([source, destination]),
+        chmod: () => {},
+        exec: (command, args, env) => {
+          exec.push([command, args, env]);
+          if (failKeytool) throw new Error("keytool failed");
+        },
+        warn: (message) => warnings.push(message),
+      };
+      return { deps, copies, exec, warnings };
+    }
+
+    const inject = (env: NodeJS.ProcessEnv, tools: JvmTools, deps: CaTrustDeps) =>
+      ofKind(writeCaTrustFiles(CA, "/scratch", env, tools, deps), "jvmKeystore");
+
+    it("copies each keystore and imports the CA with the pinned keytool, returning the mounts", () => {
+      const ks = "/opt/java/lib/security/cacerts";
+      const { deps, copies, exec } = harness([ks]);
+
+      const result = inject(
+        { JAVA_HOME: "/opt/java" },
+        { java: undefined, keytool: KEYTOOL },
+        deps,
+      );
+
+      expect(copies).toEqual([[ks, "/scratch/jvm-keystore-0"]]);
+      expect(exec).toEqual([
+        [
+          KEYTOOL,
+          [
+            "-importcert",
+            "-noprompt",
+            "-alias",
+            "buildcage-proxy-ca",
+            "-file",
+            CA,
+            "-keystore",
+            "/scratch/jvm-keystore-0",
+            "-storepass",
+            "changeit",
+          ],
+          {},
+        ],
+      ]);
+      expect(result).toEqual([{ path: "/scratch/jvm-keystore-0", destination: ks }]);
+    });
+
+    it("runs keytool once for each distinct keystore", () => {
+      const onPath = "/usr/lib/jvm/jdk-21/lib/security/cacerts";
+      const ks = "/opt/java/lib/security/cacerts";
+      const { deps, exec } = harness([onPath, ks]);
+
+      const result = inject(
+        { JAVA_HOME: "/opt/java" },
+        { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: KEYTOOL },
+        deps,
+      );
+
+      expect(exec.map(([, args]) => args[args.indexOf("-keystore") + 1])).toEqual([
+        "/scratch/jvm-keystore-0",
+        "/scratch/jvm-keystore-1",
+      ]);
+      expect(result).toEqual([
+        { path: "/scratch/jvm-keystore-0", destination: onPath },
+        { path: "/scratch/jvm-keystore-1", destination: ks },
+      ]);
+    });
+
+    // JAVA_TOOL_OPTIONS=-javaagent:... would otherwise run outside the sandbox.
+    it("runs keytool without the step's environment", () => {
+      const { deps, exec } = harness(["/opt/java/lib/security/cacerts"]);
+      inject(
+        { JAVA_HOME: "/opt/java", JAVA_TOOL_OPTIONS: "-javaagent:/home/runner/a.jar" },
+        { java: undefined, keytool: KEYTOOL },
+        deps,
+      );
+      expect(exec[0][2]).toEqual({});
+    });
+
+    it("skips a keystore keytool cannot rewrite, warns, and leaves it out of the mounts", () => {
+      const { deps, warnings } = harness(["/opt/java/lib/security/cacerts"], true);
+      expect(
+        inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool: KEYTOOL }, deps),
+      ).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("/opt/java/lib/security/cacerts");
+      expect(warnings[0]).toContain("proxy_engine: universal");
+    });
+
+    it("skips every keystore and warns once when there is no pinnable keytool", () => {
+      const keystores = [
+        "/usr/lib/jvm/jdk-21/lib/security/cacerts",
+        "/opt/java/lib/security/cacerts",
+      ];
+      const { deps, exec, copies, warnings } = harness(keystores);
+      expect(
+        inject(
+          { JAVA_HOME: "/opt/java" },
+          { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: undefined },
+          deps,
+        ),
+      ).toEqual([]);
+      expect(exec).toEqual([]);
+      expect(copies).toEqual([]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(keystores.join(", "));
+      expect(warnings[0]).toContain("Install a JDK outside those paths");
+      expect(warnings[0]).toContain("proxy_engine: universal");
+    });
+
+    it("returns nothing, and does not warn, when the runner has no JVM keystore", () => {
+      for (const keytool of [KEYTOOL, undefined]) {
+        const { deps, warnings } = harness([]);
+        expect(inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool }, deps)).toEqual([]);
+        expect(warnings).toEqual([]);
+      }
+    });
+  });
 });
 
 describe("reservedCaStorePaths", () => {
   // Only the system store is reserved in every engine; the rest only where mounted.
   it("is every system store candidate", () => {
     expect(reservedCaStorePaths()).toEqual(SYSTEM_CA_CANDIDATES);
-  });
-});
-
-describe("writeCaTrustFiles with CA directories", () => {
-  const CA_INPUT = "/scratch/input-ca.pem";
-  const RHEL_ANCHORS = "/etc/pki/ca-trust/source/anchors";
-  const SUSE_ANCHORS = "/etc/pki/trust/anchors";
-  const SUSE_GNUTLS = "/var/lib/ca-certificates/pem";
-
-  for (const dirs of [[], [RHEL_ANCHORS], [SUSE_ANCHORS, SUSE_GNUTLS]]) {
-    it(`copies each of ${dirs.length} CA directories and adds the CA to the copy`, () => {
-      const { deps, written, copied } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, dirs);
-      const caDirs = ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir");
-
-      const want = dirs.map((destination, i) => ({ path: `/scratch/ca-dir${i}`, destination }));
-      expect(caDirs).toEqual(want);
-      expect(copied).toEqual(want.map((a) => [a.destination, a.path]));
-      for (const { path } of want) {
-        expect(written[`${path}/buildcage-proxy-ca.pem`]).toEqual({
-          contents: `${FAKE_CA}\n`,
-          mode: 0o644,
-        });
-      }
-    });
-  }
-
-  it("warns and leaves out a directory it cannot copy, keeping the rest", () => {
-    const { deps, written } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [SUSE_ANCHORS, SUSE_GNUTLS]);
-    deps.copyDir = (source) => {
-      if (source === SUSE_ANCHORS) throw new Error(`EACCES: permission denied, ${source}/private`);
-    };
-    const warnings: string[] = [];
-    deps.warn = (message) => warnings.push(message);
-
-    const caDirs = ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir");
-
-    expect(caDirs).toEqual([{ path: "/scratch/ca-dir1", destination: SUSE_GNUTLS }]);
-    expect(written["/scratch/ca-dir0/buildcage-proxy-ca.pem"]).toBeUndefined();
-    expect(warnings).toEqual([
-      `could not add the proxy CA to the CA directory ${SUSE_ANCHORS} ` +
-        `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it through ` +
-        "GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that " +
-        "the runner user can read it, or use proxy_engine: universal.",
-    ]);
-  });
-
-  it("leaves out a directory whose copy the CA cannot be written into", () => {
-    const { deps } = fakeHost({ [CA_INPUT]: `${FAKE_CA}\n` }, [RHEL_ANCHORS]);
-    deps.writeFile = (path) => {
-      if (path.startsWith("/scratch/ca-dir0/")) throw new Error("EACCES");
-    };
-
-    expect(ofKind(writeCaTrustFiles(CA_INPUT, "/scratch", {}, NO_JVM, deps), "caDir")).toEqual([]);
   });
 });
 
@@ -348,6 +500,68 @@ describe("caTrustAdditions", () => {
     expect(env.PIP_CERT).toBeUndefined();
     expect(env.SSL_CERT_FILE).toBeUndefined();
   });
+
+  describe("with CA directories", () => {
+    it("mounts each copy read-only over the directory it came from, adding no env", () => {
+      const { mounts, env } = caTrustAdditions(
+        {
+          ownCaPath: "/scratch/buildcage-ca.pem",
+          stores: [
+            {
+              kind: "caDir",
+              path: "/scratch/ca-dir0",
+              destination: "/etc/pki/ca-trust/source/anchors",
+            },
+          ],
+        },
+        { NODE_EXTRA_CA_CERTS: "/set", DENO_CERT: "/set" },
+      );
+      expect(mounts).toContainEqual({
+        destination: "/etc/pki/ca-trust/source/anchors",
+        type: "none",
+        source: "/scratch/ca-dir0",
+        options: ["rbind", "ro"],
+      });
+      expect(env).toEqual({});
+    });
+  });
+
+  describe("with JVM keystores", () => {
+    it("mounts each injected keystore over the keystore it stands in for, adding no env", () => {
+      const { mounts, env } = caTrustAdditions(
+        {
+          ownCaPath: "/scratch/buildcage-ca.pem",
+          stores: [
+            {
+              kind: "jvmKeystore",
+              path: "/scratch/jvm-keystore-0",
+              destination: "/opt/java/lib/security/cacerts",
+            },
+            {
+              kind: "jvmKeystore",
+              path: "/scratch/jvm-keystore-1",
+              destination: "/opt/java/lib/security/jssecacerts",
+            },
+          ],
+        },
+        {},
+      );
+      expect(mounts).toContainEqual({
+        destination: "/opt/java/lib/security/cacerts",
+        type: "none",
+        source: "/scratch/jvm-keystore-0",
+        options: ["rbind", "ro"],
+      });
+      expect(mounts).toContainEqual({
+        destination: "/opt/java/lib/security/jssecacerts",
+        type: "none",
+        source: "/scratch/jvm-keystore-1",
+        options: ["rbind", "ro"],
+      });
+      // The JVM reads no variable.
+      expect(Object.keys(env)).toEqual(["NODE_EXTRA_CA_CERTS", "DENO_CERT"]);
+    });
+  });
 });
 
 describe("extractCaCert", () => {
@@ -454,212 +668,6 @@ describe("discoverJvmKeystores", () => {
 
   it("finds nothing when there is no keystore", () => {
     expect(discoverJvmKeystores({ JAVA_HOME: "/opt/java" }, undefined, at([]))).toEqual([]);
-  });
-});
-
-describe("writeCaTrustFiles with JVM keystores", () => {
-  const CA = "/scratch/proxy-ca.pem";
-  const KEYTOOL = "/opt/java/bin/keytool";
-
-  function harness(keystores: string[], failKeytool = false) {
-    const copies: [string, string][] = [];
-    const exec: [string, string[], NodeJS.ProcessEnv | undefined][] = [];
-    const warnings: string[] = [];
-    const deps: CaTrustDeps = {
-      readFile: () => FAKE_CA,
-      writeFile: () => {},
-      isDirectory: () => false,
-      exists: (p) => keystores.includes(p),
-      realpath: (p) => p,
-      copyFile: (source, destination) => copies.push([source, destination]),
-      chmod: () => {},
-      exec: (command, args, env) => {
-        exec.push([command, args, env]);
-        if (failKeytool) throw new Error("keytool failed");
-      },
-      warn: (message) => warnings.push(message),
-    };
-    return { deps, copies, exec, warnings };
-  }
-
-  const inject = (env: NodeJS.ProcessEnv, tools: JvmTools, deps: CaTrustDeps) =>
-    ofKind(writeCaTrustFiles(CA, "/scratch", env, tools, deps), "jvmKeystore");
-
-  it("copies each keystore and imports the CA with the pinned keytool, returning the mounts", () => {
-    const ks = "/opt/java/lib/security/cacerts";
-    const { deps, copies, exec } = harness([ks]);
-
-    const result = inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool: KEYTOOL }, deps);
-
-    expect(copies).toEqual([[ks, "/scratch/jvm-keystore-0"]]);
-    expect(exec).toEqual([
-      [
-        KEYTOOL,
-        [
-          "-importcert",
-          "-noprompt",
-          "-alias",
-          "buildcage-proxy-ca",
-          "-file",
-          CA,
-          "-keystore",
-          "/scratch/jvm-keystore-0",
-          "-storepass",
-          "changeit",
-        ],
-        {},
-      ],
-    ]);
-    expect(result).toEqual([{ path: "/scratch/jvm-keystore-0", destination: ks }]);
-  });
-
-  it("runs keytool once for each distinct keystore", () => {
-    const onPath = "/usr/lib/jvm/jdk-21/lib/security/cacerts";
-    const ks = "/opt/java/lib/security/cacerts";
-    const { deps, exec } = harness([onPath, ks]);
-
-    const result = inject(
-      { JAVA_HOME: "/opt/java" },
-      { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: KEYTOOL },
-      deps,
-    );
-
-    expect(exec.map(([, args]) => args[args.indexOf("-keystore") + 1])).toEqual([
-      "/scratch/jvm-keystore-0",
-      "/scratch/jvm-keystore-1",
-    ]);
-    expect(result).toEqual([
-      { path: "/scratch/jvm-keystore-0", destination: onPath },
-      { path: "/scratch/jvm-keystore-1", destination: ks },
-    ]);
-  });
-
-  // JAVA_TOOL_OPTIONS=-javaagent:... would otherwise run outside the sandbox.
-  it("runs keytool without the step's environment", () => {
-    const { deps, exec } = harness(["/opt/java/lib/security/cacerts"]);
-    inject(
-      { JAVA_HOME: "/opt/java", JAVA_TOOL_OPTIONS: "-javaagent:/home/runner/a.jar" },
-      { java: undefined, keytool: KEYTOOL },
-      deps,
-    );
-    expect(exec[0][2]).toEqual({});
-  });
-
-  it("skips a keystore keytool cannot rewrite, warns, and leaves it out of the mounts", () => {
-    const { deps, warnings } = harness(["/opt/java/lib/security/cacerts"], true);
-    expect(inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool: KEYTOOL }, deps)).toEqual(
-      [],
-    );
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("/opt/java/lib/security/cacerts");
-    expect(warnings[0]).toContain("proxy_engine: universal");
-  });
-
-  it("skips every keystore and warns once when there is no pinnable keytool", () => {
-    const keystores = [
-      "/usr/lib/jvm/jdk-21/lib/security/cacerts",
-      "/opt/java/lib/security/cacerts",
-    ];
-    const { deps, exec, copies, warnings } = harness(keystores);
-    expect(
-      inject(
-        { JAVA_HOME: "/opt/java" },
-        { java: "/usr/lib/jvm/jdk-21/bin/java", keytool: undefined },
-        deps,
-      ),
-    ).toEqual([]);
-    expect(exec).toEqual([]);
-    expect(copies).toEqual([]);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain(keystores.join(", "));
-    expect(warnings[0]).toContain("Install a JDK outside those paths");
-    expect(warnings[0]).toContain("proxy_engine: universal");
-  });
-
-  it("returns nothing, and does not warn, when the runner has no JVM keystore", () => {
-    for (const keytool of [KEYTOOL, undefined]) {
-      const { deps, warnings } = harness([]);
-      expect(inject({ JAVA_HOME: "/opt/java" }, { java: undefined, keytool }, deps)).toEqual([]);
-      expect(warnings).toEqual([]);
-    }
-  });
-});
-
-describe("writeCaTrustFiles with a CA directory that is a symlink", () => {
-  it("copies the directory it resolves to, not the link", () => {
-    const anchors = "/etc/pki/ca-trust/source/anchors";
-    const { deps, copied } = fakeHost({ "/scratch/input-ca.pem": `${FAKE_CA}\n` }, [anchors]);
-    deps.realpath = (path) => (path === anchors ? "/usr/share/pki/anchors" : path);
-
-    const caDirs = ofKind(
-      writeCaTrustFiles("/scratch/input-ca.pem", "/scratch", {}, NO_JVM, deps),
-      "caDir",
-    );
-
-    expect(copied).toEqual([["/usr/share/pki/anchors", "/scratch/ca-dir0"]]);
-    expect(caDirs).toEqual([{ path: "/scratch/ca-dir0", destination: anchors }]);
-  });
-});
-
-describe("caTrustAdditions with CA directories", () => {
-  it("mounts each copy read-only over the directory it came from, adding no env", () => {
-    const { mounts, env } = caTrustAdditions(
-      {
-        ownCaPath: "/scratch/buildcage-ca.pem",
-        stores: [
-          {
-            kind: "caDir",
-            path: "/scratch/ca-dir0",
-            destination: "/etc/pki/ca-trust/source/anchors",
-          },
-        ],
-      },
-      { NODE_EXTRA_CA_CERTS: "/set", DENO_CERT: "/set" },
-    );
-    expect(mounts).toContainEqual({
-      destination: "/etc/pki/ca-trust/source/anchors",
-      type: "none",
-      source: "/scratch/ca-dir0",
-      options: ["rbind", "ro"],
-    });
-    expect(env).toEqual({});
-  });
-});
-
-describe("caTrustAdditions with JVM keystores", () => {
-  it("mounts each injected keystore over the keystore it stands in for, adding no env", () => {
-    const { mounts, env } = caTrustAdditions(
-      {
-        ownCaPath: "/scratch/buildcage-ca.pem",
-        stores: [
-          {
-            kind: "jvmKeystore",
-            path: "/scratch/jvm-keystore-0",
-            destination: "/opt/java/lib/security/cacerts",
-          },
-          {
-            kind: "jvmKeystore",
-            path: "/scratch/jvm-keystore-1",
-            destination: "/opt/java/lib/security/jssecacerts",
-          },
-        ],
-      },
-      {},
-    );
-    expect(mounts).toContainEqual({
-      destination: "/opt/java/lib/security/cacerts",
-      type: "none",
-      source: "/scratch/jvm-keystore-0",
-      options: ["rbind", "ro"],
-    });
-    expect(mounts).toContainEqual({
-      destination: "/opt/java/lib/security/jssecacerts",
-      type: "none",
-      source: "/scratch/jvm-keystore-1",
-      options: ["rbind", "ro"],
-    });
-    // The JVM reads no variable.
-    expect(Object.keys(env)).toEqual(["NODE_EXTRA_CA_CERTS", "DENO_CERT"]);
   });
 });
 

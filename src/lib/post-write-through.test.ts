@@ -9,16 +9,9 @@ import {
   saveWriteThroughForPost,
   takeWriteThroughForPost,
 } from "./post-write-through.ts";
+import { STEP_OWNER_ENV } from "./test/runner-host.ts";
 
-/** A real Actions step's environment, which ownerToken joins into a token. */
-const ENV = {
-  GITHUB_RUN_ID: "1",
-  GITHUB_RUN_ATTEMPT: "1",
-  GITHUB_JOB: "build",
-  GITHUB_ACTION: "buildcage",
-  RUNNER_TEMP: "/runner-1/_work/_temp",
-  GITHUB_STATE: "/home/runner/work/_temp/state",
-};
+const ENV = { ...STEP_OWNER_ENV, GITHUB_STATE: "/home/runner/work/_temp/state" };
 
 let root: string;
 let base: string;

@@ -52,7 +52,7 @@ const printDockerViaExec = (args: string[], env: NodeJS.ProcessEnv): void => {
 /* v8 ignore stop */
 
 export interface StartSandboxProxyOptions {
-  composeFile: string;
+  composeFiles: readonly string[];
   projectName: string;
   containerName: string;
   pullPolicy: string;
@@ -61,15 +61,15 @@ export interface StartSandboxProxyOptions {
 
 /** Starts this step's own throwaway proxy container via `docker compose up`. */
 export async function startSandboxProxy(
-  { composeFile, projectName, containerName, pullPolicy, composeEnv }: StartSandboxProxyOptions,
+  { composeFiles, projectName, containerName, pullPolicy, composeEnv }: StartSandboxProxyOptions,
   deps: ProxyLifecycleDeps = {},
 ): Promise<void> {
   const { printDocker = printDockerViaExec } = deps;
   await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
     try {
-      printDocker(buildComposeUpArgs({ composeFile, projectName, pullPolicy }), composeEnv);
+      printDocker(buildComposeUpArgs({ composeFiles, projectName, pullPolicy }), composeEnv);
     } catch (e) {
-      throw proxyStartError(e, { composeFile, projectName, containerName, composeEnv }, deps);
+      throw proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps);
     }
   });
 }
@@ -80,7 +80,7 @@ export async function startSandboxProxy(
 function proxyStartError(
   e: unknown,
   {
-    composeFile,
+    composeFiles,
     projectName,
     containerName,
     composeEnv,
@@ -95,7 +95,7 @@ function proxyStartError(
     );
   }
 
-  printProxyLog({ composeFile, projectName, composeEnv }, deps);
+  printProxyLog({ composeFiles, projectName, composeEnv }, deps);
   return new SandboxError(
     describeContainerStartFailure(state, { role: "sandbox proxy", containerName }),
     "PROXY_NOT_READY",
@@ -129,21 +129,21 @@ function reportInspectFailure(e: unknown): void {
 /** Best effort: the message that follows still stands without the log. */
 function printProxyLog(
   {
-    composeFile,
+    composeFiles,
     projectName,
     composeEnv,
   }: Omit<StartSandboxProxyOptions, "pullPolicy" | "containerName">,
   { printDocker = printDockerViaExec }: ProxyLifecycleDeps,
 ): void {
   try {
-    printDocker(buildComposeLogsArgs({ composeFile, projectName, tail: LOG_TAIL }), composeEnv);
+    printDocker(buildComposeLogsArgs({ composeFiles, projectName, tail: LOG_TAIL }), composeEnv);
   } catch {
     console.log("The sandbox proxy container's log could not be read.");
   }
 }
 
 export interface StopSandboxProxyOptions {
-  composeFile: string;
+  composeFiles: readonly string[];
   projectName: string;
   composeEnv: NodeJS.ProcessEnv;
   annotation: Annotation;
@@ -153,12 +153,12 @@ export interface StopSandboxProxyOptions {
  *  failure as a warning rather than throwing: this runs in the step's
  *  finally block, after the sandboxed command has already completed. */
 export async function stopSandboxProxy(
-  { composeFile, projectName, composeEnv, annotation }: StopSandboxProxyOptions,
+  { composeFiles, projectName, composeEnv, annotation }: StopSandboxProxyOptions,
   { printDocker = printDockerViaExec }: ProxyLifecycleDeps = {},
 ): Promise<void> {
   await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
     try {
-      printDocker(buildComposeDownArgs({ composeFile, projectName }), composeEnv);
+      printDocker(buildComposeDownArgs({ composeFiles, projectName }), composeEnv);
     } catch (e) {
       annotation.warning(
         `Failed to stop the sandbox proxy container: ${describeDockerFailure(e, { operation: "docker compose down" })}`,

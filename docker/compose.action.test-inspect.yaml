@@ -1,47 +1,24 @@
-# Test-only counterpart to compose.action.yaml, used only via
-# BUILDCAGE_TEST_COMPOSE_FILE (see
+# Layered on compose.action.yaml through BUILDCAGE_TEST_COMPOSE_OVERLAY (see
 # src/core/lib/provenance/local-image-override.ts) by this repo's own
-# inspect-engine integration tests. Adds the one thing a published action has
-# no reason to know about: a second network joining the fixture origins
-# started by ../compose.test-inspect.yaml, and trust for their self-signed
-# certificate.
-#
-# BUILDCAGE_TEST_COMPOSE_FILE only takes effect at all when
-# BUILDCAGE_BUILD_TEST_HOOKS=1 was set at build time (see
-# readLocalImageOverride in src/lib/compose-file.ts); without that flag the
-# override is unreachable, and therefore irrelevant, in a published action's
-# dist/main.cjs.
+# inspect-engine integration tests, which reach it only in a build made with
+# BUILDCAGE_BUILD_TEST_HOOKS=1. Adds what a published action has no reason to
+# know about: a second network joining the fixture origins started by
+# ../compose.test-inspect.yaml, and trust for their self-signed certificate.
+# Paths resolve against this directory, the first compose file's.
 services:
   proxy:
-    container_name: ${PROXY_CONTAINER_NAME:-buildcage-proxy}
-    image: ${BUILDCAGE_PROXY_IMAGE_REF:-placeholder}
-    cap_add:
-      - NET_ADMIN
     environment:
-      - PROXY_MODE=${PROXY_MODE:-restrict}
-      - ALLOWED_HTTPS_RULES=${ALLOWED_HTTPS_RULES:-}
-      - ALLOWED_HTTP_RULES=${ALLOWED_HTTP_RULES:-}
-      - ALLOWED_IP_RULES=${ALLOWED_IP_RULES:-}
-      - ALLOWED_URL_RULES=${ALLOWED_URL_RULES:-}
-      - ALLOWED_TLS_RULES=${ALLOWED_TLS_RULES:-}
-      # inspect only: the AWS access key check, off when no key is given.
-      - ALLOWED_AWS_KEY=${ALLOWED_AWS_KEY:-}
-      - ALLOWED_AWS_ROLE_ACCOUNTS=${ALLOWED_AWS_ROLE_ACCOUNTS:-}
       - TEST_NET_ADDR=10.200.0.2/24
       - TEST_NET_SUBNET=${TEST_NET_SUBNET:-10.210.0.0/24}
       # What the action computed, plus a fixture address nothing answers on so
       # the blocked-name scenario has a deterministic target.
       - HOST_ADDRESSES=${HOST_ADDRESSES:-} 10.200.0.199
-      # Test-only: init-cfg only honours this in an image built with
-      # BUILDCAGE_TEST_HOOKS=1 (see docker/inspect/Dockerfile's
-      # /opt/buildcage/.test-hooks marker). The value below is a fixed
-      # in-container path, regardless of where the host-side cert actually lives.
+      # Honoured only by an image built with BUILDCAGE_TEST_HOOKS=1 (see
+      # docker/inspect/Dockerfile's /opt/buildcage/.test-hooks marker).
       - BUILDCAGE_EXTRA_CA_FILE=/test-fixtures/test-server-cert.pem
     volumes:
       - ../test/test-net-addr/attach.sh:/test-hooks/attach-test-net-addr.sh:ro
-      # BUILDCAGE_TEST_CERT_PATH: an absolute host path, set by the test
-      # script itself. A relative path here would resolve against this
-      # file's own directory (docker/), not the repo root.
+      # An absolute host path, set by the test script itself.
       - ${BUILDCAGE_TEST_CERT_PATH:?BUILDCAGE_TEST_CERT_PATH must be an absolute path to test-server-inspect/cert.pem}:/test-fixtures/test-server-cert.pem:ro
     # Wrapped here rather than in the image: the proxy is the product image
     # and carries no test-only setup.
@@ -52,19 +29,6 @@ services:
     networks:
       default:
       test-net:
-    labels:
-      io.buildcage.owner: ${BUILDCAGE_OWNER:-}
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'for check in /etc/s6-overlay/s6-rc.d/*/data/check; do "$$check" || exit 1; done',
-        ]
-      interval: 30s
-      start_interval: 250ms
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
 networks:
   test-net:

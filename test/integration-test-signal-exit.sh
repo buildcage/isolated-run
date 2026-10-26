@@ -78,7 +78,7 @@ assert_cancelled_cleanly() {
     pass "$name: the sandboxed command did not outlive the step"
   fi
   local container
-  container=$(awk '/^container_name<</{getline; print; exit}' "$dir/state.env" 2>/dev/null)
+  container=$(state_container_name "$dir/state.env")
   if [ -n "$container" ] && docker inspect "$container" >/dev/null 2>&1; then
     fail "$name: the proxy container $container is still there"
     docker rm -f "$container" >/dev/null 2>&1

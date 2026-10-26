@@ -2,7 +2,7 @@
 # Drives dist/main.cjs directly against a real universal-engine proxy
 # container and a fixture origin network (compose.test-universal.yaml),
 # proving allow/block/wildcard/port/direct-IP/dns-failed/internal-address
-# enforcement end-to-end (see test/universal-restrict-scenarios.sh for the
+# enforcement end-to-end (see test/scenarios/universal-restrict.sh for the
 # scenario list itself).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
@@ -41,13 +41,15 @@ echo "--- report assertions (Job Summary) ---"
 SUMMARY=$(cat "$TMPDIR/step.md")
 assert_report_complete
 
-assert_summary_contains "| \`allowed.example.com:443\` | HTTPS |" "allowed.example.com:443 recorded as allowed"
-assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`allowed.example.com:443\` | HTTPS |" "allowed.example.com:443 recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
 # Case and a trailing dot survive only on the Host-header path, so that is
-# where the scenarios ask for both forms. The report folds both into the
-# allowed.example.com:80 row above (the uppercase form's absence is checked
-# below), and the scenarios' own 200s assert that they passed.
-assert_summary_contains "| \`sub.wildcard.example.com:443\` | HTTPS |" "wildcard-matched name recorded as allowed"
+# where the scenarios ask for both forms. The report folds the uppercase form
+# into the allowed.example.com:80 row above (its absence is checked below). The
+# trailing-dot host is requested nowhere else, so its row is that request's,
+# with the dot dropped as the rules saw it.
+assert_section_contains "Allowed Hosts" "| \`trailingdot.wildcard.example.com:80\` | HTTP |" "a Host with a trailing dot recorded as allowed without it"
+assert_section_contains "Allowed Hosts" "| \`sub.wildcard.example.com:443\` | HTTPS |" "wildcard-matched name recorded as allowed"
 # Each of these is the near miss for a rule the scenarios also request on its
 # matching side. From inside the sandbox every one of them looks the same,
 # "not 200", so the reason is what tells a rule that blocked the name from a
@@ -63,8 +65,9 @@ assert_summary_contains "| \`blocked.example.com:80\` | HTTP | 🚫 not-allowed 
 assert_summary_contains "| \`blocked.example.com:8443\` | HTTPS | 🚫 not-allowed |" "blocked.example.com:8443 recorded as blocked, reason not-allowed"
 assert_summary_contains "| \`blocked.example.com:8080\` | HTTP | 🚫 not-allowed |" "blocked.example.com:8080 recorded as blocked, reason not-allowed"
 assert_summary_contains "| \`10.200.0.100:80\` | IP | 🚫 ip-not-allowed |" "direct IP recorded as blocked, reason ip-not-allowed"
-assert_summary_contains "| \`10.200.0.100:8443\` | IP |" "an allowed address recorded as allowed, whatever name its SNI carried"
-assert_summary_contains "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.100:8443\` | IP |" "an allowed address recorded as allowed, though its SNI named a host no rule allows"
+assert_section_lacks "Allowed Hosts" "| \`blocked.example.com:8443\` |" "an allowed address was judged by the address, not by the name its SNI carried"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_summary_contains "| \`10.200.0.101:8443\` | IP | 🚫 ip-not-allowed |" "an address no rule allows recorded as blocked, though its SNI named an allowed one"
 # No rule blocked these and none can clear them, so they are marked as
 # failures beside the blocks.
@@ -91,21 +94,7 @@ assert_summary_contains "| \`tlsany.example.com_x.evil.example.net:80\` | HTTP |
 
 # Allowed Hosts has no reason column, so its row is a prefix of the Blocked
 # Hosts row for the same host; search that section alone.
-ALLOWED_SECTION=$(awk '
-  /^###/ { in_section = (index($0, "Allowed Hosts") > 0) ? 1 : 0; next }
-  in_section { print }
-' <<< "$SUMMARY")
-
-assert_absent_in_allowed() {
-  local pattern="$1" label="$2"
-  if grep -qF -- "$pattern" <<< "$ALLOWED_SECTION"; then
-    fail "$label -- found in the Allowed Hosts table"
-  else
-    pass "$label"
-  fi
-}
-
-assert_absent_in_allowed "| \`blocked.example.com:80\` | HTTP |" \
+assert_section_lacks "Allowed Hosts" "| \`blocked.example.com:80\` | HTTP |" \
   "keep-alive: second (blocked) request on a reused connection did not inherit the first request's ALLOWED verdict"
 
 assert_absent_in_summary() {
@@ -124,20 +113,11 @@ assert_absent_in_summary "| \`forged.example.com:443\` | HTTPS |" \
 
 assert_absent_in_summary "ALLOWED.example.com" "uppercase host (HTTP) folded into the lowercase row"
 
-assert_present_in_allowed() {
-  local pattern="$1" label="$2"
-  if grep -qF -- "$pattern" <<< "$ALLOWED_SECTION"; then
-    pass "$label"
-  else
-    fail "$label -- not found in the Allowed Hosts table"
-  fi
-}
-
 # The other direction: keepalive.wildcard.example.com is requested once, as
 # the second request on a connection whose first was blocked. Scoped to the
 # Allowed Hosts table, since a blocked row for it would start with the same
 # text.
-assert_present_in_allowed "| \`keepalive.wildcard.example.com:80\` | HTTP |" \
+assert_section_contains "Allowed Hosts" "| \`keepalive.wildcard.example.com:80\` | HTTP |" \
   "keep-alive: second (allowed) request on a reused connection did not inherit the first request's BLOCKED verdict"
 
 rm -rf "$TMPDIR"

@@ -60,14 +60,15 @@ vp run build      # rolldown → the committed dist/ bundles
 │   ├── inspect/             # proxy_engine: inspect
 │   ├── gen-seccomp-profile/ # Go: derives the seccomp filter from Docker's default profile
 │   ├── filesystem-audit/    # Go and eBPF: the filesystem audit tracer
-│   ├── compose.*.yaml       # The compose files the action, its tests and the dev loop run
+│   ├── compose.*.yaml       # The action's compose file, and the overlays its tests and dev loop add
 │   └── *-licenses.sh        # License collection and checks run at image build time
 ├── scripts/
 │   ├── run-isolated.sh      # netns, veth and rootfs setup around `runc run`, via `sudo -n`
 │   └── buildcage-init.sh    # The sandbox's PID 1
 ├── test/                    # integration-test-*.sh drivers, assert-*.sh/.mjs, *-scenarios.sh
+│   └── scenarios/           # Each engine's restrict-mode cases, in POSIX sh
 ├── dev/                     # The macOS dev-loop image and scripts, and the fixture refresh
-├── compose.yaml             # Local compose config, also what CI's sandbox jobs build from
+├── compose.yaml             # The action's compose file plus a build from source; CI builds through it
 ├── compose.test-*.yaml      # Fixture origins for the integration tests
 ├── licenses/                # License texts copied into the images, and the npm license generator
 ├── docs/
@@ -162,13 +163,23 @@ the Node run.
 | `make test_integration_sandbox_inspect_rules`    | Its first half: restrict, audit, round trip and the AWS key check          |
 | `make test_integration_sandbox_inspect_ca`       | Its second half: Chromium's NSS database and the CA mount's reserved paths |
 | `make test_integration_listener_scope`           | `:10024`/`:53` stay unreachable outside `buildcage0`, every engine         |
+| `make test_integration_haproxy_configs`          | Every HAProxy config the generators write loads in its engine's image      |
 
 They drive `dist/main.cjs` directly (`test/integration-test-*.sh`). The first three groups need
 `BUILDCAGE_LOCAL_IMAGE_REF` and a [test-hook build](#the-action-against-an-unpublished-image).
-They do not all want the same image: the inspect group needs one built from `docker/inspect`, and
-`test_integration_listener_scope` builds both images itself and wants the variable unset. So
-`make test_integration` records what CI runs rather than running it in one go; build the image a
-group needs, then run that group.
+They do not all want the same image: the inspect group needs one built from `docker/inspect`. The
+last two take a universal and an inspect image at once, in `BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL` and
+`BUILDCAGE_LOCAL_IMAGE_REF_INSPECT`; the listener check's inspect image is built without test hooks,
+as it ships. So `make test_integration` records what CI runs rather than
+running it in one go; build the images a group needs, then run that group. CI also checks that every
+`test/integration-test-*.sh` is run by a target.
+
+The fixture groups start the proxy with `docker/compose.action.test-<engine>.yaml` layered on the
+shipped `docker/compose.action.yaml` (`BUILDCAGE_TEST_COMPOSE_OVERLAY`), so they run what ships
+plus the fixture network and nothing in place of it. The config check loads every golden config
+(`src/**/__fixtures__/*.cfg`), and one the image's own
+generator writes from a large rule set, with `haproxy -c`. CoreDNS has no way to check a Corefile
+without serving it, so the Corefile is not checked.
 
 A test that needs a fixture origin, whether for what only a fixture can cover or just to keep off
 the real internet, goes in `test_integration_sandbox_universal` or
@@ -201,6 +212,18 @@ catch two of them sharing a buffer. After changing the BPF program, run "Test / 
 under preemption" by hand: it boots Ubuntu's 7.0 and 6.8 `generic` kernels in a VM, lets three
 processes on one CPU make changes under names of their own, and fails on a record mixing two of
 them (`test/filesystem-audit-preemption/`).
+
+`docker/filesystem-audit/testdata/contract.jsonl` holds a line of each form the tracer writes, made
+by running a sample of each through its decoder and recorder. Its Go tests fail when the file no
+longer matches, and the summary's tests read it to check that every field and kind is handled.
+After changing what the tracer writes, rewrite it. The Go tests need `go generate` first, which
+compiles the BPF program with clang and libbpf's headers, so run both in the image's build stage:
+
+```bash
+docker run --rm -v "$PWD/docker/filesystem-audit:/src" -w /src golang:1.27-alpine sh -c \
+  'apk add -q clang llvm libbpf-dev linux-headers && go generate ./... &&
+   go test -run TestRecordingContractIsUpToDate -update .'
+```
 
 The golden test renders a real recording from the `test_sandbox_filesystem_audit` e2e job, kept in
 `src/lib/__fixtures__/filesystem-audit/`. When the tracer's output changes, take a new one from a

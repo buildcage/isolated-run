@@ -1,14 +1,30 @@
+import { readFileSync } from "node:fs";
+
 import { describe, it, expect } from "vitest";
 
-import { classify } from "./record.ts";
+import { classify, type AuditRecord } from "./record.ts";
 
 const ok = (letter: string, path: string) => ({ letter, path, failed: false, perm: false });
 
 describe("classify", () => {
-  it("names each kind by its letter", () => {
-    expect(classify({ kind: "read", path: "/a" })).toStrictEqual([ok("R", "/a")]);
-    expect(classify({ kind: "unlink", path: "/a" })).toStrictEqual([ok("D", "/a")]);
-    expect(classify({ kind: "chown", path: "/a" })).toStrictEqual([ok("A", "/a")]);
+  it.each([
+    ["read", "R"],
+    ["write", "W"],
+    ["exec", "X"],
+    ["mkdir", "W"],
+    ["mknod", "W"],
+    ["truncate", "W"],
+    ["symlink", "W"],
+    ["unlink", "D"],
+    ["rmdir", "D"],
+    ["chmod", "A"],
+    ["chown", "A"],
+    ["attr", "A"],
+  ])("names %s by %s, done or failed", (kind, letter) => {
+    expect(classify({ kind, path: "/a" })).toStrictEqual([ok(letter, "/a")]);
+    expect(classify({ kind, path: "/a", failed: true, err: 2 })).toStrictEqual([
+      { letter, path: "/a", failed: true, perm: false },
+    ]);
   });
 
   it("counts an open only when it creates or truncates", () => {
@@ -86,5 +102,57 @@ describe("classify", () => {
   it("leaves out a record with no letter or no path", () => {
     expect(classify({ kind: "fork" })).toStrictEqual([]);
     expect(classify({ kind: "read" })).toStrictEqual([]);
+  });
+});
+
+// The tracer's Go tests keep this file in step with what it writes: a line of
+// each form, failed ones included, with the fields the tracer sets for it.
+const contract = readFileSync(
+  new URL("../../../docker/filesystem-audit/testdata/contract.jsonl", import.meta.url),
+  "utf8",
+)
+  .trimEnd()
+  .split("\n")
+  .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+const DECLARED: Record<keyof AuditRecord, true> = {
+  t: true,
+  kind: true,
+  pid: true,
+  ppid: true,
+  nspid: true,
+  comm: true,
+  program: true,
+  path: true,
+  name: true,
+  to: true,
+  access: true,
+  err: true,
+  failed: true,
+  image: true,
+  memfd: true,
+  deleted: true,
+  dropped: true,
+  untracked: true,
+  host_missed: true,
+  exchange: true,
+  syscall: true,
+  killed: true,
+};
+const IGNORED = new Set(["to_name", "flags", "mode", "owner", "compat"]);
+const NOT_ACCESS = new Set(["fork", "syscall", "end"]);
+
+describe("the tracer's recording", () => {
+  it("names only keys AuditRecord declares or deliberately ignores, and every key it declares", () => {
+    const keys = new Set(contract.flatMap((r) => Object.keys(r)));
+    expect([...keys].filter((k) => !(k in DECLARED) && !IGNORED.has(k))).toStrictEqual([]);
+    expect(Object.keys(DECLARED).filter((k) => !keys.has(k))).toStrictEqual([]);
+  });
+
+  it("gives every access kind, failed or not, a letter", () => {
+    const records = contract as unknown as AuditRecord[];
+    const silent = records.filter((r) => !NOT_ACCESS.has(r.kind) && classify(r).length === 0);
+    expect(silent).toStrictEqual([]);
+    expect(records.filter((r) => !NOT_ACCESS.has(r.kind)).length).toBeGreaterThan(0);
   });
 });

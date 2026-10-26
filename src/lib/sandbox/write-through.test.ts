@@ -1,23 +1,30 @@
-import { describe, it, expect } from "vitest";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { afterAll, beforeAll, describe, it, expect } from "vitest";
+
+import { RUNNER_ENV, withLinks } from "../test/runner-host.ts";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
+  assertKnownFilesExist,
   assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
   splitWriteThroughInput,
   WriteThroughTargetUncreatableError,
 } from "./write-through.ts";
 
-const ENV = {
-  HOME: "/home/runner",
-  GITHUB_WORKSPACE: "/home/runner/work/repo/repo",
-  RUNNER_TEMP: "/home/runner/work/_temp",
-  GITHUB_OUTPUT: "/home/runner/work/_temp/_runner_file_commands/set_output_abc",
-  GITHUB_ENV: "/home/runner/work/_temp/_runner_file_commands/set_env_abc",
-  GITHUB_PATH: "/home/runner/work/_temp/_runner_file_commands/add_path_abc",
-  GITHUB_STEP_SUMMARY: "/home/runner/work/_temp/_runner_file_commands/step_summary_abc",
-};
+const ENV = RUNNER_ENV;
 
 describe("resolveWriteThroughEntry", () => {
   it("expands $NAME and ${NAME} forms for allowed variables", () => {
@@ -181,11 +188,7 @@ describe("splitWriteThroughInput", () => {
 });
 
 describe("assertNoSymlinkInWriteThrough", () => {
-  /** Every path exists; `links` are the symlinks, each to its stored target. */
-  const host = (links: Record<string, string> = {}) => ({
-    lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
-    readlink: (p: string) => links[p]!,
-  });
+  const host = withLinks;
 
   it("accepts a path with no symlinks on it, including one still to be created", () => {
     const missing = { lstat: () => undefined, readlink: () => "" };
@@ -215,6 +218,67 @@ describe("assertNoSymlinkInWriteThrough", () => {
       );
     }
   });
+});
+
+describe("write_through checks on the real filesystem", () => {
+  let root = "";
+
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "buildcage-write-through-")));
+    mkdirSync(join(root, "real"));
+    mkdirSync(join(root, "sealed"), { mode: 0o555 });
+    writeFileSync(join(root, "file"), "");
+    writeFileSync(join(root, "output"), "");
+    symlinkSync("real", join(root, "link"));
+  });
+
+  afterAll(() => {
+    if (root === "") return;
+    if (existsSync(join(root, "sealed"))) chmodSync(join(root, "sealed"), 0o755);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("accepts a real path, including one still to be created", () => {
+    expect(() => assertNoSymlinkInWriteThrough(join(root, "real/new"))).not.toThrow();
+  });
+
+  it("refuses a path through a symlink, naming where it leads", () => {
+    expect(() => assertNoSymlinkInWriteThrough(join(root, "link/new"))).toThrow(
+      `instead: ${JSON.stringify(join(root, "real/new"))}`,
+    );
+  });
+
+  it("tells a missing runner file from a present one", () => {
+    const env = { GITHUB_OUTPUT: join(root, "output"), GITHUB_ENV: join(root, "missing") };
+
+    expect(() => assertKnownFilesExist([env.GITHUB_OUTPUT], env)).not.toThrow();
+    expect(() => assertKnownFilesExist([env.GITHUB_ENV], env)).toThrow(/doesn't exist/);
+  });
+
+  it("creates a missing path under a directory the runner can write", () => {
+    const target = join(root, "real/a/b");
+
+    ensureWriteThroughTargetsExist([target]);
+
+    expect(existsSync(target)).toBe(true);
+  });
+
+  // Holds for root too: X_OK needs an execute bit even for root.
+  it("refuses a missing path under a regular file", () => {
+    expect(() => ensureWriteThroughTargetsExist([join(root, "file/x")])).toThrow(
+      WriteThroughTargetUncreatableError,
+    );
+  });
+
+  // Root ignores the mode bits.
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a missing path under a directory the runner can't write",
+    () => {
+      expect(() => ensureWriteThroughTargetsExist([join(root, "sealed/x")])).toThrow(
+        WriteThroughTargetUncreatableError,
+      );
+    },
+  );
 });
 
 describe("ensureWriteThroughTargetsExist", () => {

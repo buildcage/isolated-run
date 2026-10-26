@@ -19,6 +19,7 @@ permissions: {}
 jobs:
   changes:
     runs-on: ubuntu-slim
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -93,6 +94,9 @@ jobs:
           - { runner: ubuntu-24.04-arm, filesystem_mode: persistent, runner_read_only: true }
           - { runner: ubuntu-26.04, filesystem_mode: ephemeral }
     runs-on: ${{ matrix.runner }}
+    # Well above a normal run; without a limit a hang holds a runner for six
+    # hours.
+    timeout-minutes: 15
     permissions:
       contents: read
     name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}${{ matrix.runner_read_only && ', runner read-only' || '' }}${{ matrix.enforcement && ', enforcement, config_file' || '' }}${{ matrix.concurrency && ', concurrency' || '' }}, ${{ matrix.runner }})"
@@ -189,129 +193,8 @@ jobs:
           filesystem_mode: ${{ matrix.filesystem_mode }}
           filesystem_audit: record
           upload_filesystem_audit_artifact: true
-          run: |
-            cat /etc/hostname > /dev/null
-            # A process's own /proc directory, then another process's.
-            cat /proc/self/status /proc/1/stat > /dev/null
-            echo probe > "$GITHUB_WORKSPACE/probe.txt"
-            mv "$GITHUB_WORKSPACE/probe.txt" "$GITHUB_WORKSPACE/probe2.txt"
-            rm "$GITHUB_WORKSPACE/probe2.txt"
-            # A command run from a subshell that itself touches nothing.
-            (cd "$GITHUB_WORKSPACE" && touch subshell.txt || true)
-            # Times set through a descriptor (futimens), which names no path.
-            python3 -c 'import os, sys; os.utime(os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT))' "$GITHUB_WORKSPACE/futimens.txt"
-            # Times set through an empty name and AT_EMPTY_PATH.
-            python3 -c 'import ctypes, os, sys; fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT)
-            assert ctypes.CDLL(None, use_errno=True).utimensat(fd, b"", None, 0x1000) == 0' "$GITHUB_WORKSPACE/empty-name.txt"
-            # Failed calls on relative names: one against a changed working
-            # directory, one against a directory passed by descriptor.
-            mkdir -p "$GITHUB_WORKSPACE/sub"
-            (cd "$GITHUB_WORKSPACE/sub" && : < missing.txt) 2>/dev/null || true
-            python3 -c 'import os, sys; d = os.open(sys.argv[1], os.O_RDONLY)
-            try: os.unlink("gone", dir_fd=d)
-            except FileNotFoundError: pass
-            try: os.open("absent", os.O_RDONLY, dir_fd=d)
-            except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
-            # Changes the kernel refuses after the tracer's hook has seen them.
-            chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
-            chown 1:2 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
-            mkdir "$GITHUB_WORKSPACE/root-owned/x" 2>/dev/null || true
-            # Refused by the read-only root before the tracer's path hook.
-            mkdir /usr/local/buildcage-ro-probe 2>/dev/null || true
-            # Changes through a descriptor alone that the kernel refuses before
-            # the tracer's hook: a chmod and chown on the read-only root, a
-            # chown there through an empty name and AT_EMPTY_PATH, and a
-            # truncate through a descriptor not open for writing. Then a
-            # truncate on /dev/null, which changes no file, and an xattr set
-            # through a descriptor.
-            echo data > "$GITHUB_WORKSPACE/fd-truncate.txt"
-            echo data > "$GITHUB_WORKSPACE/fd-xattr.txt"
-            python3 -c 'import ctypes, os, sys
-            ro = os.open("/usr/bin/env", os.O_RDONLY)
-            libc = ctypes.CDLL(None, use_errno=True)
-            assert libc.fchownat(ro, b"", 3, 4, 0x1000) == -1 and ctypes.get_errno() == 30
-            for change in (lambda: os.fchmod(ro, 0o4755), lambda: os.fchown(ro, 1, 2),
-                           lambda: os.ftruncate(os.open(sys.argv[1], os.O_RDONLY), 0),
-                           lambda: os.ftruncate(os.open("/dev/null", os.O_WRONLY), 0),
-                           lambda: os.setxattr(os.open(sys.argv[2], os.O_RDONLY), "user.buildcage", b"1")):
-                try: change()
-                except OSError: pass' \
-              "$GITHUB_WORKSPACE/fd-truncate.txt" "$GITHUB_WORKSPACE/fd-xattr.txt"
-            # A mkdir on a name already there, which is no change.
-            mkdir "$GITHUB_WORKSPACE/sub" 2>/dev/null || true
-            # A script run by a relative name from the directory it sits in.
-            mkdir -p "$GITHUB_WORKSPACE/A"
-            printf '#!/bin/sh\n' > "$GITHUB_WORKSPACE/A/run.sh"
-            chmod +x "$GITHUB_WORKSPACE/A/run.sh"
-            (cd "$GITHUB_WORKSPACE/A" && ./run.sh)
-            # A hard link, which names the file it links as well as its new name.
-            echo data > "$GITHUB_WORKSPACE/link-src.txt"
-            ln "$GITHUB_WORKSPACE/link-src.txt" "$GITHUB_WORKSPACE/link-dst.txt"
-            # One across mounts, which fails EXDEV before protected_hardlinks
-            # is consulted.
-            ln /etc/hostname "$GITHUB_WORKSPACE/hostname-link" 2>/dev/null || true
-            # A symlink with the longest target the kernel takes.
-            ln -s "/$(printf 'x%.0s' $(seq 4094))" "$GITHUB_WORKSPACE/long-link"
-            # A file mapped executable that is no library.
-            echo data > "$GITHUB_WORKSPACE/mapped.bin"
-            python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
-            mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ | mmap.PROT_EXEC)' "$GITHUB_WORKSPACE/mapped.bin"
-            # A mapping and an open the kernel refuses after the tracer's hook: a
-            # shared writable map of a file opened read-only, and a FIFO opened
-            # for writing with no reader.
-            echo data > "$GITHUB_WORKSPACE/ro-mapped.bin"
-            python3 -c 'import mmap, sys; f = open(sys.argv[1], "rb")
-            try: mmap.mmap(f.fileno(), 0)
-            except PermissionError: pass' "$GITHUB_WORKSPACE/ro-mapped.bin"
-            mkfifo "$GITHUB_WORKSPACE/fifo"
-            python3 -c 'import os, sys
-            try: os.open(sys.argv[1], os.O_WRONLY | os.O_NONBLOCK)
-            except OSError: pass' "$GITHUB_WORKSPACE/fifo"
-            # mprotect adding PROT_WRITE (and PROT_EXEC) to shared mappings.
-            echo data > "$GITHUB_WORKSPACE/mprotected.bin"
-            echo data > "$GITHUB_WORKSPACE/mprotected-rwx.bin"
-            python3 -c 'import ctypes, os, sys
-            libc = ctypes.CDLL(None)
-            libc.mmap.restype = ctypes.c_void_p
-            libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-            failed = ctypes.c_void_p(-1).value
-            def remap(path, prot):
-                p = libc.mmap(None, 4096, 1, 1, os.open(path, os.O_RDWR), 0)  # PROT_READ, MAP_SHARED
-                assert p != failed and libc.mprotect(ctypes.c_void_p(p), 4096, prot) == 0
-                ctypes.memmove(p, b"X", 1)
-            remap(sys.argv[1], 3)  # PROT_READ | PROT_WRITE
-            remap(sys.argv[2], 7)  # PROT_READ | PROT_WRITE | PROT_EXEC
-            p = libc.mmap(None, 4096, 0, 0x21, -1, 0)  # PROT_NONE, MAP_SHARED | MAP_ANONYMOUS
-            assert p != failed and libc.mprotect(ctypes.c_void_p(p), 4096, 3) == 0' \
-              "$GITHUB_WORKSPACE/mprotected.bin" "$GITHUB_WORKSPACE/mprotected-rwx.bin"
-            # A memfd and a deleted file, each run with no path left to it.
-            python3 -c 'import os, shutil, sys
-            m = os.memfd_create("probe-memfd")
-            os.write(m, open("/usr/bin/true", "rb").read())
-            shutil.copy("/usr/bin/true", sys.argv[1])
-            d = os.open(sys.argv[1], os.O_RDONLY)
-            os.unlink(sys.argv[1])
-            for fd in (m, d):
-                if os.fork() == 0:
-                    os.execve(fd, ["true"], {})
-                os.wait()' "$GITHUB_WORKSPACE/gone-bin"
-            # Writing through a descriptor a shell already wrote through: a forked
-            # child (the trailing true keeps bash from exec'ing it), then a
-            # program the shell execs in place.
-            (exec 3> "$GITHUB_WORKSPACE/shared.txt"; echo head >&3; sh -c 'echo body >&3'; true)
-            (exec 3> "$GITHUB_WORKSPACE/execd.txt"; echo head >&3; exec cat /etc/hostname >&3)
-            # A program, not the builtin, with an argument the record must not keep.
-            /usr/bin/true buildcage-audit-sentinel-arg
-            # A user namespace, which the sandbox's seccomp profile refuses.
-            python3 -c 'import ctypes; assert ctypes.CDLL(None).unshare(0x10000000) == -1'
-            # A 32-bit syscall (getpid through int 0x80) is numbered apart from
-            # the calls the tracer reads, so seccomp kills the thread making it:
-            # SIGSYS, 128+31.
-            if [ "$(uname -m)" = x86_64 ]; then
-              status=0
-              "$GITHUB_WORKSPACE/int80" || status=$?
-              if [ "$status" -ne 159 ]; then echo "::error::a 32-bit syscall ended with $status, not SIGSYS"; exit 1; fi
-            fi
+          # Sourced so the step's own shell makes the accesses.
+          run: . "$GITHUB_WORKSPACE/test/filesystem-audit/probe.sh"
 
       - name: Verify the Job Summary has the filesystem audit
         env:
@@ -331,21 +214,10 @@ jobs:
         run: ./test/assert-filesystem-audit-artifact.sh "$RUNNER_TEMP/audit"
 
       - name: The tracer and the sandbox's cgroup are gone after the step
-        run: |
-          if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
-          cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
-          if ls -d "$cg"/buildcage-proxy-* 2>/dev/null; then echo "::error::the sandbox's cgroup was left"; exit 1; fi
+        run: ./test/assert-no-audit-leftovers.sh
 
-      # The real post step runs only once the job ends, so it is driven here
-      # with the state it would be handed (see integration-test-post-state-tampering.sh).
       - name: The post step removes the audit's files
-        run: |
-          base="/var/tmp/buildcage-$(id -u)"
-          rec=$(ls "$base"/filesystem-audit-*.jsonl | head -1)
-          suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/p')
-          if [ -z "$suffix" ]; then echo "::error::no recording left for the post step"; exit 1; fi
-          STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
-          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+        run: ./test/drive-post-step.sh
 
       - name: Run an ephemeral step with filesystem_audit enabled
         id: ephemeral_audit
@@ -393,20 +265,14 @@ jobs:
 
       - name: The post step removes the ephemeral step's audit files
         if: matrix.filesystem_mode == 'ephemeral'
-        run: |
-          base="/var/tmp/buildcage-$(id -u)"
-          rec=$(ls "$base"/filesystem-audit-*.jsonl | head -1)
-          suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\..*/\1/p')
-          if [ -z "$suffix" ]; then echo "::error::no recording left for the post step"; exit 1; fi
-          STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs
-          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+        run: ./test/drive-post-step.sh
 
       # One representative case through the real action wrapper, against real
       # internet hosts (no fixture network), proves proxy_engine: universal
       # wiring end-to-end: an allowed host reaches its origin, a blocked one does
       # not, and both verdicts reach the report.
       # Which names, ports and protocols are judged which way, and the log-line
-      # sanitizing behind that, live in test/universal-restrict-scenarios.sh,
+      # sanitizing behind that, live in test/scenarios/universal-restrict.sh,
       # which needs a fixture network this job deliberately does not set up.
       - name: Run an isolated command via the real action
         if: matrix.enforcement
@@ -541,16 +407,10 @@ jobs:
           cat "$RUNNER_TEMP/rules-summary.md"
           grep -qF 'No access fell outside `expected_filesystem_rules`.' "$RUNNER_TEMP/rules-summary.md"
 
-      # As above, so the checks after a failed start below find no file of these steps.
+      # Run here so the failed-start checks below find no file of these steps.
       - name: The post step removes the rules steps' files
         if: matrix.enforcement
-        run: |
-          base="/var/tmp/buildcage-$(id -u)"
-          for rec in "$base"/filesystem-audit-*.jsonl; do
-            suffix=$(basename "$rec" | sed -nE 's/^filesystem-audit-([0-9a-f]{8})\.jsonl$/\1/p')
-            if [ -n "$suffix" ]; then STATE_container_name="buildcage-proxy-$suffix" node dist/post.cjs; fi
-          done
-          if ls "$base"/filesystem-audit-* 2>/dev/null; then echo "::error::the post step left the audit's files"; exit 1; fi
+        run: ./test/drive-post-step.sh
 
       # Container/network/Compose-project namespacing holds under Actions' own
       # `parallel:` keyword; the direct-script counterpart is in
@@ -715,23 +575,29 @@ jobs:
         run: |
           if [ "$OUTCOME" != failure ]; then echo "::error::the step did not fail ($OUTCOME)"; exit 1; fi
           if [ -e "$GITHUB_WORKSPACE/should-not-run" ]; then echo "::error::the command ran"; exit 1; fi
-          if pgrep -x filesystem-audi; then echo "::error::the tracer outlived its step"; exit 1; fi
-          cg="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup)"
-          if ls -d "$cg"/buildcage-proxy-* 2>/dev/null; then echo "::error::the sandbox's cgroup was left"; exit 1; fi
-          if ls "/var/tmp/buildcage-$(id -u)"/filesystem-audit-* 2>/dev/null; then
-            echo "::error::the failed start left the audit's files"; exit 1
-          fi
+          ./test/assert-no-audit-leftovers.sh --no-files
 
-  # A concurrent step ending must not detach an inspect step's CA mount,
-  # whatever engine the ending step uses.
-  test_sandbox_concurrency_inspect:
+  # Runs the inspect engine through the real action, and checks that a
+  # concurrent step ending does not detach an inspect step's CA mount or NSS
+  # database. On ubuntu-22.04 an ending step also runs with the universal
+  # engine and Chrome reads a page through the proxy. The arm64 entry is the
+  # only run of inspect on that architecture and builds the inspect image
+  # alone; its runner image has no Chrome.
+  test_sandbox_inspect:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.test_sandbox == 'true') }}
-    # ubuntu-latest's hosts already run the inspect integration tests.
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-latest's hosts already run the inspect integration tests.
+          - { runner: ubuntu-22.04, universal: true, chrome: true }
+          - { runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     permissions:
       contents: read
-    name: "e2e: test (sandbox, inspect engine, concurrency, ubuntu-22.04)"
+    name: "e2e: test (sandbox, inspect engine, concurrency, ${{ matrix.runner }})"
 
     steps:
       - name: Checkout
@@ -743,7 +609,7 @@ jobs:
         id: local_proxy
         uses: ./.github/actions/prepare-local-proxy
         with:
-          engines: universal inspect
+          engines: ${{ matrix.universal && 'universal inspect' || 'inspect' }}
 
       # One representative case through the real action wrapper, against real
       # internet hosts (no fixture network), proves proxy_engine: inspect wiring
@@ -817,6 +683,7 @@ jobs:
 
       - parallel:
           - name: sandbox-parallel-short-universal
+            if: matrix.universal
             uses: ./
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
@@ -827,6 +694,7 @@ jobs:
               run: wget -q -T 5 -O /dev/null https://example.com/
 
           - name: sandbox-parallel-long-inspect
+            if: matrix.universal
             uses: ./
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
@@ -914,6 +782,7 @@ jobs:
             uses: ./
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
+              CHROME: ${{ matrix.chrome && '1' || '' }}
             with:
               proxy_engine: inspect
               allowed_url_rules: "GET https://example.com/**"
@@ -926,16 +795,20 @@ jobs:
                   echo "::error::the NSS database mount is gone after the concurrent steps ended"
                   exit 1
                 fi
-                dom=$(google-chrome --headless=new --no-sandbox --dump-dom https://example.com/ 2>/dev/null)
-                if ! grep -q "Example Domain" <<<"$dom"; then
-                  echo "::error::Chrome did not trust the proxy CA"
-                  exit 1
+                if [ -n "$CHROME" ]; then
+                  dom=$(google-chrome --headless=new --no-sandbox --dump-dom https://example.com/ 2>/dev/null)
+                  if ! grep -q "Example Domain" <<<"$dom"; then
+                    echo "::error::Chrome did not trust the proxy CA"
+                    exit 1
+                  fi
                 fi
 
       # Only once the parallel steps were reached: a failure earlier skips them,
       # and this would then report their missing database instead.
       - name: Verify the NSS database's directories were settled
         if: ${{ !cancelled() && steps.nssdb-ephemeral.outcome == 'success' }}
+        env:
+          CHROME: ${{ matrix.chrome && '1' || '' }}
         run: |
           ledger="/var/tmp/buildcage-$(id -u)/nssdb-ledger.json"
           if [ ! -e "$ledger" ]; then
@@ -947,12 +820,12 @@ jobs:
             echo "::error::$ledger still lists directories or uses after every step ended"
             exit 1
           fi
-          if [ ! -e ~/.pki/nssdb/cert9.db ] || grep -rqs buildcage ~/.pki/nssdb; then
-            echo "::error::the database Chrome made is missing, or still holds the slot"
+          if { [ -n "$CHROME" ] && [ ! -e ~/.pki/nssdb/cert9.db ]; } || grep -rqs buildcage ~/.pki/nssdb; then
+            echo "::error::the database Chrome made is missing, or the slot is still in the database"
             ls -laR ~/.pki || true
             exit 1
           fi
-          echo "OK: every step's use ended, and Chrome's database was kept without the slot"
+          echo "OK: every step's use ended, and no slot was left in the database"
 
   # The AWS access key check against the real STS, which a fixture origin
   # cannot stand in for: the check depends on the shape of real clients'
@@ -962,6 +835,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && github.repository == 'buildcage/isolated-run' && (github.event_name != 'pull_request' || (needs.changes.outputs.test_sandbox == 'true' && github.event.pull_request.head.repo.full_name == github.repository)) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The role trusts only jobs in this environment. Its only permission is
     # assuming a second role, which has none.
     environment: aws-e2e
@@ -1133,14 +1007,10 @@ jobs:
   # can't target them directly without listing every combination.
   e2e-tests-passed:
     name: E2E tests passed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
     needs:
-      [
-        changes,
-        test_sandbox_filesystem_audit,
-        test_sandbox_concurrency_inspect,
-        test_sandbox_aws_key_check,
-      ]
+      [changes, test_sandbox_filesystem_audit, test_sandbox_inspect, test_sandbox_aws_key_check]
     if: always()
     permissions: {}
     steps:

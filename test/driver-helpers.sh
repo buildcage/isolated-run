@@ -55,7 +55,7 @@ run_step() {
     GITHUB_STATE="$prefix.state"
     GITHUB_STEP_SUMMARY="$prefix.md"
     BUILDCAGE_LOCAL_IMAGE_REF="$BUILDCAGE_LOCAL_IMAGE_REF"
-    BUILDCAGE_TEST_COMPOSE_FILE="$REPO_ROOT/docker/compose.action.test-$engine.yaml"
+    BUILDCAGE_TEST_COMPOSE_OVERLAY="$REPO_ROOT/docker/compose.action.test-$engine.yaml"
     INPUT_PROXY_ENGINE="$engine"
     "$@"
     node "$REPO_ROOT/dist/main.cjs"
@@ -65,4 +65,17 @@ run_step() {
     return "${PIPESTATUS[0]}"
   fi
   "${cmd[@]}" > "$prefix.log" 2>&1
+}
+
+# state_container_name <state file>: the proxy container name a step wrote to
+# its GITHUB_STATE, empty if it wrote none.
+state_container_name() {
+  awk '/^container_name<</{getline; print; exit}' "$1" 2>/dev/null
+}
+
+# proxy_project <container name>: the Compose project the step started that
+# container under, as deriveProjectName (src/core/lib/docker/compose-project-name.ts)
+# derives it. Once the container is gone its labels can't be read.
+proxy_project() {
+  printf 'buildcage-%s' "$(printf '%s' "$1" | sha256sum | cut -c1-12)"
 }

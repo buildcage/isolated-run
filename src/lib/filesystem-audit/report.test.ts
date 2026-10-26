@@ -1,127 +1,28 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
-import { describe, it, expect, vi, afterEach, beforeEach, type Mock } from "vitest";
-
-import type { Annotation } from "#core/lib/actions/annotation.ts";
-import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
+import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { mediatedPathOf } from "../sandbox/runner-output-files.ts";
+import {
+  annotation,
+  AUDIT,
+  CLEAN,
+  deps,
+  reportStepFilesystemAudit,
+  RULES,
+  UPLOAD_DIR,
+  uploadedBlocks,
+} from "../test/filesystem-audit-report.ts";
 import { UPLOAD_NOTE } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
-import {
-  openWriter,
-  readStepFilesystemAudit,
-  readLines,
-  type FilesystemAuditReportDeps,
-  type FilesystemAuditReportOptions,
-} from "./report.ts";
-import { parseExpectedRules } from "./rules.ts";
+import { readStepFilesystemAudit } from "./report.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   // A recording without the end line fails the step.
   process.exitCode = undefined;
 });
-
-// The step's own directory, uploaded as is.
-const UPLOAD_DIR = "/var/tmp/buildcage-0/filesystem-audit-deadbeef";
-
-// The stripped copy, uploaded in place of the recording.
-const CLEAN = `${UPLOAD_DIR}/filesystem-audit.jsonl`;
-
-// The proposed rules, uploaded beside it.
-const RULES = `${UPLOAD_DIR}/expected-filesystem-rules.yml`;
-
-const AUDIT = {
-  outPath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.jsonl",
-  pidFilePath: "/var/tmp/buildcage-0/filesystem-audit-deadbeef.pid",
-  uploadDir: UPLOAD_DIR,
-  stepPath: CLEAN,
-  rulesPath: RULES,
-};
-
-function annotation(): Annotation & { warning: Mock; error: Mock } {
-  return { notice: vi.fn(), warning: vi.fn(), error: vi.fn() };
-}
-
-// A recording held as a string, read a line at a time as readLines would.
-const recording =
-  (text: string): FilesystemAuditReportDeps["readLines"] =>
-  (_path, onLine) => {
-    for (const line of text.split("\n")) onLine(line);
-  };
-
-function deps(overrides: Partial<FilesystemAuditReportDeps> & { raw?: string } = {}): {
-  deps: Partial<FilesystemAuditReportDeps> & { summaries: string[] };
-  summaries: string[];
-  uploads: string[][];
-  outputs: string[];
-  appended: string[];
-  writes: { path: string; content: string }[];
-  ruleFiles: { path: string; content: string }[];
-} {
-  const summaries: string[] = [];
-  const uploads: string[][] = [];
-  const ruleFiles: { path: string; content: string }[] = [];
-  const outputs: string[] = [];
-  const appended: string[] = [];
-  const writes: { path: string; content: string }[] = [];
-  const { raw = JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }), ...rest } =
-    overrides;
-  return {
-    summaries,
-    uploads,
-    outputs,
-    appended,
-    writes,
-    ruleFiles,
-    deps: {
-      summaries,
-      readLines: recording(raw),
-      readFile: () => raw,
-      makeDir: () => {},
-      openWriter: (path) => {
-        const lines: string[] = [];
-        return {
-          write: (line) => void lines.push(line),
-          close: () => void writes.push({ path, content: lines.join("\n") }),
-        };
-      },
-      realpath: (p) => p,
-      uploadArtifact: async (files) => {
-        uploads.push(files);
-        return { name: "buildcage-filesystem-audit-deadbeef" };
-      },
-      writeFile: (path, content) => void ruleFiles.push({ path, content }),
-      setOutput: (name) => void outputs.push(name),
-      appendFile: (_path, content) => void appended.push(content),
-      ...rest,
-    },
-  };
-}
-
-// Prepares the audit and renders its blocks as the report step would,
-// collecting their text.
-async function reportStepFilesystemAudit(
-  options: FilesystemAuditReportOptions & { startedAt?: number },
-  d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
-): Promise<void> {
-  const { summaries = [], ...overrides } = d;
-  const blocks = await uploadedBlocks(options, overrides);
-  if (blocks.length > 0) summaries.push(joinSummaryBlocks(blocks));
-}
-
-// Uploads first, as a step that ran to the end does, then renders.
-async function uploadedBlocks(
-  options: FilesystemAuditReportOptions & { startedAt?: number },
-  overrides: Partial<FilesystemAuditReportDeps>,
-): Promise<SummaryBlock[]> {
-  const read = readStepFilesystemAudit(options, overrides);
-  return read.blocks(options.startedAt, await read.upload(), undefined);
-}
 
 describe("readStepFilesystemAudit", () => {
   const base = {
@@ -146,7 +47,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain(
@@ -168,7 +69,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("Filesystem Activity");
@@ -219,7 +120,7 @@ describe("readStepFilesystemAudit", () => {
         annotation: annotation(),
         env: {},
       },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("00:02.500: R a /w/x");
@@ -230,7 +131,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: undefined, annotation: annotation(), env: {} },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries).toEqual([]);
@@ -253,7 +154,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
-      d,
+      { ...d, summaries },
     );
 
     expect(note.warning).not.toHaveBeenCalled();
@@ -278,7 +179,10 @@ describe("readStepFilesystemAudit", () => {
     });
 
     try {
-      await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+      await reportStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: note, env: {} },
+        { ...d, summaries },
+      );
 
       expect(note.error).toHaveBeenCalledWith(
         "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
@@ -300,7 +204,10 @@ describe("readStepFilesystemAudit", () => {
       const note = annotation();
       const { deps: d, summaries, uploads } = deps({ raw: write });
 
-      await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+      await reportStepFilesystemAudit(
+        { ...base, audit: AUDIT, annotation: note, env: {} },
+        { ...d, summaries },
+      );
 
       expect(note.error).toHaveBeenCalledWith(
         "The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:",
@@ -316,7 +223,7 @@ describe("readStepFilesystemAudit", () => {
 
       await reportStepFilesystemAudit(
         { ...base, cancelled: true, audit: AUDIT, annotation: note, env: {} },
-        d,
+        { ...d, summaries },
       );
 
       expect(note.error).not.toHaveBeenCalled();
@@ -365,7 +272,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(note.warning).toHaveBeenCalledWith(
@@ -462,7 +369,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/sym/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("W node ./a.txt");
@@ -494,7 +401,7 @@ describe("readStepFilesystemAudit", () => {
         },
         mediated: ["GITHUB_OUTPUT"],
       },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toMatch(/W +bash +\$GITHUB_OUTPUT\n/);
@@ -512,7 +419,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("W node ./a.txt");
@@ -522,7 +429,10 @@ describe("readStepFilesystemAudit", () => {
     const note = annotation();
     const { deps: d, summaries, uploads, outputs } = deps({ raw: "" });
 
-    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: {} },
+      { ...d, summaries },
+    );
 
     expect(note.error).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(1);
@@ -557,7 +467,7 @@ describe("readStepFilesystemAudit", () => {
         annotation: annotation(),
         env: { GITHUB_WORKSPACE: "/work" },
       },
-      d,
+      { ...d, summaries },
     );
 
     expect(writes).toEqual([]);
@@ -599,7 +509,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(outputs).toEqual([""]);
@@ -681,7 +591,10 @@ describe("readStepFilesystemAudit", () => {
       },
     });
 
-    await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
+    await reportStepFilesystemAudit(
+      { ...base, audit: AUDIT, annotation: note, env: {} },
+      { ...d, summaries },
+    );
 
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to read the filesystem audit recording: EIO: i/o error",
@@ -710,7 +623,7 @@ describe("readStepFilesystemAudit", () => {
         annotation: annotation(),
         env: { GITHUB_WORKSPACE: "/work", BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: "/tmp/dbg.md" },
       },
-      d,
+      { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("Filesystem Activity");
@@ -728,7 +641,7 @@ describe("readStepFilesystemAudit", () => {
     try {
       await reportStepFilesystemAudit(
         { ...base, failClosed: true, audit: AUDIT, annotation: note, env: {} },
-        d,
+        { ...d, summaries },
       );
 
       expect(note.error).toHaveBeenCalledWith(
@@ -781,7 +694,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(note.warning).toHaveBeenCalledWith(
@@ -815,7 +728,7 @@ describe("readStepFilesystemAudit", () => {
 
     await reportStepFilesystemAudit(
       { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      d,
+      { ...d, summaries },
     );
 
     expect(writes).toEqual([{ path: CLEAN, content: JSON.stringify({ ...step, comm: "bash" }) }]);
@@ -840,7 +753,7 @@ describe("readStepFilesystemAudit", () => {
 
       await reportStepFilesystemAudit(
         { ...base, audit: AUDIT, annotation: note, env: { GITHUB_WORKSPACE: "/work" } },
-        d,
+        { ...d, summaries },
       );
 
       expect(note.warning).toHaveBeenCalledWith(
@@ -883,7 +796,7 @@ describe("readStepFilesystemAudit: failures while reading", () => {
       }),
     });
 
-    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+    await reportStepFilesystemAudit({ ...base, annotation: note }, { ...d, summaries });
 
     expect(note.warning).toHaveBeenCalledWith(
       "Failed to render the filesystem audit summary: bad record",
@@ -939,7 +852,7 @@ describe("readStepFilesystemAudit: failures while reading", () => {
       openWriter: () => ({ write: () => {}, close: () => void closed.push("closed") }),
     });
 
-    await reportStepFilesystemAudit({ ...base, annotation: note }, d);
+    await reportStepFilesystemAudit({ ...base, annotation: note }, { ...d, summaries });
 
     expect(note.warning).toHaveBeenCalledWith(
       `Failed to read the filesystem audit recording: ${message}`,
@@ -976,7 +889,7 @@ describe("readStepFilesystemAudit: an upload that throws", () => {
         annotation: note,
         env: {},
       },
-      d,
+      { ...d, summaries },
     );
 
     expect(note.warning).toHaveBeenCalledWith(
@@ -988,7 +901,7 @@ describe("readStepFilesystemAudit: an upload that throws", () => {
   });
 });
 
-describe("readStepFilesystemAudit", () => {
+describe("readStepFilesystemAudit: rendering apart from the upload", () => {
   const options = {
     upload: true,
     retentionDays: 3,
@@ -1056,427 +969,5 @@ describe("readStepFilesystemAudit", () => {
     await expect(read.upload()).resolves.toBe("not-requested");
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
-  });
-});
-
-describe("readLines and openWriter", () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "filesystem-audit-"));
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  it("give back the lines split would, across chunk boundaries", () => {
-    const path = join(dir, "lines");
-    // A three-byte character straddles the first 4-byte chunk's end.
-    const text = "ab\n€x\n\nlast";
-    writeFileSync(path, text);
-    const got: string[] = [];
-    readLines(path, (line) => got.push(line), 4);
-    expect(got).toEqual(text.split("\n"));
-  });
-
-  it("write lines joined by newlines, flushing as they go", () => {
-    const path = join(dir, "out");
-    const w = openWriter(path, 10);
-    for (const line of ["first", "second", "third"]) w.write(line);
-    expect(readFileSync(path, "utf8")).toBe("first\nsecond");
-    w.close();
-    expect(readFileSync(path, "utf8")).toBe("first\nsecond\nthird");
-    openWriter(path).close();
-    expect(readFileSync(path, "utf8")).toBe("");
-  });
-
-  it("join a line that spans several chunks", () => {
-    const path = join(dir, "long");
-    writeFileSync(path, "abcdefghijklmnop\nq");
-    const got: string[] = [];
-    readLines(path, (line) => got.push(line), 3);
-    expect(got).toEqual(["abcdefghijklmnop", "q"]);
-  });
-
-  it("throw when the file is missing, with the error's code", () => {
-    expect(() => readLines(join(dir, "missing"), () => {})).toThrow(
-      expect.objectContaining({ code: "ENOENT" }),
-    );
-  });
-});
-
-describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
-  const base = {
-    upload: true,
-    retentionDays: 3,
-    containerName: "buildcage-proxy-deadbeef",
-    actionRepo: "buildcage/isolated-run",
-    actionRef: "v2",
-    failClosed: false,
-    attached: true,
-    cancelled: false,
-    mediated: [],
-    audit: AUDIT,
-    env: { GITHUB_WORKSPACE: "/work" },
-  };
-  const rules = (text: string) => parseExpectedRules([{ text, origin: "input", firstLine: 1 }]);
-  const raw = [
-    JSON.stringify({ kind: "read", comm: "node", path: "/work/a" }),
-    JSON.stringify({ kind: "write", comm: "node", path: "/work/b" }),
-    JSON.stringify({ kind: "end", dropped: 0, untracked: 0 }),
-  ].join("\n");
-
-  it("counts the table's rows for the verdict and the warning", () => {
-    const note = annotation();
-    const { deps: d } = deps({ raw });
-
-    const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
-
-    expect(read.verdictItems).toStrictEqual({ warning: ["2 unexpected file accesses"] });
-    expect(note.warning).toHaveBeenCalledWith(
-      "2 file accesses fell outside expected_filesystem_rules; the Unexpected Accesses table lists them.",
-    );
-  });
-
-  it("keeps rules all commented out in the proposed file, matching nothing against them", () => {
-    const note = annotation();
-    const { deps: d, ruleFiles } = deps({ raw });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, givenLines: ["# node R ./a"] },
-      d,
-    );
-
-    expect(read.verdictItems).toStrictEqual({});
-    expect(ruleFiles[0].content.split("\n").slice(4, 7)).toStrictEqual([
-      "  # node R ./a",
-      "",
-      "  # Not matched in this run",
-    ]);
-  });
-
-  it("lists only what the rules did not take, warns of it, and counts it for the verdict", async () => {
-    const note = annotation();
-    const { deps: d, uploads, ruleFiles, writes } = deps({ raw });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("# reads\nnode R ./a") },
-      d,
-    );
-    const md = joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined));
-
-    expect(read.verdictItems).toStrictEqual({ warning: ["1 unexpected file access"] });
-    expect(note.warning).toHaveBeenCalledWith(
-      "1 file access fell outside expected_filesystem_rules; the Unexpected Accesses table lists it.",
-    );
-    expect(process.exitCode).toBeUndefined();
-    expect(md).toContain(
-      "### ⚠️ Unexpected Accesses (1)\n\n<sub>1 recorded operation matched `expected_filesystem_rules`.</sub>\n\n" +
-        "<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>\n\n" +
-        "| Program | Command | Access | Path |\n| --- | --- | --- | --- |\n| `node` | `node` | W | `./b` |\n\n",
-    );
-    expect(md).not.toContain("Accessed Paths");
-    expect(md).not.toContain("File access details");
-    expect(md).toContain(
-      "`expected_filesystem_rules` lists the file accesses this step is expected to make, " +
-        "and this section shows only the ones outside them.\n\n" +
-        "`expected-filesystem-rules.yml` in this run's filesystem audit artifact " +
-        "(`buildcage-filesystem-audit-deadbeef`) holds the rules given plus one for each access they did not take.",
-    );
-    expect(md).toContain(
-      "[How to write the rules](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#expected-accesses)",
-    );
-    expect(ruleFiles).toStrictEqual([
-      {
-        path: RULES,
-        content: [
-          "filesystem_audit: record",
-          UPLOAD_NOTE,
-          "upload_filesystem_audit_artifact: true",
-          "expected_filesystem_rules: |",
-          "  # reads",
-          "  node R ./a",
-          "",
-          "  # Not matched in this run",
-          "  node  W  ./b",
-          "",
-        ].join("\n"),
-      },
-    ]);
-    expect(writes[0].content.split("\n").slice(0, 2)).toStrictEqual([
-      '{"kind":"read","comm":"node","path":"/work/a","rule":"input:2"}',
-      '{"kind":"write","comm":"node","path":"/work/b","unexpected":true}',
-    ]);
-    expect(uploads).toStrictEqual([[CLEAN, RULES]]);
-  });
-
-  it("fails the step on an unexpected access with fail_on_unexpected_file_access", async () => {
-    const note = annotation();
-    const { deps: d } = deps({ raw });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
-      d,
-    );
-
-    expect(read.verdictItems).toStrictEqual({ caution: ["1 unexpected file access"] });
-    expect(note.error).toHaveBeenCalledWith(
-      "1 file access fell outside expected_filesystem_rules; the Unexpected Accesses table lists it. " +
-        "Failing the step, as fail_on_unexpected_file_access is true.",
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("fails the step with fail_on_unexpected_file_access when the recording cannot be read", async () => {
-    const note = annotation();
-    const { deps: d } = deps({
-      readLines: () => {
-        throw new Error("EIO: i/o error");
-      },
-    });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
-      d,
-    );
-
-    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(note.error).toHaveBeenCalledWith(
-      "The file accesses could not be checked against expected_filesystem_rules, as the recording could not be read; failing the step, as fail_on_unexpected_file_access is true.",
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("fails the step with fail_on_unexpected_file_access when the summary fails, but not without it", async () => {
-    const failing = () =>
-      deps({
-        raw,
-        createSummary: (options) => ({
-          ...createAuditSummary(options),
-          add: () => {
-            throw new Error("bad record");
-          },
-        }),
-      }).deps;
-    const note = annotation();
-
-    const quiet = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R ./a") },
-      failing(),
-    );
-    expect(note.error).not.toHaveBeenCalled();
-    expect(quiet.verdictItems).toStrictEqual({});
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
-      failing(),
-    );
-
-    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(note.error).toHaveBeenCalledWith(
-      "The file accesses could not be checked against expected_filesystem_rules, as summarizing the recording failed; failing the step, as fail_on_unexpected_file_access is true.",
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("fails the step with fail_on_unexpected_file_access when the recording misses accesses", async () => {
-    const note = annotation();
-    const { deps: d } = deps({ raw: raw.replace('"dropped":0', '"dropped":3') });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
-      d,
-    );
-    const both = readStepFilesystemAudit(
-      { ...base, annotation: annotation(), rules: rules("node R ./a"), failOnUnexpected: true },
-      d,
-    );
-
-    expect(read.verdictItems).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(both.verdictItems).toStrictEqual({
-      caution: ["1 unexpected file access", "file access check incomplete"],
-    });
-    expect(note.error).toHaveBeenCalledWith(
-      "Not every file access was checked against expected_filesystem_rules, as the recording misses some; failing the step, as fail_on_unexpected_file_access is true.",
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it("says the check is incomplete when the tracer stopped early or the recording is gone", () => {
-    const { deps: early } = deps({ raw: raw.split("\n").slice(0, -1).join("\n") });
-    const { deps: gone } = deps({
-      readLines: () => {
-        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
-      },
-    });
-    const read = (d: typeof early, failOnUnexpected: boolean) =>
-      readStepFilesystemAudit(
-        { ...base, annotation: annotation(), rules: rules("node RW ./*"), failOnUnexpected },
-        d,
-      ).verdictItems;
-
-    expect(read(early, true)).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(read(gone, true)).toStrictEqual({ caution: ["file access check incomplete"] });
-    expect(read(early, false)).toStrictEqual({});
-  });
-
-  it("leaves the step alone when the kernel skipped hooks, which counts the whole host", () => {
-    const note = annotation();
-    const { deps: d } = deps({
-      raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
-    });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
-      d,
-    );
-
-    expect(note.error).not.toHaveBeenCalled();
-    expect(read.verdictItems).toStrictEqual({});
-    expect(process.exitCode).toBeUndefined();
-  });
-
-  it("says so when the rules took every access, and still writes them", async () => {
-    const note = annotation();
-    const { deps: d, ruleFiles, summaries } = deps({ raw });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
-      d,
-    );
-    await reportStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node RW ./*") },
-      {
-        ...d,
-        summaries,
-      },
-    );
-
-    expect(read.verdictItems).toStrictEqual({});
-    expect(note.warning).not.toHaveBeenCalled();
-    expect(note.error).not.toHaveBeenCalled();
-    expect(summaries[0]).toContain(
-      "No access fell outside `expected_filesystem_rules`.\n\n<sub>2 recorded operations matched `expected_filesystem_rules`.</sub>",
-    );
-    expect(ruleFiles[0].content).toContain("expected_filesystem_rules: |\n  node RW ./*\n");
-  });
-
-  it("counts no unexpected access when their paths were too many to list", async () => {
-    const note = annotation();
-    const {
-      deps: d,
-      ruleFiles,
-      summaries,
-    } = deps({
-      raw,
-      createSummary: (options) => createAuditSummary({ ...options, limits: { nodes: 1 } }),
-    });
-
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R /etc/x") },
-      d,
-    );
-    summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
-
-    expect(read.verdictItems).toStrictEqual({
-      warning: ["unexpected file accesses (too many to list)"],
-    });
-    expect(note.warning).toHaveBeenCalledWith(
-      "File accesses fell outside expected_filesystem_rules on too many distinct paths to list.",
-    );
-    expect(summaries[0]).toContain(
-      "_The accesses outside the rules touched too many distinct paths to list._",
-    );
-    expect(summaries[0]).toContain(
-      "No rules were proposed: the accesses touched too many distinct paths.",
-    );
-    expect(ruleFiles).toStrictEqual([]);
-  });
-
-  it("uploads the record alone, and says so, when the rules cannot be written", async () => {
-    const note = annotation();
-    const {
-      deps: d,
-      uploads,
-      summaries,
-    } = deps({
-      raw,
-      writeFile: () => {
-        throw new Error("EEXIST");
-      },
-    });
-
-    await reportStepFilesystemAudit({ ...base, annotation: note }, { ...d, summaries });
-
-    expect(note.warning).toHaveBeenCalledWith(
-      "Failed to write the proposed expected_filesystem_rules: EEXIST",
-    );
-    expect(uploads).toStrictEqual([[CLEAN]]);
-    expect(summaries[0]).toContain("The proposed rules could not be written.");
-  });
-
-  it("proposes no rules for a recording with no file access", async () => {
-    const {
-      deps: d,
-      uploads,
-      summaries,
-    } = deps({
-      raw: [
-        JSON.stringify({ kind: "syscall", comm: "a.out", syscall: "getpid", killed: true }),
-        JSON.stringify({ kind: "end", dropped: 0, untracked: 0 }),
-      ].join("\n"),
-    });
-
-    await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
-
-    expect(uploads).toStrictEqual([[CLEAN]]);
-    expect(summaries[0]).toContain(
-      "No rules were proposed, as no file access was recorded.\n\n[How to write the rules]",
-    );
-  });
-
-  it("links the artifact's page, in the note and the legend, where the upload gave one", async () => {
-    const { deps: d, summaries } = deps({
-      raw,
-      uploadArtifact: async () => ({
-        name: "buildcage-filesystem-audit-deadbeef",
-        url: "https://github.com/o/r/actions/runs/1/artifacts/2",
-      }),
-    });
-
-    await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
-
-    expect(summaries[0]).toContain(
-      "`expected-filesystem-rules.yml` in this run's " +
-        "[filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) " +
-        "holds a rule for each access this run made.",
-    );
-    expect(summaries[0]).toContain(
-      "the full record is in the [filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) · ",
-    );
-  });
-
-  it("points at the upload input when nothing is uploaded, and still matches", async () => {
-    const note = annotation();
-    const { deps: d, ruleFiles, summaries } = deps({ raw });
-
-    await reportStepFilesystemAudit(
-      { ...base, upload: false, annotation: note, rules: rules("node R ./a") },
-      { ...d, summaries },
-    );
-
-    expect(ruleFiles).toStrictEqual([]);
-    expect(summaries[0]).toContain("### ⚠️ Unexpected Accesses (1)");
-    expect(summaries[0]).toContain(
-      "Set `upload_filesystem_audit_artifact: true` to get `expected-filesystem-rules.yml`, " +
-        "with the rules given plus one for each access they did not take.",
-    );
-  });
-
-  it("says the rules were not kept when the upload failed", async () => {
-    const { deps: d, summaries } = deps({ raw, uploadArtifact: async () => undefined });
-
-    await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
-
-    expect(summaries[0]).toContain(
-      "This run's `expected-filesystem-rules.yml` was lost, as the artifact could not be uploaded.\n\n" +
-        "[How to write the rules]",
-    );
   });
 });

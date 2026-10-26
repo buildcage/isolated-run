@@ -3,40 +3,18 @@ import { describe, it, expect } from "vitest";
 import { joinSummaryBlocks } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
-import { renderFilesystemAuditSummary } from "../test/filesystem-audit.ts";
+import {
+  jsonl,
+  lines,
+  PREFIXES,
+  programRows,
+  render,
+  renderFilesystemAuditSummary,
+  tableRows,
+} from "../test/filesystem-audit.ts";
 import { newAgg } from "./agg.ts";
-import type { AuditSummary, SummaryOptions } from "./reduce.ts";
+import type { AuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
-
-const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
-
-function jsonl(...records: object[]): string {
-  return records.map((r) => JSON.stringify(r)).join("\n");
-}
-
-// The rows printed inside the ``` block, each collapsed to single spaces.
-function lines(md: string): string[] {
-  const m = md.match(/```\n([\s\S]*?)\n```/);
-  return m ? m[1].split("\n").map((l) => l.replace(/\s+/g, " ").trim()) : [];
-}
-
-// The "Accessed Paths" table's rows, verbatim.
-function programRows(md: string): string[] {
-  const m = md.match(
-    /### 📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
-  );
-  return m ? m[1].split("\n") : [];
-}
-
-// The same rows as path and access alone, for a test of the paths.
-function tableRows(md: string): string[] {
-  return programRows(md).map((row) =>
-    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| (?:[^|\\]|\\.)* \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
-  );
-}
-
-const render = (...records: object[]): string =>
-  renderFilesystemAuditSummary(jsonl(...records), PREFIXES);
 
 describe("renderAuditSummaryBlocks: times", () => {
   // 2026-10-06T00:00:00Z in epoch seconds, the proxy's start in these cases.
@@ -508,5 +486,76 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 3 more | W | `/tmp/**` |\n");
     expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` | R | `/x` |\n");
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 2 more | D | `/y` |\n");
+  });
+});
+
+describe("renderAuditSummaryBlocks: layout", () => {
+  it("opens on a blank line and explains the flags under the accessed paths", () => {
+    const md = render(
+      { kind: "exec", comm: "cat", path: "/usr/bin/cat" },
+      { kind: "read", comm: "cat", path: "/etc/hostname" },
+    );
+    // Appended after the traffic report's </details>, which a heading right
+    // after it would be read as part of.
+    expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
+    expect(md).toContain("### 📂 Accessed Paths (2)\n\n<sub>R read");
+    expect(md.split("<sub>R read")).toHaveLength(2);
+    // With no accessed paths table, the details are the first to show flags.
+    const killed = render({
+      kind: "syscall",
+      comm: "a.out",
+      syscall: "socketcall",
+      compat: true,
+      killed: true,
+      failed: true,
+    });
+    expect(killed).not.toContain("### 📂 Accessed Paths");
+    expect(killed.slice(killed.indexOf("<details>"))).toContain("<sub>R read");
+  });
+
+  it("orders untimed rows by workspace, home, the rest, then path and command, the table's by program first", () => {
+    const md = render(
+      { kind: "read", pid: 1, comm: "b", path: "/etc/x" },
+      { kind: "read", pid: 2, comm: "a", path: "/etc/x" },
+      { kind: "read", pid: 3, comm: "c", path: "/home/u/y" },
+      { kind: "read", pid: 3, comm: "c", path: "/work/b" },
+      { kind: "read", pid: 3, comm: "c", path: "/work/a" },
+    );
+    expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ~/y", "R a /etc/x", "R b /etc/x"]);
+    expect(programRows(md)).toEqual([
+      "| `b` | `b` | R | `/etc/x` |",
+      "| `a` | `a` | R | `/etc/x` |",
+      "| `c` | `c` | R | `./a` |",
+      "| `c` | `c` | R | `./b` |",
+      "| `c` | `c` | R | `~/y` |",
+    ]);
+  });
+
+  it("keeps the same path under each command that touched it, sorted by command", () => {
+    const md = render(
+      { kind: "read", comm: "node", path: "/work/x" },
+      { kind: "read", comm: "sh", path: "/work/x" },
+      { kind: "read", comm: "bash", path: "/work/x" },
+    );
+    expect(lines(md)).toEqual(["R bash ./x", "R node ./x", "R sh ./x"]);
+  });
+
+  it("pads the flag and command columns to a fixed width", () => {
+    const md = render(
+      { kind: "read", comm: "node", path: "/work/a" },
+      { kind: "read", comm: "sh", path: "/work/b" },
+      { kind: "write", comm: "sh", path: "/work/b" },
+    );
+    expect(md).toContain("R  node ./a");
+    expect(md).toContain("RW sh   ./b");
+  });
+
+  it("sorts several same-root paths", () => {
+    const md = render(
+      { kind: "read", comm: "node", path: "/work/c" },
+      { kind: "read", comm: "node", path: "/work/a" },
+      { kind: "read", comm: "node", path: "/work/b" },
+    );
+    expect(lines(md)).toEqual(["R node ./a", "R node ./b", "R node ./c"]);
   });
 });

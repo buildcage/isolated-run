@@ -15830,7 +15830,7 @@ function ruleBlock(rules, mode, scheme) {
 }
 //#endregion
 //#region src/core/lib/acl/haproxy-rules.ts
-const HOST_IS_ADDRESS = `^${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}$`, INTERNAL_RANGES = [
+const HOST_IS_ADDRESS = `^${IPV4}$`, INTERNAL_RANGES = [
 	"0.0.0.0/8",
 	"127.0.0.0/8",
 	"169.254.0.0/16",
@@ -23254,8 +23254,8 @@ const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
 }
-function resolveComposeFile(override) {
-	return override?.composeFile ?? DEFAULT_COMPOSE_FILE;
+function resolveComposeFiles(override) {
+	return override?.composeOverlay ? [DEFAULT_COMPOSE_FILE, override.composeOverlay] : [DEFAULT_COMPOSE_FILE];
 }
 //#endregion
 //#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
@@ -70886,356 +70886,6 @@ function setFilesystemAuditOutput(name) {
 	setOutput("filesystem_audit_artifact_name", name);
 }
 //#endregion
-//#region src/core/lib/report/render/markdown-table.ts
-const ALIGN_MARKERS = {
-	left: "---",
-	right: "---:",
-	center: ":---:"
-}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
-function escapeCell(value) {
-	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function codeSpan(text) {
-	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
-	return `${fence}${pad}${text}${pad}${fence}`;
-}
-function codeCell(value) {
-	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
-}
-function markdownTable(formats, rows) {
-	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
-	for (let row of rows) {
-		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
-		lines.push(`| ${cells.join(" | ")} |`);
-	}
-	return lines.join("\n");
-}
-//#endregion
-//#region src/lib/filesystem-audit/paths.ts
-const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
-function marked(r, path) {
-	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
-}
-const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
-function normalize$2(path, self) {
-	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
-	return unnumbered(path.replace(/^\.\//, ""), own);
-}
-function relativize(path, prefixes) {
-	if (isRunnerFile(path)) return `$${path.slice(2)}`;
-	for (let ws of prefixes.workspace) {
-		if (path === ws) return ".";
-		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-	}
-	for (let home of prefixes.home) {
-		if (path === home) return "~";
-		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
-	}
-	return path;
-}
-function canonical(path, prefixes) {
-	let variable = prefixes.runnerFiles?.get(path);
-	if (variable) return "\0$" + variable;
-	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
-		if (path === alt) return first;
-		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
-	}
-	return path;
-}
-function sortKey(path) {
-	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
-}
-function components(p) {
-	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
-}
-function spell(parts) {
-	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
-}
-//#endregion
-//#region src/lib/filesystem-audit/escape.ts
-const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
-	"\n": "\\n",
-	"\r": "\\r",
-	"	": "\\t",
-	"\\": "\\\\",
-	"\"": "\\\"",
-	"*": "\\*",
-	"[": "\\[",
-	"]": "\\]"
-};
-function escapeForDisplay(name) {
-	return escapeWith(UNSAFE_CHARS, name);
-}
-function escapeCommandName(name) {
-	return escapeWith(UNSAFE_COMMAND_CHARS, name);
-}
-function escapeWith(unsafe, name) {
-	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
-}
-function escapeChar(c) {
-	let named = NAMED_ESCAPES[c];
-	if (named !== void 0) return named;
-	let cp = Number(c.codePointAt(0));
-	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
-}
-const UNESCAPES = Object.fromEntries(Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]));
-function unescapeDisplay(text) {
-	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
-		if (cp !== void 0) {
-			let n = parseInt(cp, 16);
-			if (n <= 1114111) return String.fromCodePoint(n);
-		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
-		else if (UNESCAPES[c] !== void 0) return UNESCAPES[c];
-		return bad = !0, "";
-	});
-	return bad ? void 0 : out;
-}
-function field(text) {
-	return text.includes(" ") ? `"${text}"` : text;
-}
-function pathCell({ path, deleted }) {
-	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
-}
-function markdownRows(header, rows) {
-	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map(() => "---");
-	return [
-		line(header),
-		line(rule),
-		...rows.map(line)
-	].join("\n");
-}
-//#endregion
-//#region src/lib/filesystem-audit/record.ts
-const LETTER = {
-	read: "R",
-	write: "W",
-	exec: "X",
-	mkdir: "W",
-	mknod: "W",
-	truncate: "W",
-	symlink: "W",
-	link: "W",
-	rename: "M",
-	unlink: "D",
-	rmdir: "D",
-	chmod: "A",
-	chown: "A",
-	attr: "A"
-}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
-	1,
-	13,
-	30
-]);
-function classify(r) {
-	let letter, failed = !1;
-	if (r.failed && r.kind === "open") {
-		let access = r.access ?? "r";
-		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
-	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
-	if (!letter) return [];
-	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
-	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-	let out = r.path ? [{
-		letter,
-		path: r.path,
-		failed,
-		perm
-	}] : [];
-	return r.kind === "rename" && r.to && out.push({
-		letter: r.exchange ? letter : "W",
-		path: r.to,
-		failed,
-		perm
-	}), out;
-}
-function classifyLink(r, letter, failed, perm) {
-	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
-	return r.to && out.push({
-		letter,
-		path: r.to,
-		failed,
-		perm: perm && !fileRefused
-	}), file && out.push({
-		letter: "L",
-		path: file,
-		failed,
-		perm: fileRefused
-	}), out;
-}
-const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
-function bitsOf(letter) {
-	let bits = letterBits.get(letter);
-	return bits === void 0 && (bits = letter.split("").reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
-}
-function procOf(gens, r) {
-	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
-	let gen = gens.get(r.pid) ?? 0;
-	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
-}
-const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
-function parseLine(line) {
-	try {
-		return JSON.parse(line);
-	} catch {
-		return;
-	}
-}
-//#endregion
-//#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
-function fields(line, ref) {
-	let out = [], i = 0;
-	for (; i < line.length;) {
-		if (line[i] === " " || line[i] === "	") {
-			i++;
-			continue;
-		}
-		let raw, memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
-		if (line[i] === "\"" || memfd) {
-			let end = line.indexOf("\"", i) + 1;
-			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
-			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
-			if (raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
-		} else {
-			let end = line.slice(i).search(/[ \t]/);
-			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
-		}
-		out.push(raw);
-	}
-	return out;
-}
-const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
-function globPattern(glob) {
-	let out = "", i = 0;
-	for (; i < glob.length;) {
-		if (glob.startsWith("**", i)) {
-			let atStart = i === 0 || glob[i - 1] === "/";
-			for (; glob[i] === "*";) i++;
-			if (atStart && i === glob.length) {
-				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
-				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
-			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
-			continue;
-		}
-		if (glob[i] === "*") {
-			out += "[^/]*", i++;
-			continue;
-		}
-		let c = glob[i];
-		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
-		i += c.length, out += c.replace(SPECIAL, "\\$&");
-	}
-	return RegExp(`^${out}$`);
-}
-const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
-function accessBits(access) {
-	let bits = {
-		ok: 0,
-		failed: 0,
-		perm: 0
-	};
-	for (let i = 0; i < access.length; i++) {
-		let c = access[i], bit = BIT[c.toUpperCase()];
-		c === c.toUpperCase() ? bits.ok |= bit : access[i + 1] === "!" ? (bits.perm |= bit, i++) : bits.failed |= bit;
-	}
-	return bits;
-}
-function parseExpectedRules(sources) {
-	let rules = [], lines = [];
-	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
-		let line = raw.trim();
-		if (lines.push(line), line === "" || line.startsWith("#")) return;
-		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
-		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
-		let [program, access, path] = parts;
-		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
-		let glob = (field) => {
-			let pattern = globPattern(field);
-			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
-			return pattern;
-		};
-		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
-		rules.push({
-			ref,
-			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
-			path: anyProcess(path, glob(path)),
-			...accessBits(access)
-		});
-	});
-	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
-	return {
-		rules,
-		lines
-	};
-}
-function takes(rule, bit, failed, perm) {
-	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
-}
-var RuleMatcher = class {
-	cache = new Map();
-	rules;
-	constructor(rules) {
-		this.rules = rules;
-	}
-	match(program, path, bits, failed, perm) {
-		let key = `${program}\0${path}`, candidates = this.cache.get(key);
-		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
-		let unmatched = 0, ref;
-		for (let c of ORDER) {
-			let bit = BIT[c];
-			if (!(bits & bit)) continue;
-			let rule = candidates.find((r) => takes(r, bit, failed, perm));
-			rule ? ref ??= rule.ref : unmatched |= bit;
-		}
-		return ref === void 0 ? { unmatched } : {
-			unmatched,
-			ref
-		};
-	}
-};
-//#endregion
-//#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
-function givenRules(written) {
-	let out = [], afterHeading = !1;
-	for (let line of written) if (line === "# Not matched in this run") {
-		for (; out.at(-1) === "";) out.pop();
-		afterHeading = !0;
-	} else (!afterHeading || line !== "") && (out.push(line), afterHeading = !1);
-	return out;
-}
-function expectedRulesFile(written, proposed) {
-	let given = givenRules(written), rows = proposed.map((r) => [
-		ruleField(r.program.path),
-		r.flags,
-		ruleField(r.path.path)
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
-		...given,
-		"",
-		"# Not matched in this run",
-		...added
-	];
-	if (lines.length !== 0) return [
-		"filesystem_audit: record",
-		UPLOAD_NOTE,
-		"upload_filesystem_audit_artifact: true",
-		`${EXPECTED_RULES_INPUT}: |`,
-		...lines.map((line) => line ? `  ${line}` : ""),
-		""
-	].join("\n");
-}
-function writeProposedRules(summary, given, path, annotation, writeFile) {
-	if (!summary) return "write-failed";
-	if (summary.proposedCut) return "too-many-paths";
-	let file = expectedRulesFile(given, summary.proposed);
-	if (file === void 0) return "none";
-	try {
-		return writeFile(path, file), "written";
-	} catch (e) {
-		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
-	}
-}
-//#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
@@ -71277,6 +70927,15 @@ function sniHost(sni) {
 }
 //#endregion
 //#region src/core/lib/log/traffic-event.ts
+const FAILURE_REASONS$1 = new Set([
+	"origin-unreachable",
+	"origin-no-response",
+	"origin-aborted",
+	"dns-failed"
+]);
+function actionFor(reason, isAudit) {
+	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
+}
 const CLIENT_ENDED_REASONS = new Set(["client-aborted", "client-timeout"]);
 function clientEndedNoise(timeline) {
 	let completed = new Set();
@@ -71419,23 +71078,8 @@ function formatElapsedFixed(elapsedSeconds) {
 	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
-function communicationTruncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
-}
-function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
-	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
-	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, lineNote)).join("\n")}\n\`\`\`\n\n`;
-}
-const MARK = {
-	block: "🚫",
-	discovery: "ℹ️",
-	incomplete: "⚠️",
-	failed: "⚠️"
-};
-function renderEvent(event, startedAt, lineNote) {
-	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${event.wouldBlock})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
-	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}${tail}`;
-}
+//#endregion
+//#region src/core/lib/report/render/credential-query.ts
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
 	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
@@ -71463,6 +71107,23 @@ function redactCredentialQuery(url) {
 	if (start === -1) return url;
 	let hash = url.indexOf("#", start), end = hash === -1 ? url.length : hash, query = url.slice(start + 1, end).split("&").map(redactPart).join("&");
 	return url.slice(0, start + 1) + query + url.slice(end);
+}
+function communicationTruncationNote(artifactAvailable) {
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+}
+function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
+	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
+	return shown.length === 0 ? "" : `\`\`\`\n${shown.map((event) => renderEvent(event, startedAt, lineNote)).join("\n")}\n\`\`\`\n\n`;
+}
+const MARK = {
+	block: "🚫",
+	discovery: "ℹ️",
+	incomplete: "⚠️",
+	failed: "⚠️"
+};
+function renderEvent(event, startedAt, lineNote) {
+	let mark = event.action === "audit" && event.wouldBlock !== void 0 ? "⚠️" : MARK[event.action] ?? "✅", note = event.wouldBlock === void 0 ? "" : ` (restrict would block: ${event.wouldBlock})`, extra = lineNote(event), tail = extra ? ` ${extra}` : "";
+	return `${mark} ${formatTime(event.time, startedAt)}: ${subject(event)} -> ${outcome(event)}${note}${tail}`;
 }
 function subject(event) {
 	if (event.queryType !== void 0) return `DNS ${event.queryType} ${event.host}`;
@@ -71522,6 +71183,31 @@ function toRow(group) {
 		expectedBy: group.rule,
 		note: `(${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
+}
+//#endregion
+//#region src/core/lib/report/render/markdown-table.ts
+const ALIGN_MARKERS = {
+	left: "---",
+	right: "---:",
+	center: ":---:"
+}, alignMarker = (align) => ALIGN_MARKERS[align ?? "left"];
+function escapeCell(value) {
+	return value === void 0 ? "" : String(value).replace(/[\\`[\]<>|*]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function codeSpan(text) {
+	let longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length)), fence = "`".repeat(longest + 1), pad = /^[ `]|[ `]$/.test(text) && text.trim() !== "" ? " " : "";
+	return `${fence}${pad}${text}${pad}${fence}`;
+}
+function codeCell(value) {
+	return value === void 0 || value === "" ? "" : codeSpan(String(value).replace(/\|/g, "\\|").replace(/\r?\n/g, " "));
+}
+function markdownTable(formats, rows) {
+	let headers = formats.map((f) => f.title), aligns = formats.map((f) => alignMarker(f.align)), lines = [`| ${headers.join(" | ")} |`, `| ${aligns.join(" | ")} |`];
+	for (let row of rows) {
+		let cells = formats.map((f) => (f.cell ?? escapeCell)(row[f.key]));
+		lines.push(`| ${cells.join(" | ")} |`);
+	}
+	return lines.join("\n");
 }
 //#endregion
 //#region src/core/lib/report/render/host-table.ts
@@ -72696,6 +72382,82 @@ function runnerFilesDirFor(containerName) {
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
 //#endregion
+//#region src/lib/filesystem-audit/record.ts
+const LETTER = {
+	read: "R",
+	write: "W",
+	exec: "X",
+	mkdir: "W",
+	mknod: "W",
+	truncate: "W",
+	symlink: "W",
+	link: "W",
+	rename: "M",
+	unlink: "D",
+	rmdir: "D",
+	chmod: "A",
+	chown: "A",
+	attr: "A"
+}, ORDER = "RWXMLDA", PERM_ERRNO = new Set([
+	1,
+	13,
+	30
+]);
+function classify(r) {
+	let letter, failed = !1;
+	if (r.failed && r.kind === "open") {
+		let access = r.access ?? "r";
+		letter = (access.startsWith("w") ? "" : "R") + (/[wct]/.test(access) ? "W" : ""), failed = !0;
+	} else r.failed ? (letter = LETTER[r.kind], failed = !0) : r.kind === "mmap" ? letter = r.access === "w" ? "W" : "R" : r.kind === "open" ? (r.access?.includes("c") || r.access?.includes("t")) && (letter = "W") : letter = LETTER[r.kind];
+	if (!letter) return [];
+	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
+	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
+	let out = r.path ? [{
+		letter,
+		path: r.path,
+		failed,
+		perm
+	}] : [];
+	return r.kind === "rename" && r.to && out.push({
+		letter: r.exchange ? letter : "W",
+		path: r.to,
+		failed,
+		perm
+	}), out;
+}
+function classifyLink(r, letter, failed, perm) {
+	let file = !r.deleted && !r.memfd ? r.path : void 0, fileRefused = !!file && failed && r.err === 1, out = [];
+	return r.to && out.push({
+		letter,
+		path: r.to,
+		failed,
+		perm: perm && !fileRefused
+	}), file && out.push({
+		letter: "L",
+		path: file,
+		failed,
+		perm: fileRefused
+	}), out;
+}
+const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
+function bitsOf(letter) {
+	let bits = letterBits.get(letter);
+	return bits === void 0 && (bits = letter.split("").reduce((b, l) => b | BIT[l], 0), letterBits.set(letter, bits)), bits;
+}
+function procOf(gens, r) {
+	r.kind === "fork" && gens.set(r.pid, (gens.get(r.pid) ?? 0) + 1);
+	let gen = gens.get(r.pid) ?? 0;
+	return r.kind === "exec" && gens.set(r.pid, gen + 1), `${r.pid}/${gen}`;
+}
+const isRecord = (r) => typeof r == "object" && !!r && typeof r.kind == "string";
+function parseLine(line) {
+	try {
+		return JSON.parse(line);
+	} catch {
+		return;
+	}
+}
+//#endregion
 //#region src/lib/filesystem-audit/agg.ts
 const newAgg = () => ({
 	ok: 0,
@@ -72726,6 +72488,255 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.ok & BIT[c] && (out += c);
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
+}
+//#endregion
+//#region src/lib/filesystem-audit/paths.ts
+const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
+function marked(r, path) {
+	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
+}
+const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
+function normalize$2(path, self) {
+	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
+	return unnumbered(path.replace(/^\.\//, ""), own);
+}
+function relativize(path, prefixes) {
+	if (isRunnerFile(path)) return `$${path.slice(2)}`;
+	for (let ws of prefixes.workspace) {
+		if (path === ws) return ".";
+		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
+	}
+	for (let home of prefixes.home) {
+		if (path === home) return "~";
+		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	}
+	return path;
+}
+function canonical(path, prefixes) {
+	let variable = prefixes.runnerFiles?.get(path);
+	if (variable) return "\0$" + variable;
+	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
+		if (path === alt) return first;
+		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	}
+	return path;
+}
+function sortKey(path) {
+	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
+}
+function components(p) {
+	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
+}
+function spell(parts) {
+	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
+}
+//#endregion
+//#region src/lib/filesystem-audit/escape.ts
+const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
+	"\n": "\\n",
+	"\r": "\\r",
+	"	": "\\t",
+	"\\": "\\\\",
+	"\"": "\\\"",
+	"*": "\\*",
+	"[": "\\[",
+	"]": "\\]"
+};
+function escapeForDisplay(name) {
+	return escapeWith(UNSAFE_CHARS, name);
+}
+function escapeCommandName(name) {
+	return escapeWith(UNSAFE_COMMAND_CHARS, name);
+}
+function escapeWith(unsafe, name) {
+	return name.replace(unsafe, (m) => m.startsWith(" ") ? escapeChar(" ").repeat(m.length) : escapeChar(m));
+}
+function escapeChar(c) {
+	let named = NAMED_ESCAPES[c];
+	if (named !== void 0) return named;
+	let cp = Number(c.codePointAt(0));
+	return cp >= 56448 && cp <= 56575 ? `\\x${(cp & 255).toString(16)}` : `\\u{${cp.toString(16)}}`;
+}
+const UNESCAPES = Object.fromEntries(Object.entries(NAMED_ESCAPES).map(([c, escaped]) => [escaped[1], c]));
+function unescapeDisplay(text) {
+	let bad = !1, out = text.replace(/\\(?:u\{([0-9a-f]{1,6})\}|x([89a-f][0-9a-f])|(.?))/g, (_, cp, raw, c) => {
+		if (cp !== void 0) {
+			let n = parseInt(cp, 16);
+			if (n <= 1114111) return String.fromCodePoint(n);
+		} else if (raw !== void 0) return String.fromCharCode(56320 + parseInt(raw, 16));
+		else if (UNESCAPES[c] !== void 0) return UNESCAPES[c];
+		return bad = !0, "";
+	});
+	return bad ? void 0 : out;
+}
+function field(text) {
+	return text.includes(" ") ? `"${text}"` : text;
+}
+function pathCell({ path, deleted }) {
+	return deleted ? codeCell(path) + DELETED_MARK : codeCell(path);
+}
+function markdownRows(header, rows) {
+	let line = (cells) => `| ${cells.join(" | ")} |`, rule = header.map(() => "---");
+	return [
+		line(header),
+		line(rule),
+		...rows.map(line)
+	].join("\n");
+}
+//#endregion
+//#region src/lib/filesystem-audit/rules.ts
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", RULES_FILE_EXAMPLE = "path/to/expected-filesystem-rules.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+function fields(line, ref) {
+	let out = [], i = 0;
+	for (; i < line.length;) {
+		if (line[i] === " " || line[i] === "	") {
+			i++;
+			continue;
+		}
+		let raw, memfd = line.startsWith(`${MEMFD_PREFIX}"`, i);
+		if (line[i] === "\"" || memfd) {
+			let end = line.indexOf("\"", i) + 1;
+			for (; end < line.length && line[end] !== "\"";) end += line[end] === "\\" ? 2 : 1;
+			if (end >= line.length) throw invalidRules(ref, "a quote is not closed");
+			if (raw = memfd ? line.slice(i, end + 1) : line.slice(i + 1, end), i = end + 1, i < line.length && line[i] !== " " && line[i] !== "	") throw invalidRules(ref, "a closing quote must end its field");
+		} else {
+			let end = line.slice(i).search(/[ \t]/);
+			raw = end === -1 ? line.slice(i) : line.slice(i, i + end), i += raw.length;
+		}
+		out.push(raw);
+	}
+	return out;
+}
+const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
+function globPattern(glob) {
+	let out = "", i = 0;
+	for (; i < glob.length;) {
+		if (glob.startsWith("**", i)) {
+			let atStart = i === 0 || glob[i - 1] === "/";
+			for (; glob[i] === "*";) i++;
+			if (atStart && i === glob.length) {
+				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
+				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
+			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
+			continue;
+		}
+		if (glob[i] === "*") {
+			out += "[^/]*", i++;
+			continue;
+		}
+		let c = glob[i];
+		if (c === "\\" && (ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0], unescapeDisplay(c) === void 0)) return;
+		i += c.length, out += c.replace(SPECIAL, "\\$&");
+	}
+	return RegExp(`^${out}$`);
+}
+const procByNumber = (name) => unnumbered(name) !== name, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => pattern.test(name) || OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>")) } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+function accessBits(access) {
+	let bits = {
+		ok: 0,
+		failed: 0,
+		perm: 0
+	};
+	for (let i = 0; i < access.length; i++) {
+		let c = access[i], bit = BIT[c.toUpperCase()];
+		c === c.toUpperCase() ? bits.ok |= bit : access[i + 1] === "!" ? (bits.perm |= bit, i++) : bits.failed |= bit;
+	}
+	return bits;
+}
+function parseExpectedRules(sources) {
+	let rules = [], lines = [];
+	for (let { text, origin, firstLine } of sources) text.split("\n").forEach((raw, n) => {
+		let line = raw.trim();
+		if (lines.push(line), line === "" || line.startsWith("#")) return;
+		let ref = firstLine === void 0 ? origin : `${origin}:${firstLine + n}`, parts = fields(line, ref);
+		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
+		let [program, access, path] = parts;
+		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
+		let glob = (field) => {
+			let pattern = globPattern(field);
+			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an unknown escape`);
+			return pattern;
+		};
+		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
+		rules.push({
+			ref,
+			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
+			path: anyProcess(path, glob(path)),
+			...accessBits(access)
+		});
+	});
+	for (; lines.length > 0 && lines.at(-1) === "";) lines.pop();
+	return {
+		rules,
+		lines
+	};
+}
+function takes(rule, bit, failed, perm) {
+	return failed ? ((perm ? rule.perm : rule.ok | rule.failed | rule.perm) & bit) !== 0 : (rule.ok & bit) !== 0;
+}
+var RuleMatcher = class {
+	cache = new Map();
+	rules;
+	constructor(rules) {
+		this.rules = rules;
+	}
+	match(program, path, bits, failed, perm) {
+		let key = `${program}\0${path}`, candidates = this.cache.get(key);
+		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.rules.filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
+		let unmatched = 0, ref;
+		for (let c of ORDER) {
+			let bit = BIT[c];
+			if (!(bits & bit)) continue;
+			let rule = candidates.find((r) => takes(r, bit, failed, perm));
+			rule ? ref ??= rule.ref : unmatched |= bit;
+		}
+		return ref === void 0 ? { unmatched } : {
+			unmatched,
+			ref
+		};
+	}
+};
+//#endregion
+//#region src/lib/filesystem-audit/proposed-rules.ts
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), UPLOAD_NOTE = "# Uploads the full record and the next proposed rules each run; keep this key while you want them.";
+function givenRules(written) {
+	let out = [], afterHeading = !1;
+	for (let line of written) if (line === "# Not matched in this run") {
+		for (; out.at(-1) === "";) out.pop();
+		afterHeading = !0;
+	} else (!afterHeading || line !== "") && (out.push(line), afterHeading = !1);
+	return out;
+}
+function expectedRulesFile(written, proposed) {
+	let given = givenRules(written), rows = proposed.map((r) => [
+		ruleField(r.program.path),
+		r.flags,
+		ruleField(r.path.path)
+	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)], added = rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`), lines = given.length === 0 ? added : added.length === 0 ? given : [
+		...given,
+		"",
+		"# Not matched in this run",
+		...added
+	];
+	if (lines.length !== 0) return [
+		"filesystem_audit: record",
+		UPLOAD_NOTE,
+		"upload_filesystem_audit_artifact: true",
+		`${EXPECTED_RULES_INPUT}: |`,
+		...lines.map((line) => line ? `  ${line}` : ""),
+		""
+	].join("\n");
+}
+function writeProposedRules(summary, given, path, annotation, writeFile) {
+	if (!summary) return "write-failed";
+	if (summary.proposedCut) return "too-many-paths";
+	let file = expectedRulesFile(given, summary.proposed);
+	if (file === void 0) return "none";
+	try {
+		return writeFile(path, file), "written";
+	} catch (e) {
+		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
+	}
 }
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
@@ -73051,6 +73062,42 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+}
+//#endregion
+//#region src/lib/filesystem-audit/line-file.ts
+const CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = [];
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
+		}
+		onLine(Buffer.concat(carry).toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
 }
 //#endregion
 //#region src/lib/filesystem-audit/command.ts
@@ -73689,41 +73736,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 }
 //#endregion
 //#region src/lib/filesystem-audit/report.ts
-const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", CHUNK_BYTES = 1 << 20;
-function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(chunkBytes), carry = [];
-		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
-			start < n && carry.push(Buffer.from(chunk.subarray(start)));
-		}
-		onLine(Buffer.concat(carry).toString("utf8"));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function openWriter(path, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		let data = Buffer.from(pending.join(""));
-		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
-		pending = [], size = 0;
-	};
-	return {
-		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
-		},
-		close: () => {
-			try {
-				flush();
-			} finally {
-				(0, node_fs.closeSync)(fd);
-			}
-		}
-	};
-}
-const realDeps$3 = {
+const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
 	openWriter,
@@ -73908,6 +73921,138 @@ function readExpectedFilesystemRules(value, config, filesystemAudit) {
 			lines: rules.lines
 		};
 	}
+}
+//#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+const ALLOWED_WRITE_THROUGH_VARS = [
+	"HOME",
+	"GITHUB_WORKSPACE",
+	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], KNOWN_FILE_VARS = [
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+function resolveWriteThroughEntry(rawLine, env) {
+	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
+		let name = braced ?? bare;
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function splitWriteThroughInput(input) {
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+}
+function resolveWriteThroughPaths(input, env) {
+	let lines = splitWriteThroughInput(input);
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+}
+var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
+function defaultExists(path) {
+	try {
+		return (0, node_fs.lstatSync)(path), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultCanWrite(path) {
+	try {
+		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultMkdir$1(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+	let resolved = resolveHostPath(path, {
+		lstat,
+		readlink
+	}), link = resolved.links[0];
+	if (link === void 0) return;
+	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
+	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
+}
+function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
+	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+}
+function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir$1 } = {}) {
+	let missing = resolvedPaths.filter((path) => !exists(path));
+	for (let path of missing) {
+		let ancestor = (0, node_path.dirname)(path);
+		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
+	}
+	for (let path of missing) try {
+		mkdir(path);
+	} catch (e) {
+		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+//#endregion
+//#region src/lib/filesystem-example-inputs.ts
+function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedRulesLines, failOnUnexpectedFileAccess }, rulesFile) {
+	let lines = [];
+	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
+	let paths = splitWriteThroughInput(writeThroughInput);
+	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...givenRules(expectedRulesLines).map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 //#endregion
 //#region src/lib/filesystem-audit/mode.ts
@@ -74155,11 +74300,13 @@ function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 		hostPath
 	];
 }
-function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
+function fileArgs(composeFiles) {
+	return composeFiles.flatMap((file) => ["-f", file]);
+}
+function buildComposeUpArgs({ composeFiles, projectName, pullPolicy }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"up",
@@ -74173,11 +74320,10 @@ function buildComposeUpArgs({ composeFile, projectName, pullPolicy }) {
 		"--quiet-pull"
 	];
 }
-function buildComposeLogsArgs({ composeFile, projectName, tail }) {
+function buildComposeLogsArgs({ composeFiles, projectName, tail }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"logs",
@@ -74186,11 +74332,10 @@ function buildComposeLogsArgs({ composeFile, projectName, tail }) {
 		String(tail)
 	];
 }
-function buildComposeDownArgs({ composeFile, projectName }) {
+function buildComposeDownArgs({ composeFiles, projectName }) {
 	return [
 		"compose",
-		"-f",
-		composeFile,
+		...fileArgs(composeFiles),
 		"-p",
 		projectName,
 		"down",
@@ -74246,18 +74391,18 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 		env: hostCommandEnv("docker", env)
 	});
 };
-async function startSandboxProxy({ composeFile, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
+async function startSandboxProxy({ composeFiles, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
 	let { printDocker = printDockerViaExec } = deps;
 	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
 		try {
 			printDocker(buildComposeUpArgs({
-				composeFile,
+				composeFiles,
 				projectName,
 				pullPolicy
 			}), composeEnv);
 		} catch (e) {
 			throw proxyStartError(e, {
-				composeFile,
+				composeFiles,
 				projectName,
 				containerName,
 				composeEnv
@@ -74265,10 +74410,10 @@ async function startSandboxProxy({ composeFile, projectName, containerName, pull
 		}
 	});
 }
-function proxyStartError(e, { composeFile, projectName, containerName, composeEnv }, deps) {
+function proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps) {
 	let state = readProxyState(containerName, composeEnv, deps);
 	return state ? (printProxyLog({
-		composeFile,
+		composeFiles,
 		projectName,
 		composeEnv
 	}, deps), new SandboxError(describeContainerStartFailure(state, {
@@ -74287,10 +74432,10 @@ function reportInspectFailure(e) {
 	let stderr = capturedStderr(e);
 	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
 }
-function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
+function printProxyLog({ composeFiles, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
 	try {
 		printDocker(buildComposeLogsArgs({
-			composeFile,
+			composeFiles,
 			projectName,
 			tail: 100
 		}), composeEnv);
@@ -74298,11 +74443,11 @@ function printProxyLog({ composeFile, projectName, composeEnv }, { printDocker =
 		console.log("The sandbox proxy container's log could not be read.");
 	}
 }
-async function stopSandboxProxy({ composeFile, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
+async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
 	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
 		try {
 			printDocker(buildComposeDownArgs({
-				composeFile,
+				composeFiles,
 				projectName
 			}), composeEnv);
 		} catch (e) {
@@ -74437,50 +74582,6 @@ function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVaria
 	return lines;
 }
 //#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
-//#endregion
 //#region src/lib/sandbox/host-probes.ts
 const SETPRIV_CANDIDATE_PATHS = [
 	"/usr/bin/setpriv",
@@ -74610,7 +74711,7 @@ function isTracer(pid, readFile) {
 //#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
-function defaultMkdir$1(path, mode) {
+function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function defaultLstat$1(path) {
@@ -74773,7 +74874,7 @@ function removeUnusedDirs(ledger, deps) {
 	}
 }
 function claimNssDb(name, destination, dirs, deps = {}) {
-	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
+	let { mkdir = defaultMkdir, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
 	return withLedger((ledger) => {
 		let undo = () => {
 			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
@@ -75556,86 +75657,6 @@ function scratchBaseLayers(execDir, aliases = []) {
 		source: execDir,
 		options: ["bind", "ro"]
 	}];
-}
-//#endregion
-//#region src/lib/sandbox/write-through.ts
-const ALLOWED_WRITE_THROUGH_VARS = [
-	"HOME",
-	"GITHUB_WORKSPACE",
-	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], KNOWN_FILE_VARS = [
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env) {
-	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
-		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
-		let value = env[name];
-		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
-		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
-	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
-	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-}
-function splitWriteThroughInput(input) {
-	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
-}
-function resolveWriteThroughPaths(input, env) {
-	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
-}
-var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
-function defaultExists(path) {
-	try {
-		return (0, node_fs.lstatSync)(path), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultCanWrite(path) {
-	try {
-		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultMkdir(path) {
-	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
-	let resolved = resolveHostPath(path, {
-		lstat,
-		readlink
-	}), link = resolved.links[0];
-	if (link === void 0) return;
-	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
-	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
-}
-function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
-	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
-}
-function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
-	let missing = resolvedPaths.filter((path) => !exists(path));
-	for (let path of missing) {
-		let ancestor = (0, node_path.dirname)(path);
-		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
-		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
-	}
-	for (let path of missing) try {
-		mkdir(path);
-	} catch (e) {
-		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
-	}
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
@@ -76878,6 +76899,74 @@ function readActionVersion$1(docker, containerId, proxyEngine) {
 	}
 }
 //#endregion
+//#region src/core/lib/log/dns.ts
+const DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/;
+function timeOf(stamp) {
+	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
+	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
+}
+async function scanDnsLog(lines, isAudit = !1) {
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
+	for await (let line of lines) {
+		let trimmed = line.trim();
+		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
+		let match = DNS.exec(trimmed);
+		if (match) {
+			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
+			existing ? existing.allowed ||= allowed : seen.set(match[3], {
+				time,
+				allowed
+			});
+			continue;
+		}
+		let lookup = DNS_DISCOVERY.exec(trimmed);
+		if (lookup) {
+			let key = `${lookup[2]}\t${lookup[3]}`;
+			discovery.has(key) || discovery.set(key, {
+				time: timeOf(lookup[1]),
+				host: lookup[2],
+				queryType: lookup[3]
+			});
+			continue;
+		}
+		let blockedService = DNS_SERVICE_DENIED.exec(trimmed);
+		blockedService ? service.has(blockedService[2]) || service.set(blockedService[2], {
+			time: timeOf(blockedService[1]),
+			host: blockedService[2],
+			queryType: blockedService[3]
+		}) : DNS_LINE.test(trimmed) && unparsed++;
+	}
+	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
+		let reason = allowed ? void 0 : "dns-not-allowed", event = {
+			time,
+			action: actionFor(reason, isAudit),
+			protocol: "dns",
+			host
+		};
+		return reason !== void 0 && (event.reason = reason), event;
+	});
+	for (let { time, host, queryType } of discovery.values()) events.push({
+		time,
+		action: "discovery",
+		protocol: "dns",
+		host,
+		queryType
+	});
+	for (let { time, host, queryType } of service.values()) events.push({
+		time,
+		action: actionFor("dns-service-not-allowed", isAudit),
+		protocol: "dns",
+		host,
+		queryType,
+		reason: "dns-service-not-allowed"
+	});
+	return {
+		events,
+		headIntact: headIntact ?? !1,
+		unparsed
+	};
+}
+//#endregion
 //#region src/core/lib/log/start-marker.ts
 const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
 function incompleteReason(terminationState, method) {
@@ -76886,11 +76975,7 @@ function incompleteReason(terminationState, method) {
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
-function timeOf(stamp) {
-	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
-	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
-}
+const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
 function isBlock(terminationState) {
 	let cause = terminationState[0];
 	if (cause === "P" || cause === "S") return !0;
@@ -76908,15 +76993,7 @@ function reasonFor(logged, terminationState, tlsError, method) {
 		default: return tlsError === void 0 ? "origin-unreachable" : cause === "S" && tlsError !== "-" && tlsError !== "0" ? "origin-untrusted" : "origin-connect-failed";
 	}
 }
-const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]), FAILURE_REASONS$1 = new Set([
-	"origin-unreachable",
-	"origin-no-response",
-	"origin-aborted",
-	"dns-failed"
-]);
-function actionFor(reason, isAudit) {
-	return reason === void 0 ? isAudit ? "audit" : "allow" : FAILURE_REASONS$1.has(reason) ? "failed" : "block";
-}
+const REQUESTLESS_REASONS = new Set(["bad-request", "missing-host-header"]);
 function urlOf(scheme, authority, target) {
 	return target.startsWith("/") ? `${scheme}://${authority}${target}` : void 0;
 }
@@ -77008,67 +77085,6 @@ function blockUnpassedAddresses(events) {
 function blockUnallowedNames(events, allowsName) {
 	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
-async function scanInspectDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
-	for await (let line of lines) {
-		let trimmed = line.trim();
-		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
-		let match = DNS.exec(trimmed);
-		if (match) {
-			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
-			existing ? existing.allowed ||= allowed : seen.set(match[3], {
-				time,
-				allowed
-			});
-			continue;
-		}
-		let lookup = DNS_DISCOVERY.exec(trimmed);
-		if (lookup) {
-			let key = `${lookup[2]}\t${lookup[3]}`;
-			discovery.has(key) || discovery.set(key, {
-				time: timeOf(lookup[1]),
-				host: lookup[2],
-				queryType: lookup[3]
-			});
-			continue;
-		}
-		let blockedService = DNS_SERVICE_DENIED.exec(trimmed);
-		blockedService ? service.has(blockedService[2]) || service.set(blockedService[2], {
-			time: timeOf(blockedService[1]),
-			host: blockedService[2],
-			queryType: blockedService[3]
-		}) : DNS_LINE.test(trimmed) && unparsed++;
-	}
-	let events = [...seen.entries()].map(([host, { time, allowed }]) => {
-		let reason = allowed ? void 0 : "dns-not-allowed", event = {
-			time,
-			action: actionFor(reason, isAudit),
-			protocol: "dns",
-			host
-		};
-		return reason !== void 0 && (event.reason = reason), event;
-	});
-	for (let { time, host, queryType } of discovery.values()) events.push({
-		time,
-		action: "discovery",
-		protocol: "dns",
-		host,
-		queryType
-	});
-	for (let { time, host, queryType } of service.values()) events.push({
-		time,
-		action: actionFor("dns-service-not-allowed", isAudit),
-		protocol: "dns",
-		host,
-		queryType,
-		reason: "dns-service-not-allowed"
-	});
-	return {
-		events,
-		headIntact: headIntact ?? !1,
-		unparsed
-	};
-}
 //#endregion
 //#region src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
@@ -77082,7 +77098,7 @@ function resolverAllows(parameters) {
 }
 async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
@@ -77141,7 +77157,7 @@ async function scanHaproxyLog(lines, isAudit) {
 //#region src/core/lib/report/build/universal.ts
 async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanInspectDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
 }
 //#endregion
 //#region src/lib/report-fetch.ts
@@ -77474,14 +77490,8 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 	return deps.log(`buildcage: proxy image: ${imageRef}`), {
 		imageRef,
 		pullPolicy,
-		composeFile: resolveComposeFile(localOverride)
+		composeFiles: resolveComposeFiles(localOverride)
 	};
-}
-function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedRulesLines, failOnUnexpectedFileAccess }, rulesFile) {
-	let lines = [];
-	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
-	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), rulesFile && expectedRulesLines.length ? lines.push(`# ${rulesFile} from this run's artifact, reviewed and committed at this path`, `config_file: ${RULES_FILE_EXAMPLE}`) : expectedRulesLines.length && lines.push(`${EXPECTED_RULES_INPUT}: |`, ...givenRules(expectedRulesLines).map((line) => line ? `  ${line}` : "")), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
 }
 const configFileAllowed = (env) => !["pull_request_target", "workflow_run"].includes(env.GITHUB_EVENT_NAME ?? "");
 function logConfiguredRules({ rules, aws }, deps) {
@@ -77552,7 +77562,7 @@ async function runSandboxStep(env, overrides = {}) {
 	let deps = {
 		...realDeps,
 		...overrides
-	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFile } = await resolveProxyImage(inputs, env, deps);
+	}, inputs = readStepInputs(env, deps), { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
@@ -77573,14 +77583,14 @@ async function runSandboxStep(env, overrides = {}) {
 		awsKey: aws.key,
 		awsRoleAccounts: aws.roleAccounts
 	}, env), stopProxy = () => deps.stopSandboxProxy({
-		composeFile,
+		composeFiles,
 		projectName,
 		composeEnv,
 		annotation
 	});
 	try {
 		await deps.startSandboxProxy({
-			composeFile,
+			composeFiles,
 			projectName,
 			containerName,
 			pullPolicy,

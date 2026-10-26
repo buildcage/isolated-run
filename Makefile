@@ -92,10 +92,10 @@ test_sandbox_dev: ## Run a sample isolated command in the dev loop and verify is
 
 .PHONY: clean_sandbox_dev
 clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
-	@docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml down -v --rmi local
+	@docker compose -f compose.yaml -f docker/compose.sandbox-dev.yaml down -v --rmi all
 
 # ===========================================================================
-# Integration tests. The four groups below, and nothing else, are what CI's
+# Integration tests. The groups below, and nothing else, are what CI's
 # test-integration.yml runs.
 # ===========================================================================
 
@@ -103,11 +103,11 @@ clean_sandbox_dev: ## Stop and remove the sandbox dev-loop containers
 # about what "the integration tests" are. Not a target to run straight
 # through, unlike the unit tests: each group wants a different proxy image
 # under BUILDCAGE_LOCAL_IMAGE_REF: universal for the first two, an inspect
-# image built with BUILDCAGE_TEST_HOOKS=1 for the third, and none at all for
-# the fourth, which builds both images itself and wants the variable unset.
-# Build the image a group needs, then run that group.
+# image built with BUILDCAGE_TEST_HOOKS=1 for the third, and both at once, under
+# BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT, for
+# the last two. Build the images a group needs, then run that group.
 .PHONY: test_integration
-test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope ## Every integration test CI runs; the four groups need different proxy images, so build each one's image first
+test_integration: test_integration_sandbox_linux test_integration_sandbox_universal test_integration_sandbox_inspect test_integration_listener_scope test_integration_haproxy_configs ## Every integration test CI runs; the groups need different proxy images, so build each one's image first
 
 # Drives dist/main.cjs directly (a host command, not a Docker build). Two
 # halves, which CI runs as separate jobs; here they run one after the other,
@@ -160,7 +160,8 @@ test_integration_sandbox_universal: ## Run the universal-engine fixture-based in
 		./test/integration-test-universal-audit.sh \
 		./test/integration-test-concurrent.sh \
 		./test/integration-test-known-blocked-rules.sh \
-		./test/integration-test-reserved-mounts.sh
+		./test/integration-test-reserved-mounts.sh \
+		./test/integration-test-proxy-down.sh
 
 # Separate from the above: these need an inspect-engine image (a different
 # Dockerfile/build) and the fixture origin network in compose.test-inspect.yaml.
@@ -185,8 +186,18 @@ test_integration_sandbox_inspect_ca: ## Inspect-engine CA trust in Chromium's NS
 		./test/integration-test-inspect-chromium.sh \
 		./test/integration-test-inspect-reserved-mounts.sh
 
-# Builds each engine's proxy image itself (docker compose build), unlike the
-# groups above, which reuse a pre-built BUILDCAGE_LOCAL_IMAGE_REF.
 .PHONY: test_integration_listener_scope
-test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0
+test_integration_listener_scope: ## Check :10024/:53 are unreachable outside buildcage0 (needs BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT)
 	@./test/integration-test-listener-scope.sh
+
+# Every fixture directory holding golden HAProxy configs, so a new golden test
+# is checked without editing this. haproxy-universal/ holds the universal
+# engine's; the rest are the inspect engine's.
+HAPROXY_FIXTURE_DIRS = $(patsubst %/,%,$(sort $(dir $(shell find src -path '*/__fixtures__/*.cfg'))))
+HAPROXY_UNIVERSAL_FIXTURE_DIRS = $(filter %/haproxy-universal,$(HAPROXY_FIXTURE_DIRS))
+
+# Needs the images, not a running proxy.
+.PHONY: test_integration_haproxy_configs
+test_integration_haproxy_configs: ## Check every HAProxy config the generators write loads in each engine's image (needs BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL and BUILDCAGE_LOCAL_IMAGE_REF_INSPECT)
+	@./test/assert-haproxy-configs.sh universal "$${BUILDCAGE_LOCAL_IMAGE_REF_UNIVERSAL:?}" $(HAPROXY_UNIVERSAL_FIXTURE_DIRS)
+	@./test/assert-haproxy-configs.sh inspect "$${BUILDCAGE_LOCAL_IMAGE_REF_INSPECT:?}" $(filter-out $(HAPROXY_UNIVERSAL_FIXTURE_DIRS),$(HAPROXY_FIXTURE_DIRS))

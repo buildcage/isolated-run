@@ -1,6 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import {
+  HOME,
+  NO_LINKS,
+  PERSISTENT,
+  RUNNER_DIRS_ENV,
+  WORKSPACE,
+  withLinks,
+} from "../test/runner-host.ts";
 import {
   findPinnableCommand,
   jvmTools,
@@ -14,20 +22,6 @@ import {
 import { hostCommand, hostCommandEnv } from "./pinned-commands.ts";
 import { realPathOf } from "./symlinks.ts";
 
-const HOME = "/home/runner";
-const WORKSPACE = "/home/runner/work/repo/repo";
-const PERSISTENT = [WORKSPACE, HOME, "/tmp", "/home/runner/work/_temp"];
-
-/** A filesystem whose only symlinks are `links`, each to its stored target. */
-function withLinks(links: Record<string, string>) {
-  const fs = {
-    lstat: (path: string) => ({ isSymbolicLink: () => path in links }),
-    readlink: (path: string) => links[path]!,
-  };
-  return fs;
-}
-const NO_LINKS = withLinks({});
-
 const asWritten = (path: string) => path;
 
 /**
@@ -40,7 +34,7 @@ function host(files: string[], links: Record<string, string> = {}): FindCommandD
 }
 
 describe("persistingWritablePaths", () => {
-  const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
+  const env = RUNNER_DIRS_ENV;
 
   it("is every directory persistent mode binds back read-write", () => {
     expect(
@@ -423,8 +417,52 @@ describe("pinHostCommands", () => {
   });
 });
 
+describe("hostCommandEnv", () => {
+  const env = { PATH: "/home/runner/.local/bin:/usr/bin", HOME: "/home/runner" };
+
+  // The pins are module state, so each case starts from a fresh module.
+  async function freshPins() {
+    vi.resetModules();
+    return import("./pinned-commands.ts");
+  }
+
+  afterAll(() => vi.resetModules());
+
+  it("gives docker and sudo the system dirs only until their PATH is pinned", async () => {
+    const { hostCommandEnv } = await freshPins();
+
+    for (const command of ["docker", "sudo"]) {
+      expect(hostCommandEnv(command, env)).toStrictEqual({
+        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        HOME: "/home/runner",
+      });
+    }
+  });
+
+  it("gives docker and sudo each their pinned PATH, keeping the rest of the environment", async () => {
+    const { hostCommandEnv, pinCommandPathEnv } = await freshPins();
+    pinCommandPathEnv("docker", "/opt/hostedtoolcache/bin:/usr/bin");
+    pinCommandPathEnv("sudo", "/usr/sbin:/usr/bin");
+
+    expect(hostCommandEnv("docker", env)).toStrictEqual({
+      PATH: "/opt/hostedtoolcache/bin:/usr/bin",
+      HOME: "/home/runner",
+    });
+    expect(hostCommandEnv("sudo", env)).toStrictEqual({
+      PATH: "/usr/sbin:/usr/bin",
+      HOME: "/home/runner",
+    });
+  });
+
+  it("leaves any other command's environment as is", async () => {
+    const { hostCommandEnv } = await freshPins();
+
+    expect(hostCommandEnv("/usr/bin/keytool", env)).toBe(env);
+  });
+});
+
 describe("pinningPaths", () => {
-  const env = { GITHUB_WORKSPACE: WORKSPACE, HOME, RUNNER_TEMP: "/home/runner/work/_temp" };
+  const env = RUNNER_DIRS_ENV;
 
   it("is persistent mode's set plus write_through, whatever mode the step runs in", () => {
     expect(pinningPaths(() => "/opt/out", env, asWritten)).toStrictEqual([

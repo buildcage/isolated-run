@@ -8,7 +8,7 @@ import {
   type CutCause,
   type Node,
 } from "../filesystem-audit/fold-tree.ts";
-import { components, unfoldable } from "../filesystem-audit/paths.ts";
+import { components, DELETED_MARK, unfoldable } from "../filesystem-audit/paths.ts";
 import { BIT } from "../filesystem-audit/record.ts";
 import {
   reduceRecording,
@@ -23,7 +23,65 @@ import {
 } from "../filesystem-audit/render.ts";
 import { FILESYSTEM_ACTIVITY_TITLE } from "../filesystem-audit/report.ts";
 
-const SCRATCH_BASE = "/var/tmp/buildcage-0";
+export const SCRATCH_BASE = "/var/tmp/buildcage-0";
+/** The step's script, which the sandbox runs from its scratch dir. */
+export const RUN_SCRIPT = `${SCRATCH_BASE}/sandbox-x/exec/run-script.sh`;
+
+/** The lines buildcage's own setup leaves ahead of the step's, as recorded. */
+export const machinery = JSON.stringify({
+  kind: "exec",
+  pid: 1,
+  comm: "setpriv",
+  path: "/usr/bin/setpriv",
+});
+export const shell = JSON.stringify({
+  kind: "exec",
+  pid: 2,
+  ppid: 1,
+  comm: "run-script.sh",
+  path: RUN_SCRIPT,
+});
+
+/** A recording reader over the given lines. */
+export const feed =
+  (...text: string[]) =>
+  (onLine: (line: string) => void): void =>
+    text.forEach((line) => onLine(line));
+
+export const PREFIXES: SummaryOptions = { workspace: ["/work"], home: ["/home/u"] };
+
+export function jsonl(...records: object[]): string {
+  return records.map((r) => JSON.stringify(r)).join("\n");
+}
+
+/** The rows printed inside the details' ``` block, as printed. */
+export function detailsBlockRows(md: string): string[] {
+  const m = md.match(/```\n([\s\S]*?)\n```/);
+  return m ? m[1].split("\n") : [];
+}
+
+/** The details' rows, each collapsed to single spaces. */
+export function lines(md: string): string[] {
+  return detailsBlockRows(md).map((l) => l.replace(/\s+/g, " ").trim());
+}
+
+/** The "Accessed Paths" table's rows, verbatim. */
+export function programRows(md: string): string[] {
+  const m = md.match(
+    /### 📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+  );
+  return m ? m[1].split("\n") : [];
+}
+
+/** The same rows as path and access alone, for a test of the paths. */
+export function tableRows(md: string): string[] {
+  return programRows(md).map((row) =>
+    row.replace(/^\| (?:`[^`]*`|[^|`]*) \| (?:[^|\\]|\\.)* \| ([^|]*) \| (.*) \|$/, "| $2 | $1 |"),
+  );
+}
+
+export const render = (...records: object[]): string =>
+  renderFilesystemAuditSummary(jsonl(...records), PREFIXES);
 
 // Joined whole, the summary never compares priorities.
 const JOINED = Object.fromEntries(
@@ -46,6 +104,24 @@ export function reduceText(
   );
   if (!summary) throw summaryError;
   return { kept, summary };
+}
+
+/** The summary of records, as the step reduces them. */
+export function summarize(records: object[], options: SummaryOptions = PREFIXES): AuditSummary {
+  return reduceText(jsonl(...records), options).summary;
+}
+
+/**
+ * The details' rows of a summary, killed ones last, as `flags command path`:
+ * what `lines` reads from the rendered details, before they are put in order
+ * and quoted.
+ */
+export function detailRows(summary: AuditSummary): string[] {
+  return [...(summary.details ?? []), ...summary.killed].map((r) =>
+    `${r.flags} ${r.commField} ${r.path}${r.deleted ? DELETED_MARK : ""}`
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 export function stripSandboxMachinery(jsonl: string, scratchBase: string): string {

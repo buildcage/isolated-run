@@ -1,32 +1,20 @@
 import { describe, it, expect } from "vitest";
 
-import { SandboxError } from "../errors.ts";
 import { resolveFilesystemAudit } from "./mode.ts";
 
 describe("resolveFilesystemAudit", () => {
-  it("defaults to off for undefined", () => {
-    expect(resolveFilesystemAudit(undefined)).toBe("off");
-  });
-
-  it("defaults to off for empty string", () => {
-    expect(resolveFilesystemAudit("")).toBe("off");
-  });
-
-  it("accepts off explicitly", () => {
-    expect(resolveFilesystemAudit("off")).toBe("off");
-  });
-
-  it("accepts record", () => {
-    expect(resolveFilesystemAudit("record")).toBe("record");
+  it.each([
+    [undefined, "off"],
+    ["", "off"],
+    ["off", "off"],
+    ["record", "record"],
+  ])("resolves %j to %s", (input, mode) => {
+    expect(resolveFilesystemAudit(input)).toBe(mode);
   });
 
   it("throws SandboxError with code INVALID_FILESYSTEM_AUDIT for an invalid value", () => {
-    expect.assertions(2);
-    try {
-      resolveFilesystemAudit("on");
-    } catch (err) {
-      expect(err).toBeInstanceOf(SandboxError);
-      expect((err as SandboxError).code).toBe("INVALID_FILESYSTEM_AUDIT");
-    }
+    expect(() => resolveFilesystemAudit("on")).toThrow(
+      expect.objectContaining({ name: "SandboxError", code: "INVALID_FILESYSTEM_AUDIT" }),
+    );
   });
 });
