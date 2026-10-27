@@ -73167,6 +73167,8 @@ function createAuditSummary(prefixes) {
 		"/proc/self",
 		"/etc",
 		"/usr",
+		"/usr/local",
+		"/opt/hostedtoolcache",
 		"/root",
 		"…",
 		...shownPrefixes.workspace,
