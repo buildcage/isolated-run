@@ -7,7 +7,8 @@ permissions: {}
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The image the baseline was taken on, as another may read other files.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -35,12 +36,14 @@ jobs:
             GET https://registry.npmjs.org/**
             POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
           filesystem_audit: record
-          # Proposes a rule for each access outside the baseline, to review and
-          # add once it is expected.
+          # Uploads the full record each run, which names every path the step
+          # touched, and a rule for each access outside the baseline, to review
+          # and add once it is expected.
           upload_filesystem_audit_artifact: true
           config_file: test/filesystem-audit/expected-filesystem-rules.yml
           run: |
             npm ci
 
-            # Not in the baseline: an unexpected refused write (w!a).
+            # Not in the baseline: an unexpected refused write and failed change of
+            # its times (w!a).
             touch /usr/local/bin/buildcage-example-planted || true
