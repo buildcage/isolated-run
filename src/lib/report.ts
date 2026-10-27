@@ -252,6 +252,11 @@ export function reportDidNotFitLine(artifactAvailable: boolean): string {
   return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
 }
 
+/** A block whose opening tags change once a fit cuts it, so that a folded
+ *  part's summary line says so without being opened. */
+export type RetitledBlock = SummaryBlock &
+  ({ cutOpen?: undefined } | { open: string; cutOpen: string });
+
 export interface WriteSummaryBlocksOptions extends Partial<
   Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">
 > {
@@ -282,19 +287,24 @@ export interface SummaryWriteResult {
  * into the headroom kept for it, as long as the file stays under the limit.
  */
 export async function writeSummaryBlocks(
-  blocks: SummaryBlock[],
+  blocks: RetitledBlock[],
   env: NodeJS.ProcessEnv,
   { commandBytes = 0, fallbackLine, ...overrides }: WriteSummaryBlocksOptions = {},
 ): Promise<SummaryWriteResult> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
   const used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes);
   const cutIds = new Set<string>();
-  const fitted = fitStepSummary(blocks, {
+  const retitled: { open: string; cutOpen: string }[] = [];
+  let fitted = fitStepSummary(blocks, {
     usedBytes: used,
-    onCut: (b) => {
+    onCut: (b: RetitledBlock) => {
       if (b.id !== undefined) cutIds.add(b.id);
+      if (b.cutOpen !== undefined) retitled.push(b);
     },
   });
+  // In the fitted text rather than by fitting again, which would rebuild every
+  // block. The few bytes it adds fall within the headroom the fit keeps.
+  for (const { open, cutOpen } of retitled) fitted = fitted.replace(open, () => cutOpen);
   // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
   const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
   const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);

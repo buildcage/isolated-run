@@ -68,7 +68,7 @@ export function lines(md: string): string[] {
 /** The "Accessed Paths" table's rows, verbatim. */
 export function programRows(md: string): string[] {
   const m = md.match(
-    /### 📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
+    /<summary>📂 Accessed Paths[^\n]*\n\n(?:<sub>[^\n]*<\/sub>\n\n)?[^\n]*\n[^\n]*\n([\s\S]*?)\n\n/,
   );
   return m ? m[1].split("\n") : [];
 }

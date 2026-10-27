@@ -652,6 +652,27 @@ describe("moveCommandSummaryLast", () => {
 });
 
 describe("writeSummaryBlocks", () => {
+  it("retitles a block the fit cut, and only that one", async () => {
+    const written: string[] = [];
+    const folded = (id: string, text: string) => ({
+      id,
+      priority: 1,
+      level: 1,
+      section: id,
+      cut: "lines" as const,
+      open: `<${id}>\n`,
+      cutOpen: `<${id} cut>\n`,
+      text,
+    });
+    const { cutIds } = await writeSummaryBlocks(
+      [folded("small", "a\n"), folded("large", `${"x\n".repeat(600_000)}`)],
+      { GITHUB_STEP_SUMMARY: "/summary.md" },
+      { fileSize: () => 0, writeSummary: async (m) => void written.push(m) },
+    );
+    expect(cutIds).toStrictEqual(new Set(["large"]));
+    expect(written[0]).toMatch(/^<small>\na\n<large cut>\nx\n/);
+  });
+
   it("writes the blocks when they fit", async () => {
     const written: string[] = [];
     const { wrote } = await writeSummaryBlocks(
