@@ -153,9 +153,8 @@ From the top:
   first ran, and each one's paths in path order: the workspace, then `$HOME`, then the rest. A
   `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
   lists the commands that made the row's accesses, in the order they first did, and past three, the
-  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped). Its
-  heading says `(truncated)` in place of the count when the table was cut short, and a table cut
-  to no row leaves only its note; see [Limits](#limits).
+  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped). A
+  table that does not fit in the Job Summary leaves only its note; see [Limits](#limits).
 - **File access details**, folded, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A run is the row of the
   command that started it, as in the table. Times count from the start of the step's proxy, on the
@@ -284,9 +283,9 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
   as folding one would hide the directory inside it: `/proc/<pid>/task` and
   `/proc/<pid>/task/<tid>` stay unfolded, so another process's thread files show a row each, as
   its own files do under `/proc/<pid>`.
-- `/usr`, `/usr/local` and `/opt/hostedtoolcache`, where a `dir/**` rule would take a read or write
-  of anything installed there, and `/opt` above the last. What lies below them still folds, as
-  `/usr/lib/**`.
+- `/usr/local` and the tool cache, `$RUNNER_TOOL_CACHE`, where a `dir/**` rule would take a read
+  or write of anything installed there, and the directories above them, such as `/usr`. What lies
+  below them still folds, as `/usr/lib/**`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
@@ -726,8 +725,8 @@ also fails the step, after the command, with the record cut where it stopped.
   file access details give way first, and this section's table after the traffic report's timeline
   and known blocked hosts; [The Job Summary size cap](./reference.md#the-job-summary-size-cap) has
   the full order. A part that does not fit is cut at a line, with a note after what is kept, or
-  replaced by the note when none of it fits. The note on a cut accessed paths table is inside its
-  folded element, whose heading then says `(truncated)`. The note names the artifact, which still
+  replaced by the note when none of it fits. The accessed paths table is only ever replaced whole,
+  so its note is not hidden in its folded element. The note names the artifact, which still
   holds every access, or says how to ask for one, or, when the upload failed, that the record was
   not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds

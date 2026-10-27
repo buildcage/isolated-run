@@ -485,10 +485,11 @@ pass the limit, its parts give way in this order: the file access details, the t
 blocked hosts table, the Filesystem Activity table, the AWS keys table, the allowed table, the
 blocked and failed table, the ⚠️ tables of requests `restrict` would block, and last the `restrict`
 example. A part that does not fit is cut at a line boundary with a note after what is kept, or
-replaced by the note when nothing of it fits; the known blocked hosts table and the example are only
-ever replaced whole. Once one of the other traffic tables is cut, the timeline and the known blocked
-hosts table are left out under the same note. The Filesystem Activity section follows the same
-rule: once its table is cut, the details are left out under its note.
+replaced by the note when nothing of it fits; the known blocked hosts table, the Filesystem Activity
+section's accessed paths table and the example are only ever replaced whole. Once one of the other
+traffic tables is cut, the timeline and the known blocked hosts table are left out under the same
+note. The Filesystem Activity section follows the same rule: once its table is cut, the details are
+left out under its note.
 
 The report is written to the Job Summary only, so what was cut is recovered from the
 [traffic artifact](#traffic-artifact), or the filesystem audit's own artifact for its section; when

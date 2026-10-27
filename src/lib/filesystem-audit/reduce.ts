@@ -51,6 +51,8 @@ export interface SummaryOptions extends Prefixes {
   /** Whether to gather the rules proposed for what no rule takes, every
    *  access when there are none. */
   propose?: boolean;
+  /** $RUNNER_TOOL_CACHE, raw and real. */
+  toolCache?: string[];
   fanout?: number;
   /** The limits below; a test lowers them. */
   limits?: Partial<Limits>;
@@ -231,9 +233,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/proc/<pid>/task/<tid>/fd",
     "/proc/self",
     "/etc",
-    "/usr",
     "/usr/local",
-    "/opt/hostedtoolcache",
+    ...(prefixes.toolCache ?? []).map((p) => escapePath(canonical(p, prefixes))),
     "/root",
     "…",
     ...shownPrefixes.workspace,
