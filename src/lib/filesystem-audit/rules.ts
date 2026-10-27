@@ -101,8 +101,8 @@ const ANY_DIRS = "(?:[\\s\\S]*/)?";
 
 /** A glob compiled. */
 export interface Glob {
-  /** A regular expression over a whole name, both escaped as the summary
-   *  escapes them. */
+  /** A regular expression over a whole name, the glob and the name both
+   *  escaped as the summary escapes them. */
   pattern: RegExp;
   /** The components every name it takes starts with: all of the glob's
    *  without a wildcard, else those before the component holding the first. */
@@ -120,8 +120,8 @@ export function compileGlob(glob: string): Glob | undefined {
   let firstStar: number | undefined;
   let i = 0;
   while (i < glob.length) {
-    if (glob[i] === "*") firstStar ??= i;
     if (glob.startsWith("**", i)) {
+      firstStar ??= i;
       const atStart = i === 0 || glob[i - 1] === "/";
       while (glob[i] === "*") i++;
       if (atStart && i === glob.length) {
@@ -136,6 +136,7 @@ export function compileGlob(glob: string): Glob | undefined {
       continue;
     }
     if (glob[i] === "*") {
+      firstStar ??= i;
       out += "[^/]*";
       i++;
       continue;

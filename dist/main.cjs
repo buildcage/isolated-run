@@ -72611,7 +72611,8 @@ const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-
 function compileGlob(glob) {
 	let out = "", firstStar, i = 0;
 	for (; i < glob.length;) {
-		if (glob[i] === "*" && (firstStar ??= i), glob.startsWith("**", i)) {
+		if (glob.startsWith("**", i)) {
+			firstStar ??= i;
 			let atStart = i === 0 || glob[i - 1] === "/";
 			for (; glob[i] === "*";) i++;
 			if (atStart && i === glob.length) {
@@ -72621,7 +72622,7 @@ function compileGlob(glob) {
 			continue;
 		}
 		if (glob[i] === "*") {
-			out += "[^/]*", i++;
+			firstStar ??= i, out += "[^/]*", i++;
 			continue;
 		}
 		let c = glob[i];
