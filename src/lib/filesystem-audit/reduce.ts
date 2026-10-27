@@ -209,10 +209,11 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
-  // The workspace and $HOME as the paths spell them once escaped.
+  // The workspace and $HOME as the paths spell them once escaped: canonical
+  // gives each path the first spelling.
   const shownPrefixes = {
-    workspace: prefixes.workspace.map(escapePath),
-    home: prefixes.home.map(escapePath),
+    workspace: prefixes.workspace.slice(0, 1).map(escapePath),
+    home: prefixes.home.slice(0, 1).map(escapePath),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   // "…" stands for the unknown start of a cut or relative name, so it folds

@@ -72515,9 +72515,9 @@ function relativize(path, prefixes) {
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
-	for (let [first, ...rest] of [prefixes.workspace, prefixes.home]) for (let alt of rest) {
-		if (path === alt) return first;
-		if (path.startsWith(`${alt}/`)) return first + path.slice(alt.length);
+	for (let spellings of [prefixes.workspace, prefixes.home]) for (let spelling of spellings) {
+		if (path === spelling) return spellings[0];
+		if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
 	}
 	return path;
 }
@@ -73135,8 +73135,8 @@ function createAuditSummary(prefixes) {
 			images.delete(proc);
 		}
 	}, shownPrefixes = {
-		workspace: prefixes.workspace.map(escapePath),
-		home: prefixes.home.map(escapePath)
+		workspace: prefixes.workspace.slice(0, 1).map(escapePath),
+		home: prefixes.home.slice(0, 1).map(escapePath)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",

@@ -117,6 +117,38 @@ describe("createAuditSummary: folding", () => {
     ).toEqual(["R c /etc/a/**"]);
   });
 
+  it("keeps the workspace and $HOME whole under any spelling, but not the real path's parents", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/real/work/${f}` })),
+        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/data/u/.ssh/${f}` })),
+        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/data/${f}` })),
+        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/real/${f}` })),
+      ),
+      { workspace: ["/sym/work", "/real/work"], home: ["/home/u", "/data/u"] },
+    );
+    expect(lines(md)).toEqual([
+      "R c ./a",
+      "R c ./b",
+      "R c ./c",
+      "R c ~/.ssh/a",
+      "R c ~/.ssh/b",
+      "R c ~/.ssh/c",
+      "R c /data/**",
+      "R c /real/**",
+    ]);
+  });
+
+  it("keeps a workspace given by its real path whole under a symlinked $HOME", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/data/u/work/${f}` })),
+      ),
+      { workspace: ["/data/u/work"], home: ["/home/u", "/data/u"] },
+    );
+    expect(lines(md)).toEqual(["R c ./a", "R c ./b", "R c ./c"]);
+  });
+
   it("keeps a refusal beside a success, and a plain failure only where nothing succeeded", () => {
     const summary = summarize([
       { kind: "read", comm: "c", path: "/opt/passwd" },
