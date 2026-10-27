@@ -78,6 +78,11 @@ Setting a rule the engine can't act on is caught before the command starts: `res
 a rule that looks like it protects the step but cannot be enforced is worse than none, and `audit`
 warns and ignores it.
 
+Each `allowed_*` input can hold about 128 KiB of rules, the most Linux passes in one environment
+variable, counted without comments and blank lines. A larger one fails the step before the command
+starts; write fewer, broader rules, such as [wildcards](#wildcards). This only matters with
+`config_file`, as a workflow's own value already has to fit for the runner to start the step.
+
 ### Config file
 
 `config_file` names a YAML file in the repository that sets any input but `run` and the deprecated

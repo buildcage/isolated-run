@@ -16418,6 +16418,20 @@ function readRuleInputs(getInput$11 = getInput) {
 		knownBlockedRules
 	};
 }
+const RULE_LISTS = {
+	allowed_https_rules: "httpsRules",
+	allowed_http_rules: "httpRules",
+	allowed_ip_rules: "ipRules",
+	allowed_url_rules: "urlRules",
+	allowed_tls_rules: "tlsRules",
+	known_blocked_rules: "knownBlockedRules"
+};
+function checkRuleListSizesOrThrow(rules, names) {
+	for (let name of names) {
+		let limit = 131072 - name.length - 2, bytes = Buffer.byteLength(rules[RULE_LISTS[name]].join("\n"));
+		if (bytes > limit) throw new InvalidRulesError(`${name} is ${bytes} bytes as parsed, over the ${limit} one environment variable can hold; write fewer, broader rules`, "INVALID_RULES");
+	}
+}
 //#endregion
 //#region src/core/lib/docker/compose-project-name.ts
 function deriveProjectName(containerName) {
@@ -23230,6 +23244,13 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 }
 //#endregion
 //#region src/lib/compose-env.ts
+const PROXY_RULE_INPUTS = [
+	"allowed_https_rules",
+	"allowed_http_rules",
+	"allowed_ip_rules",
+	"allowed_url_rules",
+	"allowed_tls_rules"
+];
 function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKey, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
 		...env,
@@ -77479,7 +77500,7 @@ function readStepInputs(env, deps) {
 		proxyEngine,
 		proxyMode,
 		knownBlockedUrlRules: knownBlockedRules.filter(isKnownBlockedUrlRule)
-	}, annotation.warning), {
+	}, annotation.warning), checkRuleListSizesOrThrow(rules, PROXY_RULE_INPUTS), {
 		actionRef,
 		reportActionRef,
 		actionRepo,

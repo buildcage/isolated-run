@@ -408,6 +408,22 @@ describe("runSandboxStep", () => {
     expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("", undefined, "off");
   });
 
+  it("fails before any setup on an allowed rule list too long for the proxy's environment", async () => {
+    mocks.readRuleInputs.mockReturnValue({
+      httpsRules: Array.from({ length: 12_000 }, () => "a.example.com:443"),
+      httpRules: [],
+      ipRules: [],
+      urlRules: [],
+      tlsRules: [],
+      knownBlockedRules: [],
+    });
+
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("allowed_https_rules is");
+    expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
   it.each([
     "readExpectedFilesystemRules",
     "readFailOnUnexpectedFileAccess",

@@ -18,7 +18,7 @@ import {
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { readTrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
-import { readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
+import { checkRuleListSizesOrThrow, readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
@@ -26,7 +26,7 @@ import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenan
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
-import { buildComposeEnv } from "./compose-env.ts";
+import { buildComposeEnv, PROXY_RULE_INPUTS } from "./compose-env.ts";
 import { readLocalImageOverride, resolveComposeFiles } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
@@ -347,6 +347,9 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     },
     annotation.warning,
   );
+  // After the support checks, so a rule the engine cannot use is reported as
+  // that rather than as too long.
+  checkRuleListSizesOrThrow(rules, PROXY_RULE_INPUTS);
   // Unlike the checks above, fails in audit too.
   const aws = deps.readAwsKeyInputs({ proxyEngine }, env);
 
