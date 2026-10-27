@@ -29,7 +29,7 @@ jobs:
       # file. With fail_on_unexpected_file_access: true, that would fail the
       # step.
       - name: Check what an install touches against a baseline
-        uses: buildcage/isolated-run@b3c6b5415d1ce2dc9cd3e580b8dac8962a17c9d2 # v2.4.0
+        uses: buildcage/isolated-run@7231a9514976bc228a07871b58a87aa99af442a1 # v2.4.1
         with:
           proxy_mode: restrict
           allowed_url_rules: |
