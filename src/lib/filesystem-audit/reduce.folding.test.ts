@@ -4,6 +4,7 @@ import {
   detailRows,
   jsonl,
   lines,
+  PREFIXES,
   render,
   renderFilesystemAuditSummary,
   summarize,
@@ -120,19 +121,30 @@ describe("createAuditSummary: folding", () => {
   it("folds an install tree only a level down, so a rule never takes everything installed", () => {
     const reads = (dir: string) =>
       ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` }));
-    for (const dir of ["/usr", "/usr/local", "/opt/hostedtoolcache"])
-      expect(detailRows(summarize([...reads(dir), ...reads(`${dir}/lib`)]))).toEqual([
-        `R c ${dir}/a`,
-        `R c ${dir}/b`,
-        `R c ${dir}/c`,
-        `R c ${dir}/lib/**`,
+    // The tool cache under either spelling, and under $HOME's real path as
+    // the paths spell it.
+    const options = {
+      ...PREFIXES,
+      home: ["/home/u", "/var/home/u"],
+      toolCache: ["/runner/_tool", "/srv/_tool", "/var/home/u/_tool"],
+    };
+    for (const dir of ["/usr", "/usr/local", "/runner/_tool", "/srv/_tool", "/home/u/_tool"])
+      expect(detailRows(summarize([...reads(dir), ...reads(`${dir}/lib`)], options))).toEqual([
+        `R c ${dir.replace("/home/u", "~")}/a`,
+        `R c ${dir.replace("/home/u", "~")}/b`,
+        `R c ${dir.replace("/home/u", "~")}/c`,
+        `R c ${dir.replace("/home/u", "~")}/lib/**`,
       ]);
     // Nor does the directory above one.
     expect(
-      detailRows(summarize([...reads("/opt"), ...reads("/opt/hostedtoolcache")])).filter((l) =>
+      detailRows(summarize([...reads("/srv"), ...reads("/srv/_tool")], options)).filter((l) =>
         l.endsWith("/**"),
       ),
     ).toEqual([]);
+    // Without the variable, the hosted runner's path is not special.
+    expect(detailRows(summarize(reads("/opt/hostedtoolcache")))).toEqual([
+      "R c /opt/hostedtoolcache/**",
+    ]);
   });
 
   it("keeps the workspace and $HOME whole under any spelling, but not the real path's parents", () => {

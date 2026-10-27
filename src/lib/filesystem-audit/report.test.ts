@@ -389,6 +389,29 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
+  it("keeps the tool cache from folding under its realpath too", async () => {
+    const reads = ["a", "b", "c"].map((leaf) =>
+      JSON.stringify({ kind: "read", comm: "node", path: `/real/tool/${leaf}` }),
+    );
+    const { deps: d, summaries } = deps({
+      raw: reads.join("\n"),
+      realpath: (p) => (p === "/sym/tool" ? "/real/tool" : p),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", RUNNER_TOOL_CACHE: "/sym/tool" },
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain("R node /real/tool/a");
+    expect(summaries[0]).not.toContain("/real/tool/**");
+  });
+
   it("names a mediated runner file at its backing copy and another at its real path", async () => {
     const { deps: d, summaries } = deps({
       raw: [

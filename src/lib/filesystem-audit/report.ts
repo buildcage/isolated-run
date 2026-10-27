@@ -248,6 +248,7 @@ export function readStepFilesystemAudit(
   const options: SummaryOptions = {
     workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
     home: prefixes(env.HOME, deps.realpath),
+    toolCache: prefixes(env.RUNNER_TOOL_CACHE, deps.realpath),
     runnerFiles: runnerFiles(env, mediated, deps.realpath),
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     // Only a prepared directory takes the proposed rules.
