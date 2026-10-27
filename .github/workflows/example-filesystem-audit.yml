@@ -7,7 +7,8 @@ permissions: {}
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The image the expected rules example's baseline was taken on.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
