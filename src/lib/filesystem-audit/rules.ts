@@ -99,16 +99,28 @@ const SPECIAL = /[.*+?^${}()|[\]\\]/g;
 const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
 const ANY_DIRS = "(?:[\\s\\S]*/)?";
 
+/** A glob compiled. */
+export interface Glob {
+  /** A regular expression over a whole name, both escaped as the summary
+   *  escapes them. */
+  pattern: RegExp;
+  /** The components every name it takes starts with: all of the glob's
+   *  without a wildcard, else those before the component holding the first. */
+  start: string[];
+}
+
 /**
- * A glob as a regular expression over a whole name, both escaped as the
- * summary escapes them. Undefined when the glob holds an escape the summary
- * never writes: one that stands for no character, such as `\q`, or one for a
- * character it writes otherwise, such as `\u{41}` for `A`.
+ * A glob compiled in one pass, so its pattern and its start agree on what is
+ * a wildcard and what an escape. Undefined when the glob holds an escape the
+ * summary never writes: one that stands for no character, such as `\q`, or
+ * one for a character it writes otherwise, such as `\u{41}` for `A`.
  */
-export function globPattern(glob: string): RegExp | undefined {
+export function compileGlob(glob: string): Glob | undefined {
   let out = "";
+  let firstStar: number | undefined;
   let i = 0;
   while (i < glob.length) {
+    if (glob[i] === "*") firstStar ??= i;
     if (glob.startsWith("**", i)) {
       const atStart = i === 0 || glob[i - 1] === "/";
       while (glob[i] === "*") i++;
@@ -138,24 +150,11 @@ export function globPattern(glob: string): RegExp | undefined {
     i += c.length;
     out += c.replace(SPECIAL, "\\$&");
   }
-  return new RegExp(`^${out}$`);
-}
-
-/**
- * The components every name a glob takes starts with: all of its own without
- * a wildcard, else those before the component holding the first.
- */
-export function fixedComponents(glob: string): string[] {
-  for (let i = 0; i < glob.length; i++) {
-    if (glob[i] === "\\") {
-      ESCAPE.lastIndex = i;
-      i += ESCAPE.exec(glob)![0].length - 1;
-    } else if (glob[i] === "*") {
-      const end = glob.lastIndexOf("/", i);
-      return end === -1 ? [] : glob.slice(0, end).split("/");
-    }
-  }
-  return glob.split("/");
+  const end = firstStar === undefined ? glob.length : glob.lastIndexOf("/", firstStar);
+  return {
+    pattern: new RegExp(`^${out}$`),
+    start: end === -1 ? [] : glob.slice(0, end).split("/"),
+  };
 }
 
 // The summary never shows a /proc number or thread-self, so a rule naming one
@@ -222,14 +221,14 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
           ref,
           `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`,
         );
-      const glob = (field: string): RegExp => {
-        const pattern = globPattern(field);
-        if (!pattern)
+      const glob = (field: string): Glob => {
+        const compiled = compileGlob(field);
+        if (!compiled)
           throw invalidRules(
             ref,
             `${JSON.stringify(field)} holds an escape the summary never writes`,
           );
-        return pattern;
+        return compiled;
       };
       // Not the program: one that ran nothing goes by its own name, which may hold "//".
       if (!path.startsWith(MEMFD_PREFIX) && UNTIDY.test(path))
@@ -243,11 +242,13 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
             ref,
             `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`,
           );
+      const programGlob = program === "*" ? undefined : glob(program);
+      const pathGlob = glob(path);
       rules.push({
         ref,
-        program: program === "*" ? undefined : anyProcess(program, glob(program)),
-        path: anyProcess(path, glob(path)),
-        pathStart: fixedComponents(path),
+        program: programGlob && anyProcess(program, programGlob.pattern),
+        path: anyProcess(path, pathGlob.pattern),
+        pathStart: pathGlob.start,
         ...accessBits(access),
       });
     });
