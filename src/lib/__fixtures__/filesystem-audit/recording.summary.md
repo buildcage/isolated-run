@@ -4,7 +4,7 @@
 > 🚫 Killed for a 32-bit system call: `int80`.
 
 <details>
-<summary>📂 Accessed Paths (117)</summary>
+<summary>📂 Accessed Paths (121)</summary>
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
@@ -78,7 +78,11 @@
 | `/usr/bin/python3.12` | `python3.12` | d | `./sub/gone` |
 | `/usr/bin/python3.12` | `python3.12` | R | `/etc/locale.alias` |
 | `/usr/bin/python3.12` | `python3.12` | R | `/proc/self/stat` |
-| `/usr/bin/python3.12` | `python3.12` | Ra! | `/usr/**` |
+| `/usr/bin/python3.12` | `python3.12` | Ra! | `/usr/bin/**` |
+| `/usr/bin/python3.12` | `python3.12` | R | `/usr/lib/**` |
+| `/usr/bin/python3.12` | `python3.12` | R | `/usr/local/lib/python3.12/dist-packages` |
+| `/usr/bin/python3.12` | `python3.12` | r | `/usr/pyvenv.cfg` |
+| `/usr/bin/python3.12` | `python3.12` | R | `/usr/share/zoneinfo/Etc/UTC` |
 | `/usr/bin/python3.12` | `python3.12` | WX | `memfd:"probe-memfd"` |
 | `/usr/bin/mkdir` | `mkdir` | W | `./A` |
 | `/usr/bin/mkdir` | `mkdir` | w! | `./root-owned/x` |
@@ -170,8 +174,12 @@
 00:06.548:           R   touch      /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache
 00:06.548:           WA  touch      ./subshell.txt
 00:06.549-00:06.745: X   bash       /usr/bin/python3.12
-00:06.549-00:06.759: Ra! python3.12 /usr/**
+00:06.549-00:06.759: R   python3.12 /usr/lib/**
 00:06.549-00:06.745: R   python3.12 /etc/locale.alias
+00:06.552-00:06.748: r   python3.12 /usr/pyvenv.cfg
+00:06.552-00:06.748: Ra! python3.12 /usr/bin/**
+00:06.553-00:06.749: R   python3.12 /usr/share/zoneinfo/Etc/UTC
+00:06.557-00:06.753: R   python3.12 /usr/local/lib/python3.12/dist-packages
 00:06.563:           WA  python3.12 ./futimens.txt
 00:06.583:           WA  python3.12 ./empty-name.txt
 00:06.587-00:06.632: X   bash       /usr/bin/mkdir

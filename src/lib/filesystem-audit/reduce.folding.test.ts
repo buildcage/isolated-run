@@ -117,6 +117,24 @@ describe("createAuditSummary: folding", () => {
     ).toEqual(["R c /etc/a/**"]);
   });
 
+  it("folds an install tree only a level down, so a rule never takes everything installed", () => {
+    const reads = (dir: string) =>
+      ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` }));
+    for (const dir of ["/usr", "/usr/local", "/opt/hostedtoolcache"])
+      expect(detailRows(summarize([...reads(dir), ...reads(`${dir}/lib`)]))).toEqual([
+        `R c ${dir}/a`,
+        `R c ${dir}/b`,
+        `R c ${dir}/c`,
+        `R c ${dir}/lib/**`,
+      ]);
+    // Nor does the directory above one.
+    expect(
+      detailRows(summarize([...reads("/opt"), ...reads("/opt/hostedtoolcache")])).filter((l) =>
+        l.endsWith("/**"),
+      ),
+    ).toEqual([]);
+  });
+
   it("keeps the workspace and $HOME whole under any spelling, but not the real path's parents", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
@@ -151,13 +169,13 @@ describe("createAuditSummary: folding", () => {
 
   it("keeps a refusal beside a success, and a plain failure only where nothing succeeded", () => {
     const summary = summarize([
-      { kind: "read", comm: "c", path: "/opt/passwd" },
-      { kind: "read", comm: "c", path: "/opt/hosts" },
-      { kind: "open", failed: true, comm: "c", path: "/opt/shadow", err: 13 },
-      { kind: "open", failed: true, comm: "c", path: "/opt/missing", err: 2 },
-      { kind: "write", comm: "c", path: "/opt/cron.d/evil" },
+      { kind: "read", comm: "c", path: "/srv/passwd" },
+      { kind: "read", comm: "c", path: "/srv/hosts" },
+      { kind: "open", failed: true, comm: "c", path: "/srv/shadow", err: 13 },
+      { kind: "open", failed: true, comm: "c", path: "/srv/missing", err: 2 },
+      { kind: "write", comm: "c", path: "/srv/cron.d/evil" },
     ]);
-    expect(detailRows(summary)).toEqual(["RWr! c /opt/**"]);
+    expect(detailRows(summary)).toEqual(["RWr! c /srv/**"]);
   });
 
   it("keeps a refused directory open beside the reads below it", () => {
