@@ -281,6 +281,8 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
   as folding one would hide the directory inside it: `/proc/<pid>/task` and
   `/proc/<pid>/task/<tid>` stay unfolded, so another process's thread files show a row each, as
   its own files do under `/proc/<pid>`.
+- `/usr`, where a `/usr/**` rule would take a read of anything installed. What lies below it still
+  folds, as `/usr/lib/**`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule

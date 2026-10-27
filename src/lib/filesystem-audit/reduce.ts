@@ -219,7 +219,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // "…" stands for the unknown start of a cut or relative name, so it folds
   // only as the kept directories do, not for having three such names under it.
   // Where secrets and other processes' descriptors live, a "dir/**" rule
-  // proposed from a few reads would take every later one.
+  // proposed from a few reads would take every later one. "/usr/**" would
+  // take a read of anything installed.
   const keep = [
     "/",
     "/home",
@@ -230,6 +231,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     "/proc/<pid>/task/<tid>/fd",
     "/proc/self",
     "/etc",
+    "/usr",
     "/root",
     "…",
     ...shownPrefixes.workspace,

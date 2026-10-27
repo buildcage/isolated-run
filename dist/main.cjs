@@ -73166,6 +73166,7 @@ function createAuditSummary(prefixes) {
 		"/proc/<pid>/task/<tid>/fd",
 		"/proc/self",
 		"/etc",
+		"/usr",
 		"/root",
 		"…",
 		...shownPrefixes.workspace,

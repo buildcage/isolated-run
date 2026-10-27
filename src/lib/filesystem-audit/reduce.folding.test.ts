@@ -117,6 +117,17 @@ describe("createAuditSummary: folding", () => {
     ).toEqual(["R c /etc/a/**"]);
   });
 
+  it("folds /usr only a level down, so a rule never takes everything installed", () => {
+    const reads = (dir: string) =>
+      ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` }));
+    expect(detailRows(summarize([...reads("/usr"), ...reads("/usr/lib")]))).toEqual([
+      "R c /usr/a",
+      "R c /usr/b",
+      "R c /usr/c",
+      "R c /usr/lib/**",
+    ]);
+  });
+
   it("keeps the workspace and $HOME whole under any spelling, but not the real path's parents", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
