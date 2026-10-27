@@ -294,7 +294,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
         "lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Command | Access | Path |\n| --- | --- | --- | --- |\n" +
         "| `node` | `node` | R | `./a` |\n| `node` | `node` | R | `/etc/hosts` |\n" +
-        "| `sh` | `sh` | W | `./a` |\n\n</details>\n<details>\n",
+        "| `sh` | `sh` | W | `./a` |\n\n</details>\n\n<details>\n",
     );
   });
 
@@ -403,7 +403,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
       md.indexOf("<summary>🔍 File access details"),
     );
     expect(md).toMatch(
-      /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+      /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>R read[^\n]*<\/sub>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
     );
   });
 });
@@ -499,8 +499,9 @@ describe("renderAuditSummaryBlocks: layout", () => {
     // after it would be read as part of.
     expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
     expect(md).toContain("<details>\n<summary>📂 Accessed Paths (2)</summary>\n\n<sub>R read");
-    expect(md.split("<sub>R read")).toHaveLength(2);
-    // With no accessed paths table, the details are the first to show flags.
+    // Again in the details, as either may be opened alone.
+    expect(md.split("<sub>R read")).toHaveLength(3);
+    expect(md.indexOf("<sub>R read", md.indexOf("🔍"))).toBeGreaterThan(0);
     const killed = render({
       kind: "syscall",
       comm: "a.out",

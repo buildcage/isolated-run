@@ -129,8 +129,11 @@
 | `/usr/bin/uname` | `uname` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
 
 </details>
+
 <details>
 <summary>🔍 File access details</summary>
+
+<sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
 <sub>first-last access since the proxy started · flags · command · path</sub>
 

@@ -130,6 +130,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | `/usr/local/bin/node` | `node[npm ci]` | X      | `/usr/bin/dash`       |
 
 ▶ 🔍 File access details
+R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 first-last access since the proxy started · flags · command · path
 00:00.401:           X   bash         /usr/local/bin/node
 00:00.412:           R   node[npm ci] ./package.json
@@ -152,7 +153,8 @@ From the top:
   first ran, and each one's paths in path order: the workspace, then `$HOME`, then the rest. A
   `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
   lists the commands that made the row's accesses, in the order they first did, and past three, the
-  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped).
+  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped). Its
+  heading says `(truncated)` in place of the count when the table was cut; see [Limits](#limits).
 - **File access details**, folded, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A run is the row of the
   command that started it, as in the table. Times count from the start of the step's proxy, on the
@@ -718,8 +720,10 @@ also fails the step, after the command, with the record cut where it stopped.
   file access details give way first, and this section's table after the traffic report's timeline
   and known blocked hosts; [The Job Summary size cap](./reference.md#the-job-summary-size-cap) has
   the full order. A part that does not fit is cut at a line, with a note after what is kept, or
-  replaced by the note when none of it fits. The note names the artifact, which still holds every
-  access, or says how to ask for one, or, when the upload failed, that the record was not kept.
+  replaced by the note when none of it fits. The note on a cut accessed paths table is inside its
+  folded element, whose heading then says `(truncated)`. The note names the artifact, which still
+  holds every access, or says how to ask for one, or, when the upload failed, that the record was
+  not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
   keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is

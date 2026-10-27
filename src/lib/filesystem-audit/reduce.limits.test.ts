@@ -76,6 +76,8 @@ describe("createAuditSummary: limits", () => {
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
+    // Said where it shows folded too, in place of a count of rows not all there.
+    expect(md).toContain("<summary>📂 Accessed Paths (truncated)</summary>");
     expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
@@ -120,6 +122,7 @@ describe("createAuditSummary: limits", () => {
     expect(programRows(md)).toEqual([
       "| `command-0` | `command-0`, `command-1` and 18 more | R | `/tmp/x` |",
     ]);
+    expect(md).toContain("<summary>📂 Accessed Paths (1)</summary>");
     expect(section(md, "<summary>📂 Accessed Paths", "🔍")).not.toContain(CUT);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -173,6 +176,27 @@ describe("createAuditSummary: limits", () => {
     expect(md.split("NOTE")).toHaveLength(2);
     expect(md).not.toContain("/tmp/f0");
     expect(md).not.toContain("🔍 File access details");
+  });
+
+  it("ends the table's element before a note printed in place of the details", () => {
+    const blocks = renderFilesystemAuditBlocks(
+      jsonl(...tmpFiles(2)),
+      PREFIXES,
+      { "filesystem-unexpected": 1, "filesystem-paths": 1, "filesystem-log": 2 },
+      () => "unused",
+    ).map((b) => (b.id === "filesystem-log" ? { ...b, cut: "atomic" as const } : b));
+    const whole = fitStepSummary(blocks, { limitBytes: Infinity });
+    const md = fitStepSummary(
+      withNotices(blocks, () => "NOTE\n"),
+      {
+        limitBytes:
+          8 * 1024 +
+          Buffer.byteLength(whole.slice(0, whole.indexOf("<details>\n<summary>🔍"))) +
+          10,
+      },
+    );
+    // A note right under </details> would be read as part of that HTML block.
+    expect(md).toContain("</details>\n\nNOTE\n");
   });
 
   it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {

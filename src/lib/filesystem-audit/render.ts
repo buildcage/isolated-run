@@ -2,6 +2,7 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { codeCell, codeSpan } from "#core/lib/report/render/markdown-table.ts";
 import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
+import type { RetitledBlock } from "../report.ts";
 import { fmtSpan } from "./agg.ts";
 import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
@@ -156,7 +157,7 @@ function pathsBlock(
   rows: PathRow[] | undefined,
   cause: CutCause | undefined,
   { priorities, cutNote }: RenderOptions,
-): SummaryBlock {
+): RetitledBlock {
   const block = {
     id: FILESYSTEM_BLOCK.paths,
     priority: priorities[FILESYSTEM_BLOCK.paths],
@@ -165,14 +166,19 @@ function pathsBlock(
   };
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
   const md = accessRows(rows.map((r) => ({ ...r, path: r })));
+  const open = (count: string) => `<details>\n<summary>📂 Accessed Paths (${count})</summary>\n\n`;
   // Folded, as it lists every access rather than only those outside
-  // expected_filesystem_rules. A table cut short says so after the rows it kept.
+  // expected_filesystem_rules. A table cut short says so after the rows it
+  // kept, and in its summary line, which shows while the note is folded.
   return {
     ...block,
     cut: "lines",
     head: 4,
-    open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
-    close: DETAILS_CLOSE,
+    open: open(cause ? "truncated" : String(rows.length)),
+    cutOpen: open("truncated"),
+    // The blank line ends the </details>, which would otherwise take in a
+    // note printed in place of the details.
+    close: `${DETAILS_CLOSE}\n`,
     text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
   };
 }
@@ -182,8 +188,6 @@ const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : fie
 
 function detailsBlock(
   { details, killed, detailsCut }: AuditSummary,
-  /** Whether the flag legend is still to be shown. */
-  legendDue: boolean,
   { startedAt, priorities, cutNote }: RenderOptions,
 ): SummaryBlock {
   const log = {
@@ -224,12 +228,12 @@ function detailsBlock(
         `${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`,
     )
     .join("\n");
-  const legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
   return {
     ...log,
     cut: "lines",
     text:
-      `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` +
+      // The legend again, as either part may be opened alone.
+      `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` +
       (detailsCut ? cutNote(detailsCut) : ""),
   };
 }
@@ -313,9 +317,8 @@ export function renderAuditSummaryBlocks(
     const rows = paths && byProgramAndPath(paths);
     // Empty when the step was only killed for a syscall, which the details list.
     if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
-    // The table's note stands for the details too. Without the table, the
-    // details are the first to show flags.
-    if (rows) blocks.push(detailsBlock(summary, rows.length === 0, opts));
+    // The table's note stands for the details too.
+    if (rows) blocks.push(detailsBlock(summary, opts));
   }
   if (opts.rulesNote) blocks.push(frame(`\n${opts.rulesNote}`));
   // The blank line ends a </details> above, which would otherwise swallow it.

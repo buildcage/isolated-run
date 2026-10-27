@@ -73490,18 +73490,19 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	let md = accessRows(rows.map((r) => ({
 		...r,
 		path: r
-	})));
+	}))), open = (count) => `<details>\n<summary>📂 Accessed Paths (${count})</summary>\n\n`;
 	return {
 		...block,
 		cut: "lines",
 		head: 4,
-		open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
-		close: DETAILS_CLOSE,
+		open: open(cause ? "truncated" : String(rows.length)),
+		cutOpen: open("truncated"),
+		close: `${DETAILS_CLOSE}\n`,
 		text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, priorities, cutNote }) {
+function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -73520,11 +73521,11 @@ function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, p
 		"flags",
 		"command",
 		"path"
-	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n"), legend = legendDue ? `<sub>${LEGEND}</sub>\n\n` : "";
+	], body = rows.map((r, i) => `${timeW ? `${(times[i] && `${times[i]}:`).padEnd(timeW + 1)} ` : ""}${r.flags.padEnd(flagsW)} ${comms[i].padEnd(commW)} ${shownField(r)}${r.deleted ? DELETED_MARK : ""}`).join("\n");
 	return {
 		...log,
 		cut: "lines",
-		text: `${legend}<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
+		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
 	};
 }
 function unexpectedBlock(summary, { priorities, expected }) {
@@ -73571,7 +73572,7 @@ function renderAuditSummaryBlocks(summary, opts) {
 	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
 	else {
 		let rows = paths && byProgramAndPath(paths);
-		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, rows.length === 0, opts));
+		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, opts));
 	}
 	return opts.rulesNote && blocks.push(frame(`\n${opts.rulesNote}`)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
 }
@@ -73728,12 +73729,21 @@ async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine,
 	let { fileSize, writeSummary } = {
 		...realDeps$4,
 		...overrides
-	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), fitted = fitStepSummary(blocks, {
-		usedBytes: used,
-		onCut: (b) => {
-			b.id !== void 0 && cutIds.add(b.id);
-		}
-	}), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), fit = (fitting) => {
+		let cut = new Set();
+		return {
+			cut,
+			text: fitStepSummary(fitting, {
+				usedBytes: used,
+				onCut: (b) => cut.add(b)
+			})
+		};
+	}, { cut, text: fitted } = fit(blocks);
+	blocks.some((b) => b.cutOpen !== void 0 && cut.has(b)) && ({cut, text: fitted} = fit(blocks.map((b) => b.cutOpen !== void 0 && cut.has(b) ? {
+		...b,
+		open: b.cutOpen
+	} : b)));
+	let cutIds = new Set([...cut].flatMap((b) => b.id === void 0 ? [] : [b.id])), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
 	return frames <= room && used + bytes(fitted) <= 1048576 ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && bytes(fallbackLine) <= room && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
 		cutIds,
 		wrote

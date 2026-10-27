@@ -252,6 +252,12 @@ export function reportDidNotFitLine(artifactAvailable: boolean): string {
   return `> ⚠️ ${reportDidNotFitMessage(artifactAvailable)}\n`;
 }
 
+/** A block whose opening tags change once a fit cuts it, so that a folded
+ *  part's summary line says so without being opened. */
+export interface RetitledBlock extends SummaryBlock {
+  cutOpen?: string;
+}
+
 export interface WriteSummaryBlocksOptions extends Partial<
   Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">
 > {
@@ -282,19 +288,24 @@ export interface SummaryWriteResult {
  * into the headroom kept for it, as long as the file stays under the limit.
  */
 export async function writeSummaryBlocks(
-  blocks: SummaryBlock[],
+  blocks: RetitledBlock[],
   env: NodeJS.ProcessEnv,
   { commandBytes = 0, fallbackLine, ...overrides }: WriteSummaryBlocksOptions = {},
 ): Promise<SummaryWriteResult> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
   const used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes);
-  const cutIds = new Set<string>();
-  const fitted = fitStepSummary(blocks, {
-    usedBytes: used,
-    onCut: (b) => {
-      if (b.id !== undefined) cutIds.add(b.id);
-    },
-  });
+  const fit = (fitting: RetitledBlock[]) => {
+    const cut = new Set<SummaryBlock>();
+    return { cut, text: fitStepSummary(fitting, { usedBytes: used, onCut: (b) => cut.add(b) }) };
+  };
+  let { cut, text: fitted } = fit(blocks);
+  // Fitted again with the cut blocks retitled. Each is still cut, being only
+  // longer, and the room it leaves the rest barely moves.
+  if (blocks.some((b) => b.cutOpen !== undefined && cut.has(b)))
+    ({ cut, text: fitted } = fit(
+      blocks.map((b) => (b.cutOpen !== undefined && cut.has(b) ? { ...b, open: b.cutOpen } : b)),
+    ));
+  const cutIds = new Set([...cut].flatMap((b) => (b.id === undefined ? [] : [b.id])));
   // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
   const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
   const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);
