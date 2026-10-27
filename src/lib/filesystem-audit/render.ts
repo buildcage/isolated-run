@@ -151,8 +151,7 @@ function accessRows(rows: Pick<RuleRow, "program" | "commands" | "flags" | "path
 }
 
 // Each part sits a level below the one before it, so once one is cut the
-// parts after it print nothing and its note stands for them all. The flags
-// are explained where they first appear.
+// parts after it print nothing and its note stands for them all.
 function pathsBlock(
   rows: PathRow[] | undefined,
   cause: CutCause | undefined,

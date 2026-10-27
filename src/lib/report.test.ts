@@ -660,8 +660,8 @@ describe("writeSummaryBlocks", () => {
       level: 1,
       section: id,
       cut: "lines" as const,
-      open: "<open>\n",
-      cutOpen: "<cut>\n",
+      open: `<${id}>\n`,
+      cutOpen: `<${id} cut>\n`,
       text,
     });
     const { cutIds } = await writeSummaryBlocks(
@@ -670,7 +670,7 @@ describe("writeSummaryBlocks", () => {
       { fileSize: () => 0, writeSummary: async (m) => void written.push(m) },
     );
     expect(cutIds).toStrictEqual(new Set(["large"]));
-    expect(written[0]).toMatch(/^<open>\na\n<cut>\nx\n/);
+    expect(written[0]).toMatch(/^<small>\na\n<large cut>\nx\n/);
   });
 
   it("writes the blocks when they fit", async () => {

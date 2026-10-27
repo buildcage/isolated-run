@@ -154,7 +154,8 @@ From the top:
   `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
   lists the commands that made the row's accesses, in the order they first did, and past three, the
   first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped). Its
-  heading says `(truncated)` in place of the count when the table was cut; see [Limits](#limits).
+  heading says `(truncated)` in place of the count when the table was cut short, and a table cut
+  to no row leaves only its note; see [Limits](#limits).
 - **File access details**, folded, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A run is the row of the
   command that started it, as in the table. Times count from the start of the step's proxy, on the

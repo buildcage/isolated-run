@@ -294,18 +294,19 @@ export async function writeSummaryBlocks(
 ): Promise<SummaryWriteResult> {
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
   const used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes);
-  const fit = (fitting: RetitledBlock[]) => {
-    const cut = new Set<SummaryBlock>();
-    return { cut, text: fitStepSummary(fitting, { usedBytes: used, onCut: (b) => cut.add(b) }) };
-  };
-  let { cut, text: fitted } = fit(blocks);
-  // Fitted again with the cut blocks retitled. Each is still cut, being only
-  // longer, and the room it leaves the rest barely moves.
-  if (blocks.some((b) => b.cutOpen !== undefined && cut.has(b)))
-    ({ cut, text: fitted } = fit(
-      blocks.map((b) => (b.cutOpen !== undefined && cut.has(b) ? { ...b, open: b.cutOpen } : b)),
-    ));
-  const cutIds = new Set([...cut].flatMap((b) => (b.id === undefined ? [] : [b.id])));
+  const cutIds = new Set<string>();
+  const retitled: RetitledBlock[] = [];
+  let fitted = fitStepSummary(blocks, {
+    usedBytes: used,
+    onCut: (b: RetitledBlock) => {
+      if (b.id !== undefined) cutIds.add(b.id);
+      if (b.cutOpen !== undefined) retitled.push(b);
+    },
+  });
+  // In the fitted text rather than by fitting again, which would rebuild every
+  // block. The few bytes it adds fall within the headroom the fit keeps.
+  for (const { open, cutOpen } of retitled)
+    if (open) fitted = fitted.replace(open, () => cutOpen ?? open);
   // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
   const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
   const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);

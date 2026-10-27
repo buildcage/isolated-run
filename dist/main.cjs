@@ -73729,21 +73729,14 @@ async function writeSummaryBlocks(blocks, env, { commandBytes = 0, fallbackLine,
 	let { fileSize, writeSummary } = {
 		...realDeps$4,
 		...overrides
-	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), fit = (fitting) => {
-		let cut = new Set();
-		return {
-			cut,
-			text: fitStepSummary(fitting, {
-				usedBytes: used,
-				onCut: (b) => cut.add(b)
-			})
-		};
-	}, { cut, text: fitted } = fit(blocks);
-	blocks.some((b) => b.cutOpen !== void 0 && cut.has(b)) && ({cut, text: fitted} = fit(blocks.map((b) => b.cutOpen !== void 0 && cut.has(b) ? {
-		...b,
-		open: b.cutOpen
-	} : b)));
-	let cutIds = new Set([...cut].flatMap((b) => b.id === void 0 ? [] : [b.id])), room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
+	}, used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes), cutIds = new Set(), retitled = [], fitted = fitStepSummary(blocks, {
+		usedBytes: used,
+		onCut: (b) => {
+			b.id !== void 0 && cutIds.add(b.id), b.cutOpen !== void 0 && retitled.push(b);
+		}
+	});
+	for (let { open, cutOpen } of retitled) open && (fitted = fitted.replace(open, () => cutOpen ?? open));
+	let room = 1040384 - used, frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0), content = "", wrote = "nothing";
 	return frames <= room && used + bytes(fitted) <= 1048576 ? (content = fitted, wrote = "blocks") : fallbackLine !== void 0 && bytes(fallbackLine) <= room && (content = fallbackLine, wrote = "fallback"), content !== "" && await writeSummary(content, env.GITHUB_STEP_SUMMARY), {
 		cutIds,
 		wrote
