@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { BIT } from "./record.ts";
-import { fixedComponents, globPattern, parseExpectedRules, RuleMatcher } from "./rules.ts";
+import { compileGlob, parseExpectedRules, RuleMatcher } from "./rules.ts";
 
 const inline = (text: string) => [{ text, origin: "input" as const, firstLine: 1 }];
 const parse = (text: string) => parseExpectedRules(inline(text));
 
-describe("globPattern", () => {
-  const matches = (glob: string, name: string) => globPattern(glob)!.test(name);
+describe("compileGlob", () => {
+  const matches = (glob: string, name: string) => compileGlob(glob)!.pattern.test(name);
 
   it("matches a name with no wildcard as itself, its special characters included", () => {
     expect(matches("./a.b(c)+", "./a.b(c)+")).toBe(true);
@@ -31,16 +31,16 @@ describe("globPattern", () => {
   });
 
   it("refuses an escape the summary never writes", () => {
-    expect(globPattern(String.raw`./a\q`)).toBeUndefined();
-    expect(globPattern(String.raw`./a\x41`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\q`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\x41`)).toBeUndefined();
   });
 
   it("refuses an escape for a character the summary writes otherwise", () => {
-    expect(globPattern(String.raw`./\u{41}`)).toBeUndefined();
-    expect(globPattern(String.raw`./a\u{a}`)).toBeUndefined();
-    expect(globPattern(String.raw`./a\u{0a0}`)).toBeUndefined();
-    expect(globPattern(String.raw`./a\u{dc80}`)).toBeUndefined();
-    expect(globPattern(String.raw`./a\[1\]`)).toBeUndefined();
+    expect(compileGlob(String.raw`./\u{41}`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\u{a}`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\u{0a0}`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\u{dc80}`)).toBeUndefined();
+    expect(compileGlob(String.raw`./a\[1\]`)).toBeUndefined();
   });
 
   it("matches a trailing /** as the directory and everything under it", () => {
@@ -69,9 +69,7 @@ describe("globPattern", () => {
     expect(matches("~/**/.npmrc", "~/a/b/.npmrc")).toBe(true);
     expect(matches("~/**/.npmrc", "~/a/b/.npmrcx")).toBe(false);
   });
-});
 
-describe("fixedComponents", () => {
   it.each([
     ["./work/abc/**/test", [".", "work", "abc"]],
     ["./dist/**", [".", "dist"]],
@@ -81,7 +79,7 @@ describe("fixedComponents", () => {
     [String.raw`./a\*b/*`, [".", String.raw`a\*b`]],
     ["/missing/", ["", "missing", ""]],
   ])("takes %j to start with %j", (glob, start) => {
-    expect(fixedComponents(glob)).toStrictEqual(start);
+    expect(compileGlob(glob)!.start).toStrictEqual(start);
   });
 });
 

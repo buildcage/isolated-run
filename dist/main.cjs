@@ -72608,10 +72608,11 @@ function fields(line, ref) {
 	return out;
 }
 const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
-function globPattern(glob) {
-	let out = "", i = 0;
+function compileGlob(glob) {
+	let out = "", firstStar, i = 0;
 	for (; i < glob.length;) {
 		if (glob.startsWith("**", i)) {
+			firstStar ??= i;
 			let atStart = i === 0 || glob[i - 1] === "/";
 			for (; glob[i] === "*";) i++;
 			if (atStart && i === glob.length) {
@@ -72621,7 +72622,7 @@ function globPattern(glob) {
 			continue;
 		}
 		if (glob[i] === "*") {
-			out += "[^/]*", i++;
+			firstStar ??= i, out += "[^/]*", i++;
 			continue;
 		}
 		let c = glob[i];
@@ -72632,15 +72633,11 @@ function globPattern(glob) {
 		}
 		i += c.length, out += c.replace(SPECIAL, "\\$&");
 	}
-	return RegExp(`^${out}$`);
-}
-function fixedComponents(glob) {
-	for (let i = 0; i < glob.length; i++) if (glob[i] === "\\") ESCAPE.lastIndex = i, i += ESCAPE.exec(glob)[0].length - 1;
-	else if (glob[i] === "*") {
-		let end = glob.lastIndexOf("/", i);
-		return end === -1 ? [] : glob.slice(0, end).split("/");
-	}
-	return glob.split("/");
+	let end = firstStar === void 0 ? glob.length : glob.lastIndexOf("/", firstStar);
+	return {
+		pattern: RegExp(`^${out}$`),
+		start: end === -1 ? [] : glob.slice(0, end).split("/")
+	};
 }
 const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, asAnyProcess = (name) => OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : void 0, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => {
 	let any = asAnyProcess(name);
@@ -72668,17 +72665,18 @@ function parseExpectedRules(sources) {
 		let [program, access, path] = parts;
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
 		let glob = (field) => {
-			let pattern = globPattern(field);
-			if (!pattern) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes`);
-			return pattern;
+			let compiled = compileGlob(field);
+			if (!compiled) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes`);
+			return compiled;
 		};
 		if (!path.startsWith("memfd:") && UNTIDY.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`);
 		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
+		let programGlob = program === "*" ? void 0 : glob(program), pathGlob = glob(path);
 		rules.push({
 			ref,
-			program: program === "*" ? void 0 : anyProcess(program, glob(program)),
-			path: anyProcess(path, glob(path)),
-			pathStart: fixedComponents(path),
+			program: programGlob && anyProcess(program, programGlob.pattern),
+			path: anyProcess(path, pathGlob.pattern),
+			pathStart: pathGlob.start,
 			...accessBits(access)
 		});
 	});
