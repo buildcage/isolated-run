@@ -316,7 +316,6 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const failOnBlocked = deps.readFailOnBlocked();
   const trafficArtifact = deps.readTrafficArtifactInputs();
   const rules = deps.readRuleInputs();
-  checkRuleListSizesOrThrow(rules, PROXY_RULE_INPUTS);
   const stepLabel = deps.readStepLabel();
 
   // Suppresses annotations outside a real action run, as writeReportSummary does.
@@ -348,6 +347,9 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     },
     annotation.warning,
   );
+  // After the support checks, so a rule the engine cannot use is reported as
+  // that rather than as too long.
+  checkRuleListSizesOrThrow(rules, PROXY_RULE_INPUTS);
   // Unlike the checks above, fails in audit too.
   const aws = deps.readAwsKeyInputs({ proxyEngine }, env);
 

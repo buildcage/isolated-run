@@ -419,6 +419,7 @@ describe("runSandboxStep", () => {
     });
 
     await expect(runSandboxStep(ENV, deps)).rejects.toThrow("allowed_https_rules is");
+    expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
