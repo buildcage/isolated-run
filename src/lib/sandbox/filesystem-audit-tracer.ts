@@ -382,8 +382,8 @@ export async function startFilesystemAudit(
     ? hostCannotAudit(child.reason() || "the tracer exited")
     : auditUnavailable("the tracer did not attach in time");
   await haltTracer(tracer, false, haltOptions, haltDeps);
-  // A tracer that attached just too late may have created the recording; the
-  // report would otherwise read it as one cut short.
+  // A tracer that attached just too late may have created the recording,
+  // which the report does not read.
   remove(outPath);
   throw cancelled ? cancelledBeforeRun() : failure;
 }

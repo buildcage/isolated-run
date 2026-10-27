@@ -138,30 +138,47 @@ describe("readStepFilesystemAudit", () => {
     expect(outputs).toEqual([""]);
   });
 
-  it("reports nothing and sets an empty output when the tracer never attached", async () => {
-    const exitCode = process.exitCode;
-    const note = annotation();
-    const {
-      deps: d,
-      summaries,
-      outputs,
-    } = deps({
-      readLines: () => {
-        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+  it.each([
+    [
+      "no recording",
+      {
+        readLines: () => {
+          throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+        },
       },
-    });
+    ],
+    [
+      "a recording left behind",
+      { raw: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }) },
+    ],
+  ])(
+    "reports nothing and sets an empty output when the tracer never attached, with %s",
+    async (_, overrides) => {
+      const exitCode = process.exitCode;
+      const note = annotation();
+      const { deps: d, summaries, uploads, outputs } = deps(overrides);
 
-    await reportStepFilesystemAudit(
-      { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
-      { ...d, summaries },
-    );
+      await reportStepFilesystemAudit(
+        {
+          ...base,
+          attached: false,
+          audit: AUDIT,
+          annotation: note,
+          env: {},
+          rules: { rules: [] },
+          failOnUnexpected: true,
+        },
+        { ...d, summaries },
+      );
 
-    expect(note.warning).not.toHaveBeenCalled();
-    expect(note.error).not.toHaveBeenCalled();
-    expect(summaries).toEqual([]);
-    expect(outputs).toEqual([""]);
-    expect(process.exitCode).toBe(exitCode);
-  });
+      expect(note.warning).not.toHaveBeenCalled();
+      expect(note.error).not.toHaveBeenCalled();
+      expect(summaries).toEqual([]);
+      expect(uploads).toEqual([]);
+      expect(outputs).toEqual([""]);
+      expect(process.exitCode).toBe(exitCode);
+    },
+  );
 
   it("fails the step, whatever the mode, when the recording is gone after the tracer attached", async () => {
     const exitCode = process.exitCode;
@@ -237,19 +254,6 @@ describe("readStepFilesystemAudit", () => {
         const { deps: d } = deps({ raw: [write, last].join("\n") });
         await reportStepFilesystemAudit({ ...base, audit: AUDIT, annotation: note, env: {} }, d);
       }
-
-      expect(note.error).not.toHaveBeenCalled();
-      expect(process.exitCode).toBeUndefined();
-    });
-
-    it("leaves the step alone when the tracer never attached", async () => {
-      const note = annotation();
-      const { deps: d } = deps({ raw: write });
-
-      await reportStepFilesystemAudit(
-        { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
-        d,
-      );
 
       expect(note.error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
