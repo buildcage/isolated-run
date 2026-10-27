@@ -325,6 +325,7 @@ describe("runSandboxStep", () => {
       INPUT_ALLOWED_HTTPS_RULES: "example.com",
       INPUT_EXPECTED_FILESYSTEM_RULES: rules,
       INPUT_WRITE_THROUGH: "./out",
+      INPUT_DIR: "the workflow's own",
     };
     let lastRead: string | undefined;
     mocks.readAwsKeyInputs.mockImplementation((_: unknown, e: NodeJS.ProcessEnv) => {
@@ -339,6 +340,7 @@ describe("runSandboxStep", () => {
       ...ENV,
       INPUT_RUN: "echo hello",
       INPUT_FAIL_ON_BLOCKED: "false",
+      INPUT_DIR: "the workflow's own",
     });
   });
 
