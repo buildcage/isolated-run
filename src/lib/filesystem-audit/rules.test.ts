@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { BIT } from "./record.ts";
-import { globPattern, parseExpectedRules, RuleMatcher } from "./rules.ts";
+import { fixedComponents, globPattern, parseExpectedRules, RuleMatcher } from "./rules.ts";
 
 const inline = (text: string) => [{ text, origin: "input" as const, firstLine: 1 }];
 const parse = (text: string) => parseExpectedRules(inline(text));
@@ -68,6 +68,20 @@ describe("globPattern", () => {
     expect(matches("~/**/.npmrc", "~/.npmrc")).toBe(true);
     expect(matches("~/**/.npmrc", "~/a/b/.npmrc")).toBe(true);
     expect(matches("~/**/.npmrc", "~/a/b/.npmrcx")).toBe(false);
+  });
+});
+
+describe("fixedComponents", () => {
+  it.each([
+    ["./work/abc/**/test", [".", "work", "abc"]],
+    ["./dist/**", [".", "dist"]],
+    ["./wo*k/x", ["."]],
+    ["/x*", [""]],
+    ["**/.npmrc", []],
+    [String.raw`./a\*b/*`, [".", String.raw`a\*b`]],
+    ["/missing/", ["", "missing", ""]],
+  ])("takes %j to start with %j", (glob, start) => {
+    expect(fixedComponents(glob)).toStrictEqual(start);
   });
 });
 
@@ -164,6 +178,21 @@ describe("parseExpectedRules", () => {
 
 describe("RuleMatcher", () => {
   const matcher = (text: string) => new RuleMatcher(parse(text).rules);
+
+  it("tries every rule whose fixed components lead the path, in the order written", () => {
+    const m = matcher("* R ./work/abc/**/test\n* R ./work/**/test\n* R ./work/abc/x");
+    expect(m.match("/bin/a", "./work/abc/x/test", BIT.R, false, false).ref).toBe("input:1");
+    expect(m.match("/bin/a", "./work/x/test", BIT.R, false, false).ref).toBe("input:2");
+    expect(m.match("/bin/a", "./work/abc/x", BIT.R, false, false).ref).toBe("input:3");
+    expect(m.match("/bin/a", "./workx/test", BIT.R, false, false).ref).toBeUndefined();
+    const reversed = matcher("* R ./work/**/test\n* R ./work/abc/**/test");
+    expect(reversed.match("/bin/a", "./work/abc/x/test", BIT.R, false, false).ref).toBe("input:1");
+  });
+
+  it("tries a /proc/<pid>/ rule on the accessing process's own directory", () => {
+    const m = matcher("* R /proc/<pid>/status");
+    expect(m.match("/bin/a", "/proc/self/status", BIT.R, false, false).ref).toBe("input:1");
+  });
 
   it("takes an access by the first rule that names its program, path and outcome", () => {
     const m = matcher("/bin/a R ./x\n* R ./**\n* r! /etc/**");

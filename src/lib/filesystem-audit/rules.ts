@@ -37,6 +37,8 @@ export interface ExpectedRule {
   /** Undefined matches any program. */
   program: NameMatcher | undefined;
   path: NameMatcher;
+  /** The components every path it takes starts with. */
+  pathStart: string[];
   /** The actions it expects to succeed, to fail, and to be refused, as bits. */
   ok: number;
   failed: number;
@@ -139,6 +141,23 @@ export function globPattern(glob: string): RegExp | undefined {
   return new RegExp(`^${out}$`);
 }
 
+/**
+ * The components every name a glob takes starts with: all of its own without
+ * a wildcard, else those before the component holding the first.
+ */
+export function fixedComponents(glob: string): string[] {
+  for (let i = 0; i < glob.length; i++) {
+    if (glob[i] === "\\") {
+      ESCAPE.lastIndex = i;
+      i += ESCAPE.exec(glob)![0].length - 1;
+    } else if (glob[i] === "*") {
+      const end = glob.lastIndexOf("/", i);
+      return end === -1 ? [] : glob.slice(0, end).split("/");
+    }
+  }
+  return glob.split("/");
+}
+
 // The summary never shows a /proc number or thread-self, so a rule naming one
 // would never match.
 const procByNumber = (name: string): boolean => unnumbered(name) !== name;
@@ -152,12 +171,15 @@ const UNTIDY = /\/\.?\//;
 // again as /proc/<pid>.
 const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
 const OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/;
+const asAnyProcess = (name: string): string | undefined =>
+  OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : undefined;
 const anyProcess = (glob: string, pattern: RegExp): NameMatcher =>
   ANY_PROCESS.test(glob)
     ? {
-        test: (name) =>
-          pattern.test(name) ||
-          (OWN_DIRECTORY.test(name) && pattern.test(name.replace(OWN_DIRECTORY, "/proc/<pid>"))),
+        test: (name) => {
+          const any = asAnyProcess(name);
+          return pattern.test(name) || (any !== undefined && pattern.test(any));
+        },
       }
     : pattern;
 
@@ -225,6 +247,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         ref,
         program: program === "*" ? undefined : anyProcess(program, glob(program)),
         path: anyProcess(path, glob(path)),
+        pathStart: fixedComponents(path),
         ...accessBits(access),
       });
     });
@@ -241,13 +264,51 @@ function takes(rule: ExpectedRule, bit: number, failed: boolean, perm: boolean):
 // Past this many program and path pairs, the cache starts afresh.
 const CACHE_MAX = 100_000;
 
+/** A fixed component, and the rules, by index, whose fixed components end at it. */
+interface StartNode {
+  rules: number[];
+  next: Map<string, StartNode>;
+}
+
 /** Matches accesses against the rules, remembering each program and path's rules. */
 export class RuleMatcher {
   private readonly cache = new Map<string, ExpectedRule[]>();
   private readonly rules: ExpectedRule[];
+  // Only the rules whose fixed components lead a path are tried on it.
+  private readonly starts: StartNode = { rules: [], next: new Map() };
 
   constructor(rules: ExpectedRule[]) {
     this.rules = rules;
+    rules.forEach(({ pathStart }, i) => {
+      let node = this.starts;
+      for (const part of pathStart) {
+        let next = node.next.get(part);
+        if (!next) node.next.set(part, (next = { rules: [], next: new Map() }));
+        node = next;
+      }
+      node.rules.push(i);
+    });
+  }
+
+  // Adds the rules whose fixed components lead the path.
+  private startingAt(path: string, into: Set<number>): void {
+    let node: StartNode | undefined = this.starts;
+    for (const part of path.split("/")) {
+      for (const i of node.rules) into.add(i);
+      node = node.next.get(part);
+      if (!node) return;
+    }
+    for (const i of node.rules) into.add(i);
+  }
+
+  // The rules that may take a path, in the order they were written.
+  private candidates(path: string): ExpectedRule[] {
+    const found = new Set<number>();
+    this.startingAt(path, found);
+    // A /proc/<pid>/ rule takes the accessing process's own directory too.
+    const any = asAnyProcess(path);
+    if (any !== undefined) this.startingAt(any, found);
+    return [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
   }
 
   /**
@@ -265,7 +326,7 @@ export class RuleMatcher {
     let candidates = this.cache.get(key);
     if (!candidates) {
       if (this.cache.size >= CACHE_MAX) this.cache.clear();
-      candidates = this.rules.filter(
+      candidates = this.candidates(path).filter(
         (r) => (r.program === undefined || r.program.test(program)) && r.path.test(path),
       );
       this.cache.set(key, candidates);
