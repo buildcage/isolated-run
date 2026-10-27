@@ -744,6 +744,14 @@ Both are read-only inside the sandbox in either filesystem mode, since what they
 later step and post step. Name the one the command writes to in `write_through:`, such as
 `$GITHUB_ENV`, or hand the value to the next step through `$GITHUB_OUTPUT` and that step's `env:`.
 
+**Can I trust the action itself?**
+
+isolated-run relies on being verifiable rather than on being trusted. The source is open for anyone
+to read at any time, and the action runs only what was built from it: each release is immutable, its
+image is built from the release commit and signed, and the action verifies that before it runs.
+Changing what isolated-run does means changing its public source first. See
+[Image provenance verification](./docs/security.md#image-provenance-verification).
+
 ## GitHub's native egress firewall
 
 GitHub is building an egress firewall directly into Actions runners
