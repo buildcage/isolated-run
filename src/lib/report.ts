@@ -254,9 +254,8 @@ export function reportDidNotFitLine(artifactAvailable: boolean): string {
 
 /** A block whose opening tags change once a fit cuts it, so that a folded
  *  part's summary line says so without being opened. */
-export interface RetitledBlock extends SummaryBlock {
-  cutOpen?: string;
-}
+export type RetitledBlock = SummaryBlock &
+  ({ cutOpen?: undefined } | { open: string; cutOpen: string });
 
 export interface WriteSummaryBlocksOptions extends Partial<
   Pick<WriteReportSummaryDeps, "fileSize" | "writeSummary">
@@ -295,7 +294,7 @@ export async function writeSummaryBlocks(
   const { fileSize, writeSummary } = { ...realDeps, ...overrides };
   const used = Math.max(0, summarySize(env.GITHUB_STEP_SUMMARY, fileSize) - commandBytes);
   const cutIds = new Set<string>();
-  const retitled: RetitledBlock[] = [];
+  const retitled: { open: string; cutOpen: string }[] = [];
   let fitted = fitStepSummary(blocks, {
     usedBytes: used,
     onCut: (b: RetitledBlock) => {
@@ -305,8 +304,7 @@ export async function writeSummaryBlocks(
   });
   // In the fitted text rather than by fitting again, which would rebuild every
   // block. The few bytes it adds fall within the headroom the fit keeps.
-  for (const { open, cutOpen } of retitled)
-    if (open) fitted = fitted.replace(open, () => cutOpen ?? open);
+  for (const { open, cutOpen } of retitled) fitted = fitted.replace(open, () => cutOpen);
   // The budget fitStepSummary fits to: only what it cannot cut has to fit it.
   const room = STEP_SUMMARY_LIMIT_BYTES - SAFETY_MARGIN_BYTES - used;
   const frames = blocks.reduce((n, b) => n + (b.cut === "keep" ? bytes(wholeBlock(b)) : 0), 0);
