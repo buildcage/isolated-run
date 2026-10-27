@@ -16,7 +16,7 @@ jobs:
       # injected CA. audit records every destination, and the Job Summary's
       # "Switch to restrict mode" section lists them as allowed_https_rules.
       - name: Discover required domains with isolated-run
-        uses: buildcage/isolated-run@982ef9f5462477eedc29a8f94dcaef669a2bdccd # v2.3.0
+        uses: buildcage/isolated-run@b3c6b5415d1ce2dc9cd3e580b8dac8962a17c9d2 # v2.4.0
         with:
           proxy_mode: audit
           proxy_engine: universal
