@@ -277,9 +277,10 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 - `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`, `~/.gnupg`, the same
   directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`, which hold secrets
   or another process's descriptors, so a rule proposed for a read there names only the file read.
-  A directory below one still folds, as `/etc/ssl/**`. The directories above one do not, as a
-  `dir/**` row there would take it: a thread's files under `/proc/<pid>/task/<tid>` stay a row
-  each, as a process's do under `/proc/<pid>`.
+  A directory below one still folds, as `/etc/ssl/**`. The directories above one do not either,
+  as folding one would hide the directory inside it: `/proc/<pid>/task` and
+  `/proc/<pid>/task/<tid>` stay unfolded, so another process's thread files show a row each, as
+  its own files do under `/proc/<pid>`.
 - A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
   `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
@@ -513,11 +514,12 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 The step fails before the command runs when the rules are set without `filesystem_audit: record`,
 and on a line that is not a rule, with `Invalid expected_filesystem_rules at <where>: <reason>`:
 other than three fields, a quote not closed or not ending its field, an access of other letters,
-an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component before a
-path's last (`a//b`, `a/./b`, `a//`), which the summary drops, so a failed `rmdir /missing//` is
-written `/missing/`, or a number or `thread-self` in a `/proc` path. `<where>` is
-`input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of the config
-file, or `config` where YAML may have joined the value's lines, as outside a `|` block.
+an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component between
+two slashes in a path (`a//b`, `a/./b`, `a//`), or a number or `thread-self` in a `/proc` path.
+`<where>` is `input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of
+the config file, or `config` where YAML may have joined the value's lines, as outside a `|` block.
+The summary drops those components from a name a command passed, so a failed `rmdir /missing//`
+is written `/missing/`.
 
 ### How rules match
 

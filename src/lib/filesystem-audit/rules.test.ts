@@ -164,6 +164,7 @@ describe("parseExpectedRules", () => {
     ["* R ./a//b", 'input:1: "./a//b" holds an empty or "." component'],
     ["* R /a/./b", 'input:1: "/a/./b" holds an empty or "." component'],
     ["* R /missing//", 'input:1: "/missing//" holds an empty or "." component'],
+    ["* R /a/./", 'input:1: "/a/./" holds an empty or "." component'],
     ["* R /proc/1/environ", 'input:1: "/proc/1/environ" names a process or a thread in /proc'],
     ["* R /proc/12", 'input:1: "/proc/12" names a process'],
     ["* R /proc/<pid>/task/3/stat", 'input:1: "/proc/<pid>/task/3/stat" names a process'],
