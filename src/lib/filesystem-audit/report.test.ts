@@ -242,17 +242,28 @@ describe("readStepFilesystemAudit", () => {
       expect(process.exitCode).toBeUndefined();
     });
 
-    it("leaves the step alone when the tracer never attached", async () => {
+    it("reports nothing from a recording a tracer that never attached left behind", async () => {
       const note = annotation();
-      const { deps: d } = deps({ raw: write });
+      const { deps: d, summaries, uploads, outputs } = deps({ raw: write });
 
       await reportStepFilesystemAudit(
-        { ...base, attached: false, audit: AUDIT, annotation: note, env: {} },
-        d,
+        {
+          ...base,
+          attached: false,
+          audit: AUDIT,
+          annotation: note,
+          env: {},
+          rules: { rules: [] },
+          failOnUnexpected: true,
+        },
+        { ...d, summaries },
       );
 
       expect(note.error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
+      expect(summaries).toEqual([]);
+      expect(uploads).toEqual([]);
+      expect(outputs).toEqual([""]);
     });
   });
 

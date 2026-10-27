@@ -73820,7 +73820,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		upload: async () => (setOutput(""), "not-requested"),
 		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
 	});
-	if (!audit) return settled(NONE);
+	if (!audit || !attached) return settled(NONE);
 	let cleanPath = audit.stepPath, prepared = upload;
 	if (upload) try {
 		deps.makeDir(audit.uploadDir);
@@ -73839,9 +73839,9 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	} catch (e) {
 		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`));
 	}
-	if (!reduced) return attached ? (annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete)) : settled(NONE);
+	if (!reduced) return annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
-	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), attached && !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
+	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
 	let given = rules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === void 0) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),

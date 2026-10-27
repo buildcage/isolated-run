@@ -229,7 +229,8 @@ export function readStepFilesystemAudit(
     blocks: (startedAt, _artifact, stepLabel) =>
       result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE)),
   });
-  if (!audit) return settled(NONE);
+  // A recording a tracer that never attached left behind is not trusted.
+  if (!audit || !attached) return settled(NONE);
   // The stripped copy and the proposed rules go in the step's own directory
   // under the scratch base, which the sandbox cannot reach (unlike
   // $RUNNER_TEMP or /tmp). Writing a new file leaves the root-owned recording
@@ -273,7 +274,6 @@ export function readStepFilesystemAudit(
     return settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, incomplete);
   }
   if (!reduced) {
-    if (!attached) return settled(NONE);
     annotation.error(
       "The filesystem audit recording is gone: something removed it after the tracer started; failing the step",
     );
@@ -295,7 +295,7 @@ export function readStepFilesystemAudit(
     );
   // The tracer exited during the step, as a full disk makes it, or did not
   // finish its record when stopped. Only the banner would say so otherwise.
-  if (attached && !ended && !cancelled) {
+  if (!ended && !cancelled) {
     annotation.error(
       "The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:",
     );
