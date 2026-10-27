@@ -73444,7 +73444,7 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	unexpected: "filesystem-unexpected",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -73494,8 +73494,10 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	return {
 		...block,
 		cut: "lines",
-		head: 6,
-		text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
+		head: 4,
+		open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
+		close: DETAILS_CLOSE,
+		text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
@@ -73506,7 +73508,7 @@ function detailsBlock({ details, killed, detailsCut }, legendDue, { startedAt, p
 		level: 3,
 		section: SECTION,
 		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
-		close: "</details>\n"
+		close: DETAILS_CLOSE
 	};
 	if (!details) return {
 		...log,

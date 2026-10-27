@@ -119,7 +119,7 @@ A shortened example:
 ```
 ## Filesystem Activity Report
 
-### 📂 Accessed Paths (5)
+▶ 📂 Accessed Paths (5)
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Command        | Access | Path                  |
 | --------------------- | -------------- | ------ | --------------------- |
@@ -147,7 +147,7 @@ From the top:
 
 - A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
   any; see [What changes in the step](#what-changes-in-the-step).
-- **Accessed Paths** has one row per program and path, with a [flag](#flags) for each action.
+- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each action.
   Running a program is an `X` row under the program that ran it. Programs are in the order they
   first ran, and each one's paths in path order: the workspace, then `$HOME`, then the rest. A
   `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
@@ -464,8 +464,9 @@ comment says to add them back, under `with:` or in a config file. It also leaves
 
 ### What the summary shows
 
-- **Unexpected Accesses** takes the place of Accessed Paths and the details, with the same columns;
-  the artifact still has every access. Each row is one rule the proposed file adds.
+- **Unexpected Accesses** takes the place of Accessed Paths and the details, with the same columns,
+  and is not folded; the artifact still has every access. Each row is one rule the proposed file
+  adds.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
 - `fail_on_unexpected_file_access: true` fails the step instead, in `audit` mode too, with the

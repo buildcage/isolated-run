@@ -3,7 +3,8 @@
 
 > 🚫 Killed for a 32-bit system call: `int80`.
 
-### 📂 Accessed Paths (117)
+<details>
+<summary>📂 Accessed Paths (117)</summary>
 
 <sub>R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused</sub>
 
@@ -127,6 +128,7 @@
 | `/usr/bin/uname` | `uname` | R | `/usr/lib/locale/**` |
 | `/usr/bin/uname` | `uname` | R | `/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache` |
 
+</details>
 <details>
 <summary>🔍 File access details</summary>
 

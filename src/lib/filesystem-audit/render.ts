@@ -165,12 +165,15 @@ function pathsBlock(
   };
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
   const md = accessRows(rows.map((r) => ({ ...r, path: r })));
-  // A table cut short says so after the rows it kept.
+  // Folded, as it lists every access rather than only those outside
+  // expected_filesystem_rules. A table cut short says so after the rows it kept.
   return {
     ...block,
     cut: "lines",
-    head: 6,
-    text: `### 📂 Accessed Paths (${rows.length})\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
+    head: 4,
+    open: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n`,
+    close: DETAILS_CLOSE,
+    text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
   };
 }
 
@@ -276,9 +279,9 @@ const operations = (n: number): string =>
 
 /**
  * The summary as blocks for fitStepSummary, in print order: a frame (heading
- * and notes) kept whole, the accessed-paths table under the flag legend, the
- * full per-command record folded into a details element, the proposed rules'
- * note, and the legend note, also kept whole. With
+ * and notes) kept whole, the accessed-paths table and the full per-command
+ * record, each folded into a details element, the proposed rules' note, and
+ * the legend note, also kept whole. With
  * expected_filesystem_rules, what they did not take replaces the table and
  * the details.
  */

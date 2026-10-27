@@ -76,7 +76,7 @@ describe("createAuditSummary: limits", () => {
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -88,7 +88,7 @@ describe("createAuditSummary: limits", () => {
       ...tmpFiles(20),
     );
     // The table's note stands for the details too.
-    expect(md).not.toContain("### 📂 Accessed Paths");
+    expect(md).not.toContain("<summary>📂 Accessed Paths");
     // A table cut whole takes its legend with it.
     expect(md).not.toContain("<sub>R read");
     expect(md.split(CUT)).toHaveLength(2);
@@ -120,7 +120,7 @@ describe("createAuditSummary: limits", () => {
     expect(programRows(md)).toEqual([
       "| `command-0` | `command-0`, `command-1` and 18 more | R | `/tmp/x` |",
     ]);
-    expect(section(md, "### 📂 Accessed Paths", "🔍")).not.toContain(CUT);
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).not.toContain(CUT);
     expect(section(md, "🔍")).toContain(CUT);
   });
 
@@ -133,7 +133,7 @@ describe("createAuditSummary: limits", () => {
     }));
     const md = limited({ bytes: 200 }, ...execs, ...tmpFiles(2));
     expect(tableRows(md)).toEqual([0, 1, 2, 3, 4].map((i) => `| \`/usr/bin/tool-${i}\` | X |`));
-    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain(CUT);
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
     expect(md).not.toContain("tool-19");
   });
 
@@ -172,7 +172,7 @@ describe("createAuditSummary: limits", () => {
     expect(md).toContain("`/usr/bin/tool-0`");
     expect(md.split("NOTE")).toHaveLength(2);
     expect(md).not.toContain("/tmp/f0");
-    expect(md).not.toContain("<details>");
+    expect(md).not.toContain("🔍 File access details");
   });
 
   it("cuts a part whose unfolded paths outgrow the bound, saying so", () => {
@@ -202,7 +202,7 @@ describe("createAuditSummary: limits", () => {
       { kind: "read", pid: 1, comm: "b", path: "/x/f" },
       { kind: "read", pid: 1, comm: "b", path: "/y/g" },
     );
-    expect(section(md, "### 📂 Accessed Paths", "🔍")).toContain("`/x/f`");
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain("`/x/f`");
     expect(section(md, "🔍")).toContain("too many distinct paths to summarize");
   });
 
