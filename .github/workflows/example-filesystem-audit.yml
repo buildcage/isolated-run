@@ -40,7 +40,8 @@ jobs:
           run: |
             npm ci
 
-            # Recorded as a refused write (w!): the sandbox makes /usr/local/bin read-only.
+            # Recorded as a refused write (w!), and touch's failed change of its times
+            # (a): the sandbox makes /usr/local/bin read-only.
             touch /usr/local/bin/buildcage-example-planted || true
 
       # Empty when nothing was uploaded, and download-artifact would then fetch
