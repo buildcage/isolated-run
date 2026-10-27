@@ -9,7 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/helpers.sh"
 f="$BUILDCAGE_RUN_DEBUG_SUMMARY_FILE"
 sections=$(mktemp -d)
 trap 'rm -rf "$sections"' EXIT
-sed -n '/^### 📂 Accessed/,/^<details>/p' "$f" > "$sections/accessed.md"
+sed -n '/^<summary>📂 Accessed/,/^<\/details>/p' "$f" > "$sections/accessed.md"
 
 # The line a row is first on, or nothing.
 line_of() { grep -nE -m1 "$1" "$f" | cut -d: -f1 || true; }
@@ -38,10 +38,10 @@ else
 fi
 assert_file_has "$f" "The move's new name is written" -E ' W +(gnu)?mv +\./probe2\.txt$'
 
-# The table lists, open, what each program touched, and what it ran as an X
+# The table lists, folded, what each program touched, and what it ran as an X
 # under the program that ran it. python3 is a symlink, so it shows as the
 # versioned file it runs.
-assert_file_has "$f" "The accessed table is open" -E '^### 📂 Accessed Paths \([0-9]+\)$'
+assert_file_has "$f" "The accessed table is folded" -E '^<summary>📂 Accessed Paths \([0-9]+\)</summary>$'
 assert_file_has "$sections/accessed.md" "python3 is run by bash as the versioned file it runs" -E '^\| `bash` \| `bash` \| X \| `/usr/bin/python3[.0-9]*` \|$'
 assert_file_has "$sections/accessed.md" "run.sh is written and run by bash" -F '| `bash` | `bash` | WX | `./A/run.sh` |'
 assert_file_has "$sections/accessed.md" "The step's shell goes by bash" -F '| `bash` | `bash` | W | `./probe.txt` |'

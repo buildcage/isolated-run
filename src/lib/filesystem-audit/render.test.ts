@@ -281,7 +281,7 @@ describe("renderAuditSummaryBlocks: tables", () => {
     expect(tableRows(md)).toEqual(["| `/srv/a` | M |", "| `/srv/b` | M |"]);
   });
 
-  it("gives each program one row per path, open under the flags' legend", () => {
+  it("gives each program one row per path, folded under the flags' legend", () => {
     const md = render(
       { kind: "read", pid: 1, comm: "node", path: "/etc/hosts" },
       { kind: "read", pid: 1, comm: "node", path: "/work/a" },
@@ -289,12 +289,12 @@ describe("renderAuditSummaryBlocks: tables", () => {
       { kind: "read", pid: 1, comm: "node", path: "/work/a" },
     );
     expect(md).toContain(
-      "### 📂 Accessed Paths (3)\n\n" +
+      "<details>\n<summary>📂 Accessed Paths (3)</summary>\n\n" +
         "<sub>R read · W write · X exec · M move · L link · D delete · A attr · " +
         "lowercase = failed · ! = refused</sub>\n\n" +
         "| Program | Command | Access | Path |\n| --- | --- | --- | --- |\n" +
         "| `node` | `node` | R | `./a` |\n| `node` | `node` | R | `/etc/hosts` |\n" +
-        "| `sh` | `sh` | W | `./a` |\n\n<details>\n",
+        "| `sh` | `sh` | W | `./a` |\n\n</details>\n\n<details>\n",
     );
   });
 
@@ -399,11 +399,11 @@ describe("renderAuditSummaryBlocks: tables", () => {
 
   it("folds the per-command record into a details element after the table", () => {
     const md = render({ kind: "read", comm: "a", path: "/work/x" });
-    expect(md.indexOf("### 📂 Accessed Paths")).toBeLessThan(
+    expect(md.indexOf("<summary>📂 Accessed Paths")).toBeLessThan(
       md.indexOf("<summary>🔍 File access details"),
     );
     expect(md).toMatch(
-      /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
+      /<details>\n<summary>🔍 File access details<\/summary>\n\n<sub>R read[^\n]*<\/sub>\n\n<sub>flags · command · path<\/sub>\n\n```\nR a \.\/x\n```\n\n<\/details>\n$/,
     );
   });
 });
@@ -498,9 +498,10 @@ describe("renderAuditSummaryBlocks: layout", () => {
     // Appended after the traffic report's </details>, which a heading right
     // after it would be read as part of.
     expect(`</details>\n${md}`).toContain("</details>\n\n## Filesystem Activity Report\n");
-    expect(md).toContain("### 📂 Accessed Paths (2)\n\n<sub>R read");
-    expect(md.split("<sub>R read")).toHaveLength(2);
-    // With no accessed paths table, the details are the first to show flags.
+    expect(md).toContain("<details>\n<summary>📂 Accessed Paths (2)</summary>\n\n<sub>R read");
+    // Again in the details, as either may be opened alone.
+    expect(md.split("<sub>R read")).toHaveLength(3);
+    expect(md.indexOf("<sub>R read", md.indexOf("🔍"))).toBeGreaterThan(0);
     const killed = render({
       kind: "syscall",
       comm: "a.out",
@@ -509,7 +510,7 @@ describe("renderAuditSummaryBlocks: layout", () => {
       killed: true,
       failed: true,
     });
-    expect(killed).not.toContain("### 📂 Accessed Paths");
+    expect(killed).not.toContain("<summary>📂 Accessed Paths");
     expect(killed.slice(killed.indexOf("<details>"))).toContain("<sub>R read");
   });
 
