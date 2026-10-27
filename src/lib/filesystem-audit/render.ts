@@ -2,7 +2,6 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { codeCell, codeSpan } from "#core/lib/report/render/markdown-table.ts";
 import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
-import type { RetitledBlock } from "../report.ts";
 import { fmtSpan } from "./agg.ts";
 import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
@@ -156,7 +155,7 @@ function pathsBlock(
   rows: PathRow[] | undefined,
   cause: CutCause | undefined,
   { priorities, cutNote }: RenderOptions,
-): RetitledBlock {
+): SummaryBlock {
   const block = {
     id: FILESYSTEM_BLOCK.paths,
     priority: priorities[FILESYSTEM_BLOCK.paths],
@@ -165,20 +164,17 @@ function pathsBlock(
   };
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
   const md = accessRows(rows.map((r) => ({ ...r, path: r })));
-  const open = (count: string) => `<details>\n<summary>📂 Accessed Paths (${count})</summary>\n\n`;
   // Folded, as it lists every access rather than only those outside
-  // expected_filesystem_rules. A table cut short says so after the rows it
-  // kept, and in its summary line, which shows while the note is folded.
+  // expected_filesystem_rules, and cut whole so the note is not hidden in the
+  // folded element. A table cut short for its size says so after it.
   return {
     ...block,
-    cut: "lines",
-    head: 4,
-    open: open(cause ? "truncated" : String(rows.length)),
-    cutOpen: open("truncated"),
-    // The blank line ends the </details>, which would otherwise take in a
-    // note printed in place of the details.
-    close: `${DETAILS_CLOSE}\n`,
-    text: `<sub>${LEGEND}</sub>\n\n${md}\n\n${cause ? cutNote(cause) : ""}`,
+    cut: "atomic",
+    // The blank line ends the </details>, which would otherwise take in the
+    // note or a note printed in place of the details.
+    text:
+      `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n` +
+      `<sub>${LEGEND}</sub>\n\n${md}\n\n${DETAILS_CLOSE}\n${cause ? cutNote(cause) : ""}`,
   };
 }
 

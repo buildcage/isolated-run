@@ -76,9 +76,9 @@ describe("createAuditSummary: limits", () => {
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    // Said where it shows folded too, in place of a count of rows not all there.
-    expect(md).toContain("<summary>📂 Accessed Paths (truncated)</summary>");
-    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(CUT);
+    expect(md).toContain("<summary>📂 Accessed Paths (1)</summary>");
+    // Outside the folded element, so it shows with the summary line.
+    expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(`</details>\n\n${CUT}`);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);
     expect(section(md, "🔍")).toContain(CUT);
   });
@@ -152,7 +152,7 @@ describe("createAuditSummary: limits", () => {
     expect(programRows(limited({ bytes: 100 }, ...records))).toHaveLength(1);
   });
 
-  it("prints nothing after the part a size cut reaches, its note standing for the rest", () => {
+  it("replaces a table the fit cuts with its note, standing for the details too", () => {
     const execs = Array.from({ length: 40 }, (_, i) => ({
       kind: "exec",
       comm: "c",
@@ -172,10 +172,10 @@ describe("createAuditSummary: limits", () => {
       withNotices(blocks, () => "NOTE\n"),
       { limitBytes: 8 * 1024 + 600 },
     );
-    expect(md).toContain("`/usr/bin/tool-0`");
+    // Cut whole, so the note is not folded away with the rows.
+    expect(md).not.toContain("<details>");
     expect(md.split("NOTE")).toHaveLength(2);
     expect(md).not.toContain("/tmp/f0");
-    expect(md).not.toContain("🔍 File access details");
   });
 
   it("ends the table's element before a note printed in place of the details", () => {
