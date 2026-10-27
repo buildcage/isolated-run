@@ -74486,6 +74486,259 @@ async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotat
 	});
 }
 //#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+function pathsOverlap(a, b) {
+	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+function pathAliases(mounts, path) {
+	let owner = mountAt(mounts, path);
+	if (!owner) return [];
+	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
+	for (let m of mounts) {
+		if (m.device !== owner.device) continue;
+		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
+		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
+	}
+	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
+}
+function mountAt(mounts, path) {
+	let found;
+	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
+	return found;
+}
+var WritablePathConflictError = class extends Error {};
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+}
+//#endregion
+//#region src/lib/sandbox/ephemeral-fs.ts
+function defaultDeviceOf(path) {
+	return (0, node_fs.statSync)(path).dev;
+}
+function defaultIsDirectory$1(path) {
+	return (0, node_fs.statSync)(path).isDirectory();
+}
+function defaultStat$1(path) {
+	let { uid, gid, mode } = (0, node_fs.statSync)(path);
+	return {
+		uid,
+		gid,
+		mode
+	};
+}
+function defaultExecFile(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
+	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
+	return notCoveredByWriteThrough.filter((c) => {
+		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
+		if (!nestingParent) return !0;
+		try {
+			return deviceOf(c) !== deviceOf(nestingParent);
+		} catch {
+			return !0;
+		}
+	});
+}
+function rootCannotRead({ fsType, superOptions = [] }) {
+	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
+}
+function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory$1, warn } = {}) {
+	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
+	for (let [path, mount] of visible) {
+		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
+		let reason;
+		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
+		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
+		else try {
+			if (!isDirectory(path)) continue;
+		} catch (e) {
+			reason = `the runner cannot stat it (${errorMessage(e)})`;
+		}
+		reason === void 0 ? roots.push(path) : warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
+	}
+	return roots;
+}
+function slugify(path) {
+	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
+}
+function overlayUpperFor(scratchDir, root) {
+	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
+}
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat$1, execFile = defaultExecFile, self = {
+	uid: process.getuid(),
+	gid: process.getgid()
+} } = {}) {
+	return roots.map((path) => {
+		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
+		mkdir(work, { recursive: !0 });
+		let { uid, gid, mode } = stat(path), perm = mode & 4095;
+		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
+			"install",
+			"-d",
+			"-o",
+			String(uid),
+			"-g",
+			String(gid),
+			"-m",
+			perm.toString(8),
+			"--",
+			upper
+		]), {
+			path,
+			upper,
+			work
+		};
+	});
+}
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
+	if (mode !== "ephemeral") return [];
+	let lines = ["Filesystem mode: ephemeral"];
+	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
+	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
+	return lines;
+}
+//#endregion
+//#region src/lib/sandbox/host-probes.ts
+const SETPRIV_CANDIDATE_PATHS = [
+	"/usr/bin/setpriv",
+	"/bin/setpriv",
+	"/usr/sbin/setpriv",
+	"/sbin/setpriv"
+];
+function resolveSetprivPath(exists) {
+	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
+}
+function parseNofileLimit(procLimits, nrOpen) {
+	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
+	if (!line) return;
+	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
+	return soft !== void 0 && hard !== void 0 ? {
+		soft,
+		hard
+	} : void 0;
+}
+function shmSizeFromStatfs({ type, bsize, blocks }) {
+	if (type !== 16914836) return;
+	let size = bsize * blocks;
+	return Number.isFinite(size) && size > 0 ? size : void 0;
+}
+function parseCgroupV2Path(procCgroup) {
+	let lines = procCgroup.split("\n").filter((line) => line !== "");
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
+}
+function readOptionalFile(path) {
+	try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch {
+		return;
+	}
+}
+function readNumericFile(path) {
+	let raw = readOptionalFile(path)?.trim();
+	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
+}
+const realHostProbes = {
+	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
+	nofileRlimit: () => {
+		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+		for (let pid of [process.ppid, "self"]) {
+			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
+			if (parsed) return parsed;
+		}
+	},
+	shmSizeBytes: () => {
+		try {
+			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
+		} catch {
+			return;
+		}
+	},
+	hostname: () => node_os.default.hostname(),
+	varRunRealPath: () => {
+		try {
+			return (0, node_fs.realpathSync)("/var/run");
+		} catch {
+			return;
+		}
+	},
+	realpath: (path) => realPathOf(path),
+	cgroupPath: () => {
+		let procCgroup = readOptionalFile("/proc/self/cgroup");
+		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
+	},
+	kernelBtf: () => {
+		try {
+			return (0, node_fs.statSync)("/sys/kernel/btf/vmlinux").size > 0;
+		} catch {
+			return !1;
+		}
+	}
+};
+function auditUnavailable(reason) {
+	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+}
+function hostCannotAudit(reason) {
+	let e = auditUnavailable(reason);
+	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
+}
+const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2", NATIVE_ARCH = {
+	x64: "SCMP_ARCH_X86_64",
+	arm64: "SCMP_ARCH_AARCH64"
+};
+function withoutCompatSyscalls(profile, arch = process.arch) {
+	let p = profile, native = NATIVE_ARCH[arch];
+	return !p || !Array.isArray(p.architectures) || !native ? profile : {
+		...p,
+		architectures: p.architectures.filter((a) => a === native)
+	};
+}
+function allowedSyscalls(profile) {
+	let p = profile;
+	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
+}
+function checkFilesystemAuditHost(probes = realHostProbes) {
+	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
+	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
+}
+//#endregion
+//#region src/lib/sandbox/filesystem-audit-paths.ts
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
+	return {
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
+		uploadDir,
+		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
+	};
+}
+function readPid(readFile, pidFilePath) {
+	return Number(readFile(pidFilePath).trim());
+}
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return;
+	}
+}
+//#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
 function defaultMkdir(path, mode) {
@@ -74737,7 +74990,7 @@ function defaultLstat(path) {
 		return;
 	}
 }
-function defaultStat$1(path) {
+function defaultStat(path) {
 	try {
 		return (0, node_fs.statSync)(path);
 	} catch {
@@ -74782,7 +75035,7 @@ function warnNotAdded(warn, reason) {
 	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
 }
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
-	let { exec = defaultExec$3, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, warn } = deps;
+	let { exec = defaultExec$3, lstat = defaultLstat, stat = defaultStat, realpath = node_fs.realpathSync, warn } = deps;
 	if (!home || stat(home)?.isDirectory() !== !0) return warnNotAdded(warn, `HOME (${JSON.stringify(home ?? "")}) is not a directory`);
 	let realHome = realpath(home), plan = planNssDb(realHome, { lstat });
 	if (typeof plan == "string") return warnNotAdded(warn, plan);
@@ -75076,35 +75329,6 @@ function releaseNssDbDirs(files, deps = {}) {
 	files.claim?.registered && releaseNssDb(files.claim.name, deps);
 }
 //#endregion
-//#region src/lib/sandbox/paths.ts
-function isAtOrUnder(path, ancestor) {
-	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-function pathsOverlap(a, b) {
-	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
-}
-function pathAliases(mounts, path) {
-	let owner = mountAt(mounts, path);
-	if (!owner) return [];
-	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
-	for (let m of mounts) {
-		if (m.device !== owner.device) continue;
-		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
-		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
-	}
-	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
-}
-function mountAt(mounts, path) {
-	let found;
-	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
-	return found;
-}
-var WritablePathConflictError = class extends Error {};
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
-}
-//#endregion
 //#region src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/certs/ca-certificates.crt",
@@ -75126,7 +75350,7 @@ function defaultReadFile$2(path) {
 function defaultWriteFile(path, contents, mode) {
 	(0, node_fs.writeFileSync)(path, contents, { mode });
 }
-function defaultIsDirectory$1(path) {
+function defaultIsDirectory(path) {
 	return (0, node_fs.statSync)(path, { throwIfNoEntry: !1 })?.isDirectory() === !0;
 }
 function defaultCopyDir(source, destination) {
@@ -75226,7 +75450,7 @@ const NSS_DB_RESERVATION = {
 	refuses: (entry, destination) => entry !== destination && isAtOrUnder(entry, destination),
 	refusal: (destination) => `is inside the NSS database at ${JSON.stringify(destination)}, which the inspect engine covers for the step. Name ${JSON.stringify(destination)} itself to have the command's changes written back.`
 };
-function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$2, readFile = defaultReadFile$2, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory$1, copyDir = defaultCopyDir, warn } = {}) {
+function writeCaTrustFiles(caCertPath, dir, env, tools, { exec = defaultExec$2, readFile = defaultReadFile$2, writeFile = defaultWriteFile, exists = node_fs.existsSync, chmod = node_fs.chmodSync, copyFile = node_fs.copyFileSync, realpath = node_fs.realpathSync, isDirectory = defaultIsDirectory, copyDir = defaultCopyDir, warn } = {}) {
 	let deps = {
 		exec,
 		readFile,
@@ -75327,270 +75551,6 @@ function caTrustAdditions(files, env) {
 		mounts,
 		env: extraEnv
 	};
-}
-//#endregion
-//#region src/lib/sandbox/env-loader.ts
-const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
-	"ACTIONS_RUNTIME_URL",
-	"ACTIONS_RUNTIME_TOKEN",
-	"ACTIONS_CACHE_URL",
-	"ACTIONS_RESULTS_URL",
-	"ACTIONS_CACHE_SERVICE_V2",
-	"ACTIONS_CACHE_MODE"
-]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`));
-function isRunnerOnly(key) {
-	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
-}
-function resolveSandboxEnv(env, caTrust, warn, overrides = {}) {
-	let merged = {
-		...env,
-		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
-	}, resolved = {}, skipped = [];
-	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
-	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), {
-		...resolved,
-		...overrides
-	};
-}
-function buildEnvBlob(resolved) {
-	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
-	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
-}
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ENV_LOADER_SOURCE = (0, node_path.join)(__dirname$2, "..", "scripts", "buildcage-init.sh");
-function writeEnvLoader(execDir, source = ENV_LOADER_SOURCE) {
-	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
-	return (0, node_fs.writeFileSync)(loaderPath, (0, node_fs.readFileSync)(source), { mode: 448 }), loaderPath;
-}
-function envLoaderArgs(loaderPath, scriptPath) {
-	return [
-		loaderPath,
-		ENV_BLOB_TERMINATOR,
-		scriptPath
-	];
-}
-//#endregion
-//#region src/lib/sandbox/ephemeral-fs.ts
-function defaultDeviceOf(path) {
-	return (0, node_fs.statSync)(path).dev;
-}
-function defaultIsDirectory(path) {
-	return (0, node_fs.statSync)(path).isDirectory();
-}
-function defaultStat(path) {
-	let { uid, gid, mode } = (0, node_fs.statSync)(path);
-	return {
-		uid,
-		gid,
-		mode
-	};
-}
-function defaultExecFile(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
-	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
-	return notCoveredByWriteThrough.filter((c) => {
-		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
-		if (!nestingParent) return !0;
-		try {
-			return deviceOf(c) !== deviceOf(nestingParent);
-		} catch {
-			return !0;
-		}
-	});
-}
-function rootCannotRead({ fsType, superOptions = [] }) {
-	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
-}
-function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory, warn } = {}) {
-	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [];
-	for (let [path, mount] of visible) {
-		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
-		let reason;
-		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
-		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
-		else try {
-			if (!isDirectory(path)) continue;
-		} catch (e) {
-			reason = `the runner cannot stat it (${errorMessage(e)})`;
-		}
-		reason === void 0 ? roots.push(path) : warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
-	}
-	return roots;
-}
-function slugify(path) {
-	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
-}
-function overlayUpperFor(scratchDir, root) {
-	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
-}
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat, execFile = defaultExecFile, self = {
-	uid: process.getuid(),
-	gid: process.getgid()
-} } = {}) {
-	return roots.map((path) => {
-		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
-		mkdir(work, { recursive: !0 });
-		let { uid, gid, mode } = stat(path), perm = mode & 4095;
-		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
-			"install",
-			"-d",
-			"-o",
-			String(uid),
-			"-g",
-			String(gid),
-			"-m",
-			perm.toString(8),
-			"--",
-			upper
-		]), {
-			path,
-			upper,
-			work
-		};
-	});
-}
-function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
-	if (mode !== "ephemeral") return [];
-	let lines = ["Filesystem mode: ephemeral"];
-	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
-	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
-	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
-	return lines;
-}
-//#endregion
-//#region src/lib/sandbox/host-probes.ts
-const SETPRIV_CANDIDATE_PATHS = [
-	"/usr/bin/setpriv",
-	"/bin/setpriv",
-	"/usr/sbin/setpriv",
-	"/sbin/setpriv"
-];
-function resolveSetprivPath(exists) {
-	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
-}
-function parseNofileLimit(procLimits, nrOpen) {
-	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
-	if (!line) return;
-	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
-	return soft !== void 0 && hard !== void 0 ? {
-		soft,
-		hard
-	} : void 0;
-}
-function shmSizeFromStatfs({ type, bsize, blocks }) {
-	if (type !== 16914836) return;
-	let size = bsize * blocks;
-	return Number.isFinite(size) && size > 0 ? size : void 0;
-}
-function parseCgroupV2Path(procCgroup) {
-	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
-	let path = lines[0].slice(3);
-	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
-}
-function readOptionalFile(path) {
-	try {
-		return (0, node_fs.readFileSync)(path, "utf8");
-	} catch {
-		return;
-	}
-}
-function readNumericFile(path) {
-	let raw = readOptionalFile(path)?.trim();
-	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
-}
-const realHostProbes = {
-	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
-	nofileRlimit: () => {
-		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
-		for (let pid of [process.ppid, "self"]) {
-			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
-			if (parsed) return parsed;
-		}
-	},
-	shmSizeBytes: () => {
-		try {
-			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
-		} catch {
-			return;
-		}
-	},
-	hostname: () => node_os.default.hostname(),
-	varRunRealPath: () => {
-		try {
-			return (0, node_fs.realpathSync)("/var/run");
-		} catch {
-			return;
-		}
-	},
-	realpath: (path) => realPathOf(path),
-	cgroupPath: () => {
-		let procCgroup = readOptionalFile("/proc/self/cgroup");
-		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
-	},
-	kernelBtf: () => {
-		try {
-			return (0, node_fs.statSync)("/sys/kernel/btf/vmlinux").size > 0;
-		} catch {
-			return !1;
-		}
-	}
-};
-function auditUnavailable(reason) {
-	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
-}
-function hostCannotAudit(reason) {
-	let e = auditUnavailable(reason);
-	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
-}
-const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2", NATIVE_ARCH = {
-	x64: "SCMP_ARCH_X86_64",
-	arm64: "SCMP_ARCH_AARCH64"
-};
-function withoutCompatSyscalls(profile, arch = process.arch) {
-	let p = profile, native = NATIVE_ARCH[arch];
-	return !p || !Array.isArray(p.architectures) || !native ? profile : {
-		...p,
-		architectures: p.architectures.filter((a) => a === native)
-	};
-}
-function allowedSyscalls(profile) {
-	let p = profile;
-	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
-}
-function checkFilesystemAuditHost(probes = realHostProbes) {
-	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
-	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
-}
-//#endregion
-//#region src/lib/sandbox/filesystem-audit-paths.ts
-function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
-	return {
-		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		uploadDir,
-		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
-		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
-	};
-}
-function readPid(readFile, pidFilePath) {
-	return Number(readFile(pidFilePath).trim());
-}
-function isTracer(pid, readFile) {
-	try {
-		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
-	} catch {
-		return;
-	}
 }
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
@@ -76029,6 +75989,46 @@ function resolveSandboxGid(primaryGid, env, options = {}) {
 	}
 	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
 	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
+//#endregion
+//#region src/lib/sandbox/env-loader.ts
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
+	"ACTIONS_RUNTIME_URL",
+	"ACTIONS_RUNTIME_TOKEN",
+	"ACTIONS_CACHE_URL",
+	"ACTIONS_RESULTS_URL",
+	"ACTIONS_CACHE_SERVICE_V2",
+	"ACTIONS_CACHE_MODE"
+]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`));
+function isRunnerOnly(key) {
+	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
+}
+function resolveSandboxEnv(env, caTrust, warn, overrides = {}) {
+	let merged = {
+		...env,
+		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
+	}, resolved = {}, skipped = [];
+	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
+	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), {
+		...resolved,
+		...overrides
+	};
+}
+function buildEnvBlob(resolved) {
+	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
+	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
+}
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ENV_LOADER_SOURCE = (0, node_path.join)(__dirname$2, "..", "scripts", "buildcage-init.sh");
+function writeEnvLoader(execDir, source = ENV_LOADER_SOURCE) {
+	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
+	return (0, node_fs.writeFileSync)(loaderPath, (0, node_fs.readFileSync)(source), { mode: 448 }), loaderPath;
+}
+function envLoaderArgs(loaderPath, scriptPath) {
+	return [
+		loaderPath,
+		ENV_BLOB_TERMINATOR,
+		scriptPath
+	];
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-audit-tracer.ts
@@ -77591,7 +77591,7 @@ async function runSandboxStep(env, overrides = {}) {
 		...realDeps,
 		...overrides
 	}, inputs = readStepInputs(env, deps);
-	for (let key of ACTION_INPUT_ENV_KEYS) delete env[key];
+	for (let name of CONFIG_FILE_INPUTS.lists) delete env[`INPUT_${name.toUpperCase()}`];
 	let { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;

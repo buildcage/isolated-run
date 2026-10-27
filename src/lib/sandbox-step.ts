@@ -54,7 +54,6 @@ import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { commandSummaryDroppedMessage, commandSummaryDroppedNote } from "./report.ts";
-import { ACTION_INPUT_ENV_KEYS } from "./sandbox/env-loader.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
 import { checkFilesystemAuditHost } from "./sandbox/filesystem-audit-host.ts";
 import {
@@ -567,8 +566,9 @@ export async function runSandboxStep(
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
   // config_file can push a list input past the 128 KiB one variable may hold,
-  // which fails every exec that inherits it with E2BIG.
-  for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
+  // which fails every exec that inherits it with E2BIG. The other inputs stay
+  // readable, so a later read gets the value rather than an empty default.
+  for (const name of CONFIG_FILE_INPUTS.lists) delete env[`INPUT_${name.toUpperCase()}`];
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
   const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);

@@ -316,23 +316,30 @@ describe("runSandboxStep", () => {
     expect(mocks.runSandboxedCommand.mock.calls[0][0].filesystemAudit).toBeUndefined();
   });
 
-  it("drops this action's inputs from env once every one is read", async () => {
+  it("drops the list inputs from env once every one is read, and keeps the others", async () => {
+    const rules = "* R ./a\n".repeat(20_000);
     const env = {
       ...ENV,
       INPUT_RUN: "echo hello",
-      INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a\n".repeat(20_000),
-      INPUT_DIR: "the workflow's own",
+      INPUT_FAIL_ON_BLOCKED: "false",
+      INPUT_ALLOWED_HTTPS_RULES: "example.com",
+      INPUT_EXPECTED_FILESYSTEM_RULES: rules,
+      INPUT_WRITE_THROUGH: "./out",
     };
     let lastRead: string | undefined;
     mocks.readAwsKeyInputs.mockImplementation((_: unknown, e: NodeJS.ProcessEnv) => {
-      lastRead = e.INPUT_RUN;
+      lastRead = e.INPUT_EXPECTED_FILESYSTEM_RULES;
       return { key: "", roleAccounts: [] };
     });
 
     await runSandboxStep(env, deps);
 
-    expect(lastRead).toBe("echo hello");
-    expect(env).toStrictEqual({ ...ENV, INPUT_DIR: "the workflow's own" });
+    expect(lastRead).toBe(rules);
+    expect(env).toStrictEqual({
+      ...ENV,
+      INPUT_RUN: "echo hello",
+      INPUT_FAIL_ON_BLOCKED: "false",
+    });
   });
 
   it("hands the report the inputs read up front", async () => {
