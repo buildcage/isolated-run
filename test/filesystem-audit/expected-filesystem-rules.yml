@@ -43,4 +43,7 @@ expected_filesystem_rules: |
   /usr/local/bin/node                             R    /sys/fs/cgroup/**
   /usr/local/bin/node                             W    /tmp/node-compile-cache
   /usr/local/bin/node                             WMr  /tmp/node-compile-cache/**
-  /usr/local/bin/node                             R    /usr/**
+  /usr/local/bin/node                             R    /usr/bin/ldd
+  /usr/local/bin/node                             r    /usr/local/etc/npmrc
+  /usr/local/bin/node                             R    /usr/local/lib/node_modules/npm/**
+  /usr/local/bin/node                             R    /usr/share/zoneinfo/Etc/UTC

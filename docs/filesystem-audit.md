@@ -377,7 +377,9 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 
 The baseline shows a new path or a new program. It cannot tell which code inside a program made an
 access: npm and a package's install script both run as `node`, so a rule for `node` takes either.
-Like the audit itself, the rules never block an access.
+Like the audit itself, the rules never block an access. The
+[expected rules example](../.github/workflows/example-filesystem-audit-expected.yml) runs an npm
+install against a baseline.
 
 ### Setting up a baseline
 

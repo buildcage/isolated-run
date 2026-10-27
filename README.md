@@ -140,8 +140,9 @@ A separate
 writes survive a `filesystem_mode: ephemeral` step and which the overlay discards, and the
 [filesystem audit example](.github/workflows/example-filesystem-audit.yml) records what an npm
 install touches, and its
-[expected rules counterpart](.github/workflows/example-filesystem-audit-expected.yml) shows only
-what falls outside a baseline taken from it. The AWS access key check runs against a real AWS account
+[`expected_filesystem_rules` counterpart](.github/workflows/example-filesystem-audit-expected.yml)
+shows only what falls outside a baseline taken from it. The AWS access key check runs against a real
+AWS account
 ([audit](.github/workflows/example-aws-key-check-audit.yml) ·
 [restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and blocking a
 key the step was not given.

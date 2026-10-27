@@ -12,8 +12,8 @@ jobs:
       contents: read
 
     steps:
-      # The same sample and install as the filesystem audit example, so the
-      # recorded paths match the baseline taken from it.
+      # The same sample and install as the filesystem audit example, whose
+      # run the baseline was taken from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: test/filesystem-audit
@@ -35,6 +35,9 @@ jobs:
             GET https://registry.npmjs.org/**
             POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
           filesystem_audit: record
+          # Proposes a rule for each access outside the baseline, to review and
+          # add once it is expected.
+          upload_filesystem_audit_artifact: true
           config_file: test/filesystem-audit/expected-filesystem-rules.yml
           run: |
             npm ci
