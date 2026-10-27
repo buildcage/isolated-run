@@ -52,8 +52,9 @@ export const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report";
 export interface FilesystemAuditReportOptions {
   /** Set only under filesystem_audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
-  /** Whether the tracer attached. Once it has, its recording is there until
-   *  the post step, so one that is gone was removed by something else. */
+  /** Whether the tracer attached. Without it nothing is reported, as a
+   *  recording found then is not trusted. Once it has, its recording is there
+   *  until the post step, so one that is gone was removed by something else. */
   attached: boolean;
   /** A cancelled step cuts the tracer's stop short, so its record may lack the
    *  end line, and the step fails anyway. */
@@ -229,7 +230,6 @@ export function readStepFilesystemAudit(
     blocks: (startedAt, _artifact, stepLabel) =>
       result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE)),
   });
-  // A recording a tracer that never attached left behind is not trusted.
   if (!audit || !attached) return settled(NONE);
   // The stripped copy and the proposed rules go in the step's own directory
   // under the scratch base, which the sandbox cannot reach (unlike
