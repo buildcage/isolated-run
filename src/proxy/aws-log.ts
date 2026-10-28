@@ -19,20 +19,27 @@ export const AWS_BLOCKED_VERDICTS = [
 export type AwsBlockedReason =
   `${typeof AWS_REASON_PREFIX}${(typeof AWS_BLOCKED_VERDICTS)[number]}`;
 
+/** What the check logs of a request. */
+export type AwsLoggedFields = {
+  key?: "env" | "assumed" | "issued" | "none";
+  accountId?: string;
+  assumedAccount?: string;
+  keyRef?: string;
+  issuedKeyRef?: string;
+  roleAccount?: string;
+};
+
 /** What the traffic record says of a request; see
  *  docs/aws.md#in-the-traffic-artifact. */
 export type AwsTrafficFields = {
-  aws: {
-    key?: "env" | "assumed" | "issued" | "none";
-    accountId?: string;
-    assumedAccount?: string;
-    keyRef?: string;
-    issuedKeyRef?: string;
-    roleAccount?: string;
+  aws: AwsLoggedFields & {
+    /** The report's names for the keys of keyRef and issuedKeyRef. */
+    keyName?: string;
+    issuedKeyName?: string;
   };
 };
 
 /** What the check logged for a request. */
-export function awsFieldsOf(e: TrafficEvent): AwsTrafficFields["aws"] {
+export function awsFieldsOf(e: TrafficEvent): AwsLoggedFields {
   return e.extensions?.aws ?? {};
 }

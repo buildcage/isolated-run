@@ -181,12 +181,12 @@ This table follows the allowed hosts and has one row per access key that signed 
 STS or ECR answer issued, so it shows what the check made of each key even in a run where it blocked
 nothing:
 
-| Key   | Check                                         | Source                            | Requests | Hosts                                                                  | keyRef             |
-| ----- | --------------------------------------------- | --------------------------------- | -------: | ---------------------------------------------------------------------- | ------------------ |
-| key 1 | ✅ known                                      | starting key                      |        2 | `sts.us-east-1.amazonaws.com`                                          | `9f2b41c07ad3e815` |
-| key 2 | ✅ known                                      | role in 111111111111 (from key 1) |       14 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `6e30dca31102cb8a` |
-| key 3 | ⚠️ restrict would block (aws-key-not-allowed) | role in 222222222222 (from key 1) |       66 | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` | `0c5d7e9a43b1f260` |
-| key 4 | ⚠️ restrict would block (aws-key-not-allowed) | unknown                           |        3 | `ssm.us-east-1.amazonaws.com`                                          | `d81a6f3c25e09b74` |
+| Key   | Check                                         | Source                            | Hosts                                                                  | Requests |
+| ----- | --------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | -------: |
+| key 1 | ✅ passed                                     | starting key                      | `sts.us-east-1.amazonaws.com`                                          |        2 |
+| key 2 | ✅ passed                                     | role in 111111111111 (from key 1) | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |       14 |
+| key 3 | ⚠️ restrict would block (aws-key-not-allowed) | role in 222222222222 (from key 1) | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |       66 |
+| key 4 | ⚠️ restrict would block (aws-key-not-allowed) | unknown                           | `ssm.us-east-1.amazonaws.com`                                          |        3 |
 
 Keys are numbered `key 1`, `key 2` and so on, in the order they first appear, and every part of the
 report uses the same numbers.
@@ -203,8 +203,8 @@ report uses the same numbers.
   - `ECR layer URL`: one an ECR registry request was answered with.
   - `unknown`: a key from anywhere else, such as a profile;
     [`aws-key-not-allowed`](#aws-key-not-allowed) lists the causes.
-- **Hosts** names up to three of the hosts its requests went to.
-- **keyRef** is the key's `keyRef` in the [traffic artifact](#in-the-traffic-artifact).
+- **Hosts** names the hosts its requests went to: all of them up to three, else the first two and
+  how many more.
 
 **Communication details** ends the line of each request signed with a key in `[aws key N]`, and the
 line of a call whose answer issued a key names that key too. An unsigned call that issued one, such
@@ -607,6 +607,8 @@ and its `reason` or `wouldBlock` says why.
 | `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it through                             | the account of that role, whether or not it is named                                                                                                                         |
 | `keyRef`         | on every request signed with an access key, whether or not the check let it through                           | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
 | `issuedKeyRef`   | on an STS call or an ECR registry redirect that issued a key                                                  | the `keyRef` of the requests signed with that key                                                                                                                            |
+| `keyName`        | with `keyRef`                                                                                                 | the key's name in the report, such as `key 2`                                                                                                                                |
+| `issuedKeyName`  | with `issuedKeyRef`                                                                                           | the issued key's name in the report                                                                                                                                          |
 | `roleAccount`    | on an unsigned `AssumeRoleWithWebIdentity` form naming `Action` and `RoleArn` once each, whatever the verdict | the account of the role in `RoleArn`, whether or not it is named; the call is judged by it unless another reason, such as `aws-unreadable`, blocks it first                  |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
@@ -618,6 +620,11 @@ cannot be turned back into a key ID or matched across runs.
   "action": "allow",
   "host": "cloudformation.us-east-1.amazonaws.com",
   "method": "POST",
-  "aws": { "key": "assumed", "accountId": "111111111111", "keyRef": "6e30dca31102cb8a" }
+  "aws": {
+    "key": "assumed",
+    "accountId": "111111111111",
+    "keyRef": "6e30dca31102cb8a",
+    "keyName": "key 2"
+  }
 }
 ```

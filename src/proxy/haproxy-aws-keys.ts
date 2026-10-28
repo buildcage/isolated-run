@@ -31,7 +31,7 @@ import {
   STS_HOST,
   formName,
 } from "./aws-hosts.ts";
-import { AWS_REASON_PREFIX, AWS_BLOCKED_VERDICTS, type AwsTrafficFields } from "./aws-log.ts";
+import { AWS_REASON_PREFIX, AWS_BLOCKED_VERDICTS, type AwsLoggedFields } from "./aws-log.ts";
 
 /** Where the files the check reads are. */
 export interface AwsKeyCheck {
@@ -81,7 +81,7 @@ export function awsKeyExtension(check: AwsKeyCheck): InspectStageExtension {
         keyRef: "txn.aws_log_key_ref",
         issuedKeyRef: "txn.aws_log_issued_ref",
         roleAccount: "txn.aws_log_role",
-      } satisfies Record<keyof AwsTrafficFields["aws"], string>,
+      } satisfies Record<keyof AwsLoggedFields, string>,
     },
   };
 }

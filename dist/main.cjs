@@ -71630,6 +71630,11 @@ function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
 }
 //#endregion
+//#region src/lib/first-of.ts
+function firstOf(names, shown) {
+	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
+}
+//#endregion
 //#region src/lib/aws-keys.ts
 const KEY_NOT_ALLOWED = "aws-key-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
 function isEcrRegistry(host) {
@@ -71665,8 +71670,7 @@ function awsKeys(timeline) {
 	return keys;
 }
 function keyHostsCell(hosts) {
-	let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).map(codeCell).join(", ");
-	return rest > 0 ? `${shown} and ${rest} more` : shown;
+	return firstOf([...hosts].map(codeCell), 3);
 }
 function awsKeyLineNote(keys) {
 	let name = (keyRef) => keyRef ? keys.get(keyRef)?.name : void 0;
@@ -71675,11 +71679,28 @@ function awsKeyLineNote(keys) {
 		return signer ? issued ? `[aws ${signer} → issued ${issued}]` : `[aws ${signer}]` : issued && `[issued aws ${issued}]`;
 	};
 }
+function withAwsKeyNames(timeline) {
+	let keys = awsKeys(timeline);
+	return timeline.map((e) => {
+		let aws = awsFieldsOf(e), keyName = aws.keyRef && keys.get(aws.keyRef)?.name, issuedKeyName = aws.issuedKeyRef && keys.get(aws.issuedKeyRef)?.name;
+		return !keyName && !issuedKeyName ? e : {
+			...e,
+			extensions: {
+				...e.extensions,
+				aws: {
+					...aws,
+					...keyName && { keyName },
+					...issuedKeyName && { issuedKeyName }
+				}
+			}
+		};
+	});
+}
 function awsKeysTruncationNote(artifactAvailable) {
-	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef" : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact"}._\n`;
+	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run names every request's key" : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
-	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ known" : "not checked";
+	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ passed" : "not checked";
 }
 function sourceCell(key, keys) {
 	if (key.known === "env") return "starting key";
@@ -71704,27 +71725,21 @@ function awsKeysBlocks(keys, fit) {
 			title: "Source"
 		},
 		{
-			key: "count",
-			title: "Requests",
-			align: "right"
-		},
-		{
 			key: "hosts",
 			title: "Hosts",
 			cell: String
 		},
 		{
-			key: "keyRef",
-			title: "keyRef",
-			cell: codeCell
+			key: "count",
+			title: "Requests",
+			align: "right"
 		}
 	], [...keys.values()].map((key) => ({
 		key: key.name,
 		check: checkCell(key),
 		source: sourceCell(key, keys),
-		count: key.count,
 		hosts: keyHostsCell(key.hosts),
-		keyRef: key.keyRef
+		count: key.count
 	})));
 	return [trafficTableBlock("traffic-aws-keys", fit.priority, awsKeysTruncationNote(fit.artifactAvailable), "### 🔑 AWS Keys\n\n", table, "\n")];
 }
@@ -73432,9 +73447,6 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
-function firstOf(names, shown) {
-	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
-}
 function killedNote(rows) {
 	let killed = inRecordingOrder(rows);
 	if (!killed.length) return;
@@ -77288,7 +77300,7 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
-		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
+		writeTrafficFile(file, buildTrafficRecords(withAwsKeyNames(report.timeline), report.startedAt));
 		let name = artifactName("buildcage-traffic", containerName);
 		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
 	} catch (e) {

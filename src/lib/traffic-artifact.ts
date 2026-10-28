@@ -9,6 +9,7 @@ import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/
 
 import type { AwsTrafficFields } from "../proxy/aws-log.ts";
 import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "./artifact-upload.ts";
+import { withAwsKeyNames } from "./aws-keys.ts";
 import type { Report } from "./report.ts";
 import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-dir.ts";
 
@@ -42,7 +43,7 @@ export async function uploadTrafficArtifact(
     const file = join(scratchDir, "traffic.json");
     writeTrafficFile(
       file,
-      buildTrafficRecords<AwsTrafficFields>(report.timeline, report.startedAt),
+      buildTrafficRecords<AwsTrafficFields>(withAwsKeyNames(report.timeline), report.startedAt),
     );
     const name = artifactName("buildcage-traffic", containerName);
     await upload(name, [file], scratchDir, { retentionDays });

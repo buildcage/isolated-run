@@ -83,8 +83,8 @@ assert_summary_contains "(restrict would block: aws-key-not-allowed) [aws key 3 
   "the timeline says restrict would have blocked the request, naming the key it issued"
 assert_summary_contains "[aws key 1 → issued key 2]" \
   "the timeline names the key that signed a call and the key its answer issued"
-assert_summary_contains "| key 1 | ✅ known | starting key | 1 | \`sts.us-east-1.amazonaws.com\` |" \
-  "AWS Keys lists the starting key as one the check knew"
+assert_summary_contains "| key 1 | ✅ passed | starting key | \`sts.us-east-1.amazonaws.com\` | 1 |" \
+  "AWS Keys lists the starting key as one the check passed"
 assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ -> .*\(restrict would block: aws-key-not-allowed\) \[aws key 4\]$" \
   "an AssumeRole answer to a key restrict would block taught no key" \
   "an AssumeRole answer to a key restrict would block taught its key"

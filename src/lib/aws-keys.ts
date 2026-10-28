@@ -9,6 +9,7 @@ import { trafficTableBlock, type PartFit } from "#core/lib/report/render/traffic
 import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { AWS_REASON_PREFIX, awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { firstOf } from "./first-of.ts";
 
 export const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
 const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
@@ -79,14 +80,12 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
   return keys;
 }
 
-/** How many hosts a key's row names before counting the rest. */
+/** How many hosts a key's row names, counting the rest in place of the last. */
 const KEY_HOSTS_SHOWN = 3;
 
-/** A key's hosts as one cell: the first few, then how many more. */
+/** A key's hosts as one cell. */
 export function keyHostsCell(hosts: Set<string>): string {
-  const rest = hosts.size - KEY_HOSTS_SHOWN;
-  const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).map(codeCell).join(", ");
-  return rest > 0 ? `${shown} and ${rest} more` : shown;
+  return firstOf([...hosts].map(codeCell), KEY_HOSTS_SHOWN);
 }
 
 /** The end of each line in Communication details that a key signed or that issued one. */
@@ -101,21 +100,44 @@ export function awsKeyLineNote(keys: Map<string, AwsKey>): LineNote {
   };
 }
 
+/** `timeline` with each signed or issuing request naming its keys as the
+ *  report does, so the traffic artifact can be read beside it. */
+export function withAwsKeyNames(timeline: TrafficEvent[]): TrafficEvent[] {
+  const keys = awsKeys(timeline);
+  return timeline.map((e) => {
+    const aws = awsFieldsOf(e);
+    const keyName = aws.keyRef && keys.get(aws.keyRef)?.name;
+    const issuedKeyName = aws.issuedKeyRef && keys.get(aws.issuedKeyRef)?.name;
+    if (!keyName && !issuedKeyName) return e;
+    return {
+      ...e,
+      extensions: {
+        ...e.extensions,
+        aws: {
+          ...aws,
+          ...(keyName && { keyName }),
+          ...(issuedKeyName && { issuedKeyName }),
+        },
+      },
+    };
+  });
+}
+
 /** Names the summary block of AWS Keys. */
 const AWS_KEYS_ID = "traffic-aws-keys";
 
 /** What the report says where the Job Summary's size limit cut AWS Keys. */
 export function awsKeysTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
-    ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef"
-    : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact";
+    ? "the buildcage-traffic artifact uploaded for this run names every request's key"
+    : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact";
   return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${rest}._\n`;
 }
 
 function checkCell(key: AwsKey): string {
   if (key.blocked) return `🚫 ${key.blocked}`;
   if (key.wouldBlock) return `⚠️ restrict would block (${key.wouldBlock})`;
-  return key.allowed ? "✅ known" : "not checked";
+  return key.allowed ? "✅ passed" : "not checked";
 }
 
 function sourceCell(key: AwsKey, keys: Map<string, AwsKey>): string {
@@ -144,18 +166,16 @@ export function awsKeysBlocks(keys: Map<string, AwsKey>, fit: PartFit): SummaryB
       { key: "key", title: "Key" },
       { key: "check", title: "Check" },
       { key: "source", title: "Source" },
-      { key: "count", title: "Requests", align: "right" },
       // Already a code span per host, as a request chooses its Host header.
       { key: "hosts", title: "Hosts", cell: String },
-      { key: "keyRef", title: "keyRef", cell: codeCell },
+      { key: "count", title: "Requests", align: "right" },
     ],
     [...keys.values()].map((key) => ({
       key: key.name,
       check: checkCell(key),
       source: sourceCell(key, keys),
-      count: key.count,
       hosts: keyHostsCell(key.hosts),
-      keyRef: key.keyRef,
+      count: key.count,
     })),
   );
   return [

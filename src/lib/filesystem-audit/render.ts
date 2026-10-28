@@ -2,6 +2,7 @@ import type { SummaryBlock } from "#core/lib/report/render/fit-step-summary.ts";
 import { codeCell, codeSpan } from "#core/lib/report/render/markdown-table.ts";
 import { reportHeading } from "#core/lib/report/render/traffic-parts.ts";
 
+import { firstOf } from "../first-of.ts";
 import { fmtSpan } from "./agg.ts";
 import type { UploadedArtifact } from "./artifact.ts";
 import { field, markdownRows, pathCell } from "./escape.ts";
@@ -30,13 +31,6 @@ const INCOMPLETE_NOTE =
 const KILLED_COMMS_SHOWN = 3;
 // An Accessed Paths or Unexpected Accesses row names up to this many commands.
 const COMMANDS_SHOWN = 3;
-
-// Every name if there are at most `shown`, else one fewer and how many more
-// there are, so the count never stands for a single name.
-function firstOf(names: string[], shown: number): string {
-  if (names.length <= shown) return names.join(", ");
-  return `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
-}
 
 // Each command killed for a 32-bit syscall, in the order killed.
 function killedNote(rows: KilledRow[]): string | undefined {

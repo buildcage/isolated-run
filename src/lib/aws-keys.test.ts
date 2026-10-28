@@ -9,6 +9,7 @@ import {
   awsKeysBlocks,
   awsKeysTruncationNote,
   keyHostsCell,
+  withAwsKeyNames,
 } from "./aws-keys.ts";
 
 const event = (
@@ -93,25 +94,25 @@ describe("awsKeysBlocks", () => {
         ),
       ]),
     ).toStrictEqual([
-      "| key 1 | ✅ known | starting key | 3 | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `aaaa` |",
-      "| key 2 | ✅ known | role in 111111111111 (from key 1) | 2 | `s3.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | `bbbb` |",
-      "| key 3 | 🚫 aws-key-not-allowed | role in 222222222222 (from a web identity) | 1 | `s3.amazonaws.com` | `cccc` |",
-      "| key 4 | not checked | ECR layer URL (from key 2) | 0 |  | `dddd` |",
-      "| key 5 | ⚠️ restrict would block (aws-key-not-allowed) | unknown | 1 | `s3.amazonaws.com` | `eeee` |",
-      "| key 6 | not checked | STS (from key 1) | 0 |  | `ffff` |",
-      "| key 7 | not checked | unknown | 1 | `s3.amazonaws.com` | `gggg` |",
-      "| key 8 | 🚫 aws-role-not-allowed | unknown | 1 | `s3.amazonaws.com` | `hhhh` |",
-      "| key 9 | ⚠️ restrict would block (aws-ambiguous-credential) | unknown | 1 | `s3.amazonaws.com` | `iiii` |",
-      "| key 10 | not checked | ECR layer URL (from a registry token) | 0 |  | `llll` |",
-      "| key 11 | 🚫 aws-unreadable | starting key | 1 | `s3.amazonaws.com` | `jjjj` |",
-      "| key 12 | ⚠️ restrict would block (aws-unreadable) | unknown | 1 | `s3.amazonaws.com` | `kkkk` |",
+      "| key 1 | ✅ passed | starting key | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 3 |",
+      "| key 2 | ✅ passed | role in 111111111111 (from key 1) | `s3.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 2 |",
+      "| key 3 | 🚫 aws-key-not-allowed | role in 222222222222 (from a web identity) | `s3.amazonaws.com` | 1 |",
+      "| key 4 | not checked | ECR layer URL (from key 2) |  | 0 |",
+      "| key 5 | ⚠️ restrict would block (aws-key-not-allowed) | unknown | `s3.amazonaws.com` | 1 |",
+      "| key 6 | not checked | STS (from key 1) |  | 0 |",
+      "| key 7 | not checked | unknown | `s3.amazonaws.com` | 1 |",
+      "| key 8 | 🚫 aws-role-not-allowed | unknown | `s3.amazonaws.com` | 1 |",
+      "| key 9 | ⚠️ restrict would block (aws-ambiguous-credential) | unknown | `s3.amazonaws.com` | 1 |",
+      "| key 10 | not checked | ECR layer URL (from a registry token) |  | 0 |",
+      "| key 11 | 🚫 aws-unreadable | starting key | `s3.amazonaws.com` | 1 |",
+      "| key 12 | ⚠️ restrict would block (aws-unreadable) | unknown | `s3.amazonaws.com` | 1 |",
     ]);
   });
 
   it("counts every request of a key beside the hosts it names", () => {
-    const hosts = ["a", "b", "c", "d"].map((h) => `${h}.amazonaws.com`);
+    const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
     expect(rows(hosts.map((host) => event(host, { key: "env", keyRef: "aaaa" })))).toStrictEqual([
-      "| key 1 | ✅ known | starting key | 4 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 1 more | `aaaa` |",
+      "| key 1 | ✅ passed | starting key | `a.amazonaws.com`, `b.amazonaws.com` and 3 more | 5 |",
     ]);
   });
 
@@ -127,13 +128,13 @@ describe("awsKeysBlocks", () => {
 });
 
 describe("keyHostsCell", () => {
-  it("names three hosts and counts the rest", () => {
+  it("names up to three hosts, else two and counts the rest", () => {
     const hosts = (...names: string[]) =>
       keyHostsCell(new Set(names.map((h) => `${h}.amazonaws.com`)));
     expect(hosts("a", "b", "c")).toBe("`a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com`");
-    expect(hosts("a", "b", "c", "d", "e")).toBe(
-      "`a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more",
-    );
+    expect(hosts("a", "b")).toBe("`a.amazonaws.com`, `b.amazonaws.com`");
+    expect(hosts("a", "b", "c", "d")).toBe("`a.amazonaws.com`, `b.amazonaws.com` and 2 more");
+    expect(hosts("a", "b", "c", "d", "e")).toBe("`a.amazonaws.com`, `b.amazonaws.com` and 3 more");
     expect(hosts()).toBe("");
   });
 
@@ -141,6 +142,33 @@ describe("keyHostsCell", () => {
     expect(
       keyHostsCell(new Set(["b&ZeroWidthSpace;.amazonaws.com", "~~c|d~~.amazonaws.com"])),
     ).toBe("`b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com`");
+  });
+});
+
+describe("withAwsKeyNames", () => {
+  it("names the key that signed a request and the key its answer issued", () => {
+    const unsigned = event("example.com", {}, { extensions: undefined });
+    const timeline = [
+      event("sts.amazonaws.com", { key: "env", keyRef: "aaaa", issuedKeyRef: "bbbb" }),
+      event("s3.amazonaws.com", { key: "assumed", keyRef: "bbbb" }),
+      event("1.dkr.ecr.us-east-1.amazonaws.com", { issuedKeyRef: "cccc" }),
+      unsigned,
+    ];
+    const named = withAwsKeyNames(timeline);
+    expect(named.map((e) => e.extensions?.aws)).toStrictEqual([
+      {
+        key: "env",
+        keyRef: "aaaa",
+        issuedKeyRef: "bbbb",
+        keyName: "key 1",
+        issuedKeyName: "key 2",
+      },
+      { key: "assumed", keyRef: "bbbb", keyName: "key 2" },
+      { issuedKeyRef: "cccc", issuedKeyName: "key 3" },
+      undefined,
+    ]);
+    expect(named[3]).toBe(unsigned);
+    expect(timeline[0].extensions?.aws).not.toHaveProperty("keyName");
   });
 });
 
