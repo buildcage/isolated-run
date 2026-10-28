@@ -40,6 +40,6 @@ export type AwsTrafficFields = {
 };
 
 /** What the check logged for a request. */
-export function awsFieldsOf(e: TrafficEvent): AwsTrafficFields["aws"] {
+export function awsFieldsOf(e: TrafficEvent): AwsLoggedFields {
   return e.extensions?.aws ?? {};
 }

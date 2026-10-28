@@ -11,9 +11,8 @@ if (!ROLE_ACCOUNT || !SWITCHED_ACCOUNT) {
   console.log("::error::ROLE_ACCOUNT and SWITCHED_ACCOUNT must be set");
   process.exit(1);
 }
-const rows = JSON.parse(readFileSync(process.argv[2], "utf8")).filter(
-  (r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST",
-);
+const records = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const rows = records.filter((r) => r.host === "sts.us-east-1.amazonaws.com" && r.method === "POST");
 
 console.log("\n=== Traffic Artifact Assertions (AWS access key check) ===\n");
 
@@ -55,6 +54,26 @@ const known = new Set(allowed.map((r) => r.aws?.keyRef).filter(Boolean));
 check(
   blocked.every((r) => r.aws?.keyRef && !known.has(r.aws.keyRef)),
   "Each blocked call carries a keyRef, none of a key the check let through",
+);
+
+// The report's key names, one per keyRef across every host.
+const names = new Map();
+const nameFor = (ref, name) => {
+  if (!names.has(ref)) names.set(ref, name);
+  return Boolean(name) && names.get(ref) === name;
+};
+const named = records.filter((r) => r.aws?.keyRef || r.aws?.issuedKeyRef);
+check(
+  named.every(
+    (r) =>
+      (!r.aws.keyRef || nameFor(r.aws.keyRef, r.aws.keyName)) &&
+      (!r.aws.issuedKeyRef || nameFor(r.aws.issuedKeyRef, r.aws.issuedKeyName)),
+  ),
+  "Every keyRef and issuedKeyRef comes with the one name the report gives its key",
+);
+check(
+  names.size > 0 && new Set(names.values()).size === names.size,
+  "Each key has a name of its own",
 );
 
 assertResults(() => console.log(JSON.stringify(rows, null, 2)));
