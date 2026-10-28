@@ -80,7 +80,7 @@ describe("readStepFilesystemAudit", () => {
         "Once `expected_filesystem_rules` lists the file accesses this step is expected to make, " +
         "the summary shows only the accesses outside them.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
-        "(`buildcage-filesystem-audit-deadbeef`) has a rule for every access this run made, as a starting point. " +
+        "(`buildcage-filesystem-audit-deadbeef`) has a rule for each access. " +
         "Review the rules, replace the parts of paths that change between runs with `**`, and add them to " +
         "`expected_filesystem_rules`, under `with:` or in the step's config file if it has one. " +
         "To keep a long list out of the workflow, move it to a config file and name that file in `config_file:` under `with:`:\n\n" +

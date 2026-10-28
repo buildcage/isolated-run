@@ -378,15 +378,12 @@ export function rulesNote(
   const intro = given
     ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.`
     : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`;
-  const holds = (run: string): string =>
-    given
-      ? "a rule for each access no rule matches"
-      : `a rule for every access ${run} run made, as a starting point`;
+  const holds = given ? "a rule for each access no rule matches" : "a rule for each access";
   let where: string;
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
   if (proposal === "not-requested") {
-    where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${holds("that")}.`;
+    where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${holds}.`;
     steps = true;
   } else if (proposal === "lost")
     where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
@@ -396,7 +393,7 @@ export function rulesNote(
   else if (proposal === "not-prepared")
     where = "No rules were proposed, as the artifact could not be prepared.";
   else {
-    where = `${file} in this run's ${artifactLink(proposal)} has ${holds("this")}.`;
+    where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
     steps = true;
   }
   return (
