@@ -345,9 +345,7 @@ describe("readStepFilesystemAudit", () => {
     expect(uploads).toEqual([]);
     // Nor are rules gathered for a file that cannot be written.
     expect(proposing).toEqual([false]);
-    expect(summaries[0]).toContain(
-      "No rules were proposed, as the artifact could not be prepared.",
-    );
+    expect(summaries[0]).toContain("The proposed rules could not be saved.");
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {

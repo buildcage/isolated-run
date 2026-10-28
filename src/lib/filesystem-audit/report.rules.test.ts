@@ -354,7 +354,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       "Failed to write the proposed expected_filesystem_rules: EEXIST",
     );
     expect(uploads).toStrictEqual([[CLEAN]]);
-    expect(summaries[0]).toContain("The proposed rules could not be written.");
+    expect(summaries[0]).toContain("The proposed rules could not be saved.");
   });
 
   it("proposes no rules for a recording with no file access", async () => {
@@ -408,8 +408,8 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(ruleFiles).toStrictEqual([]);
     expect(summaries[0]).toContain("### ⚠️ Unexpected Accesses (1)");
     expect(summaries[0]).toContain(
-      "Set `upload_filesystem_audit_artifact: true`, and the next run's filesystem audit artifact has " +
-        "`expected-filesystem-rules-to-add.txt`, with a rule for each access no rule matches.",
+      "Set `upload_filesystem_audit_artifact: true` to get `expected-filesystem-rules-to-add.txt` " +
+        "in the next run's filesystem audit artifact.",
     );
   });
 
@@ -419,8 +419,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(summaries[0]).toContain(
-      "This run's `expected-filesystem-rules-to-add.txt` was lost, as the artifact could not be uploaded.\n\n" +
-        "[How to write the rules]",
+      "The proposed rules could not be saved.\n\n" + "[How to write the rules]",
     );
   });
 });

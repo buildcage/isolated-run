@@ -459,7 +459,8 @@ A run where no recorded access fell outside the rules proposes no file, and its 
 the **Expected filesystem rules** element. This includes a recording that misses accesses, which the
 summary's opening note reports: accesses not recorded leave nothing to propose. No file is proposed
 either when the accesses touched too many distinct paths, when the file could not be written, or
-when the artifact could not be prepared or uploaded; the element then says which.
+when the artifact could not be prepared or uploaded. The element then says so, and for each failure a
+warning gives the cause.
 
 The traffic report's **Switch to restrict mode** example stands for the whole step, with no
 `config_file`: the settings the step took from a config file are written under `with:`, so remove
