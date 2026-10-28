@@ -79,9 +79,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(md).not.toContain("File access details");
     expect(md).toContain(
       "`expected_filesystem_rules` lists the file accesses this step is expected to make, " +
-        "and this section shows only the ones outside them.\n\n" +
+        "and Unexpected Accesses above shows only the accesses no rule matches.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
-        "(`buildcage-filesystem-audit-deadbeef`) holds a rule for each access the rules did not take.",
+        "(`buildcage-filesystem-audit-deadbeef`) has a rule for each of them.",
     );
     expect(md).toContain(
       "[How to write the rules](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#expected-accesses)",
@@ -133,8 +133,10 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
       "### ⚠️ Unexpected Accesses (2)\n\n<sub>`expected_filesystem_rules` is empty, so every access is unexpected.</sub>",
     );
     // The note speaks of no rules the step does not have.
-    expect(md).toContain("List the file accesses this step is expected to make");
-    expect(md).toContain("holds a rule for each access this run made.");
+    expect(md).toContain("Once `expected_filesystem_rules` lists the file accesses");
+    expect(md).toContain(
+      "has a rule for every access this run made, ready to start that list from.",
+    );
     expect(ruleFiles.map((f) => f.content)).toStrictEqual([
       [...RULES_TO_ADD_HEADER, "node  R  ./a", "node  W  ./b", ""].join("\n"),
     ]);
@@ -389,7 +391,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(summaries[0]).toContain(
       "`expected-filesystem-rules-to-add.txt` in this run's " +
         "[filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) " +
-        "holds a rule for each access this run made.",
+        "has a rule for every access this run made, ready to start that list from.",
     );
     expect(summaries[0]).toContain(
       "the full record is in the [filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) · ",
@@ -408,8 +410,8 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(ruleFiles).toStrictEqual([]);
     expect(summaries[0]).toContain("### ⚠️ Unexpected Accesses (1)");
     expect(summaries[0]).toContain(
-      "Set `upload_filesystem_audit_artifact: true` to get `expected-filesystem-rules-to-add.txt`, " +
-        "with a rule for each access the rules did not take.",
+      "Set `upload_filesystem_audit_artifact: true`, and the next run's filesystem audit artifact has " +
+        "`expected-filesystem-rules-to-add.txt`, with a rule for each access no rule matches.",
     );
   });
 

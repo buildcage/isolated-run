@@ -393,7 +393,7 @@ install against a baseline.
    accessed paths are, and the **Expected filesystem rules** element of the summary links to it:
 
    ```text
-   # Rules for the file accesses no expected_filesystem_rules took in this run.
+   # Rules for the file accesses no expected_filesystem_rules matched in this run.
    # Review them, then add them to expected_filesystem_rules, under with: or in a config_file.
    /usr/local/bin/node  RWD  ./node_modules/**
    /usr/local/bin/node  R    ~/.npmrc
@@ -424,7 +424,7 @@ install against a baseline.
    ```yaml
    # path/to/buildcage.yml
    filesystem_audit: record
-   # Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.
+   # Needed for the proposed rules; also uploads the full record.
    upload_filesystem_audit_artifact: true
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
