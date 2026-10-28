@@ -369,8 +369,8 @@ export function rulesNote(
   }: {
     fileName: string;
     guideUrl: string;
-    /** Whether expected_filesystem_rules were given, not only the empty
-     *  rules of fail_on_unexpected_file_access. */
+    /** Whether expected_filesystem_rules were given: false for the empty
+     *  rules fail_on_unexpected_file_access checks against. */
     hasRules: boolean;
   },
 ): string | undefined {

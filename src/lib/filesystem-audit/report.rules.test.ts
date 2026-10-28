@@ -419,7 +419,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await reportStepFilesystemAudit({ ...base, annotation: annotation() }, { ...d, summaries });
 
     expect(summaries[0]).toContain(
-      "The proposed rules could not be saved.\n\n" + "[How to write the rules]",
+      "The proposed rules could not be saved.\n\n[How to write the rules]",
     );
   });
 });

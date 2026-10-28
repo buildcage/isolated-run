@@ -73870,7 +73870,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
 	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
-	let given = rules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === void 0) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
+	let given = rules !== void 0, hasRules = givenRules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
@@ -73894,11 +73894,11 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					cutNote,
 					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
 					skippedHooksUrl: `${guide}#skipped-hooks`,
-					...given && { expected: givenRules ? "given" : "empty" },
+					...given && { expected: hasRules ? "given" : "empty" },
 					rulesNote: rulesNote(proposalOf(proposed, artifact), {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						hasRules: givenRules !== void 0
+						hasRules
 					})
 				});
 			} catch (e) {
