@@ -73588,14 +73588,14 @@ const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url
 function proposalOf(state, artifact) {
 	return state === "written" ? typeof artifact == "object" ? artifact : "lost" : state;
 }
-function rulesNote(proposal, { fileName, guideUrl, given }) {
+function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
 	if (proposal === "nothing-to-add") return;
-	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`, where, steps = !1;
+	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`, where, steps = !1;
 	if (proposal === "not-requested") where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
 	else if (proposal === "too-many-paths") where = "No rules were proposed: the accesses touched too many distinct paths.";
 	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";
 	else {
-		let holds = given ? "a rule for each access no rule matches" : "a rule for each access";
+		let holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
 		where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
 	}
 	return `<details>
@@ -73898,7 +73898,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					rulesNote: rulesNote(proposalOf(proposed, artifact), {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						given: givenRules !== void 0
+						hasRules: givenRules !== void 0
 					})
 				});
 			} catch (e) {

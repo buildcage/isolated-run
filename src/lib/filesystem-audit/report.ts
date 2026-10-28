@@ -367,7 +367,7 @@ export function readStepFilesystemAudit(
           rulesNote: rulesNote(proposalOf(proposed, artifact), {
             fileName: basename(audit.rulesPath),
             guideUrl: `${guide}#expected-accesses`,
-            given: givenRules !== undefined,
+            hasRules: givenRules !== undefined,
           }),
         });
       } catch (e) {
