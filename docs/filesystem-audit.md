@@ -393,7 +393,7 @@ install against a baseline.
    accessed paths are, and the **Expected filesystem rules** element of the summary links to it:
 
    ```text
-   # Rules for the file accesses no expected_filesystem_rules took in this run.
+   # Rules for the file accesses no expected_filesystem_rules matched in this run.
    # Review them, then add them to expected_filesystem_rules, under with: or in a config_file.
    /usr/local/bin/node  RWD  ./node_modules/**
    /usr/local/bin/node  R    ~/.npmrc
@@ -424,7 +424,7 @@ install against a baseline.
    ```yaml
    # path/to/buildcage.yml
    filesystem_audit: record
-   # Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.
+   # Needed for the proposed rules; also uploads the full record.
    upload_filesystem_audit_artifact: true
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
@@ -445,21 +445,22 @@ install against a baseline.
 ### Keeping it up to date
 
 A run with rules and `upload_filesystem_audit_artifact: true` proposes a file only when a recorded
-access fell outside them. It holds a rule for each access the rules did not take, whether they are
+access fell outside them. It holds a rule for each access no rule matched, whether the rules are
 set under `with:` or in a config file, so it never repeats a rule you have. Review those rules: add
 the ones a change you know of explains, such as a dependency update, where the step keeps its
 rules, and look into the rest. Under `fail_on_unexpected_file_access`, a run that fails on an access
-the rules should have taken still proposes the file, so the rules can be fixed from it.
+the rules should have matched still proposes the file, so the rules can be fixed from it.
 
-Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
-your own rules already take. A proposed `dir/**` may cover one of your narrower rules; adding it
+Only the accesses no rule matched count toward a fold, so no `dir/**` row comes of paths
+your own rules already match. A proposed `dir/**` may cover one of your narrower rules; adding it
 leaves both, and you decide which to keep.
 
 A run where no recorded access fell outside the rules proposes no file, and its summary leaves out
 the **Expected filesystem rules** element. This includes a recording that misses accesses, which the
 summary's opening note reports: accesses not recorded leave nothing to propose. No file is proposed
 either when the accesses touched too many distinct paths, when the file could not be written, or
-when the artifact could not be prepared or uploaded; the element then says which.
+when the artifact could not be prepared or uploaded. The element then says so, and for each failure a
+warning gives the cause.
 
 The traffic report's **Switch to restrict mode** example stands for the whole step, with no
 `config_file`: the settings the step took from a config file are written under `with:`, so remove

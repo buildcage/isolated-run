@@ -365,37 +365,34 @@ export function rulesNote(
   {
     fileName,
     guideUrl,
-    given,
+    hasRules,
   }: {
     fileName: string;
     guideUrl: string;
-    /** Whether expected_filesystem_rules were given. */
-    given: boolean;
+    /** Whether expected_filesystem_rules were given: false for the empty
+     *  rules fail_on_unexpected_file_access checks against. */
+    hasRules: boolean;
   },
 ): string | undefined {
   if (proposal === "nothing-to-add") return undefined;
   const file = `\`${fileName}\``;
-  const intro = given
-    ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.`
-    : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`;
-  const holds = given
-    ? "a rule for each access the rules did not take"
-    : "a rule for each access this run made";
+  const intro = hasRules
+    ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.`
+    : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`;
   let where: string;
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
   if (proposal === "not-requested") {
-    where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`;
+    where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`;
     steps = true;
-  } else if (proposal === "lost")
-    where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
-  else if (proposal === "too-many-paths")
+  } else if (proposal === "too-many-paths")
     where = "No rules were proposed: the accesses touched too many distinct paths.";
-  else if (proposal === "write-failed") where = "The proposed rules could not be written.";
-  else if (proposal === "not-prepared")
-    where = "No rules were proposed, as the artifact could not be prepared.";
+  // Each failure's cause is in its own warning.
+  else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared")
+    where = "The proposed rules could not be saved.";
   else {
-    where = `${file} in this run's ${artifactLink(proposal)} holds ${holds}.`;
+    const holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
+    where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
     steps = true;
   }
   return (
@@ -411,8 +408,7 @@ export function rulesNote(
 // workflow, or with many rules, in a config file.
 function useSteps(where: string): string {
   return (
-    `${where} Review the rules, using \`**\` for the paths that change between runs, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the config file the step uses. With many rules, a config file keeps them out of the workflow; name it in \`config_file\`:\n\n` +
-    `\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n` +
+    `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
     "```yaml\n" +
     `# ${CONFIG_FILE_EXAMPLE}\n` +
     "filesystem_audit: record\n" +

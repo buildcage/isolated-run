@@ -72606,7 +72606,7 @@ function markdownRows(header, rows) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", CONFIG_FILE_EXAMPLE = "path/to/buildcage.yml", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -72758,7 +72758,7 @@ var RuleMatcher = class {
 };
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} took in this run.`, `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`];
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`, `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`];
 function rulesToAdd(proposed) {
 	let rows = proposed.map((r) => [
 		ruleField(r.program.path),
@@ -73588,19 +73588,26 @@ const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url
 function proposalOf(state, artifact) {
 	return state === "written" ? typeof artifact == "object" ? artifact : "lost" : state;
 }
-function rulesNote(proposal, { fileName, guideUrl, given }) {
+function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
 	if (proposal === "nothing-to-add") return;
-	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and this section shows only the ones outside them.` : `List the file accesses this step is expected to make in \`${EXPECTED_RULES_INPUT}\`, and this section then shows only the ones outside them.`, holds = given ? "a rule for each access the rules did not take" : "a rule for each access this run made", where, steps = !1;
-	return proposal === "not-requested" ? (where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file}, with ${holds}.`, steps = !0) : proposal === "lost" ? where = `This run's ${file} was lost, as the artifact could not be uploaded.` : proposal === "too-many-paths" ? where = "No rules were proposed: the accesses touched too many distinct paths." : proposal === "write-failed" ? where = "The proposed rules could not be written." : proposal === "not-prepared" ? where = "No rules were proposed, as the artifact could not be prepared." : (where = `${file} in this run's ${artifactLink(proposal)} holds ${holds}.`, steps = !0), `<details>
+	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`, where, steps = !1;
+	if (proposal === "not-requested") where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
+	else if (proposal === "too-many-paths") where = "No rules were proposed: the accesses touched too many distinct paths.";
+	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";
+	else {
+		let holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
+		where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
+	}
+	return `<details>
 <summary>📝 Expected filesystem rules</summary>
 
 ${intro}\n\n` + (steps ? useSteps(where) : `${where}\n\n`) + `[How to write the rules](${guideUrl})\n\n</details>
 `;
 }
 function useSteps(where) {
-	return `${where} Review the rules, using \`**\` for the paths that change between runs, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the config file the step uses. With many rules, a config file keeps them out of the workflow; name it in \`config_file\`:\n\n\`\`\`yaml\nconfig_file: ${CONFIG_FILE_EXAMPLE}\n\`\`\`\n\n\`\`\`yaml
-# ${CONFIG_FILE_EXAMPLE}\nfilesystem_audit: record
-# Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.\nupload_filesystem_audit_artifact: true
+	return `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
+# path/to/buildcage.yml\nfilesystem_audit: record
+# Needed for the proposed rules; also uploads the full record.\nupload_filesystem_audit_artifact: true
 ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
   /usr/local/bin/node  R    ~/.npmrc
 \`\`\`
@@ -73863,7 +73870,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 	if (!reduced) return annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete);
 	let { summary, summaryError, ended, written } = reduced, incomplete = {};
 	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
-	let given = rules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === void 0) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
+	let given = rules !== void 0, hasRules = givenRules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
 	return {
 		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
 		verdictItems,
@@ -73887,11 +73894,11 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					cutNote,
 					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
 					skippedHooksUrl: `${guide}#skipped-hooks`,
-					...given && { expected: givenRules ? "given" : "empty" },
+					...given && { expected: hasRules ? "given" : "empty" },
 					rulesNote: rulesNote(proposalOf(proposed, artifact), {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						given: givenRules !== void 0
+						hasRules
 					})
 				});
 			} catch (e) {

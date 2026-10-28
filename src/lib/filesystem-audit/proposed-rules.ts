@@ -31,12 +31,11 @@ const ruleField = (text: string): string => {
 
 /** Over the upload key, as the artifact holds every path the step touched and a
  *  config committed as is should say what keeps it coming. */
-export const UPLOAD_NOTE =
-  "# Uploads the full record each run, and proposed rules when an access falls outside the rules; keep this key while you want them.";
+export const UPLOAD_NOTE = "# Needed for the proposed rules; also uploads the full record.";
 
 /** The proposed file's first lines: what it holds and what to do with it. */
 export const RULES_TO_ADD_HEADER = [
-  `# Rules for the file accesses no ${EXPECTED_RULES_INPUT} took in this run.`,
+  `# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
   `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`,
 ];
 

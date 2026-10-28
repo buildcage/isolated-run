@@ -77,14 +77,13 @@ describe("readStepFilesystemAudit", () => {
     // The proposed rules' note follows the details.
     expect(summaries[0]).toContain(
       "```\n\n</details>\n\n<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
-        "List the file accesses this step is expected to make in `expected_filesystem_rules`, " +
-        "and this section then shows only the ones outside them.\n\n" +
+        "Once `expected_filesystem_rules` lists the file accesses this step is expected to make, " +
+        "the summary shows only the accesses no rule matches.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
-        "(`buildcage-filesystem-audit-deadbeef`) holds a rule for each access this run made. " +
-        "Review the rules, using `**` for the paths that change between runs, and add them to " +
-        "`expected_filesystem_rules`, under `with:` or in the config file the step uses. " +
-        "With many rules, a config file keeps them out of the workflow; name it in `config_file`:\n\n" +
-        "```yaml\nconfig_file: path/to/buildcage.yml\n```\n\n" +
+        "(`buildcage-filesystem-audit-deadbeef`) has a rule for each access. " +
+        "Review the rules, replace the parts of paths that change between runs with `**`, and add them to " +
+        "`expected_filesystem_rules`, under `with:` or in the step's config file if it has one. " +
+        "To keep a long list out of the workflow, move it to a config file and name that file in `config_file:` under `with:`:\n\n" +
         `\`\`\`yaml\n# path/to/buildcage.yml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n`,
     );
     // Below them, not under the heading.
@@ -346,9 +345,7 @@ describe("readStepFilesystemAudit", () => {
     expect(uploads).toEqual([]);
     // Nor are rules gathered for a file that cannot be written.
     expect(proposing).toEqual([false]);
-    expect(summaries[0]).toContain(
-      "No rules were proposed, as the artifact could not be prepared.",
-    );
+    expect(summaries[0]).toContain("The proposed rules could not be saved.");
   });
 
   it("warns and uploads nothing when the stripped copy cannot be written", async () => {

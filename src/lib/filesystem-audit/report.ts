@@ -304,6 +304,7 @@ export function readStepFilesystemAudit(
     incomplete = checkIncomplete;
   }
   const given = rules !== undefined;
+  const hasRules = givenRules !== undefined;
   // Nothing to add where no file access was recorded, or none fell outside
   // the rules, even where the recording misses some: what it lacks cannot be
   // proposed.
@@ -317,7 +318,7 @@ export function readStepFilesystemAudit(
         ? "not-prepared"
         : writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile);
   const unexpected = given
-    ? reportUnexpected(summary, failOnUnexpected, annotation, givenRules === undefined)
+    ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules)
     : {};
   // An incomplete check exists only under fail_on_unexpected_file_access, so
   // the unexpected accesses are a caution then too.
@@ -363,11 +364,11 @@ export function readStepFilesystemAudit(
           cutNote,
           legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
           skippedHooksUrl: `${guide}#skipped-hooks`,
-          ...(given && { expected: givenRules ? "given" : "empty" }),
+          ...(given && { expected: hasRules ? "given" : "empty" }),
           rulesNote: rulesNote(proposalOf(proposed, artifact), {
             fileName: basename(audit.rulesPath),
             guideUrl: `${guide}#expected-accesses`,
-            given: givenRules !== undefined,
+            hasRules,
           }),
         });
       } catch (e) {
