@@ -157,7 +157,7 @@ func TestRecorderGivesEachLineItsProcesssProgram(t *testing.T) {
 		event{kind: filesystemAuditKindK_OPEN, pid: 10, comm: "sh", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")},
 		event{kind: filesystemAuditKindK_EXEC, pid: 10, comm: "cat", data: []byte("/usr/bin/cat\x00")},
 		event{kind: filesystemAuditKindK_OPEN, pid: 10, comm: "npm ls", flags: unix.O_RDONLY, data: []byte("/etc/hosts\x00")},
-		// An open that failed before reaching a file, written from its result.
+		// An open that failed before reaching a file, written at its result.
 		event{kind: filesystemAuditKindK_OPEN_NAME, pid: 10, comm: "cat", tid: 10, data: []byte("/missing\x00")},
 		event{kind: filesystemAuditKindK_RESULT, pid: 10, comm: "cat", tid: 10, nr: nrOpenat, n1: resultOpen, pathRet: -int32(unix.ENOENT)},
 		// A fork of a process that ran nothing since the recording started.
