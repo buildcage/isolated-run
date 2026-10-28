@@ -16,7 +16,7 @@ jobs:
       # the Job Summary's "Switch to restrict mode" section lists them as
       # allowed_url_rules.
       - name: Discover required URLs with isolated-run
-        uses: buildcage/isolated-run@7231a9514976bc228a07871b58a87aa99af442a1 # v2.4.1
+        uses: buildcage/isolated-run@f0edb924acd05806564c09691f4e118cf91fa46b # v2.4.2-rc1
         with:
           proxy_mode: audit
           proxy_engine: inspect
