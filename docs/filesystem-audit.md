@@ -408,7 +408,7 @@ install against a baseline.
 
    ```text
    bash                                    X  /opt/hostedtoolcache/node/*/*/bin/node
-   /opt/hostedtoolcache/node/*/*/bin/node  R  ./.git/**
+   /opt/hostedtoolcache/node/*/*/bin/node  R  ./package.json
    ```
 
    These match any Node version, on x64 and arm64 alike. A broad rule such as `~/**` also matches
