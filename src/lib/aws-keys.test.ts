@@ -93,8 +93,8 @@ describe("awsKeysBlocks", () => {
         ),
       ]),
     ).toStrictEqual([
-      "| key 1 | ✅ known | starting key | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 3 |",
-      "| key 2 | ✅ known | role in 111111111111 (from key 1) | `s3.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 2 |",
+      "| key 1 | ✅ passed | starting key | `sts.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 3 |",
+      "| key 2 | ✅ passed | role in 111111111111 (from key 1) | `s3.amazonaws.com`, `1.dkr.ecr.us-east-1.amazonaws.com` | 2 |",
       "| key 3 | 🚫 aws-key-not-allowed | role in 222222222222 (from a web identity) | `s3.amazonaws.com` | 1 |",
       "| key 4 | not checked | ECR layer URL (from key 2) |  | 0 |",
       "| key 5 | ⚠️ restrict would block (aws-key-not-allowed) | unknown | `s3.amazonaws.com` | 1 |",
@@ -111,7 +111,7 @@ describe("awsKeysBlocks", () => {
   it("counts every request of a key beside the hosts it names", () => {
     const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
     expect(rows(hosts.map((host) => event(host, { key: "env", keyRef: "aaaa" })))).toStrictEqual([
-      "| key 1 | ✅ known | starting key | `a.amazonaws.com`, `b.amazonaws.com` and 3 more | 5 |",
+      "| key 1 | ✅ passed | starting key | `a.amazonaws.com`, `b.amazonaws.com` and 3 more | 5 |",
     ]);
   });
 

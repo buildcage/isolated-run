@@ -117,7 +117,7 @@ export function awsKeysTruncationNote(artifactAvailable: boolean): string {
 function checkCell(key: AwsKey): string {
   if (key.blocked) return `🚫 ${key.blocked}`;
   if (key.wouldBlock) return `⚠️ restrict would block (${key.wouldBlock})`;
-  return key.allowed ? "✅ known" : "not checked";
+  return key.allowed ? "✅ passed" : "not checked";
 }
 
 function sourceCell(key: AwsKey, keys: Map<string, AwsKey>): string {

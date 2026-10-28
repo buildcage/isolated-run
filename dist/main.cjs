@@ -71679,7 +71679,7 @@ function awsKeysTruncationNote(artifactAvailable) {
 	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef" : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
-	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ known" : "not checked";
+	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ passed" : "not checked";
 }
 function sourceCell(key, keys) {
 	if (key.known === "env") return "starting key";

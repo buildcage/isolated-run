@@ -183,8 +183,8 @@ nothing:
 
 | Key   | Check                                         | Source                            | Hosts                                                                  | Requests |
 | ----- | --------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | -------: |
-| key 1 | ✅ known                                      | starting key                      | `sts.us-east-1.amazonaws.com`                                          |        2 |
-| key 2 | ✅ known                                      | role in 111111111111 (from key 1) | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |       14 |
+| key 1 | ✅ passed                                     | starting key                      | `sts.us-east-1.amazonaws.com`                                          |        2 |
+| key 2 | ✅ passed                                     | role in 111111111111 (from key 1) | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |       14 |
 | key 3 | ⚠️ restrict would block (aws-key-not-allowed) | role in 222222222222 (from key 1) | `cloudformation.us-east-1.amazonaws.com`, `s3.us-east-1.amazonaws.com` |       66 |
 | key 4 | ⚠️ restrict would block (aws-key-not-allowed) | unknown                           | `ssm.us-east-1.amazonaws.com`                                          |        3 |
 

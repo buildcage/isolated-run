@@ -407,7 +407,7 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("names three hosts of each key and counts the rest", () => {
+    it("names up to three hosts of each key, else two and counts the rest", () => {
       const hosts = ["a", "b", "c", "d", "e"].map((h) => `${h}.amazonaws.com`);
       const markdown = markdownOf(
         audit([
@@ -418,7 +418,7 @@ describe("computeReportOutcomes", () => {
       );
       expect(tables(markdown)).toStrictEqual([
         [
-          "| key 1 | `a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com` and 2 more | 5 |",
+          "| key 1 | `a.amazonaws.com`, `b.amazonaws.com` and 3 more | 5 |",
           "| key 2 | `a.amazonaws.com` | 1 |",
         ],
       ]);
@@ -459,7 +459,7 @@ describe("computeReportOutcomes", () => {
     expect(at("### 🔑 AWS Keys")).toBeGreaterThan(at("### ✅ Allowed Hosts"));
     expect(at("🚫 Known Blocked Hosts")).toBeGreaterThan(at("### 🔑 AWS Keys"));
     expect(markdown).toContain(
-      "| key 1 | ✅ known | starting key | 1 | `s3.amazonaws.com` | `aaaa1111` |\n\n<details>",
+      "| key 1 | ✅ passed | starting key | `s3.amazonaws.com` | 1 |\n\n<details>",
     );
   });
 
