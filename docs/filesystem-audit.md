@@ -403,7 +403,7 @@ install against a baseline.
 2. Review the rules. A path that changes from run to run, such as a temporary file with a random
    name, or a directory where a run touched two files and the next will touch a third, needs `*` or
    `**` to match the next run too. So does a program under a versioned directory, such as Node in
-   the tool cache, `/opt/hostedtoolcache` on GitHub-hosted runners. Widen both the rule that runs it
+   the tool cache (`/opt/hostedtoolcache` on GitHub-hosted runners). Widen both the rule that runs it
    and the rules for what it accesses:
 
    ```text
@@ -411,7 +411,7 @@ install against a baseline.
    /opt/hostedtoolcache/node/*/*/bin/node  R  ./package.json
    ```
 
-   These match any Node version, on x64 and arm64 alike. A broad rule such as `~/**` also matches
+   These match any Node version on x64 or arm64. A broad rule such as `~/**` also matches
    what is worth seeing, such as `~/.ssh`, so widen no further than needed.
 
 3. Add the rule lines to `expected_filesystem_rules`, without the file's two comment lines:
