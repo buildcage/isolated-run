@@ -402,8 +402,10 @@ install against a baseline.
 
 2. Review the rules. A path that changes from run to run, such as a temporary file with a random
    name, or a directory where a run touched two files and the next will touch a third, needs `*` or
-   `**` to match the next run too. A broad rule such as `~/**` also matches what is worth seeing,
-   such as `~/.ssh`, so widen no further than needed.
+   `**` to match the next run too. So does a program under a versioned directory, such as Node from
+   the tool cache: `/opt/hostedtoolcache/node/*/x64/bin/node` matches any version. A broad rule
+   such as `~/**` also matches what is worth seeing, such as `~/.ssh`, so widen no further than
+   needed.
 3. Add the rule lines to `expected_filesystem_rules`, without the file's two comment lines:
 
    ```yaml
@@ -495,10 +497,10 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 <program> <access> <path>
 ```
 
-- **Program**: the file the process runs, as the table names it, with `*` for any program. A
-  process that ran nothing goes by its own name, as the step's shell does as `bash`. Running a
-  program is an `X` access of the program that ran it, as the table shows it:
-  `bash X /usr/bin/curl`.
+- **Program**: the file the process runs, as the table names it, with `*` for any program.
+  Wildcards work as in a path. A process that ran nothing goes by its own name, as the step's
+  shell does as `bash`. Running a program is an `X` access of the program that ran it, as the
+  table shows it: `bash X /usr/bin/curl`.
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
 - **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
   `memfd:"name"`, and a deleted file without its ` (deleted)`. A name a command passed keeps its
