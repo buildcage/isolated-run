@@ -71630,6 +71630,11 @@ function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
 }
 //#endregion
+//#region src/lib/first-of.ts
+function firstOf(names, shown) {
+	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
+}
+//#endregion
 //#region src/lib/aws-keys.ts
 const KEY_NOT_ALLOWED = "aws-key-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
 function isEcrRegistry(host) {
@@ -71665,8 +71670,7 @@ function awsKeys(timeline) {
 	return keys;
 }
 function keyHostsCell(hosts) {
-	let names = [...hosts].map(codeCell);
-	return names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 3 + 1} more`;
+	return firstOf([...hosts].map(codeCell), 3);
 }
 function awsKeyLineNote(keys) {
 	let name = (keyRef) => keyRef ? keys.get(keyRef)?.name : void 0;
@@ -73426,9 +73430,6 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 //#endregion
 //#region src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
-function firstOf(names, shown) {
-	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
-}
 function killedNote(rows) {
 	let killed = inRecordingOrder(rows);
 	if (!killed.length) return;

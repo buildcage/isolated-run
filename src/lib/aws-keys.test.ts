@@ -131,7 +131,9 @@ describe("keyHostsCell", () => {
     const hosts = (...names: string[]) =>
       keyHostsCell(new Set(names.map((h) => `${h}.amazonaws.com`)));
     expect(hosts("a", "b", "c")).toBe("`a.amazonaws.com`, `b.amazonaws.com`, `c.amazonaws.com`");
+    expect(hosts("a", "b")).toBe("`a.amazonaws.com`, `b.amazonaws.com`");
     expect(hosts("a", "b", "c", "d")).toBe("`a.amazonaws.com`, `b.amazonaws.com` and 2 more");
+    expect(hosts("a", "b", "c", "d", "e")).toBe("`a.amazonaws.com`, `b.amazonaws.com` and 3 more");
     expect(hosts()).toBe("");
   });
 

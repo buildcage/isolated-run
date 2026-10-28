@@ -9,6 +9,7 @@ import { trafficTableBlock, type PartFit } from "#core/lib/report/render/traffic
 import { ECR_DUALSTACK_REGISTRY_HOST, ECR_REGISTRY_HOST } from "../proxy/aws-hosts.ts";
 import { isAwsAccountId } from "../proxy/aws-keys.ts";
 import { AWS_REASON_PREFIX, awsFieldsOf, type AwsBlockedReason } from "../proxy/aws-log.ts";
+import { firstOf } from "./first-of.ts";
 
 export const KEY_NOT_ALLOWED = "aws-key-not-allowed" satisfies AwsBlockedReason;
 const ECR_REGISTRY = new RegExp(`${ECR_REGISTRY_HOST}|${ECR_DUALSTACK_REGISTRY_HOST}`);
@@ -82,13 +83,9 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
 /** How many hosts a key's row names, counting the rest in place of the last. */
 const KEY_HOSTS_SHOWN = 3;
 
-/** A key's hosts as one cell: every one if they fit, else one fewer and how
- *  many more, so the count never stands for a single host. */
+/** A key's hosts as one cell. */
 export function keyHostsCell(hosts: Set<string>): string {
-  const names = [...hosts].map(codeCell);
-  if (names.length <= KEY_HOSTS_SHOWN) return names.join(", ");
-  const shown = names.slice(0, KEY_HOSTS_SHOWN - 1).join(", ");
-  return `${shown} and ${names.length - KEY_HOSTS_SHOWN + 1} more`;
+  return firstOf([...hosts].map(codeCell), KEY_HOSTS_SHOWN);
 }
 
 /** The end of each line in Communication details that a key signed or that issued one. */
