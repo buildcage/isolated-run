@@ -79,14 +79,16 @@ export function awsKeys(timeline: TrafficEvent[]): Map<string, AwsKey> {
   return keys;
 }
 
-/** How many hosts a key's row names before counting the rest. */
+/** How many hosts a key's row names, counting the rest in place of the last. */
 const KEY_HOSTS_SHOWN = 3;
 
-/** A key's hosts as one cell: the first few, then how many more. */
+/** A key's hosts as one cell: every one if they fit, else one fewer and how
+ *  many more, so the count never stands for a single host. */
 export function keyHostsCell(hosts: Set<string>): string {
-  const rest = hosts.size - KEY_HOSTS_SHOWN;
-  const shown = [...hosts].slice(0, KEY_HOSTS_SHOWN).map(codeCell).join(", ");
-  return rest > 0 ? `${shown} and ${rest} more` : shown;
+  const names = [...hosts].map(codeCell);
+  if (names.length <= KEY_HOSTS_SHOWN) return names.join(", ");
+  const shown = names.slice(0, KEY_HOSTS_SHOWN - 1).join(", ");
+  return `${shown} and ${names.length - KEY_HOSTS_SHOWN + 1} more`;
 }
 
 /** The end of each line in Communication details that a key signed or that issued one. */
@@ -144,18 +146,16 @@ export function awsKeysBlocks(keys: Map<string, AwsKey>, fit: PartFit): SummaryB
       { key: "key", title: "Key" },
       { key: "check", title: "Check" },
       { key: "source", title: "Source" },
-      { key: "count", title: "Requests", align: "right" },
       // Already a code span per host, as a request chooses its Host header.
       { key: "hosts", title: "Hosts", cell: String },
-      { key: "keyRef", title: "keyRef", cell: codeCell },
+      { key: "count", title: "Requests", align: "right" },
     ],
     [...keys.values()].map((key) => ({
       key: key.name,
       check: checkCell(key),
       source: sourceCell(key, keys),
-      count: key.count,
       hosts: keyHostsCell(key.hosts),
-      keyRef: key.keyRef,
+      count: key.count,
     })),
   );
   return [

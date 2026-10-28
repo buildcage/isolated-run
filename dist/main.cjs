@@ -71665,8 +71665,8 @@ function awsKeys(timeline) {
 	return keys;
 }
 function keyHostsCell(hosts) {
-	let rest = hosts.size - 3, shown = [...hosts].slice(0, 3).map(codeCell).join(", ");
-	return rest > 0 ? `${shown} and ${rest} more` : shown;
+	let names = [...hosts].map(codeCell);
+	return names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 3 + 1} more`;
 }
 function awsKeyLineNote(keys) {
 	let name = (keyRef) => keyRef ? keys.get(keyRef)?.name : void 0;
@@ -71704,27 +71704,21 @@ function awsKeysBlocks(keys, fit) {
 			title: "Source"
 		},
 		{
-			key: "count",
-			title: "Requests",
-			align: "right"
-		},
-		{
 			key: "hosts",
 			title: "Hosts",
 			cell: String
 		},
 		{
-			key: "keyRef",
-			title: "keyRef",
-			cell: codeCell
+			key: "count",
+			title: "Requests",
+			align: "right"
 		}
 	], [...keys.values()].map((key) => ({
 		key: key.name,
 		check: checkCell(key),
 		source: sourceCell(key, keys),
-		count: key.count,
 		hosts: keyHostsCell(key.hosts),
-		keyRef: key.keyRef
+		count: key.count
 	})));
 	return [trafficTableBlock("traffic-aws-keys", fit.priority, awsKeysTruncationNote(fit.artifactAvailable), "### 🔑 AWS Keys\n\n", table, "\n")];
 }
