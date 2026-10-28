@@ -9,6 +9,7 @@ import {
   awsKeysBlocks,
   awsKeysTruncationNote,
   keyHostsCell,
+  withAwsKeyNames,
 } from "./aws-keys.ts";
 
 const event = (
@@ -141,6 +142,33 @@ describe("keyHostsCell", () => {
     expect(
       keyHostsCell(new Set(["b&ZeroWidthSpace;.amazonaws.com", "~~c|d~~.amazonaws.com"])),
     ).toBe("`b&ZeroWidthSpace;.amazonaws.com`, `~~c\\|d~~.amazonaws.com`");
+  });
+});
+
+describe("withAwsKeyNames", () => {
+  it("names the key that signed a request and the key its answer issued", () => {
+    const unsigned = event("example.com", {}, { extensions: undefined });
+    const timeline = [
+      event("sts.amazonaws.com", { key: "env", keyRef: "aaaa", issuedKeyRef: "bbbb" }),
+      event("s3.amazonaws.com", { key: "assumed", keyRef: "bbbb" }),
+      event("1.dkr.ecr.us-east-1.amazonaws.com", { issuedKeyRef: "cccc" }),
+      unsigned,
+    ];
+    const named = withAwsKeyNames(timeline);
+    expect(named.map((e) => e.extensions?.aws)).toStrictEqual([
+      {
+        key: "env",
+        keyRef: "aaaa",
+        issuedKeyRef: "bbbb",
+        keyName: "key 1",
+        issuedKeyName: "key 2",
+      },
+      { key: "assumed", keyRef: "bbbb", keyName: "key 2" },
+      { issuedKeyRef: "cccc", issuedKeyName: "key 3" },
+      undefined,
+    ]);
+    expect(named[3]).toBe(unsigned);
+    expect(timeline[0].extensions?.aws).not.toHaveProperty("keyName");
   });
 });
 

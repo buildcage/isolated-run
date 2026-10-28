@@ -100,14 +100,37 @@ export function awsKeyLineNote(keys: Map<string, AwsKey>): LineNote {
   };
 }
 
+/** `timeline` with each signed or issuing request naming its keys as the
+ *  report does, so the traffic artifact can be read beside it. */
+export function withAwsKeyNames(timeline: TrafficEvent[]): TrafficEvent[] {
+  const keys = awsKeys(timeline);
+  return timeline.map((e) => {
+    const aws = awsFieldsOf(e);
+    const keyName = aws.keyRef && keys.get(aws.keyRef)?.name;
+    const issuedKeyName = aws.issuedKeyRef && keys.get(aws.issuedKeyRef)?.name;
+    if (!keyName && !issuedKeyName) return e;
+    return {
+      ...e,
+      extensions: {
+        ...e.extensions,
+        aws: {
+          ...aws,
+          ...(keyName && { keyName }),
+          ...(issuedKeyName && { issuedKeyName }),
+        },
+      },
+    };
+  });
+}
+
 /** Names the summary block of AWS Keys. */
 const AWS_KEYS_ID = "traffic-aws-keys";
 
 /** What the report says where the Job Summary's size limit cut AWS Keys. */
 export function awsKeysTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
-    ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef"
-    : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact";
+    ? "the buildcage-traffic artifact uploaded for this run names every request's key"
+    : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact";
   return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${rest}._\n`;
 }
 

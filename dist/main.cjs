@@ -71679,8 +71679,25 @@ function awsKeyLineNote(keys) {
 		return signer ? issued ? `[aws ${signer} → issued ${issued}]` : `[aws ${signer}]` : issued && `[issued aws ${issued}]`;
 	};
 }
+function withAwsKeyNames(timeline) {
+	let keys = awsKeys(timeline);
+	return timeline.map((e) => {
+		let aws = awsFieldsOf(e), keyName = aws.keyRef && keys.get(aws.keyRef)?.name, issuedKeyName = aws.issuedKeyRef && keys.get(aws.issuedKeyRef)?.name;
+		return !keyName && !issuedKeyName ? e : {
+			...e,
+			extensions: {
+				...e.extensions,
+				aws: {
+					...aws,
+					...keyName && { keyName },
+					...issuedKeyName && { issuedKeyName }
+				}
+			}
+		};
+	});
+}
 function awsKeysTruncationNote(artifactAvailable) {
-	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request's keyRef" : "set upload_traffic_artifact: true to get every request's keyRef as a downloadable artifact"}._\n`;
+	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run names every request's key" : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
 	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ passed" : "not checked";
@@ -77283,7 +77300,7 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
 	try {
 		let file = (0, node_path.join)(scratchDir, "traffic.json");
-		writeTrafficFile(file, buildTrafficRecords(report.timeline, report.startedAt));
+		writeTrafficFile(file, buildTrafficRecords(withAwsKeyNames(report.timeline), report.startedAt));
 		let name = artifactName("buildcage-traffic", containerName);
 		return await upload(name, [file], scratchDir, { retentionDays }), console.log(`Uploaded the traffic JSON as ${name}`), name;
 	} catch (e) {

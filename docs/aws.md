@@ -607,6 +607,8 @@ and its `reason` or `wouldBlock` says why.
 | `assumedAccount` | on an STS call whose answer named a role, whether or not the check let it through                             | the account of that role, whether or not it is named                                                                                                                         |
 | `keyRef`         | on every request signed with an access key, whether or not the check let it through                           | 16 hex digits standing for the key, the same for one key throughout a run                                                                                                    |
 | `issuedKeyRef`   | on an STS call or an ECR registry redirect that issued a key                                                  | the `keyRef` of the requests signed with that key                                                                                                                            |
+| `keyName`        | with `keyRef`                                                                                                 | the key's name in the report, such as `key 2`                                                                                                                                |
+| `issuedKeyName`  | with `issuedKeyRef`                                                                                           | the issued key's name in the report                                                                                                                                          |
 | `roleAccount`    | on an unsigned `AssumeRoleWithWebIdentity` form naming `Action` and `RoleArn` once each, whatever the verdict | the account of the role in `RoleArn`, whether or not it is named; the call is judged by it unless another reason, such as `aws-unreadable`, blocks it first                  |
 
 The starting key's account is never shown, since the proxy does not ask AWS whose key it is. No key
@@ -618,6 +620,11 @@ cannot be turned back into a key ID or matched across runs.
   "action": "allow",
   "host": "cloudformation.us-east-1.amazonaws.com",
   "method": "POST",
-  "aws": { "key": "assumed", "accountId": "111111111111", "keyRef": "6e30dca31102cb8a" }
+  "aws": {
+    "key": "assumed",
+    "accountId": "111111111111",
+    "keyRef": "6e30dca31102cb8a",
+    "keyName": "key 2"
+  }
 }
 ```
