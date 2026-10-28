@@ -148,7 +148,8 @@ func (r *recorder) add(raw []byte) error {
 
 // setProgram gives rec its process's program, after an exec the file it ran.
 // Set before a line is held for its call's result, so it is the program at
-// the event.
+// the event. An open written from its result alone gets the same: no exec of
+// its process is sent while one of its threads is in a call.
 func (r *recorder) setProgram(rec *record) {
 	switch rec.Kind {
 	case "exec":
