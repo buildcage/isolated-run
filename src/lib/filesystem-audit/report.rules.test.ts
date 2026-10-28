@@ -79,9 +79,9 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(md).not.toContain("File access details");
     expect(md).toContain(
       "`expected_filesystem_rules` lists the file accesses this step is expected to make, " +
-        "and Unexpected Accesses above shows only the accesses no rule matches.\n\n" +
+        "and the summary above shows only the accesses no rule matches.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
-        "(`buildcage-filesystem-audit-deadbeef`) has a rule for each of them.",
+        "(`buildcage-filesystem-audit-deadbeef`) has a rule for each access no rule matches.",
     );
     expect(md).toContain(
       "[How to write the rules](https://github.com/buildcage/isolated-run/blob/v2/docs/filesystem-audit.md#expected-accesses)",
@@ -134,9 +134,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     );
     // The note speaks of no rules the step does not have.
     expect(md).toContain("Once `expected_filesystem_rules` lists the file accesses");
-    expect(md).toContain(
-      "has a rule for every access this run made, ready to start that list from.",
-    );
+    expect(md).toContain("has a rule for every access this run made, as a starting point.");
     expect(ruleFiles.map((f) => f.content)).toStrictEqual([
       [...RULES_TO_ADD_HEADER, "node  R  ./a", "node  W  ./b", ""].join("\n"),
     ]);
@@ -391,7 +389,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(summaries[0]).toContain(
       "`expected-filesystem-rules-to-add.txt` in this run's " +
         "[filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) " +
-        "has a rule for every access this run made, ready to start that list from.",
+        "has a rule for every access this run made, as a starting point.",
     );
     expect(summaries[0]).toContain(
       "the full record is in the [filesystem audit artifact](https://github.com/o/r/actions/runs/1/artifacts/2) · ",

@@ -73590,15 +73590,15 @@ function proposalOf(state, artifact) {
 }
 function rulesNote(proposal, { fileName, guideUrl, given }) {
 	if (proposal === "nothing-to-add") return;
-	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and Unexpected Accesses above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, this section shows only the accesses outside them.`, holds = given ? "a rule for each of them" : "a rule for every access this run made, ready to start that list from", nextHolds = given ? "a rule for each access no rule matches" : "a rule for every access that run made", where, steps = !1;
-	return proposal === "not-requested" ? (where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${nextHolds}.`, steps = !0) : proposal === "lost" ? where = `This run's ${file} was lost, as the artifact could not be uploaded.` : proposal === "too-many-paths" ? where = "No rules were proposed: the accesses touched too many distinct paths." : proposal === "write-failed" ? where = "The proposed rules could not be written." : proposal === "not-prepared" ? where = "No rules were proposed, as the artifact could not be prepared." : (where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0), `<details>
+	let file = `\`${fileName}\``, intro = given ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`, holds = (run) => given ? "a rule for each access no rule matches" : `a rule for every access ${run} run made, as a starting point`, where, steps = !1;
+	return proposal === "not-requested" ? (where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${holds("that")}.`, steps = !0) : proposal === "lost" ? where = `This run's ${file} was lost, as the artifact could not be uploaded.` : proposal === "too-many-paths" ? where = "No rules were proposed: the accesses touched too many distinct paths." : proposal === "write-failed" ? where = "The proposed rules could not be written." : proposal === "not-prepared" ? where = "No rules were proposed, as the artifact could not be prepared." : (where = `${file} in this run's ${artifactLink(proposal)} has ${holds("this")}.`, steps = !0), `<details>
 <summary>📝 Expected filesystem rules</summary>
 
 ${intro}\n\n` + (steps ? useSteps(where) : `${where}\n\n`) + `[How to write the rules](${guideUrl})\n\n</details>
 `;
 }
 function useSteps(where) {
-	return `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
+	return `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
 # path/to/buildcage.yml\nfilesystem_audit: record
 # Needed for the proposed rules; also uploads the full record.\nupload_filesystem_audit_artifact: true
 ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**

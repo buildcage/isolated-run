@@ -376,19 +376,17 @@ export function rulesNote(
   if (proposal === "nothing-to-add") return undefined;
   const file = `\`${fileName}\``;
   const intro = given
-    ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and Unexpected Accesses above shows only the accesses no rule matches.`
-    : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, this section shows only the accesses outside them.`;
-  const holds = given
-    ? "a rule for each of them"
-    : "a rule for every access this run made, ready to start that list from";
-  const nextHolds = given
-    ? "a rule for each access no rule matches"
-    : "a rule for every access that run made";
+    ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.`
+    : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`;
+  const holds = (run: string): string =>
+    given
+      ? "a rule for each access no rule matches"
+      : `a rule for every access ${run} run made, as a starting point`;
   let where: string;
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
   if (proposal === "not-requested") {
-    where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${nextHolds}.`;
+    where = `Set \`upload_filesystem_audit_artifact: true\`, and the next run's filesystem audit artifact has ${file}, with ${holds("that")}.`;
     steps = true;
   } else if (proposal === "lost")
     where = `This run's ${file} was lost, as the artifact could not be uploaded.`;
@@ -398,7 +396,7 @@ export function rulesNote(
   else if (proposal === "not-prepared")
     where = "No rules were proposed, as the artifact could not be prepared.";
   else {
-    where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
+    where = `${file} in this run's ${artifactLink(proposal)} has ${holds("this")}.`;
     steps = true;
   }
   return (
@@ -414,7 +412,7 @@ export function rulesNote(
 // workflow, or with many rules, in a config file.
 function useSteps(where: string): string {
   return (
-    `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
+    `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
     "```yaml\n" +
     `# ${CONFIG_FILE_EXAMPLE}\n` +
     "filesystem_audit: record\n" +
