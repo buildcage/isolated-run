@@ -73590,7 +73590,7 @@ function proposalOf(state, artifact) {
 }
 function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
 	if (proposal === "nothing-to-add") return;
-	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`, where, steps = !1;
+	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`, where, steps = !1;
 	if (proposal === "not-requested") where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
 	else if (proposal === "too-many-paths") where = "No rules were proposed: the accesses touched too many distinct paths.";
 	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";

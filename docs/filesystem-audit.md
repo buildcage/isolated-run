@@ -445,14 +445,14 @@ install against a baseline.
 ### Keeping it up to date
 
 A run with rules and `upload_filesystem_audit_artifact: true` proposes a file only when a recorded
-access fell outside them. It holds a rule for each access the rules did not take, whether they are
+access fell outside them. It holds a rule for each access no rule matched, whether the rules are
 set under `with:` or in a config file, so it never repeats a rule you have. Review those rules: add
 the ones a change you know of explains, such as a dependency update, where the step keeps its
 rules, and look into the rest. Under `fail_on_unexpected_file_access`, a run that fails on an access
-the rules should have taken still proposes the file, so the rules can be fixed from it.
+the rules should have matched still proposes the file, so the rules can be fixed from it.
 
-Only the accesses the rules did not take count toward a fold, so no `dir/**` row comes of paths
-your own rules already take. A proposed `dir/**` may cover one of your narrower rules; adding it
+Only the accesses no rule matched count toward a fold, so no `dir/**` row comes of paths
+your own rules already match. A proposed `dir/**` may cover one of your narrower rules; adding it
 leaves both, and you decide which to keep.
 
 A run where no recorded access fell outside the rules proposes no file, and its summary leaves out

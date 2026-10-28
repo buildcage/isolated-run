@@ -378,7 +378,7 @@ export function rulesNote(
   const file = `\`${fileName}\``;
   const intro = hasRules
     ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.`
-    : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses outside them.`;
+    : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`;
   let where: string;
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
