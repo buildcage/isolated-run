@@ -59,11 +59,11 @@ inputs:
     description: "proxy-engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
     required: false
   known-blocked-rules:
-    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy-engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail-on-blocked is true. See docs/reference.md#blocked-rules-known_blocked_rules."
+    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy-engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail-on-blocked is true. See docs/reference.md#blocked-rules-known-blocked-rules."
     required: false
     default: ""
   write-through:
-    description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write_through-paths."
+    description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write-through-paths."
     required: false
     default: ""
   writable:
