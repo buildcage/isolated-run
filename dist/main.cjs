@@ -73222,7 +73222,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
 	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
-}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0;
+}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0 && !summary.matched;
 function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
@@ -73301,14 +73301,7 @@ function createAuditSummary(prefixes) {
 			key = `${r}/${c.text}`, commands.has(key) || commands.set(key, c), commandKeys.set(memo, key);
 		}
 		return key;
-	}, strays = prefixes.rules ? new Lines({
-		fanout,
-		keep,
-		limit,
-		loose,
-		nodes: limits.nodes,
-		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
-	}) : void 0, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
+	}, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
 		fanout,
 		keep,
 		limit: Infinity,
@@ -73386,16 +73379,13 @@ function createAuditSummary(prefixes) {
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path), by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
-				details.add({
-					...x,
-					comm: cmd
-				}, parts), paths.add({
+				paths.add({
 					...x,
 					comm: String(by),
 					cmd
 				}, parts);
-				let left = tally ? takeForRules(x, parts, by, cmd) : 0;
-				left && strays?.add({
+				let left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
+				left && details.add({
 					...x,
 					comm: cmd,
 					bit: left
@@ -73467,7 +73457,7 @@ function createAuditSummary(prefixes) {
 					rank: Number(comm)
 				},
 				commands: commandsOf(agg)
-			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally), strayRows = strays && rows(kept(strays));
+			})), log = (byPath || prefixes.rules) && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
 			return {
 				ended,
 				lost,
@@ -73479,10 +73469,6 @@ function createAuditSummary(prefixes) {
 				detailsCut: details.cut,
 				...ruleRows && { proposed: byProgramThenPath(ruleRows) },
 				...tally?.givenUp && { proposedCut: !0 },
-				...strays && {
-					strayDetails: strayRows,
-					strayDetailsCut: strays.cut
-				},
 				matched: tally?.matched ?? 0,
 				unexpected: tally?.unexpected ?? 0
 			};
@@ -73603,7 +73589,7 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, killed, detailsCut, strayDetails, strayDetailsCut }, { startedAt, priorities, cutNote, expected }) {
+function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote, expected }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
@@ -73611,13 +73597,13 @@ function detailsBlock({ details, killed, detailsCut, strayDetails, strayDetailsC
 		section: SECTION,
 		open: detailsOpen(expected ? "Unexpected access details" : "File access details"),
 		close: DETAILS_CLOSE
-	}, shown = expected ? strayDetails : details, cut = expected ? strayDetailsCut : detailsCut;
-	if (!shown) return {
+	};
+	if (!details) return {
 		...log,
 		cut: "atomic",
-		text: cutNote(cut)
+		text: cutNote(detailsCut)
 	};
-	let rows = inRecordingOrder([...shown, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
+	let rows = inRecordingOrder([...details, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
@@ -73626,7 +73612,7 @@ function detailsBlock({ details, killed, detailsCut, strayDetails, strayDetailsC
 	return {
 		...log,
 		cut: "lines",
-		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (cut ? cutNote(cut) : "")
+		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
 	};
 }
 function unexpectedBlock(summary, { priorities, expected }) {
@@ -73670,7 +73656,7 @@ function renderAuditSummaryBlocks(summary, opts) {
 	});
 	if (recordedNoFileAccess(summary) && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
-	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), summary.proposed?.length && blocks.push(detailsBlock(summary, opts));
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), summary.proposed && (summary.proposed.length || killed.length) && blocks.push(detailsBlock(summary, opts));
 	else {
 		let rows = paths && byProgramAndPath(paths);
 		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, opts));

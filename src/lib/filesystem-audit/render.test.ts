@@ -488,17 +488,18 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 2 more | D | `/y` |\n");
   });
 
-  const strays = (proposed: AuditSummary["proposed"]): AuditSummary => ({
+  const strays = (
+    proposed: AuditSummary["proposed"],
+    killed: AuditSummary["killed"] = [],
+  ): AuditSummary => ({
     ended: true,
     lost: false,
     hostMissed: 0,
     paths: [],
-    details: [
-      { agg: newAgg(), flags: "R", comm: "cat", commField: "cat", path: "./a" },
-      { agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" },
-    ],
-    strayDetails: [{ agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" }],
-    killed: [],
+    details: proposed?.length
+      ? [{ agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" }]
+      : [],
+    killed,
     proposed,
     matched: 1,
     unexpected: proposed?.length ?? 0,
@@ -531,6 +532,24 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
 
   it("prints no details where no access was unexpected", () => {
     expect(renderGiven(strays([]))).not.toContain("<details>");
+  });
+
+  it("lists a program killed for a 32-bit syscall though every access was expected", () => {
+    const killed = {
+      agg: newAgg(),
+      flags: "!",
+      comm: "a",
+      commField: "a",
+      path: "syscall:32-bit open (killed)",
+      syscall: true as const,
+    };
+    expect(renderGiven(strays([], [killed]))).toContain(
+      "```\n! a syscall:32-bit open (killed)\n```",
+    );
+  });
+
+  it("prints no details where a note takes the place of the table", () => {
+    expect(renderGiven({ ...strays(undefined), proposedCut: true })).not.toContain("<details>");
   });
 });
 

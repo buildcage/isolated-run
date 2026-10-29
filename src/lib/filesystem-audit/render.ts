@@ -175,10 +175,8 @@ function pathsBlock(
 // A memfd's name is quoted already, and a killed syscall's row names no path.
 const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : field(r.path));
 
-// Every access's rows, or with expected-filesystem-rules only those of what
-// no rule took.
 function detailsBlock(
-  { details, killed, detailsCut, strayDetails, strayDetailsCut }: AuditSummary,
+  { details, killed, detailsCut }: AuditSummary,
   { startedAt, priorities, cutNote, expected }: RenderOptions,
 ): SummaryBlock {
   const log = {
@@ -189,10 +187,8 @@ function detailsBlock(
     open: detailsOpen(expected ? "Unexpected access details" : "File access details"),
     close: DETAILS_CLOSE,
   };
-  const shown = expected ? strayDetails : details;
-  const cut = expected ? strayDetailsCut : detailsCut;
-  if (!shown) return { ...log, cut: "atomic", text: cutNote(cut) };
-  const rows = inRecordingOrder([...shown, ...killed]);
+  if (!details) return { ...log, cut: "atomic", text: cutNote(detailsCut) };
+  const rows = inRecordingOrder([...details, ...killed]);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
@@ -227,7 +223,7 @@ function detailsBlock(
     text:
       // The legend again, as either part may be opened alone.
       `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` +
-      (cut ? cutNote(cut) : ""),
+      (detailsCut ? cutNote(detailsCut) : ""),
   };
 }
 
@@ -308,7 +304,8 @@ export function renderAuditSummaryBlocks(
   if (opts.expected) {
     blocks.push(unexpectedBlock(summary, opts));
     // A note in place of the table stands for the details too.
-    if (summary.proposed?.length) blocks.push(detailsBlock(summary, opts));
+    if (summary.proposed && (summary.proposed.length || killed.length))
+      blocks.push(detailsBlock(summary, opts));
   } else {
     const rows = paths && byProgramAndPath(paths);
     // Empty when the step was only killed for a syscall, which the details list.

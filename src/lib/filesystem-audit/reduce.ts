@@ -128,6 +128,7 @@ export interface AuditSummary {
   hostMissed: number;
   /** Each part, or undefined where it was given up (see pathsCut). */
   paths: PathRow[] | undefined;
+  /** With expected-filesystem-rules, only the actions no rule took. */
   details: Row[] | undefined;
   /** Each 32-bit syscall a command was killed for, as a details row. */
   killed: KilledRow[];
@@ -142,10 +143,6 @@ export interface AuditSummary {
   proposed?: RuleRow[];
   /** Whether the proposed rules were given up. */
   proposedCut?: boolean;
-  /** With expected-filesystem-rules, the details rows of what no rule took,
-   *  or undefined where given up (see strayDetailsCut). */
-  strayDetails?: Row[];
-  strayDetailsCut?: CutCause;
   /** How many lines of the recording the rules took, and how many they did not. */
   matched: number;
   unexpected: number;
@@ -154,7 +151,7 @@ export interface AuditSummary {
 /** Whether the recording holds no file access at all, which leaves the
  *  summary saying only that, and nothing to propose rules from. */
 export const recordedNoFileAccess = (summary: AuditSummary): boolean =>
-  summary.details?.length === 0;
+  summary.details?.length === 0 && !summary.matched;
 
 /**
  * Reduces a recording to an AuditSummary in two passes over its records:
@@ -335,16 +332,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return key;
   };
-  const strays = prefixes.rules
-    ? new Lines({
-        fanout,
-        keep,
-        limit,
-        loose,
-        nodes: limits.nodes,
-        rowBytes: (p, key) => relLength(p) + commands.get(key)!.field.length + 3,
-      })
-    : undefined;
   // What no rule takes, by program and path, folded as the accessed paths
   // are but never loosened nor cut for size.
   const tally =
@@ -502,11 +489,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
       const cmd = runner?.cmd ?? x.comm;
-      // A run is the command's that started it, as in the table.
-      details.add({ ...x, comm: cmd }, parts);
       paths.add({ ...x, comm: String(by), cmd }, parts);
-      const left = tally ? takeForRules(x, parts, by, cmd) : 0;
-      if (left) strays?.add({ ...x, comm: cmd, bit: left }, parts);
+      const left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
+      // A run is the command's that started it, as in the table.
+      if (left) details.add({ ...x, comm: cmd, bit: left }, parts);
     }
     return tally?.endLine();
   };
@@ -595,10 +581,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
       commands: commandsOf(agg),
     }));
-    // A table given up leaves no room for the details either.
-    const log = byPath && rows(kept(details));
+    // A table given up leaves no room for the details either, unless rules
+    // replace the table.
+    const log = (byPath || prefixes.rules) && rows(kept(details));
     const ruleRows = tally && ruleRowsOf(tally);
-    const strayRows = strays && rows(kept(strays));
     return {
       ended,
       lost,
@@ -610,7 +596,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       detailsCut: details.cut,
       ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),
       ...(tally?.givenUp && { proposedCut: true }),
-      ...(strays && { strayDetails: strayRows, strayDetailsCut: strays.cut }),
       matched: tally?.matched ?? 0,
       unexpected: tally?.unexpected ?? 0,
     };
