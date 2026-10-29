@@ -1,7 +1,7 @@
 # The baseline for example-filesystem-audit-expected.yml: the rules a
 # filesystem audit example run proposed, with the paths that change between
 # runs (a log's timestamp, node's version) widened to `**`.
-expected_filesystem_rules: |
+expected-filesystem-rules: |
   bash                                            rw   /dev/tty
   bash                                            R    /etc/locale.alias
   bash                                            X    /usr/bin/touch

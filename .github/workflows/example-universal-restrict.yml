@@ -53,17 +53,17 @@ jobs:
       # The audit example's command, with the rules that run produced and one
       # request they block. universal enforces on host and port only, which is
       # as far as it can see without decrypting.
-      # fail_on_blocked is false only because this example blocks on purpose;
+      # fail-on-blocked is false only because this example blocks on purpose;
       # leave it at its default so a real workflow fails on a disallowed destination.
       - name: Run a Maven build with outbound network isolation
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          proxy_mode: restrict
-          proxy_engine: universal
-          allowed_https_rules: |
+          proxy-mode: restrict
+          proxy-engine: universal
+          allowed-https-rules: |
             repo.maven.apache.org:443
             repository.apache.org:443
-          fail_on_blocked: false
+          fail-on-blocked: false
           run: |
             mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
 

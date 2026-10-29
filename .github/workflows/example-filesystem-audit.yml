@@ -32,12 +32,12 @@ jobs:
         id: sandboxed
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          proxy_mode: restrict
-          allowed_url_rules: |
+          proxy-mode: restrict
+          allowed-url-rules: |
             GET https://registry.npmjs.org/**
             POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
-          filesystem_audit: record
-          upload_filesystem_audit_artifact: true
+          filesystem-audit: record
+          upload-filesystem-audit-artifact: true
           run: |
             npm ci
 
@@ -48,10 +48,10 @@ jobs:
       # Empty when nothing was uploaded, and download-artifact would then fetch
       # every artifact of the run.
       - name: Download the full record
-        if: steps.sandboxed.outputs.filesystem_audit_artifact_name != ''
+        if: steps.sandboxed.outputs.filesystem-audit-artifact-name != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.sandboxed.outputs.filesystem_audit_artifact_name }}
+          name: ${{ steps.sandboxed.outputs.filesystem-audit-artifact-name }}
           path: filesystem-audit
 
       - name: Show the first entries of the record

@@ -28,7 +28,7 @@ jobs:
       # Same command as the audit example, with the rules that run produced.
       # The account they listed commented out is uncommented once checked and
       # kept in a repository variable. The compromised dependency's call is
-      # blocked even though the URL rule allows its host. fail_on_blocked is
+      # blocked even though the URL rule allows its host. fail-on-blocked is
       # false only because this example blocks on purpose; leave it at its
       # default so a real workflow fails on a block.
       - name: Call AWS with outbound network isolation
@@ -36,10 +36,10 @@ jobs:
         env:
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
-          proxy_mode: restrict
-          allowed_url_rules: |
+          proxy-mode: restrict
+          allowed-url-rules: |
             POST https://sts.us-east-1.amazonaws.com/
-          aws_key_check: true
-          allowed_aws_role_accounts: ${{ vars.AWS_SWITCHED_ACCOUNT_ID }}
-          fail_on_blocked: false
+          aws-key-check: true
+          allowed-aws-role-accounts: ${{ vars.AWS_SWITCHED_ACCOUNT_ID }}
+          fail-on-blocked: false
           run: .github/examples/aws-key-check/deploy.sh
