@@ -189,8 +189,8 @@ you move to `restrict`. Any other `proxy-mode` value, a differently cased one in
 step.
 
 Under `inspect`, `audit` is not a passive observer: TLS is still terminated, so a tool that pins a
-certificate fails there exactly as it would under `restrict`. `universal`'s audit mode decrypts
-nothing and breaks nothing.
+certificate fails there exactly as it would under `restrict`. `universal` decrypts nothing in either
+mode, so a pinned certificate works under it.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named. Run `audit` first to find those domains.
@@ -233,10 +233,12 @@ allowed-url-rules: |
 
 Methods are separated by `|` or `,`, and `*` means any method. The port may be left out when it is
 the scheme's default, and a pattern with no path allows any path on that host. A pattern may not
-carry a `#` fragment, which never travels with a request, so a rule carrying one would match
-nothing; a query string (a `?` followed by text holding `=` or `&`), since a rule matches the path
-alone and the query is never compared; or a user name before an `@` in the host, which no request's
-Host carries.
+carry:
+
+- a `#` fragment, which never travels with a request, so a rule carrying one would match nothing
+- a query string (a `?` followed by text holding `=` or `&`), since a rule matches the path alone
+  and the query is never compared
+- a user name before an `@` in the host, which no request's `Host` carries
 
 | Pattern | In a domain                                       | In a path                     |
 | ------- | ------------------------------------------------- | ----------------------------- |
@@ -270,9 +272,9 @@ address through with `allowed-ip-rules` instead.
 ### Host rules: `allowed-https-rules`, `allowed-http-rules`, `allowed-ip-rules`, `known-blocked-rules`
 
 `allowed-https-rules`, `allowed-http-rules` and `allowed-ip-rules` share one syntax; rules are
-separated by whitespace, so one per line reads best. A host rule is equivalent to a URL rule with any
-method and any path. `known-blocked-rules` extends this syntax and is newline-separated, since a line
-there can also be a URL rule; see [Blocked rules](#blocked-rules-known-blocked-rules).
+separated by whitespace, so one per line reads best. A host rule is equivalent to a URL rule with
+any method and any path. `known-blocked-rules` extends this syntax and is newline-separated, since a
+line there can also be a URL rule; see [Blocked rules](#blocked-rules-known-blocked-rules).
 
 ```yaml
 allowed-https-rules: |
@@ -293,7 +295,7 @@ allowed-http-rules: |
 | `**`    | One or more characters **including** dots (multiple labels) | `**.example.com` matches `sub.example.com` and `deep.sub.example.com`    |
 | `?`     | A single character excluding dots                           | `exampl?.com` matches `example.com`, `examplx.com`                       |
 
-A label that contains `*` has to be exactly `*` or `**`. `abc*.example.com` is rejected here; only
+A label that contains `*` has to be exactly `*` or `**`. `abc*.example.com` is refused here; only
 [`allowed-url-rules`](#url-rules-allowed-url-rules) takes a wildcard in the middle of a label.
 
 Besides the wildcards, a label holds letters, digits, `-` and `_`, and nothing else. Write an
@@ -325,7 +327,7 @@ it names one. A `~` rule's port is part of its regex and is not checked.
 
 `known-blocked-rules` is the exception: a host rule there that names no port is read as `:*`. It is
 matched against rows of the report rather than against connections, and a row for a name the
-resolver blocked has no port at all, nothing having been connected to. `telemetry.example.com` and
+resolver blocked has no port at all, since nothing was connected to. `telemetry.example.com` and
 `telemetry.example.com:*` are the same rule.
 
 <a id="blocked-rules-known_blocked_rules"></a>
@@ -453,12 +455,12 @@ Setup checks a pattern with JavaScript's regular expressions, but the proxy runs
 backslash may precede punctuation, as in `\.`, one of `\d \D \w \W \s \S \b \B \n \r \t \f`, or a
 single-digit backreference such as `\1`, all of which the two read alike. Any other letter or digit
 after a backslash is refused. So are a backreference to a group the pattern lacks (in a URL rule,
-one outside its own half), `\B` inside a character class, a `]` right after `[` or `[^`, and a
-POSIX class such as `[:alpha:]`, each of which PCRE2 either reads differently or refuses. Escape
-the bracket (`[\]a]`) or write a range (`[a-z]`) instead. A `{` must open a quantifier such as
-`{2}` or `{1,3}`, since PCRE2 reads `{,3}` and `{ 1,3}` as quantifiers where JavaScript and RE2 read
-text; write a literal brace as `\{`. Other syntax only JavaScript accepts,
-such as `[\d-z]`, passes setup and then stops the proxy from starting.
+one outside its own half), `\B` inside a character class, a `]` right after `[` or `[^`, and a POSIX
+class such as `[:alpha:]`, each of which PCRE2 either reads differently or refuses. Escape the
+bracket (`[\]a]`) or write a range (`[a-z]`) instead. A `{` must open a quantifier such as `{2}` or
+`{1,3}`, since PCRE2 reads `{,3}` and `{ 1,3}` as quantifiers where JavaScript and RE2 read text;
+write a literal brace as `\{`. Other syntax only JavaScript accepts, such as `[\d-z]`, passes setup
+and then stops the proxy from starting.
 
 The proxy image generates its configuration with QuickJS, which refuses two group forms Node
 accepts: a flag modifier such as `(?i:`, and one group name used in two alternatives. Setup refuses
@@ -557,10 +559,10 @@ neither was uploaded, it is not kept anywhere.
 ## Blocked service names
 
 A row whose reason is `dns-service-not-allowed` is a service-discovery name,
-`_mongodb._tcp.cluster0.x.mongodb.net` and the like. **Neither way of clearing it makes the record
-resolve.** Buildcage's resolver serves no discovery record at all (see
-[Service discovery](../README.md#service-discovery)), so the answer stays empty whatever you write;
-what changes is only whether the row fails the step.
+`_mongodb._tcp.cluster0.x.mongodb.net` and the like. Neither way of clearing it makes the record
+resolve, since Buildcage's resolver serves no discovery record at all (see [Service
+discovery](../README.md#service-discovery)), so the answer stays empty whatever you write, and what
+changes is only whether the row fails the step.
 
 1. **Allow the host the name belongs to** (`cluster0.x.mongodb.net`). The lookup is then reported as
    `discovery` instead and leaves the table, and the step may connect to that host. This is the
@@ -597,9 +599,9 @@ with the port where it is not the scheme's default.
 
 A connection the client ended before it sent a whole request reached no rule and no origin, so it is
 in neither host table. **Communication details** shows it with ⚠️ and how it ended. Under `inspect`,
-one sent straight to an address is the exception, blocked as
-[`ip-not-allowed`](#the-ones-buildcage-blocked) instead, or as `sni-not-allowed` where its SNI names
-a host no rule allows.
+one sent straight to an address is blocked instead, as
+[`ip-not-allowed`](#the-ones-buildcage-blocked), or as `sni-not-allowed` where its SNI names a host
+no rule allows.
 
 ```
 ⚠️ 00:09.123: HTTPS untrusted-ca.example.com:443 -> client-aborted
@@ -618,7 +620,7 @@ certificate the `inspect` engine signs with, so every HTTPS request to that host
 handshake: as `client-tls-failed`, or as `client-aborted` from a client that closes just after it
 instead. The step's own output says so first, as a certificate verification error; installing
 `ca-certificates`, or otherwise letting the client trust the CA, is what lets the requests through.
-An `allowed-https-rules` entry changes nothing, the host having resolved and been dialled already.
+An `allowed-https-rules` entry changes nothing: the host has already resolved and been dialled.
 
 A `client-aborted` or `client-timeout` is shown only where its host completed no other connection.
 Where the same host also completed one, the close is a keepalive pool cleaning up after its work
@@ -665,11 +667,10 @@ rules say.
 `ip-not-allowed` is a connection to an address such as `203.0.113.9:8443` that ended before its
 request: a client that does not trust the CA, or one waiting for the server to speak first. A client
 sends no SNI to an address, so the certificate the proxy answers with matches no name, and nothing
-that checks it gets further, in `audit` too. `universal` in `restrict` blocks the same connection
-on arrival. A close on an address and port that also had a request read is a keepalive close and
-stays out of the report.
-Plain HTTP sent to an address with a `Host` naming some other host is the exception: the log records
-where that request went, not the address, so its keepalive close is counted here.
+that checks it gets further, in `audit` too. `universal` in `restrict` blocks the same connection on
+arrival. A close on an address and port that also had a request read is a keepalive close and stays
+out of the report, except after plain HTTP whose `Host` names some other host: the log records where
+that request went, not the address, so its keepalive close is counted here.
 
 What clears one is a rule, though not a host rule. For traffic that is not HTTP, add the port to
 `allowed-ip-rules` or the name to `allowed-tls-rules`, and the connection is passed through
@@ -708,7 +709,7 @@ a failure. **Communication details** shows each with ⚠️ too:
 | -------------------- | --------------------------------------------------------------------- |
 | `origin-no-response` | the connection was made, and no usable response headers came back     |
 | `origin-aborted`     | the response started and the transfer was cut short                   |
-| `dns-failed`         | the name resolved nowhere upstream, no rule having blocked it         |
+| `dns-failed`         | the name resolved nowhere upstream; no rule blocked it                |
 | `origin-unreachable` | a connection carrying no certificate of Buildcage's could not be made |
 
 What the first two have in common is a connection that completed, which is where the origin's
@@ -722,8 +723,8 @@ second is relayed for the step to judge rather than decrypted.
 rule allowed anything there either: the table says only that the rules did not stop these. The rules
 `audit` suggests for `restrict` include these hosts too, since the next run will ask for them again.
 
-**A connection Buildcage never completed is not here.** It is blocked, it is in Blocked Hosts, and
-it does fail the step:
+A connection Buildcage never completed is not one of these: it is blocked, listed in Blocked Hosts,
+and fails the step:
 
 | Reason                  | What happened                                                            |
 | ----------------------- | ------------------------------------------------------------------------ |
@@ -902,8 +903,8 @@ repository can fetch it through the API, until it expires.
 ## Filesystem audit
 
 `filesystem-audit` is **experimental**: its behavior, inputs and output format may still change
-without following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is the
-short form.
+without following semver. The guide is [Filesystem audit](./filesystem-audit.md); what follows is
+the short form.
 
 - `filesystem-audit: record` records the step's file accesses from the kernel and never blocks one.
   It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with kernel BTF; elsewhere the step
@@ -944,8 +945,8 @@ covered by a copy holding the CA too:
 The directory is copied as the runner user, so one holding an entry the runner cannot read is left
 uncovered: the step warns and goes on, and a tool reading that directory fails TLS.
 
-Nothing is written to the runner's filesystem, and the mount goes away with the sandbox when the step
-ends.
+Nothing is written to the runner's filesystem, and the mount goes away with the sandbox when the
+step ends.
 
 The variables below are set only when the command's environment leaves them unset, and where each
 one points depends on what it means to the tool that reads it:
@@ -992,11 +993,11 @@ certificates, keys and writes stay in its own database. `$HOME` is the step's, r
 command starts: a `HOME` the command changes gets no slot.
 
 What the command writes to the database is kept where `filesystem-mode` keeps writes to that path:
-always under `persistent`, and under `ephemeral` only below a `write-through:` entry. Elsewhere it is
-discarded. The slot itself is never kept. A database that carries the CA itself, which a command
-changing the CA's trust (`certutil -M`) or exporting it and importing it back leaves, is not
-written back: it fails the step, naming the database and pointing at `fail-on-ca-residue`, or only
-warns under `fail-on-ca-residue: false`, which writes it back. When parallel steps change the same
+always under `persistent`, and under `ephemeral` only below a `write-through:` entry. Elsewhere it
+is discarded. The slot itself is never kept. A database that carries the CA itself, which a command
+changing the CA's trust (`certutil -M`) or exporting it and importing it back leaves, is not written
+back: it fails the step, naming the database and pointing at `fail-on-ca-residue`, or only warns
+under `fail-on-ca-residue: false`, which writes it back. When parallel steps change the same
 database, the one that ends later replaces the other's changes as a whole, as it does whatever else
 wrote to the database while the step ran.
 
@@ -1046,7 +1047,7 @@ this:
 - `$NAME` / `${NAME}` expand only for `HOME`, `GITHUB_WORKSPACE`, `RUNNER_TEMP`, `GITHUB_OUTPUT`,
   `GITHUB_ENV`, `GITHUB_PATH`, and `GITHUB_STEP_SUMMARY`, not arbitrary env, so a value smuggled in
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
-  is rejected.
+  is refused.
 - A leading `~/` expands to `$HOME`.
 - A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
   working directory.
@@ -1057,27 +1058,26 @@ this:
   that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real path, as persistent
   mode does, so only what the entry adds below one is checked: `~/.cache` works where `/home` links
   to `/var/home`.
-- A path that doesn't already exist is created before the step runs, **always as a directory**, the
-  same convention Docker itself uses for a bind mount whose host source doesn't exist yet
-  (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
+- A path that doesn't already exist is created before the step runs, always as a directory, the same
+  convention Docker itself uses for a bind mount whose host source doesn't exist yet (`docker run
+  -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
   `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
-  is an error, not something this action creates. Anything else missing (`./dist`, say) is created
-  as a directory by the runner user, parents included, which needs the nearest existing parent to
-  be writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
+  fails the step instead of being created. Anything else missing (`./dist`, say) is created as a
+  directory by the runner user, parents included, which needs the nearest existing parent to be
+  writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
   command runs, since the command couldn't write there either. Create such a path in an earlier,
-  non-isolated step and give it to the runner user:
-  `sudo install -d -o "$(id -u)" -g "$(id -g)" /etc/something`.
+  non-isolated step and give it to the runner user: `sudo install -d -o "$(id -u)" -g "$(id -g)"
+  /etc/something`.
 - A created directory stays after the step, as with `docker run -v`, even if the step fails.
   Buildcage never removes one. A directory removed on the runner while a step runs, by a parallel
   step outside any sandbox or a `persistent` sandbox that can write its parent, is detached from
   every sandbox binding it, and that step's later writes there may not reach the runner.
-- `write-through:` accepts files as well as directories, but only a path that's **already** a file
-  when the step starts; a missing target is always created as a directory (see above), never a file.
-  A file entry is bind-mounted file-to-file (the same technique the `inspect` engine already uses to
-  distribute its CA), so an append or a truncating write goes through, but a tool that replaces the
-  file outright (`mv`, or unlink plus recreate) does not. If you need a file that doesn't exist yet
-  to persist, either have an earlier step create it first, or list its (already-existing) parent
-  directory instead.
+- `write-through:` accepts files as well as directories, but only a path that is already a file when
+  the step starts, since a missing one is created as a directory. A file entry is bind-mounted
+  file-to-file (as the `inspect` engine mounts its CA), so an append or a truncating write goes
+  through, but a tool that replaces the file outright (`mv`, or unlink plus recreate) does not. If
+  you need a file that doesn't exist yet to persist, either have an earlier step create it first, or
+  list its (already-existing) parent directory instead.
 - A directory entry is a mount point inside the sandbox. A tool that refreshes its output directory
   by removing it and recreating it, rather than clearing its contents, fails at the final `rmdir`
   with `EBUSY`, the same way removing a `docker run -v` target does: a mount point can't be removed
@@ -1094,14 +1094,16 @@ non-isolated step.
 
 ### `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`
 
-The command writes these two freely, so wherever its writes would reach the runner this action
-mediates them: the command writes action-owned backing copies bound into the sandbox, the real files
-are kept out of its reach (at any other path a bind mount shows them at, too), and after the step
+The command writes these two freely, so wherever its writes would reach the runner, this action
+mediates them. The command writes to backing copies the action owns, bound into the sandbox, and
+cannot reach the real files, not even at another path a bind mount shows them at. After the step,
 the action reads the copies back and writes the real files itself. A real file that is not already
-a regular file fails the step (GitHub's runner creates both before the step). That is every step in
-`persistent` mode. In `ephemeral` mode they are discarded with the overlay like any other write,
-unless `write-through` names the file or a directory it is in (`$RUNNER_TEMP`, say), by any of the
-paths it is shown at; only then are they mediated and written back, without a bind of their own.
+a regular file fails the step (GitHub's runner creates both before the step).
+
+Every step in `persistent` mode is mediated this way. In `ephemeral` mode the two are discarded with
+the overlay like any other write, unless `write-through` names the file or a directory it is in
+(`$RUNNER_TEMP`, say), by any of the paths it is shown at. Only then are they mediated and written
+back, without a bind of their own.
 
 A copy the command replaced with a symlink, FIFO or directory, or made unreadable, is read back as
 empty and fails the step; it is never followed or blocked on. The
@@ -1138,12 +1140,12 @@ instead.
 ### Reserved paths
 
 `/etc/resolv.conf` is mounted by the sandbox itself to reach the proxy's DNS, and the runner's own
-CA store to carry the proxy's CA. Which path that store is depends on the runner, so every path a
-CA store is looked for at is reserved, whether or not this runner keeps one there:
+CA store to carry the proxy's CA. Which path that store is depends on the runner, so every path a CA
+store is looked for at is reserved, whether or not this runner keeps one there:
 `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/ssl/ca-bundle.pem`,
-`/etc/pki/tls/cacert.pem` and `/etc/ssl/cert.pem`. An entry that worked on
-one runner and failed on the next would be worse than one that is refused everywhere. The file a
-candidate is a symlink to is reserved as well, since that is where the mount lands
+`/etc/pki/tls/cacert.pem` and `/etc/ssl/cert.pem`. An entry that worked on one runner and failed on
+the next would be worse than one that is refused everywhere. The file a candidate is a symlink to is
+reserved as well, since that is where the mount lands
 (`/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem` on RHEL, say).
 
 Under `inspect`, a CA directory the step covers (`/etc/pki/ca-trust/source/anchors`,
@@ -1157,25 +1159,25 @@ written back.
 
 Naming a reserved path, or anything under one, fails the step rather than being quietly ignored.
 Naming a directory that contains them (`write-through: /etc`) is fine: writes elsewhere under it
-reach the host, and only the reserved paths themselves stay read-only. The same applies to the filesystems the sandbox mounts fresh, such as `/proc`
-and `/dev`, and to the sandbox's own scratch directory under `/var/tmp`.
+reach the host, and only the reserved paths themselves stay read-only. The same applies to the
+filesystems the sandbox mounts fresh, such as `/proc` and `/dev`, and to the sandbox's own scratch
+directory under `/var/tmp`.
 
-An entry naming the scratch directory, `/var/tmp/buildcage-<uid>`, or an ancestor of it is rejected
+An entry naming the scratch directory, `/var/tmp/buildcage-<uid>`, or an ancestor of it is refused
 outright, since the writable exceptions are recursive bind-mounts and that directory holds the run's
 `mount --rbind /` rootfs, so allowing it would re-expose the whole host `/` as a writable copy.
 Entries are normalized first, so `/var/tmp/./buildcage-<uid>` is caught by the same check. This
-guards against an operator's `write-through:` value, not against the command itself. The literal
-`/` is the opt-out below and skips the guard by design; an entry that only _resolves_ to `/` is
-rejected rather than read as that opt-out.
+guards against an operator's `write-through:` value, not against the command itself. The literal `/`
+is [the opt-out below](#the--opt-out) and skips the guard.
 
 ### The `/` opt-out
 
 `write-through: /` makes every path writable but those that stay read-only under any writable
 parent: `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_STATE`, the docker CLI's config directory, the
 runner's install directory, its `_actions` directory and the reserved paths above. It only means
-anything under `persistent` and is rejected under `ephemeral`, since that mode discards writes and
+anything under `persistent` and is refused under `ephemeral`, since that mode discards writes and
 `/` would persist every one. The sentinel is the literal `/` only: an entry that merely _resolves_
-to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
+to `/` (a miscounted `../`, say) is refused rather than read as the opt-out.
 
 > [!WARNING]
 > Use `write-through: /` only for code you trust. Against a compromised command it removes more
@@ -1190,8 +1192,8 @@ to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
 >   where the command can write, so the host may later run a copy the command replaced. `docker`
 >   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
 >   plant one.
-> - `$XDG_RUNTIME_DIR` is no longer masked where it sits outside `/run`, so a `systemd --user` bus
->   there is reachable too.
+> - `$XDG_RUNTIME_DIR` is not masked where it sits outside `/run`, so a `systemd --user` bus there
+>   is reachable too.
 > - Symlinks are refused only in the four always-writable paths and other `write-through:` entries,
 >   though the command could replace one anywhere.
 >
@@ -1202,8 +1204,8 @@ to `/` (a miscounted `../`, say) is an error rather than a silent full opt-out.
 
 `write-through:` was called `writable:` before it covered both filesystem modes, and `allow_write:`
 was its `filesystem-mode: ephemeral`-only counterpart. `writable:` still works and means the same
-thing, with one change: its entries now go through the resolution above, so a relative entry
-resolves against `$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside
-the seven supported variables is rejected instead of being treated as a literal path. Setting both
-joins their lines. `allow_write:` has been removed, and a step still passing it fails with a message
-saying so rather than silently discarding the writes it asked to keep.
+thing, except that its entries go through the resolution above, so a relative entry resolves against
+`$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside the seven
+supported variables is refused instead of being treated as a literal path. Setting both joins their
+lines. `allow_write:` has been removed, and a step still passing it fails with a message saying so
+rather than silently discarding the writes it asked to keep.
