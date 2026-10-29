@@ -14,12 +14,12 @@ jobs:
     steps:
       # inspect decrypts, so it logs each request's method and full URL, and
       # the Job Summary's "Switch to restrict mode" section lists them as
-      # allowed_url_rules.
+      # allowed-url-rules.
       - name: Discover required URLs with isolated-run
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          proxy_mode: audit
-          proxy_engine: inspect
+          proxy-mode: audit
+          proxy-engine: inspect
           run: |
             npm init -y
             npm install --ignore-scripts @hono/node-server

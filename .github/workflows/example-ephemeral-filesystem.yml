@@ -13,19 +13,19 @@ jobs:
 
     steps:
       # ephemeral discards every write the step makes, except under the paths
-      # named in write_through. This example is about the filesystem, so the
+      # named in write-through. This example is about the filesystem, so the
       # command makes no outbound connection and needs no rules: restrict mode
       # with an empty allowlist blocks everything, and nothing is attempted.
       - name: Produce output with an ephemeral filesystem
         id: sandboxed
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          filesystem_mode: ephemeral
-          write_through: |
+          filesystem-mode: ephemeral
+          write-through: |
             $GITHUB_OUTPUT
             ./dist
           run: |
-            # Reaches the host: both paths are named in write_through. ./dist
+            # Reaches the host: both paths are named in write-through. ./dist
             # doesn't exist yet, so the action creates it before the step runs.
             echo "version=1.2.3" >> "$GITHUB_OUTPUT"
             echo "built" > dist/artifact.txt
@@ -40,7 +40,7 @@ jobs:
       - name: Fail if the step output did not reach the host
         if: steps.sandboxed.outputs.version != '1.2.3'
         run: |
-          echo "::error::expected version=1.2.3 through write_through: \$GITHUB_OUTPUT"
+          echo "::error::expected version=1.2.3 through write-through: \$GITHUB_OUTPUT"
           exit 1
 
       - name: Check what the overlay kept and what it discarded

@@ -26,21 +26,21 @@ jobs:
       # Activity Report" section then lists only the accesses outside it, under
       # Unexpected Accesses: here the write to /usr/local/bin, which the
       # baseline leaves out as a stand-in for an install script planting a
-      # file. With fail_on_unexpected_file_access: true, that would fail the
+      # file. With fail-on-unexpected-file-access: true, that would fail the
       # step.
       - name: Check what an install touches against a baseline
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          proxy_mode: restrict
-          allowed_url_rules: |
+          proxy-mode: restrict
+          allowed-url-rules: |
             GET https://registry.npmjs.org/**
             POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk
-          filesystem_audit: record
+          filesystem-audit: record
           # Uploads the full record each run, which names every path the step
           # touched, and a rule for each access outside the baseline, to review
           # and add once it is expected.
-          upload_filesystem_audit_artifact: true
-          config_file: test/filesystem-audit/expected-filesystem-rules.yml
+          upload-filesystem-audit-artifact: true
+          config-file: test/filesystem-audit/expected-filesystem-rules.yml
           run: |
             npm ci
 

@@ -14,11 +14,11 @@ jobs:
     steps:
       # universal reads the SNI without decrypting, so the command needs no
       # injected CA. audit records every destination, and the Job Summary's
-      # "Switch to restrict mode" section lists them as allowed_https_rules.
+      # "Switch to restrict mode" section lists them as allowed-https-rules.
       - name: Discover required domains with isolated-run
         uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         with:
-          proxy_mode: audit
-          proxy_engine: universal
+          proxy-mode: audit
+          proxy-engine: universal
           run: |
             mvn -B dependency:get -Dartifact=org.apache.commons:commons-lang3:3.17.0
