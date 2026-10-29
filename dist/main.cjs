@@ -72620,6 +72620,29 @@ function markdownRows(header, rows) {
 	].join("\n");
 }
 //#endregion
+//#region src/lib/sandbox/filesystem-audit-paths.ts
+const RECORD_FILE = "filesystem-audit.jsonl";
+function filesystemAuditPaths(containerName, scratchBase) {
+	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
+	return {
+		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
+		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
+		uploadDir,
+		stepPath: (0, node_path.join)(uploadDir, RECORD_FILE),
+		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
+	};
+}
+function readPid(readFile, pidFilePath) {
+	return Number(readFile(pidFilePath).trim());
+}
+function isTracer(pid, readFile) {
+	try {
+		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
+	} catch {
+		return;
+	}
+}
+//#endregion
 //#region src/lib/filesystem-audit/rules.ts
 const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
@@ -72781,9 +72804,9 @@ const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || 
 	"# and ** across them; ./ is the workspace and ~/ is $HOME. A path or program that",
 	"# changes between runs needs * or ** to match the next run.",
 	"#",
-	"# A dir/** rule stands for three or more paths under one directory; check what it",
-	"# covers before adding it. Where the files under it matter, find them in",
-	"# filesystem-audit.jsonl in this artifact and list them instead."
+	"# A dir/** rule stands for everything the run touched under one directory; check what",
+	"# it covers before adding it. Where the files under it matter, find them in",
+	`# ${RECORD_FILE} in this artifact and list them instead.`
 ];
 function rulesToAdd(proposed) {
 	let blocks = [];
@@ -73637,7 +73660,7 @@ ${intro}\n\n` + (steps ? useSteps(where) : `${where}\n\n`) + `[How to write the 
 `;
 }
 function useSteps(where) {
-	return `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
+	return `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
 # path/to/buildcage.yml\nfilesystem_audit: record
 # Needed for the proposed rules; also uploads the full record.\nupload_filesystem_audit_artifact: true
 ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
@@ -75629,28 +75652,6 @@ function allowedSyscalls(profile) {
 function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
-}
-//#endregion
-//#region src/lib/sandbox/filesystem-audit-paths.ts
-function filesystemAuditPaths(containerName, scratchBase) {
-	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
-	return {
-		outPath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.jsonl`),
-		pidFilePath: (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}.pid`),
-		uploadDir,
-		stepPath: (0, node_path.join)(uploadDir, "filesystem-audit.jsonl"),
-		rulesPath: (0, node_path.join)(uploadDir, "expected-filesystem-rules-to-add.txt")
-	};
-}
-function readPid(readFile, pidFilePath) {
-	return Number(readFile(pidFilePath).trim());
-}
-function isTracer(pid, readFile) {
-	try {
-		return readFile(`/proc/${pid}/comm`).startsWith("filesystem-audi");
-	} catch {
-		return;
-	}
 }
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts

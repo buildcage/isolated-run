@@ -400,8 +400,6 @@ function parseEphemeralRoots(raw) {
 	}
 	if (Array.isArray(parsed)) return parsed.every((p) => typeof p == "string" && (0, node_path.isAbsolute)(p) && !/[\x00-\x1f\x7f]/.test(p)) ? parsed : void 0;
 }
-//#endregion
-//#region src/lib/sandbox/filesystem-audit-paths.ts
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
 	return {

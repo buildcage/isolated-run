@@ -402,7 +402,7 @@ export function rulesNote(
 // workflow, or with many rules, in a config file.
 function useSteps(where: string): string {
   return (
-    `${where} Review the rules, replace the parts of paths that change between runs with \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
+    `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
     "```yaml\n" +
     `# ${CONFIG_FILE_EXAMPLE}\n` +
     "filesystem_audit: record\n" +

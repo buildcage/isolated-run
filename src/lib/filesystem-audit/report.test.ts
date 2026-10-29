@@ -81,7 +81,7 @@ describe("readStepFilesystemAudit", () => {
         "the summary shows only the accesses no rule matches.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
         "(`buildcage-filesystem-audit-deadbeef`) has a rule for each access. " +
-        "Review the rules, replace the parts of paths that change between runs with `**`, and add them to " +
+        "Review the rules, replace the parts of paths and programs that change between runs with `*` or `**`, and add them to " +
         "`expected_filesystem_rules`, under `with:` or in the step's config file if it has one. " +
         "To keep a long list out of the workflow, move it to a config file and name that file in `config_file:` under `with:`:\n\n" +
         `\`\`\`yaml\n# path/to/buildcage.yml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n`,

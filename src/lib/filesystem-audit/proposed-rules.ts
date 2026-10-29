@@ -7,6 +7,7 @@
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
+import { RECORD_FILE } from "../sandbox/filesystem-audit-paths.ts";
 import { field } from "./escape.ts";
 import { MEMFD_PREFIX } from "./paths.ts";
 import type { AuditSummary, RuleRow } from "./reduce.ts";
@@ -42,9 +43,9 @@ export const RULES_TO_ADD_HEADER = [
   "# and ** across them; ./ is the workspace and ~/ is $HOME. A path or program that",
   "# changes between runs needs * or ** to match the next run.",
   "#",
-  "# A dir/** rule stands for three or more paths under one directory; check what it",
-  "# covers before adding it. Where the files under it matter, find them in",
-  "# filesystem-audit.jsonl in this artifact and list them instead.",
+  "# A dir/** rule stands for everything the run touched under one directory; check what",
+  "# it covers before adding it. Where the files under it matter, find them in",
+  `# ${RECORD_FILE} in this artifact and list them instead.`,
 ];
 
 /** The proposed rules under the header, a block per program with its accesses

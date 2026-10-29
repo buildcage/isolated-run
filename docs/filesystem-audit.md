@@ -403,7 +403,8 @@ install against a baseline.
    bash  X  /usr/local/bin/node
    ```
 
-   The rest of the header sums up the rule syntax and folding. Each program's rules form a block.
+   The rest of the header sums up the rule syntax and asks for each `dir/**` rule to be checked.
+   Each program's rules form a block.
 
 2. Review the rules. A path that changes from run to run, such as a temporary file with a random
    name, or a directory where a run touched two files and the next will touch a third, needs `*` or
@@ -432,7 +433,8 @@ install against a baseline.
        expected_filesystem_rules: |
          /usr/local/bin/node  RWD  ./node_modules/**
          /usr/local/bin/node  R    ~/.npmrc
-         bash                 X    /usr/local/bin/node
+
+         bash  X  /usr/local/bin/node
        run: npm ci
    ```
 
@@ -447,7 +449,8 @@ install against a baseline.
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
      /usr/local/bin/node  R    ~/.npmrc
-     bash                 X    /usr/local/bin/node
+
+     bash  X  /usr/local/bin/node
    ```
 
    A step matches the workflow's and the config file's rules together, so a rule can sit in either.
