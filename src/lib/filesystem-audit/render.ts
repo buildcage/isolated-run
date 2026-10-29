@@ -307,7 +307,7 @@ export function renderAuditSummaryBlocks(
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
   if (opts.expected) {
     blocks.push(unexpectedBlock(summary, opts));
-    // Only under the table, which a note takes the place of otherwise.
+    // A note in place of the table stands for the details too.
     if (summary.proposed?.length) blocks.push(detailsBlock(summary, opts));
   } else {
     const rows = paths && byProgramAndPath(paths);

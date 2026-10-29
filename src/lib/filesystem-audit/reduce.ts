@@ -335,7 +335,6 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return key;
   };
-  // With rules, the details of what they did not take.
   const strays = prefixes.rules
     ? new Lines({
         fanout,
