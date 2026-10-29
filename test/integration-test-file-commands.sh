@@ -1,15 +1,15 @@
 #!/bin/bash
 # Verifies that the runner's GITHUB_ENV, GITHUB_PATH and GITHUB_STATE files are
 # read-only inside the sandbox in both filesystem modes and cannot be renamed
-# away, and that write_through naming GITHUB_ENV or GITHUB_PATH opens that one
-# file only. Under write_through: / nothing above them is a mount point, so the
+# away, and that write-through naming GITHUB_ENV or GITHUB_PATH opens that one
+# file only. Under write-through: / nothing above them is a mount point, so the
 # third run also tries to move $RUNNER_TEMP aside, and writes to /opt, which
 # no other entry opens. The fourth reaches the files through a bind mount that
-# write_through names. See sandboxReadonlyFileCommands and renameGuardDirs in
+# write-through names. See sandboxReadonlyFileCommands and renameGuardDirs in
 # sandbox/host-protected-paths.ts.
 #
 # The ephemeral run also checks the mediated files: GITHUB_OUTPUT, named in
-# write_through, can be rewritten in place with sed -i (which would EBUSY on a
+# write-through, can be rewritten in place with sed -i (which would EBUSY on a
 # bind-mounted file), and the host writes the real file from it.
 # GITHUB_STEP_SUMMARY, not named, stays under the overlay and is discarded,
 # while this action's report still lands.
@@ -27,16 +27,16 @@ mkdir -p "$COMMANDS"
 touch "$WORKDIR/summary.md"
 
 # The step script: each file is written to and renamed, and the one named in
-# write_through is expected to take the write.
+# write-through is expected to take the write.
 # shellcheck disable=SC2016 # expands in the sandbox
 PROBE_SCRIPT='rc=0
 for name in GITHUB_ENV GITHUB_PATH GITHUB_STATE; do
   file=$(printenv "$name")
   if [ "$name" = "$OPENED" ]; then
     if echo "probe-$MODE" >>"$file" 2>/dev/null; then
-      echo "OK: $name, named in write_through, is writable"
+      echo "OK: $name, named in write-through, is writable"
     else
-      echo "UNEXPECTED: $name, named in write_through, was not writable"
+      echo "UNEXPECTED: $name, named in write-through, was not writable"
       rc=1
     fi
     continue
@@ -99,15 +99,15 @@ if [ "$OPENED" = none ]; then
 fi
 exit $rc'
 
-# Runs one sandbox, named $1, in mode $2 with write_through $3, which opens
-# the file named in $4 (none for write_through: /).
+# Runs one sandbox, named $1, in mode $2 with write-through $3, which opens
+# the file named in $4 (none for write-through: /).
 run_probe() {
   local tag="$1" mode="$2" write_through="$3" opened="$4"
   local env_file="$COMMANDS/set_env_$tag" path_file="$COMMANDS/add_path_$tag"
   local state_file="$COMMANDS/save_state_$tag" output_file="$COMMANDS/set_output_$tag"
   local summary_file="$WORKDIR/summary_$tag.md"
   touch "$env_file" "$path_file" "$state_file" "$output_file" "$summary_file"
-  echo "=== $mode, write_through: $write_through ==="
+  echo "=== $mode, write-through: $write_through ==="
   RUNNER_TEMP="$WORKDIR/_temp" \
   GITHUB_WORKSPACE="$WORKDIR" \
   GITHUB_ENV="$env_file" \
@@ -122,7 +122,7 @@ run_probe() {
     node dist/main.cjs
 }
 
-# shellcheck disable=SC2016 # the action expands write_through
+# shellcheck disable=SC2016 # the action expands write-through
 run_probe persistent persistent '$GITHUB_PATH' GITHUB_PATH
 PERSISTENT_CODE=$?
 # shellcheck disable=SC2016
@@ -132,7 +132,7 @@ EPHEMERAL_CODE=$?
 run_probe whole persistent / none
 WHOLE_CODE=$?
 
-# The same files through a bind mount of the work directory that write_through
+# The same files through a bind mount of the work directory that write-through
 # names: what is read-only at one path has to be at the other too.
 ALIAS="/mnt/buildcage-test-alias-$$"
 if ! sudo -n mkdir -p "$ALIAS" || ! sudo -n mount --bind "$WORKDIR" "$ALIAS"; then
@@ -141,7 +141,7 @@ if ! sudo -n mkdir -p "$ALIAS" || ! sudo -n mount --bind "$WORKDIR" "$ALIAS"; th
 fi
 trap 'sudo -n umount "$ALIAS"; sudo -n rmdir "$ALIAS"; rm -rf "$WORKDIR"' EXIT
 for name in env path state; do touch "$COMMANDS/${name}_alias"; done
-echo "=== persistent, write_through: $ALIAS ==="
+echo "=== persistent, write-through: $ALIAS ==="
 RUNNER_TEMP="$WORKDIR/_temp" \
 GITHUB_WORKSPACE="$WORKDIR" \
 GITHUB_ENV="$COMMANDS/env_alias" \
@@ -169,10 +169,10 @@ echo "=== Sandbox File Command Assertions ==="
 echo ""
 check_status "persistent: every probe inside the sandbox held" "$PERSISTENT_CODE" 0
 check_status "ephemeral: every probe inside the sandbox held" "$EPHEMERAL_CODE" 0
-check_status "write_through: /: every probe inside the sandbox held" "$WHOLE_CODE" 0
-check_status "an alias in write_through: every probe inside the sandbox held" "$ALIAS_CODE" 0
+check_status "write-through: /: every probe inside the sandbox held" "$WHOLE_CODE" 0
+check_status "an alias in write-through: every probe inside the sandbox held" "$ALIAS_CODE" 0
 
-# What reached the host: only the write to the file write_through named.
+# What reached the host: only the write to the file write-through named.
 check_host_file() {
   local label="$1" file="$2" want="$3"
   if [ -z "$want" ] && ! grep -q probe "$file" 2>/dev/null; then
@@ -188,8 +188,8 @@ check_host_file "persistent: GITHUB_ENV is untouched" "$COMMANDS/set_env_persist
 check_host_file "persistent: GITHUB_STATE carries no probe" "$COMMANDS/save_state_persistent" ""
 check_host_file "ephemeral: GITHUB_ENV took the write" "$COMMANDS/set_env_ephemeral" probe-ephemeral
 check_host_file "ephemeral: GITHUB_PATH is untouched" "$COMMANDS/add_path_ephemeral" ""
-check_host_file "write_through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
-check_host_file "an alias in write_through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
+check_host_file "write-through: /: GITHUB_ENV is untouched" "$COMMANDS/set_env_whole" ""
+check_host_file "an alias in write-through: GITHUB_ENV is untouched" "$COMMANDS/env_alias" ""
 
 PERSISTENT_SUMMARY="$WORKDIR/summary_persistent.md"
 report_line=$(grep -n -m1 "^## " "$PERSISTENT_SUMMARY" | cut -d: -f1)
@@ -210,7 +210,7 @@ fi
 # The report is written from the host after the sandbox exits, outside the
 # overlay that took the command's markdown.
 if ! grep -q "DISCARDED_SUMMARY" "$SUMMARY_FILE" 2>/dev/null && grep -q "^## " "$SUMMARY_FILE"; then
-  pass "ephemeral: GITHUB_STEP_SUMMARY, not named in write_through, has this action's report and not the command's markdown"
+  pass "ephemeral: GITHUB_STEP_SUMMARY, not named in write-through, has this action's report and not the command's markdown"
 else
   fail "ephemeral: GITHUB_STEP_SUMMARY -- got: $(cat "$SUMMARY_FILE" 2>/dev/null)"
 fi

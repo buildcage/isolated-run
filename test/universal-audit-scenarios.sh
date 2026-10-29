@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the sandbox, as the `run:` input of a real proxy_engine:
+# Runs inside the sandbox, as the `run:` input of a real proxy-engine:
 # universal step in audit mode (see test/integration-test-universal-audit.sh).
 #
 # ---------------------------------------------------------------------------

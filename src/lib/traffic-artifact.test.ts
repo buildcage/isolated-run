@@ -70,11 +70,11 @@ describe("setTrafficArtifactOutput", () => {
     rmSync(outputDir, { recursive: true, force: true });
   });
 
-  it("writes the name to GITHUB_OUTPUT", () => {
+  it("writes the name to GITHUB_OUTPUT, under both spellings", () => {
     setTrafficArtifactOutput("buildcage-traffic-deadbeef");
 
     expect(readFileSync(outputFile, "utf8")).toMatch(
-      /^traffic_artifact_name<<(\S+)\nbuildcage-traffic-deadbeef\n\1\n$/,
+      /^traffic-artifact-name<<(\S+)\nbuildcage-traffic-deadbeef\n\1\ntraffic_artifact_name<<(\S+)\nbuildcage-traffic-deadbeef\n\2\n$/,
     );
   });
 
@@ -83,7 +83,9 @@ describe("setTrafficArtifactOutput", () => {
   it("writes an empty value rather than nothing", () => {
     setTrafficArtifactOutput("");
 
-    expect(readFileSync(outputFile, "utf8")).toMatch(/^traffic_artifact_name<<(\S+)\n\n\1\n$/);
+    expect(readFileSync(outputFile, "utf8")).toMatch(
+      /^traffic-artifact-name<<(\S+)\n\n\1\ntraffic_artifact_name<<(\S+)\n\n\2\n$/,
+    );
   });
 
   it("throws when the command removed GITHUB_OUTPUT", () => {

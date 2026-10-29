@@ -93,7 +93,7 @@ export interface ReportStepOptions {
  * to write.
  *
  * Never throws. A failure here is a warning naming the step that failed, and
- * under `restrict` with fail_on_blocked it also fails the step: a report that
+ * under `restrict` with fail-on-blocked it also fails the step: a report that
  * could not be read or recorded cannot vouch that nothing was blocked.
  */
 export async function reportStepTraffic(
@@ -214,7 +214,7 @@ export async function reportStepTraffic(
   try {
     setTrafficArtifactOutput(artifactName);
   } catch (e) {
-    fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
+    fail(`Failed to set the traffic-artifact-name output: ${errorMessage(e)}`);
   }
 }
 

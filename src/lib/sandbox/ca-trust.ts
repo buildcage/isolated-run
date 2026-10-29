@@ -72,7 +72,7 @@ export const CA_DIR_CANDIDATES = [
   "/var/lib/ca-certificates/pem",
 ];
 
-/** Not under /run: `write_through` can put the host's /run back, and the mount
+/** Not under /run: `write-through` can put the host's /run back, and the mount
  *  point would then be created on the host. */
 export const OWN_CA_DESTINATION = "/dev/buildcage-ca.pem";
 
@@ -218,8 +218,8 @@ interface CaStoreContext {
   deps: Required<Omit<CaTrustDeps, "warn">> & Pick<CaTrustDeps, "warn">;
 }
 
-/** Which write_through entries a store's mount refuses, since it is mounted
- *  after every write_through entry and would silently shadow them. */
+/** Which write-through entries a store's mount refuses, since it is mounted
+ *  after every write-through entry and would silently shadow them. */
 type CaStoreReservation =
   /** Every candidate, and where each resolves, in every engine, whether or
    *  not the runner has it: which one the mount lands on depends on the
@@ -290,7 +290,7 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
       `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); ` +
       "a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will " +
       "not trust the proxy. Check that the runner user can read it, or use " +
-      "proxy_engine: universal.",
+      "proxy-engine: universal.",
     mountOptions: READ_ONLY,
     reserve: {
       refuses: (entry, destination) => isAtOrUnder(entry, destination),
@@ -316,9 +316,9 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
         deps.warn?.(
           `could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no ` +
             "keytool outside the paths a sandboxed command can write to ($HOME, $GITHUB_WORKSPACE, " +
-            "/tmp, $RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a " +
+            "/tmp, $RUNNER_TEMP, write-through:). A Java step will not trust the proxy. Install a " +
             "JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside $HOME), or " +
-            "use proxy_engine: universal.",
+            "use proxy-engine: universal.",
         );
         return [];
       }
@@ -348,7 +348,7 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
     // A non-default store password otherwise shows only as an opaque TLS error.
     notAdded: (destination) =>
       `could not add the proxy CA to the JVM keystore ${destination}; a Java step ` +
-      `will not trust it. Use proxy_engine: universal for a JVM build whose ` +
+      `will not trust it. Use proxy-engine: universal for a JVM build whose ` +
       `keystore cannot be rewritten.`,
     mountOptions: READ_ONLY,
     reserve: {
@@ -360,7 +360,7 @@ export const CA_STORES: Record<CaStoreKind, CaStore> = {
   },
 };
 
-/** The paths write_through: refuses in every engine; see CaStoreReservation. */
+/** The paths write-through: refuses in every engine; see CaStoreReservation. */
 export function reservedCaStorePaths(): string[] {
   return Object.values(CA_STORES).flatMap(({ reserve }) =>
     "candidates" in reserve ? reserve.candidates : [],
@@ -473,7 +473,7 @@ export function presetCaVariables(
 }
 
 /**
- * Refuse a write_through entry a CA mount would shadow. An ancestor stays
+ * Refuse a write-through entry a CA mount would shadow. An ancestor stays
  * allowed. The entries are real paths, and runc follows symlinks in a mount's
  * destination, so each destination is compared where it resolves.
  */
@@ -494,7 +494,7 @@ export function assertWriteThroughClearOfCaTrust(
       const resolved = realpath(destination);
       if ("refuses" in reserve && reserve.refuses(path, resolved)) {
         throw new WritablePathConflictError(
-          `write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`,
+          `write-through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`,
         );
       }
     }

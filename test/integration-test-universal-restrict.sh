@@ -18,7 +18,7 @@ fixture_up universal
 
 TMPDIR=$(mktemp -d)
 
-echo "--- running the sandboxed step (proxy_engine: universal, restrict mode) ---"
+echo "--- running the sandboxed step (proxy-engine: universal, restrict mode) ---"
 run_step --tee universal "$TMPDIR/step" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443 allowed.example.com:8443 *.wildcard.example.com:443 *.wildcard.example.com:8443 ~ok\\.regex\\.example\\.com:443 ~^ports\\.regex\\.example\\.com:(443|8443)\$ ~^tlsany\\.example\\.com:.*\$" \

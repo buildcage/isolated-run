@@ -46,7 +46,7 @@ describe("persistingWritablePaths", () => {
     ).toStrictEqual([...PERSISTENT, "/opt/out"]);
   });
 
-  it("is only the write_through paths in ephemeral mode, whose overlays are discarded", () => {
+  it("is only the write-through paths in ephemeral mode, whose overlays are discarded", () => {
     expect(
       persistingWritablePaths(
         "ephemeral",
@@ -56,7 +56,7 @@ describe("persistingWritablePaths", () => {
     ).toStrictEqual([`${WORKSPACE}/dist`]);
   });
 
-  it("spells the runner's directories as they really resolve, and write_through as written", () => {
+  it("spells the runner's directories as they really resolve, and write-through as written", () => {
     const real = (p: string) => realPathOf(p, withLinks({ [HOME]: "/data/runner" }));
 
     expect(
@@ -92,7 +92,7 @@ describe("findPinnableCommand", () => {
   });
 
   it("takes the file such a chain leads to when it bears the command's name", () => {
-    // Ubuntu 26.04's sudo-rs, under write_through: /etc.
+    // Ubuntu 26.04's sudo-rs, under write-through: /etc.
     const deps = host(["/usr/lib/cargo/bin/sudo"], {
       "/usr/bin/sudo": "/etc/alternatives/sudo",
       "/etc/alternatives/sudo": "/usr/lib/cargo/bin/sudo",
@@ -182,7 +182,7 @@ describe("findPinnableCommand", () => {
     expect(findPinnableCommand("docker", undefined, PERSISTENT, deps)).toBeUndefined();
   });
 
-  it("takes the first match under write_through: /, the full opt-out", () => {
+  it("takes the first match under write-through: /, the full opt-out", () => {
     const deps = host([`${HOME}/.local/bin/docker`, "/usr/bin/docker"]);
 
     expect(findPinnableCommand("docker", `${HOME}/.local/bin:/usr/bin`, ["/"], deps)).toBe(
@@ -243,7 +243,7 @@ describe("jvmTools", () => {
     expect(jvmTools({ PATH: path }, PERSISTENT, deps).keytool).toBe("/usr/bin/keytool");
   });
 
-  it("takes the JDK's keytool behind /etc/alternatives under write_through: /etc", () => {
+  it("takes the JDK's keytool behind /etc/alternatives under write-through: /etc", () => {
     const deps = host([`${JDK}/bin/keytool`], {
       "/usr/bin/keytool": "/etc/alternatives/keytool",
       "/etc/alternatives/keytool": `${JDK}/bin/keytool`,
@@ -301,7 +301,7 @@ describe("pathOutside", () => {
     );
   });
 
-  it("drops a write_through path outside the persistent set", () => {
+  it("drops a write-through path outside the persistent set", () => {
     expect(pathOutside("/usr/local/bin:/usr/bin", ["/usr/local/bin"], NO_LINKS)).toBe("/usr/bin");
   });
 
@@ -309,7 +309,7 @@ describe("pathOutside", () => {
     expect(pathOutside(undefined, PERSISTENT, NO_LINKS)).toBe("");
   });
 
-  it("keeps PATH as is under write_through: /, the full opt-out", () => {
+  it("keeps PATH as is under write-through: /, the full opt-out", () => {
     const path = `${HOME}/.local/bin:bin:/usr/bin`;
 
     expect(pathOutside(path, [...PERSISTENT, "/"], NO_LINKS)).toBe(path);
@@ -464,7 +464,7 @@ describe("hostCommandEnv", () => {
 describe("pinningPaths", () => {
   const env = RUNNER_DIRS_ENV;
 
-  it("is persistent mode's set plus write_through, whatever mode the step runs in", () => {
+  it("is persistent mode's set plus write-through, whatever mode the step runs in", () => {
     expect(pinningPaths(() => "/opt/out", env, asWritten)).toStrictEqual([
       ...PERSISTENT,
       "/opt/out",

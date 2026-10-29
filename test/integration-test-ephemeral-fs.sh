@@ -1,8 +1,8 @@
 #!/bin/bash
-# Verifies filesystem_mode: ephemeral / write_through: end-to-end by driving
+# Verifies filesystem-mode: ephemeral / write-through: end-to-end by driving
 # dist/main.cjs directly, without the real action wrapper; test-e2e.yml's
-# enforcement steps cover write_through: through the real action, and
-# nothing there sets filesystem_mode: at all.
+# enforcement steps cover write-through: through the real action, and
+# nothing there sets filesystem-mode: at all.
 # The mount-composition/path-resolution rules themselves are already
 # unit-tested (ephemeral-fs.test.ts, oci-config.test.ts); this proves runc
 # actually honors them. The mediated $GITHUB_OUTPUT and $GITHUB_STEP_SUMMARY
@@ -19,11 +19,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
 require_local_image
 
-# Runs dist/main.cjs with filesystem_mode: ephemeral against a fresh
+# Runs dist/main.cjs with filesystem-mode: ephemeral against a fresh
 # $GITHUB_WORKSPACE/$RUNNER_TEMP (both under mktemp's default, i.e. /tmp,
 # never inside the real $HOME, so $HOME survives folding as its own overlay
 # root instead of being subsumed by GITHUB_WORKSPACE/RUNNER_TEMP; see
-# determineOverlayRoots). $1=workdir (already created) $2=write_through input
+# determineOverlayRoots). $1=workdir (already created) $2=write-through input
 # $3=run script. Writes $workdir/out.log and $workdir/exit_code.
 run_ephemeral() {
   local workdir="$1" write_through="$2" run_script="$3"
@@ -44,7 +44,7 @@ run_ephemeral() {
 }
 
 echo ""
-echo "=== Sandbox filesystem_mode: ephemeral / write_through: Assertions ==="
+echo "=== Sandbox filesystem-mode: ephemeral / write-through: Assertions ==="
 echo ""
 
 # A fresh runner has no scratch base at all, which is the state this test
@@ -53,7 +53,7 @@ echo ""
 # exists in the right shape.
 sudo rm -rf "/var/tmp/buildcage-$(id -u)"
 
-# --- Without write_through, one sandbox for every check, since a start is not
+# --- Without write-through, one sandbox for every check, since a start is not
 # cheap; the UNEXPECTED lines in out.log say which in-sandbox check gave way.
 # - $HOME writes (create + delete) never reach the host.
 # - A host mount nested under an overlay root, here the workspace under /tmp,
@@ -156,7 +156,7 @@ sudo -n umount "$NONE/tool" "$NONE/bound" "$NONE/$DEEP"
 rm -rf "$NONE" "$BIND_SRC"
 rm -f "$HOME_MARKER" "$HOME_PRELOADED" "$TMP_MARKER"
 
-# --- write_through: a missing target under a runner-owned tree
+# --- write-through: a missing target under a runner-owned tree
 # ($GITHUB_WORKSPACE) is created runner-owned, and an existing directory the
 # runner can already write that is not one of the fixed overlay candidates
 # (CI images make /opt writable by the runner user) persists writes too.
@@ -171,18 +171,18 @@ exit $rc'
 CODE_THROUGH=$(cat "$THROUGH/exit_code")
 LOG_THROUGH="$THROUGH/out.log"
 FAILURES_BEFORE_THROUGH=$FAILURES
-check_status "write_through: ./dist and /opt: the step held" "$CODE_THROUGH" 0
+check_status "write-through: ./dist and /opt: the step held" "$CODE_THROUGH" 0
 # A file on the host is itself the proof it persisted, so each entry is judged
 # on its own whatever the other did.
 if [ -f "$THROUGH/dist/output.txt" ]; then
-  pass "write_through: ./dist creates the missing dir runner-owned and persists writes under it"
+  pass "write-through: ./dist creates the missing dir runner-owned and persists writes under it"
 else
-  fail "write_through: ./dist did not persist the write"
+  fail "write-through: ./dist did not persist the write"
 fi
 if [ -f /opt/.buildcage-ephemeral-allow-write-test ]; then
-  pass "write_through: /opt persists a write to an existing, already-writable directory"
+  pass "write-through: /opt persists a write to an existing, already-writable directory"
 else
-  fail "write_through: /opt did not persist the write"
+  fail "write-through: /opt did not persist the write"
 fi
 if grep -q "^Writable (persisted): *$THROUGH/dist$" "$LOG_THROUGH" &&
   grep -q "^Writable (persisted): */opt$" "$LOG_THROUGH"; then
@@ -196,7 +196,7 @@ fi
 rm -f /opt/.buildcage-ephemeral-allow-write-test
 rm -rf "$THROUGH"
 
-# --- A missing write_through target under a tree the runner can't write fails
+# --- A missing write-through target under a tree the runner can't write fails
 # the step before the command runs, and nothing is created. Uses a throwaway
 # /etc subdirectory; needs sudo to clean up in case a failure leaves it behind.
 ETC_TARGET="/etc/buildcage-ephemeral-test-$$"
@@ -207,9 +207,9 @@ CODE_REFUSED=$(cat "$REFUSED/exit_code")
 if [ "$CODE_REFUSED" != "0" ] && [ ! -e "$ETC_TARGET" ] &&
   grep -q "the runner can't create it under \"/etc\"" "$REFUSED/out.log" &&
   ! grep -q "UNEXPECTED" "$REFUSED/out.log"; then
-  pass "write_through: a missing target under a tree the runner can't write fails the step and creates nothing"
+  pass "write-through: a missing target under a tree the runner can't write fails the step and creates nothing"
 else
-  fail "write_through: a root-owned missing target did not behave as expected (exit $CODE_REFUSED) -- see $REFUSED/out.log"
+  fail "write-through: a root-owned missing target did not behave as expected (exit $CODE_REFUSED) -- see $REFUSED/out.log"
   cat "$REFUSED/out.log"
 fi
 sudo -n rm -rf "$ETC_TARGET" 2>/dev/null

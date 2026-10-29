@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, normalize } from "node:path";
 
 import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 
-/** Env vars a write_through: entry may reference via $NAME/${NAME}. Not
+/** Env vars a write-through: entry may reference via $NAME/${NAME}. Not
  *  arbitrary env: a step's own `env:` block could otherwise smuggle a
  *  path override into what's meant to be a fixed, reviewable list. */
 const ALLOWED_WRITE_THROUGH_VARS = [
@@ -16,7 +16,7 @@ const ALLOWED_WRITE_THROUGH_VARS = [
   "GITHUB_STEP_SUMMARY",
 ] as const;
 
-/** The runner's own generated files. A missing write_through entry that names
+/** The runner's own generated files. A missing write-through entry that names
  *  one of these is always an error (see assertKnownFilesExist); everything
  *  else missing is treated as a directory to create. */
 const KNOWN_FILE_VARS = [
@@ -32,11 +32,11 @@ const KNOWN_FILE_VARS = [
 const VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /** The documented sentinel for "drop the read-only restriction entirely"
- *  (`filesystem_mode: persistent` only; see validateFilesystemInputs). */
+ *  (`filesystem-mode: persistent` only; see validateFilesystemInputs). */
 export const WRITE_THROUGH_ALL = "/";
 
 /**
- * Resolve one raw write_through: line into an absolute, normalized host path:
+ * Resolve one raw write-through: line into an absolute, normalized host path:
  * 1. $NAME / ${NAME} expansion, allowlisted names only.
  * 2. A leading `~/` (only) expands to $HOME.
  * 3. A relative path resolves against $GITHUB_WORKSPACE (matching the
@@ -56,7 +56,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
       const name = (braced ?? bare)!;
       if (!(ALLOWED_WRITE_THROUGH_VARS as readonly string[]).includes(name)) {
         throw new Error(
-          `write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; ` +
+          `write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; ` +
             `only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`,
         );
       }
@@ -66,7 +66,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
         // path (or, with $GITHUB_WORKSPACE unset too, to a relative one) and
         // then make that path write-through instead of the one named.
         throw new Error(
-          `write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`,
+          `write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`,
         );
       }
       return value;
@@ -87,7 +87,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
   // above would otherwise hand back something relative.
   if (!isAbsolute(resolved)) {
     throw new Error(
-      `write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, ` +
+      `write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, ` +
         "so it can't be resolved to a host path.",
     );
   }
@@ -97,7 +97,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
   // deliberately: a miscounted "../" landing there is a mistake, not an opt-out.
   if (normalized === "/" && rawLine.trim() !== WRITE_THROUGH_ALL) {
     throw new Error(
-      `write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping ` +
+      `write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping ` +
         'the read-only restriction entirely. Write it as a literal "/" if that is what you meant; ' +
         'otherwise check the "../" count.',
     );
@@ -110,7 +110,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
   return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
-/** The write_through: input as bare lines. Newline-separated (not
+/** The write-through: input as bare lines. Newline-separated (not
  *  whitespace-split like the ACL rule inputs) since paths can legitimately
  *  contain spaces. A whole-line `#` comment (the first non-space character is
  *  `#`) and a blank line are dropped; a `#` anywhere else stays part of the
@@ -125,7 +125,7 @@ export function splitWriteThroughInput(input: string | undefined): string[] {
   );
 }
 
-/** Parse + resolve the whole write_through: input. Duplicates are folded, so
+/** Parse + resolve the whole write-through: input. Duplicates are folded, so
  *  the same path listed twice (or reached twice through different spellings)
  *  is only acted on once. */
 export function resolveWriteThroughPaths(
@@ -191,7 +191,7 @@ export function assertNoSymlinkInWriteThrough(
       ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.`
       : "";
   throw new Error(
-    `write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a ` +
+    `write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a ` +
       `symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`,
   );
 }
@@ -211,7 +211,7 @@ export function assertKnownFilesExist(
   const missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
   if (missing !== undefined) {
     throw new WriteThroughTargetMissingError(
-      `write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own ` +
+      `write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own ` +
         "generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should " +
         "already be present -- something is wrong with the environment.",
     );
@@ -241,7 +241,7 @@ export function ensureWriteThroughTargetsExist(
     while (ancestor !== "/" && !exists(ancestor)) ancestor = dirname(ancestor);
     if (!canWrite(ancestor)) {
       throw new WriteThroughTargetUncreatableError(
-        `write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it ` +
+        `write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it ` +
           `under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable ` +
           `by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`,
       );
@@ -253,7 +253,7 @@ export function ensureWriteThroughTargetsExist(
       mkdir(path);
     } catch (e) {
       throw new WriteThroughTargetUncreatableError(
-        `write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${
+        `write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${
           e instanceof Error ? e.message : String(e)
         }`,
       );

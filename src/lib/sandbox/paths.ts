@@ -63,7 +63,7 @@ function mountAt(mounts: MountinfoEntry[], path: string): MountinfoEntry | undef
 /**
  * Thrown by the guards that reject a writable path conflicting with something
  * the sandbox needs for itself. assertScratchBaseNotWritable also runs early
- * over the write_through input, so the early and the bundle-time callers both
+ * over the write-through input, so the early and the bundle-time callers both
  * turn it into FILESYSTEM_INPUT_CONFLICT.
  */
 export class WritablePathConflictError extends Error {}
@@ -76,7 +76,7 @@ export class WritablePathConflictError extends Error {}
  * re-expose that rootfs inside the sandbox as a second, writable copy of
  * the whole host `/`, the exact escape SANDBOX_SCRATCH_BASE's placement
  * (outside the default writable set) exists to avoid. Only reachable via an
- * explicit `write_through:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
+ * explicit `write-through:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
  * (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
  * attacker-controlled), so this is a misconfiguration guard, not a
  * hardening measure against a hostile isolated command.

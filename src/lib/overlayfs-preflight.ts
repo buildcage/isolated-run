@@ -12,23 +12,23 @@ import { SANDBOX_SCRATCH_BASE, ensureOwnScratchBase } from "./sandbox/scratch-di
 type ExecLike = typeof execFileSync;
 
 const REQUIREMENT =
-  `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay ` +
+  `filesystem-mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay ` +
   "mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves " +
   "sit on an overlayfs filesystem. This commonly fails when the runner process is itself running " +
   "inside a container whose own root filesystem is overlayfs (e.g. many container-based " +
   "self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use " +
-  "filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't " +
+  "filesystem-mode: persistent instead, or run this action from a runner whose filesystem isn't " +
   "overlayfs-backed.";
 
 const CLEANUP_REQUIREMENT =
   "The probe mount itself succeeded, so this runner does support overlayfs; what failed is " +
   "removing the probe directory afterwards. That needs `sudo rm -rf`, because the kernel writes " +
   "root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), " +
-  "and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same " +
+  "and filesystem-mode: ephemeral's real cleanup discards its overlay work dirs exactly the same " +
   "way, so a run would fail on this runner anyway, later and with less to go on. This is " +
   "usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, " +
   "which checkPasswordlessSudo's own `sudo -n true` probe cannot detect. Grant the runner user " +
-  "passwordless sudo for `rm`, or use filesystem_mode: persistent instead.";
+  "passwordless sudo for `rm`, or use filesystem-mode: persistent instead.";
 
 /**
  * Kept pure (takes the error, not execFileSync's raw output) so it's
@@ -59,7 +59,7 @@ export function describeProbeCleanupFailure(dir: string, e: unknown): string {
  * (unlike scratch-dir.ts's removeScratchDir, which deletes the directory it
  * lazily unmounted). What survives the retries becomes
  * OVERLAY_PROBE_CLEANUP_FAILED: this runner cannot `sudo rm` at all, which
- * filesystem_mode: ephemeral's own cleanup needs too.
+ * filesystem-mode: ephemeral's own cleanup needs too.
  */
 function removeProbeDir(dir: string, exec: ExecLike): void {
   retryBriefly(() =>
@@ -77,7 +77,7 @@ export interface CheckOverlayfsSupportOptions {
 
 /**
  * Fails fast, before the proxy container starts, so a runner that can't
- * support filesystem_mode: ephemeral says so instead of failing with a cryptic
+ * support filesystem-mode: ephemeral says so instead of failing with a cryptic
  * runc mount error deep inside runSandboxedCommand.
  *
  * The probe's lower/upper/work/merged dirs go under SANDBOX_SCRATCH_BASE, the

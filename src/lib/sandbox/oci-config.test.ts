@@ -322,8 +322,8 @@ describe("buildOciConfig", () => {
       expect(varRun).toBeLessThan(destinations.indexOf("/var/run/docker.sock"));
     });
 
-    it("drops the /run coverage tmpfs under write_through: /, the documented full opt-out", () => {
-      // write_through: / hands the whole host back writable, /run included, so
+    it("drops the /run coverage tmpfs under write-through: /, the documented full opt-out", () => {
+      // write-through: / hands the whole host back writable, /run included, so
       // covering /run would be the one exception to "you get what you opened".
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
@@ -475,8 +475,8 @@ describe("buildOciConfig", () => {
     });
 
     // Which shapes the guard rejects is assertScratchBaseNotWritable's own
-    // (see paths.test.ts); what this says is that write_through reaches it.
-    it("fails closed when write_through: names the scratch base", () => {
+    // (see paths.test.ts); what this says is that write-through reaches it.
+    it("fails closed when write-through: names the scratch base", () => {
       expect(() =>
         build(fakeBaseSpec(), {
           ...baseArgs,
@@ -512,7 +512,7 @@ describe("buildOciConfig", () => {
         "/sys",
         "/dev/shm",
         // The /run tmpfs and its writable /run/lock come before the writable
-        // binds, so a write_through entry under /run is re-exposed on top of the
+        // binds, so a write-through entry under /run is re-exposed on top of the
         // fresh tmpfs rather than buried by it.
         "/run",
         "/run/lock",
@@ -525,7 +525,7 @@ describe("buildOciConfig", () => {
       ]);
     });
 
-    it("re-exposes a write_through path under /run on top of the coverage tmpfs", () => {
+    it("re-exposes a write-through path under /run on top of the coverage tmpfs", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/run/snapd.socket"] },
@@ -538,7 +538,7 @@ describe("buildOciConfig", () => {
       });
     });
 
-    it("keeps its own mounts after a write_through entry that contains them", () => {
+    it("keeps its own mounts after a write-through entry that contains them", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/etc"] },
@@ -550,8 +550,8 @@ describe("buildOciConfig", () => {
     });
   });
 
-  describe("`write_through: /`, the documented full opt-out", () => {
-    it("`write_through: /` is exempt from the scratch-base guard (documented full opt-out)", () => {
+  describe("`write-through: /`, the documented full opt-out", () => {
+    it("`write-through: /` is exempt from the scratch-base guard (documented full opt-out)", () => {
       expect(() =>
         build(fakeBaseSpec(), {
           ...baseArgs,
@@ -560,7 +560,7 @@ describe("buildOciConfig", () => {
       ).not.toThrow();
     });
 
-    it("`write_through: /` disables the read-only root and skips the individual writable-path mounts", () => {
+    it("`write-through: /` disables the read-only root and skips the individual writable-path mounts", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
@@ -570,7 +570,7 @@ describe("buildOciConfig", () => {
       expect(rw.length).toBe(0);
     });
 
-    it("`write_through: /` still keeps the action's own host directories read-only", () => {
+    it("`write-through: /` still keeps the action's own host directories read-only", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
         writable: { ...baseArgs.writable, writablePaths: ["/"] },
@@ -579,7 +579,7 @@ describe("buildOciConfig", () => {
       expect(config.linux.readonlyPaths).toContain("/home/runner/.docker");
     });
 
-    it("`write_through: /` skips the host-mount readonly pass entirely", () => {
+    it("`write-through: /` skips the host-mount readonly pass entirely", () => {
       const hostMounts = [{ mountPoint: "/mnt", fsType: "ext4" }];
       const config = build(fakeBaseSpec(), {
         ...baseArgs,
@@ -608,7 +608,7 @@ describe("buildOciConfig: ephemeral mode", () => {
     allowWrite: [baseArgs.writable.workdir],
   };
 
-  it("mounts each overlay root as an overlay and each write_through entry as a writable bind", () => {
+  it("mounts each overlay root as an overlay and each write-through entry as a writable bind", () => {
     const config = build(fakeBaseSpec(), { ...baseArgs, ephemeral });
     const overlays = config.mounts.filter((m) => m.type === "overlay").map((m) => m.destination);
     expect(overlays.toSorted()).toStrictEqual(["/home/runner", "/tmp"]);
@@ -617,7 +617,7 @@ describe("buildOciConfig: ephemeral mode", () => {
     ).toContain("rw");
   });
 
-  it("fails closed when a write_through entry names a destination runc mounts itself", () => {
+  it("fails closed when a write-through entry names a destination runc mounts itself", () => {
     expect(() =>
       build(fakeBaseSpec(), { ...baseArgs, ephemeral: { ...ephemeral, allowWrite: ["/proc"] } }),
     ).toThrow(WritablePathConflictError);
@@ -649,7 +649,7 @@ describe("buildOciConfig: ephemeral mode", () => {
     }
   });
 
-  it("feeds overlay roots and write_through paths into the readonlyPaths host-mount pass as protected", () => {
+  it("feeds overlay roots and write-through paths into the readonlyPaths host-mount pass as protected", () => {
     const hostMounts = [
       { mountPoint: "/", fsType: "ext4" },
       { mountPoint: "/home/runner", fsType: "ext4" },
@@ -666,7 +666,7 @@ describe("buildOciConfig: ephemeral mode", () => {
     expect(config.linux.readonlyPaths.includes("/mnt")).toBe(true);
   });
 
-  it("still fails closed if an overlay root or write_through entry somehow overlaps the scratch base", () => {
+  it("still fails closed if an overlay root or write-through entry somehow overlaps the scratch base", () => {
     expect(() =>
       build(fakeBaseSpec(), {
         ...baseArgs,
@@ -686,7 +686,7 @@ describe("buildOciConfig: caTrust", () => {
   };
   const caTrust = { ownCaPath: "/scratch/buildcage-ca.pem", stores: [systemStore] };
 
-  it("refuses a write_through entry naming a keystore it mounts, in either mode", () => {
+  it("refuses a write-through entry naming a keystore it mounts, in either mode", () => {
     const keystore = "/usr/lib/jvm/jdk/lib/security/cacerts";
     const withKeystore = {
       ...caTrust,
@@ -710,7 +710,7 @@ describe("buildOciConfig: caTrust", () => {
     ).toThrow(WritablePathConflictError);
   });
 
-  it("refuses a write_through entry where a symlinked CA directory leads", () => {
+  it("refuses a write-through entry where a symlinked CA directory leads", () => {
     const anchors = "/etc/pki/ca-trust/source/anchors";
     probes = { ...pinnedProbes(), realpath: (p) => (p === anchors ? "/opt/anchors" : p) };
     expect(() =>
@@ -749,7 +749,7 @@ describe("buildOciConfig: caTrust", () => {
     });
   });
 
-  it("keeps the system store and CA directory mounts after a write_through entry containing them", () => {
+  it("keeps the system store and CA directory mounts after a write-through entry containing them", () => {
     const anchors = "/etc/pki/ca-trust/source/anchors";
     const config = build(fakeBaseSpec(), {
       ...baseArgs,

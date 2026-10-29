@@ -204,7 +204,7 @@ describe("startFilesystemAudit", () => {
     );
 
     await expect(start).rejects.toThrow(
-      "filesystem_audit could not start (read kernel BTF: no such file); the command was not run.",
+      "filesystem-audit could not start (read kernel BTF: no such file); the command was not run.",
     );
   });
 
@@ -239,7 +239,7 @@ describe("startFilesystemAudit", () => {
         sleep: async () => {},
         remove: vi.fn(),
       }),
-    ).rejects.toThrow("filesystem_audit could not start (the tracer exited);");
+    ).rejects.toThrow("filesystem-audit could not start (the tracer exited);");
   });
 
   it("kills the tracer directly when it outlives the SIGTERM grace", async () => {

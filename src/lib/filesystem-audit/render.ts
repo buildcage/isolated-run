@@ -110,8 +110,8 @@ export interface RenderOptions {
   /** Where the skipped-hooks note links to. */
   skippedHooksUrl?: string;
   /** What the accesses are matched against, so that only those no rule took
-   *  show: "given" for expected_filesystem_rules, "empty" for no rules under
-   *  fail_on_unexpected_file_access. */
+   *  show: "given" for expected-filesystem-rules, "empty" for no rules under
+   *  fail-on-unexpected-file-access. */
   expected?: "given" | "empty";
   /** The folded element on the proposed rules, before the closing line. */
   rulesNote?: string;
@@ -159,7 +159,7 @@ function pathsBlock(
   if (!rows) return { ...block, cut: "atomic", text: cutNote(cause) };
   const md = accessRows(rows.map((r) => ({ ...r, path: r })));
   // Folded, as it lists every access rather than only those outside
-  // expected_filesystem_rules, and cut whole so the note is not hidden in the
+  // expected-filesystem-rules, and cut whole so the note is not hidden in the
   // folded element. A table cut short for its size says so after it.
   return {
     ...block,
@@ -227,7 +227,7 @@ function detailsBlock(
   };
 }
 
-// What expected_filesystem_rules did not take, as rules would spell it, or
+// What expected-filesystem-rules did not take, as rules would spell it, or
 // why there is no table.
 function unexpectedBlock(
   summary: AuditSummary,
@@ -275,7 +275,7 @@ const operations = (n: number): string =>
  * and notes) kept whole, the accessed-paths table and the full per-command
  * record, each folded into a details element, the proposed rules' note, and
  * the legend note, also kept whole. With
- * expected_filesystem_rules, what they did not take replaces the table and
+ * expected-filesystem-rules, what they did not take replaces the table and
  * the details.
  */
 export function renderAuditSummaryBlocks(
@@ -363,8 +363,8 @@ export function rulesNote(
   }: {
     fileName: string;
     guideUrl: string;
-    /** Whether expected_filesystem_rules were given: false for the empty
-     *  rules fail_on_unexpected_file_access checks against. */
+    /** Whether expected-filesystem-rules were given: false for the empty
+     *  rules fail-on-unexpected-file-access checks against. */
     hasRules: boolean;
   },
 ): string | undefined {
@@ -377,7 +377,7 @@ export function rulesNote(
   // How to use the file follows only where there is one, or the next run will have one.
   let steps = false;
   if (proposal === "not-requested") {
-    where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`;
+    where = `Set \`upload-filesystem-audit-artifact: true\` to get ${file} in the next run's filesystem audit artifact.`;
     steps = true;
   } else if (proposal === "too-many-paths")
     where = "No rules were proposed: the accesses touched too many distinct paths.";
@@ -402,12 +402,12 @@ export function rulesNote(
 // workflow, or with many rules, in a config file.
 function useSteps(where: string): string {
   return (
-    `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n` +
+    `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config-file:\` under \`with:\`:\n\n` +
     "```yaml\n" +
     `# ${CONFIG_FILE_EXAMPLE}\n` +
-    "filesystem_audit: record\n" +
+    "filesystem-audit: record\n" +
     `${UPLOAD_NOTE}\n` +
-    "upload_filesystem_audit_artifact: true\n" +
+    "upload-filesystem-audit-artifact: true\n" +
     `${EXPECTED_RULES_INPUT}: |\n` +
     "  /usr/local/bin/node  RWD  ./node_modules/**\n" +
     "  /usr/local/bin/node  R    ~/.npmrc\n" +
@@ -422,7 +422,7 @@ function useSteps(where: string): string {
 export function filesystemLegendNote(artifact: RecordArtifact, guideUrl: string): string {
   const record =
     artifact === "not-requested"
-      ? "set `upload_filesystem_audit_artifact: true` for the full record"
+      ? "set `upload-filesystem-audit-artifact: true` for the full record"
       : artifact === "upload-failed"
         ? "the full record could not be uploaded"
         : `the full record is in the ${artifactLink(artifact)}`;
@@ -440,7 +440,7 @@ export function filesystemTruncationNote(
 ): string {
   const rest =
     artifact === "not-requested"
-      ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact"
+      ? "set upload-filesystem-audit-artifact: true to get every access as a downloadable artifact"
       : artifact === "upload-failed"
         ? "the recording could not be uploaded as an artifact, so the rest is not kept"
         : `the ${artifactLink(artifact)} uploaded for this run has every access`;

@@ -54,7 +54,7 @@ export interface DetermineOverlayRootsOptions {
  * $GITHUB_WORKSPACE) down to the set that actually needs an overlay:
  * 1. Drop any candidate that doesn't exist, first, so an absent outer
  *    candidate cannot swallow an existing inner one in step 3.
- * 2. Drop any candidate at or under a write_through entry, which already
+ * 2. Drop any candidate at or under a write-through entry, which already
  *    persists it. One that only contains a narrower entry is kept: its
  *    overlay covers the rest, and the entry's own rw bind (a later, and so
  *    winning, mount; see ephemeralLayers) persists just that subtree.
@@ -112,7 +112,7 @@ function rootCannotRead({ fsType, superOptions = [] }: HostMount): boolean {
  * each of which needs an overlay of its own: overlayfs shows a mount inside
  * its lowerdir as the empty directory beneath it. Not folded by device, since
  * a bind mount of the same filesystem is hidden too. A mount under a
- * write_through path is left to that path's rbind, which carries it. A file
+ * write-through path is left to that path's rbind, which carries it. A file
  * mount is left hidden: overlayfs takes only a directory as its lowerdir. A
  * mount the overlay would or might fail on is left hidden too, with a warning,
  * rather than failing the step.
@@ -148,8 +148,8 @@ export function nestedMountRoots(
     }
     if (reason !== undefined) {
       warn?.(
-        `filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the ` +
-          `command sees the empty directory beneath it: ${reason}. Use filesystem_mode: ` +
+        `filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the ` +
+          `command sees the empty directory beneath it: ${reason}. Use filesystem-mode: ` +
           "persistent if the command needs its contents.",
       );
       continue;
@@ -224,8 +224,8 @@ export function createOverlayScratchDirs(
 }
 
 /**
- * Setup-time log lines for `filesystem_mode: ephemeral`, the already-folded
- * overlay roots, resolved write_through paths and mediated runner files, never
+ * Setup-time log lines for `filesystem-mode: ephemeral`, the already-folded
+ * overlay roots, resolved write-through paths and mediated runner files, never
  * the raw input strings. Empty (no lines at all) for `persistent` mode.
  */
 export function formatFilesystemPlanLog(

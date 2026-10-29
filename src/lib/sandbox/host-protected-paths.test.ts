@@ -41,7 +41,7 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toStrictEqual([]);
   });
 
-  it("covers both under write_through: /", () => {
+  it("covers both under write-through: /", () => {
     expect(
       sandboxReadonlyHostDirs(["/"], { HOME }, { actionRoot: ACTION }, NO_LINKS),
     ).toStrictEqual([ACTION, `${HOME}/.docker`]);
@@ -64,7 +64,7 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toStrictEqual([ACTION, `${HOME}/.docker`]);
   });
 
-  it("leaves out one a write_through entry names outright", () => {
+  it("leaves out one a write-through entry names outright", () => {
     expect(
       sandboxReadonlyHostDirs(
         [...PERSISTENT, `${HOME}/.docker`],
@@ -125,7 +125,7 @@ describe("sandboxReadonlyHostDirs", () => {
     ).toStrictEqual([ACTION, `${HOME}/.cfg`]);
   });
 
-  it("refuses nothing under write_through: /, where every symlink is replaceable", () => {
+  it("refuses nothing under write-through: /, where every symlink is replaceable", () => {
     expect(
       sandboxReadonlyHostDirs(
         ["/"],
@@ -163,7 +163,7 @@ describe("sandboxReadonlyHostDirs", () => {
     );
   });
 
-  it("refuses nothing for a directory write_through names, even through a symlink", () => {
+  it("refuses nothing for a directory write-through names, even through a symlink", () => {
     expect(
       sandboxReadonlyHostDirs(
         [...PERSISTENT, "/mnt/shared/docker"],
@@ -292,7 +292,7 @@ describe("sandboxReadonlyHostDirs", () => {
       ).toStrictEqual([ACTION, `${HOME}/.docker`]);
     });
 
-    it("leaves out an alias a write_through entry names outright", () => {
+    it("leaves out an alias a write-through entry names outright", () => {
       expect(
         sandboxReadonlyHostDirs(
           [...PERSISTENT, `${ALIAS}/.docker`],
@@ -373,7 +373,7 @@ describe("sandboxReadonlyFileCommands", () => {
       ]);
     });
 
-    it("opens a GITHUB_ENV alias write_through names, but never one of GITHUB_STATE", () => {
+    it("opens a GITHUB_ENV alias write-through names, but never one of GITHUB_STATE", () => {
       expect(
         files([`${ALIASED}/set_env_1`, `${ALIASED}/save_state_1`], ENV, NO_LINKS, MOUNTS),
       ).toStrictEqual([
@@ -385,11 +385,11 @@ describe("sandboxReadonlyFileCommands", () => {
     });
   });
 
-  it("leaves out GITHUB_ENV or GITHUB_PATH when write_through names it", () => {
+  it("leaves out GITHUB_ENV or GITHUB_PATH when write-through names it", () => {
     expect(files([ENV.GITHUB_ENV])).toStrictEqual([ENV.GITHUB_PATH, ENV.GITHUB_STATE]);
   });
 
-  it("keeps GITHUB_STATE even when write_through names its path", () => {
+  it("keeps GITHUB_STATE even when write-through names its path", () => {
     expect(files([ENV.GITHUB_STATE])).toStrictEqual([
       ENV.GITHUB_ENV,
       ENV.GITHUB_PATH,
@@ -397,7 +397,7 @@ describe("sandboxReadonlyFileCommands", () => {
     ]);
   });
 
-  it("matches a write_through entry through a symlink, and names each by its real path", () => {
+  it("matches a write-through entry through a symlink, and names each by its real path", () => {
     const deps = withLinks({ "/home": "/var/home" });
     const real = (p: string) => p.replace(/^\/home\//, "/var/home/");
 
@@ -491,7 +491,7 @@ describe("renameGuardDirs", () => {
   });
 
   // Nothing is a mount point then, so every directory above the dir is pinned.
-  it("pins up to / under write_through: /", () => {
+  it("pins up to / under write-through: /", () => {
     expect(renameGuardDirs([ACTION], ["/", HOME])).toStrictEqual([
       "/home",
       "/home/runner",

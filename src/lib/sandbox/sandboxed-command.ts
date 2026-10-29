@@ -152,11 +152,11 @@ export interface RunSandboxedCommandOptions {
   env: NodeJS.ProcessEnv;
   proxyEngine: ProxyEngine;
   filesystemMode: FilesystemMode;
-  /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), not raw candidates. */
+  /** filesystem-mode: ephemeral only; already folded (determineOverlayRoots), not raw candidates. */
   overlayRoots: string[];
   /** inspect only: whether a write to the NSS database fails the step. */
   failOnCaResidue: boolean;
-  /** Present only under filesystem_audit: record: where the tracer writes.
+  /** Present only under filesystem-audit: record: where the tracer writes.
    *  The step fails before its command runs if it cannot be started. */
   filesystemAudit?: FilesystemAuditPaths;
   /** Called once the tracer has attached. */
@@ -270,7 +270,7 @@ function extractCaTrust(
       warn(
         `these CA variables are already set and do not point at the proxy CA: ` +
           `${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails ` +
-          "TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.",
+          "TLS under proxy-engine: inspect; unset them for this step, or use proxy-engine: universal.",
       );
     }
     return files;
@@ -500,7 +500,7 @@ export function assembleBundle(
 }
 
 export const CA_RESIDUE_HINT =
-  "To let the step carry on with only a warning, set fail_on_ca_residue: false " +
+  "To let the step carry on with only a warning, set fail-on-ca-residue: false " +
   "(a copy of the CA is then written back).";
 
 /** Whether a write to path would have outlived the command: whether it lies
@@ -547,7 +547,7 @@ function finishNssDb(
       caPem: readFile(caTrust.ownCaPath),
       onResidue: (message) => {
         if (!failOnCaResidue) {
-          warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
+          warn(`buildcage: ${message} (fail-on-ca-residue is false, so the step carries on)`);
           return;
         }
         throw new SandboxError(`${message}. ${CA_RESIDUE_HINT}`, "NSS_DATABASE_CA_COPIED");

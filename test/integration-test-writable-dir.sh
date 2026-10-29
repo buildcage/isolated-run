@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies write_through: by driving dist/main.cjs directly, without the real
+# Verifies write-through: by driving dist/main.cjs directly, without the real
 # action wrapper; see test-e2e.yml's enforcement steps for the one
 # case that does exercise the real action. Covers an existing path and a
 # missing one (created as the runner and kept, written to or not). `/` on its
@@ -11,7 +11,7 @@ require_local_image
 
 WORKDIR=$(mktemp -d)
 # Outside every always-writable path ($GITHUB_WORKSPACE/$HOME/tmp/$RUNNER_TEMP),
-# so writing under it proves write_through did something, but runner-owned,
+# so writing under it proves write-through did something, but runner-owned,
 # so the runner can create a missing directory under it.
 PARENT=/opt/buildcage-write-through-test
 sudo -n mkdir -p "$PARENT"
@@ -37,7 +37,7 @@ echo built > ${PARENT}/created-kept/marker" \
 CODE=$?
 
 echo ""
-echo "=== Sandbox write_through: Assertions ==="
+echo "=== Sandbox write-through: Assertions ==="
 echo ""
 
 if [ "$CODE" = "0" ]; then

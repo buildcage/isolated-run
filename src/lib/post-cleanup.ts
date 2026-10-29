@@ -145,7 +145,7 @@ export function planPostCleanup(
   try {
     cleanupLeftoverAudit(targets.containerName, annotation, deps);
   } catch (e) {
-    annotation.warning(`run post-cleanup: filesystem_audit cleanup failed: ${errorMessage(e)}`);
+    annotation.warning(`run post-cleanup: filesystem-audit cleanup failed: ${errorMessage(e)}`);
   }
 
   // Reclaim this step's sandbox scratch dir if a hard kill bypassed the run's

@@ -101,10 +101,10 @@ function emptyRunTmpfs(destination: string): MountEntry {
 }
 
 /**
- * Paths this action mounts for its own use. A `write_through:` entry naming
+ * Paths this action mounts for its own use. A `write-through:` entry naming
  * one of them, or something under it, is rejected rather than silently
  * overridden: the mount carrying DNS or CA trust has to win, so honoring such
- * an entry is not an option. Naming an ancestor (`write_through: /etc`) stays
+ * an entry is not an option. Naming an ancestor (`write-through: /etc`) stays
  * allowed, since these mounts are applied last and shadow only the paths
  * themselves.
  *
@@ -122,7 +122,7 @@ export function reservedInternalDestinations(): string[] {
 /**
  * Fail closed if a writable bind would land on a destination runc mounts fresh
  * content at. Those come first in `mounts`, so the bind would shadow them:
- * `write_through: /proc` would hand the sandbox the host's real procfs and
+ * `write-through: /proc` would hand the sandbox the host's real procfs and
  * undo the PID-namespace separation.
  */
 function assertNoFreshMountDestinations(
@@ -162,15 +162,15 @@ function assertOverlayPathsAreOptionSafe(roots: OverlayDirs[]): void {
     const bad = [path, upper, work].find((p) => p.includes(",") || p.includes(":"));
     if (bad !== undefined) {
       throw new WritablePathConflictError(
-        `filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount ` +
+        `filesystem-mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount ` +
           `option cannot contain "," or ":", and the kernel offers no way to escape them. ` +
-          `Use filesystem_mode: persistent, which binds the directory directly.`,
+          `Use filesystem-mode: persistent, which binds the directory directly.`,
       );
     }
   }
 }
 
-/** `filesystem_mode: ephemeral`: an overlay per root, plus the write_through
+/** `filesystem-mode: ephemeral`: an overlay per root, plus the write-through
  *  holes punched back through it. */
 export function ephemeralLayers(
   { overlayRoots, allowWrite }: { overlayRoots: OverlayDirs[]; allowWrite: string[] },
@@ -197,7 +197,7 @@ export function ephemeralLayers(
       options: [`lowerdir=${root.path}`, `upperdir=${root.upper}`, `workdir=${root.work}`],
     });
   }
-  // Then the write_through entries, shallow-first. ensureWriteThroughTargetsExist
+  // Then the write-through entries, shallow-first. ensureWriteThroughTargetsExist
   // has already made every one of these on the host, so runc never has to
   // synthesize a root-owned placeholder for any of them.
   for (const p of [...allowWrite].sort((a, b) => a.length - b.length))
@@ -205,7 +205,7 @@ export function ephemeralLayers(
   return { mounts, writablePaths: protectedPaths };
 }
 
-/** `filesystem_mode: persistent`: the host's own directories bound back in
+/** `filesystem-mode: persistent`: the host's own directories bound back in
  *  read-write on top of the read-only root. */
 export function persistentLayers(
   writableDirs: string[],
@@ -215,7 +215,7 @@ export function persistentLayers(
   const mounts: MountEntry[] = [];
   const protectedPaths = new Set(writableDirs);
   if (!disableReadonly) {
-    // `write_through: /` (disableReadonly) is the documented full opt-out of
+    // `write-through: /` (disableReadonly) is the documented full opt-out of
     // the read-only restriction, so it's exempt from this guard.
     assertScratchBaseNotWritable(writableDirs);
     assertNoFreshMountDestinations(writableDirs, freshMountDestinations);

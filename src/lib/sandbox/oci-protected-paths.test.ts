@@ -162,7 +162,7 @@ describe("resolveProtectedPaths", () => {
     expect(maskedPaths).not.toContain("/tmp/runtime-runner/");
   });
 
-  it("lifts the mask under `write_through: /`, but never the /proc info-leak masks", () => {
+  it("lifts the mask under `write-through: /`, but never the /proc info-leak masks", () => {
     const { maskedPaths } = resolveProtectedPaths({
       ...base,
       writablePaths: new Set(["/"]),
@@ -174,7 +174,7 @@ describe("resolveProtectedPaths", () => {
     );
   });
 
-  it("skips the host-mount sweep under `write_through: /`, still masking what it masks", () => {
+  it("skips the host-mount sweep under `write-through: /`, still masking what it masks", () => {
     const { maskedPaths, readonlyPaths } = resolveProtectedPaths({
       ...base,
       hostMounts: [{ mountPoint: "/mnt", fsType: "ext4" }],

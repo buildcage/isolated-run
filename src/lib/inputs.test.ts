@@ -34,10 +34,10 @@ const ASIA = ["A", "S", "I", "A"].join("");
 const silent = () => {};
 
 describe("CONFIG_FILE_INPUTS", () => {
-  it("names every action.yml input but run, writable and config_file itself", () => {
+  it("names every action.yml input but run, writable and config-file itself", () => {
     const actionYml = parse(readFileSync("action.yml", "utf8")) as { inputs: object };
     const inputs = Object.keys(actionYml.inputs).filter(
-      (n) => !["run", "writable", "config_file"].includes(n),
+      (n) => !["run", "writable", "config-file"].includes(n) && !n.includes("_"),
     );
     expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
   });
@@ -46,30 +46,30 @@ describe("CONFIG_FILE_INPUTS", () => {
     expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
   });
 
-  it("lets the workflow's allowed_aws_role_accounts replace the file's, and adds rule lines", () => {
+  it("lets the workflow's allowed-aws-role-accounts replace the file's, and adds rule lines", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
     writeFileSync(
       join(workspace, "buildcage.yml"),
-      'allowed_aws_role_accounts: "222222222222"\nallowed_url_rules: GET https://b.example.com/**\n',
+      'allowed-aws-role-accounts: "222222222222"\nallowed-url-rules: GET https://b.example.com/**\n',
     );
     const env = (inline: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
       GITHUB_WORKSPACE: workspace,
       GITHUB_EVENT_NAME: "push",
-      INPUT_CONFIG_FILE: "buildcage.yml",
+      "INPUT_CONFIG-FILE": "buildcage.yml",
       ...inline,
     });
     const set = env({
-      INPUT_ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
-      INPUT_ALLOWED_URL_RULES: "GET https://a.example.com/**",
+      "INPUT_ALLOWED-AWS-ROLE-ACCOUNTS": "111111111111",
+      "INPUT_ALLOWED-URL-RULES": "GET https://a.example.com/**",
     });
     applyConfigFile(set, CONFIG_FILE_INPUTS);
-    expect(set.INPUT_ALLOWED_AWS_ROLE_ACCOUNTS).toBe("111111111111");
-    expect(set.INPUT_ALLOWED_URL_RULES).toBe(
+    expect(set["INPUT_ALLOWED-AWS-ROLE-ACCOUNTS"]).toBe("111111111111");
+    expect(set["INPUT_ALLOWED-URL-RULES"]).toBe(
       "GET https://a.example.com/**\nGET https://b.example.com/**",
     );
     const unset = env({});
     applyConfigFile(unset, CONFIG_FILE_INPUTS);
-    expect(unset.INPUT_ALLOWED_AWS_ROLE_ACCOUNTS).toBe("222222222222");
+    expect(unset["INPUT_ALLOWED-AWS-ROLE-ACCOUNTS"]).toBe("222222222222");
   });
 });
 
@@ -81,7 +81,7 @@ describe("resolveWriteThroughInput", () => {
     ...over,
   });
 
-  it("returns write_through: as given", () => {
+  it("returns write-through: as given", () => {
     expect(resolveWriteThroughInput(inputs({ writeThrough: "/opt/cache" }), silent)).toBe(
       "/opt/cache",
     );
@@ -92,12 +92,12 @@ describe("resolveWriteThroughInput", () => {
 
     expect(resolveWriteThroughInput(inputs({ writable: "/opt/cache" }), notice)).toBe("/opt/cache");
     expect(notice).toHaveBeenCalledWith(
-      expect.stringContaining("writable: is now called write_through:"),
+      expect.stringContaining("writable: is now called write-through:"),
     );
   });
 
-  // write_through may hold config_file's lines, which the workflow cannot see.
-  it("joins writable:'s lines to write_through:'s when both are set", () => {
+  // write-through may hold config-file's lines, which the workflow cannot see.
+  it("joins writable:'s lines to write-through:'s when both are set", () => {
     const notice = vi.fn();
 
     expect(
@@ -159,23 +159,23 @@ describe("readProxyInputs", () => {
 
   it("reads both inputs", () => {
     expect(
-      readProxyInputs(inputs({ proxy_engine: "universal", proxy_mode: "audit" })),
+      readProxyInputs(inputs({ "proxy-engine": "universal", "proxy-mode": "audit" })),
     ).toStrictEqual({ proxyEngine: "universal", proxyMode: "audit" });
   });
 
   it("rejects an unknown engine before an unknown mode", () => {
-    expect(() => readProxyInputs(inputs({ proxy_engine: "nope", proxy_mode: "Audit" }))).toThrow(
-      /Invalid proxy_engine/,
-    );
+    expect(() =>
+      readProxyInputs(inputs({ "proxy-engine": "nope", "proxy-mode": "Audit" })),
+    ).toThrow(/Invalid proxy-engine/);
   });
 
   it("rejects an unknown mode", () => {
-    expect(() => readProxyInputs(inputs({ proxy_mode: "Audit" }))).toThrow(/Invalid proxy_mode/);
+    expect(() => readProxyInputs(inputs({ "proxy-mode": "Audit" }))).toThrow(/Invalid proxy-mode/);
   });
 });
 
 describe("readFilesystemInputs", () => {
-  it("defaults to persistent with no write_through entries", () => {
+  it("defaults to persistent with no write-through entries", () => {
     expect(readFilesystemInputs(silent, inputs())).toStrictEqual({
       filesystemMode: "persistent",
       writeThroughInput: "",
@@ -186,7 +186,7 @@ describe("readFilesystemInputs", () => {
     expect(
       readFilesystemInputs(
         silent,
-        inputs({ filesystem_mode: "ephemeral", write_through: "/tmp/out" }),
+        inputs({ "filesystem-mode": "ephemeral", "write-through": "/tmp/out" }),
       ),
     ).toStrictEqual({ filesystemMode: "ephemeral", writeThroughInput: "/tmp/out" });
   });
@@ -195,7 +195,7 @@ describe("readFilesystemInputs", () => {
   // that each of the three reaches it under its own name.
   it("hands writable: and allow_write: to resolveWriteThroughInput too", () => {
     expect(
-      readFilesystemInputs(silent, inputs({ write_through: "/a", writable: "/b" }))
+      readFilesystemInputs(silent, inputs({ "write-through": "/a", writable: "/b" }))
         .writeThroughInput,
     ).toBe("/a\n/b");
     expect(() => readFilesystemInputs(silent, inputs({ allow_write: "/tmp/out" }))).toThrow(
@@ -218,12 +218,12 @@ describe("readFilesystemAuditInput", () => {
   });
 
   it("reads record", () => {
-    expect(readFilesystemAuditInput(inputs({ filesystem_audit: "record" }))).toBe("record");
+    expect(readFilesystemAuditInput(inputs({ "filesystem-audit": "record" }))).toBe("record");
   });
 
   it("rejects an invalid value", () => {
-    expect(() => readFilesystemAuditInput(inputs({ filesystem_audit: "on" }))).toThrow(
-      /Invalid filesystem_audit/,
+    expect(() => readFilesystemAuditInput(inputs({ "filesystem-audit": "on" }))).toThrow(
+      /Invalid filesystem-audit/,
     );
   });
 });
@@ -239,21 +239,24 @@ describe("readFilesystemAuditArtifactInputs", () => {
   it("reads the upload switch and a whole number of days", () => {
     expect(
       readFilesystemAuditArtifactInputs(
-        inputs({ upload_filesystem_audit_artifact: "true", filesystem_audit_retention_days: "7" }),
+        inputs({
+          "upload-filesystem-audit-artifact": "true",
+          "filesystem-audit-retention-days": "7",
+        }),
       ),
     ).toStrictEqual({ upload: true, retentionDays: 7 });
   });
 
   it("rejects a value that is not true or false", () => {
     expect(() =>
-      readFilesystemAuditArtifactInputs(inputs({ upload_filesystem_audit_artifact: "yes" })),
-    ).toThrow('Invalid upload_filesystem_audit_artifact: "yes". Must be true or false.');
+      readFilesystemAuditArtifactInputs(inputs({ "upload-filesystem-audit-artifact": "yes" })),
+    ).toThrow('Invalid upload-filesystem-audit-artifact: "yes". Must be true or false.');
   });
 
   it("rejects a non-positive or non-numeric retention even with nothing to upload", () => {
     expect(() =>
-      readFilesystemAuditArtifactInputs(inputs({ filesystem_audit_retention_days: "0" })),
-    ).toThrow(/Invalid filesystem_audit_retention_days/);
+      readFilesystemAuditArtifactInputs(inputs({ "filesystem-audit-retention-days": "0" })),
+    ).toThrow(/Invalid filesystem-audit-retention-days/);
   });
 });
 
@@ -268,9 +271,9 @@ describe("readStepLabel", () => {
 });
 
 describe.each([
-  { name: "fail_on_ca_residue", read: readFailOnCaResidue, unset: true },
-  { name: "fail_on_blocked", read: readFailOnBlocked, unset: true },
-  { name: "fail_on_unexpected_file_access", read: readFailOnUnexpectedFileAccess, unset: false },
+  { name: "fail-on-ca-residue", read: readFailOnCaResidue, unset: true },
+  { name: "fail-on-blocked", read: readFailOnBlocked, unset: true },
+  { name: "fail-on-unexpected-file-access", read: readFailOnUnexpectedFileAccess, unset: false },
 ])("$name", ({ name, read, unset }) => {
   it("reads its own input", () => {
     expect(read(inputs({ [name]: String(!unset) }))).toBe(!unset);
@@ -291,45 +294,45 @@ describe("readAwsKeyInputs", () => {
   const KEY = `${ASIA}AAAAAAAAAAAAAAAA`;
   const inspect = { proxyEngine: "inspect" } as const;
   const accounts = (value: string) =>
-    inputs({ aws_key_check: "true", allowed_aws_role_accounts: value });
+    inputs({ "aws-key-check": "true", "allowed-aws-role-accounts": value });
   const OFF = { key: "", roleAccounts: [] };
 
   it("leaves the check off when unset, whatever the environment holds", () => {
     expect(readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs())).toStrictEqual(OFF);
     expect(
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ aws_key_check: "false" })),
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ "aws-key-check": "false" })),
     ).toStrictEqual(OFF);
   });
 
-  it("pins the step's key with aws_key_check alone, learning no role's key", () => {
+  it("pins the step's key with aws-key-check alone, learning no role's key", () => {
     expect(
-      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ aws_key_check: "true" })),
+      readAwsKeyInputs(inspect, { AWS_ACCESS_KEY_ID: KEY }, inputs({ "aws-key-check": "true" })),
     ).toStrictEqual({ key: KEY, roleAccounts: [] });
   });
 
   // Ahead of the engine and key checks.
   it.each([
     ["unset", "inspect", {}],
-    ["false", "inspect", { aws_key_check: "false" }],
+    ["false", "inspect", { "aws-key-check": "false" }],
     ["unset", "universal", {}],
-  ] as const)("refuses role accounts with aws_key_check %s on %s", (_, proxyEngine, check) => {
+  ] as const)("refuses role accounts with aws-key-check %s on %s", (_, proxyEngine, check) => {
     expect(() =>
       readAwsKeyInputs(
         { proxyEngine },
         {},
-        inputs({ ...check, allowed_aws_role_accounts: "111111111111" }),
+        inputs({ ...check, "allowed-aws-role-accounts": "111111111111" }),
       ),
     ).toThrow(expect.objectContaining({ code: "AWS_KEY_CHECK_NOT_SET" }));
   });
 
-  it("refuses a config_file's accounts when the workflow sets aws_key_check: false", () => {
+  it("refuses a config-file's accounts when the workflow sets aws-key-check: false", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
-    writeFileSync(join(workspace, "buildcage.yml"), "allowed_aws_role_accounts: '111111111111'\n");
+    writeFileSync(join(workspace, "buildcage.yml"), "allowed-aws-role-accounts: '111111111111'\n");
     const env: NodeJS.ProcessEnv = {
       GITHUB_WORKSPACE: workspace,
       GITHUB_EVENT_NAME: "push",
-      INPUT_CONFIG_FILE: "buildcage.yml",
-      INPUT_AWS_KEY_CHECK: "false",
+      "INPUT_CONFIG-FILE": "buildcage.yml",
+      "INPUT_AWS-KEY-CHECK": "false",
     };
     applyConfigFile(env, CONFIG_FILE_INPUTS);
     expect(() =>
@@ -360,12 +363,12 @@ describe("readAwsKeyInputs", () => {
     const workspace = mkdtempSync(join(tmpdir(), "config-file-"));
     writeFileSync(
       join(workspace, "buildcage.yml"),
-      "aws_key_check: true\nallowed_aws_role_accounts: 012345678901\n",
+      "aws-key-check: true\nallowed-aws-role-accounts: 012345678901\n",
     );
     const env: NodeJS.ProcessEnv = {
       GITHUB_WORKSPACE: workspace,
       GITHUB_EVENT_NAME: "push",
-      INPUT_CONFIG_FILE: "buildcage.yml",
+      "INPUT_CONFIG-FILE": "buildcage.yml",
     };
     applyConfigFile(env, CONFIG_FILE_INPUTS);
     expect(() =>
@@ -418,11 +421,11 @@ describe("awsExampleInputs", () => {
   });
 
   it("turns the check on, and names the accounts given", () => {
-    expect(awsExampleInputs({ key: KEY, roleAccounts: [] })).toStrictEqual(["aws_key_check: true"]);
+    expect(awsExampleInputs({ key: KEY, roleAccounts: [] })).toStrictEqual(["aws-key-check: true"]);
     const lines = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] });
     expect(lines).toStrictEqual([
-      "aws_key_check: true",
-      'allowed_aws_role_accounts: "111111111111"',
+      "aws-key-check: true",
+      'allowed-aws-role-accounts: "111111111111"',
     ]);
     expect(lines.join("\n").includes(KEY)).toBe(false);
   });
@@ -445,8 +448,8 @@ describe("awsExampleInputs", () => {
     ] as TrafficEvent[];
     const block = awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline);
     expect(block).toStrictEqual([
-      "aws_key_check: true",
-      "allowed_aws_role_accounts: |",
+      "aws-key-check: true",
+      "allowed-aws-role-accounts: |",
       "  # 012345678901 # assumed in this run, check it is yours",
       "  111111111111",
       "  # 222222222222 # assumed in this run, check it is yours",
@@ -454,8 +457,8 @@ describe("awsExampleInputs", () => {
     // The block reads back as the accounts given alone.
     expect(parseAwsAccounts(block.slice(2).join("\n"))).toStrictEqual(["111111111111"]);
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline.slice(0, 1))).toStrictEqual([
-      "aws_key_check: true",
-      '# allowed_aws_role_accounts: "222222222222" # assumed in this run, check it is yours',
+      "aws-key-check: true",
+      '# allowed-aws-role-accounts: "222222222222" # assumed in this run, check it is yours',
     ]);
   });
 
@@ -496,7 +499,7 @@ describe("awsExampleInputs", () => {
       signed("eeee5555"),
     ];
     expect(awsExampleInputs({ key: KEY, roleAccounts: [] }, timeline).slice(1)).toStrictEqual([
-      "# allowed_aws_role_accounts: |",
+      "# allowed-aws-role-accounts: |",
       "#   222222222222 # lets key 1 and key 4 through; assumed in this run, check it is yours",
       "#   333333333333 # assumed in this run, check it is yours",
       "#   444444444444 # assumed in this run, check it is yours",
@@ -505,7 +508,7 @@ describe("awsExampleInputs", () => {
     expect(
       awsExampleInputs({ key: KEY, roleAccounts: ["111111111111"] }, timeline.slice(0, 3)).slice(1),
     ).toStrictEqual([
-      "allowed_aws_role_accounts: |",
+      "allowed-aws-role-accounts: |",
       "  111111111111",
       "  # 222222222222 # lets key 1 through; assumed in this run, check it is yours",
       "  # 333333333333 # assumed in this run, check it is yours",

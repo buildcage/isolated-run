@@ -8,7 +8,7 @@ export interface PostCleanupTargets {
   containerName: string;
   /** Derived here, never read from state; see resolvePostState. */
   projectName: string;
-  /** filesystem_mode: ephemeral only; absent when unset or unusable. Log decoration only. */
+  /** filesystem-mode: ephemeral only; absent when unset or unusable. Log decoration only. */
   ephemeralRoots?: string[];
 }
 

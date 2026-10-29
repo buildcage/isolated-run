@@ -15,19 +15,19 @@ beforeEach(() => vi.mocked(listHostMounts).mockReset());
 
 describe("resolveFilesystemPlan", () => {
   const ENV = RUNNER_DIRS_ENV;
-  // Everything "exists" by default (candidates and write_through targets)
+  // Everything "exists" by default (candidates and write-through targets)
   // unless a test narrows it.
   const alwaysExists = () => true;
   const notLink = () => ({ isSymbolicLink: () => false });
 
-  it("returns an empty plan for persistent mode with no write_through:, without touching the filesystem", () => {
+  it("returns an empty plan for persistent mode with no write-through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
     expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], mediatedVariables: [] });
     expect(exists).not.toHaveBeenCalled();
   });
 
-  it("resolves write_through: in persistent mode too, normalizing each entry", () => {
+  it("resolves write-through: in persistent mode too, normalizing each entry", () => {
     const plan = resolveFilesystemPlan("persistent", "./dist\n/opt/./cache/\n", ENV, {
       exists: alwaysExists,
       realpath: (p) => p,
@@ -37,7 +37,7 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots).toStrictEqual([]);
   });
 
-  it("pre-creates a missing write_through target in persistent mode", () => {
+  it("pre-creates a missing write-through target in persistent mode", () => {
     const mkdir = vi.fn();
     resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {
       exists: (p) => p !== "/opt/build-output",
@@ -197,7 +197,7 @@ describe("resolveFilesystemPlan", () => {
     ).toThrow(/overlaps/);
   });
 
-  it("accepts an empty write_through: in ephemeral mode silently (maximum isolation is a valid choice)", () => {
+  it("accepts an empty write-through: in ephemeral mode silently (maximum isolation is a valid choice)", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
@@ -232,24 +232,24 @@ describe("resolveFilesystemPlan", () => {
       ]);
     });
 
-    it("leaves both under the overlay in ephemeral mode unless write_through covers them", () => {
+    it("leaves both under the overlay in ephemeral mode unless write-through covers them", () => {
       expect(plan("ephemeral", "./dist").mediatedVariables).toStrictEqual([]);
     });
 
     // The mediation writes the file back, so the entry needs no bind of its own.
-    it("mediates a file write_through names, and drops it from the binds", () => {
+    it("mediates a file write-through names, and drops it from the binds", () => {
       const named = plan("ephemeral", "./dist\n$GITHUB_OUTPUT");
       expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
       expect(named.writeThroughPaths).toStrictEqual([`${ENV.GITHUB_WORKSPACE}/dist`]);
     });
 
-    it("mediates the files under a directory write_through names", () => {
+    it("mediates the files under a directory write-through names", () => {
       const covered = plan("ephemeral", "$RUNNER_TEMP");
       expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
       expect(covered.writeThroughPaths).toStrictEqual([ENV.RUNNER_TEMP]);
     });
 
-    it("compares a runner file by its real path, as write_through's are", () => {
+    it("compares a runner file by its real path, as write-through's are", () => {
       const covered = resolveFilesystemPlan("ephemeral", "$RUNNER_TEMP", FILES_ENV, {
         exists: alwaysExists,
         lstat: notLink,
@@ -273,7 +273,7 @@ describe("resolveFilesystemPlan", () => {
           ],
         });
 
-      it("mediates the files under a directory write_through names there", () => {
+      it("mediates the files under a directory write-through names there", () => {
         const covered = aliased("/mnt/alias/_temp");
         expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
         expect(covered.writeThroughPaths).toStrictEqual(["/mnt/alias/_temp"]);
@@ -294,7 +294,7 @@ describe("resolveFilesystemPlan", () => {
         expect(covered.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"]);
       });
 
-      it("mediates a file write_through names there, and drops it from the binds", () => {
+      it("mediates a file write-through names there, and drops it from the binds", () => {
         const named = aliased("/mnt/alias/_temp/_runner_file_commands/set_output_abc");
         expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
         expect(named.writeThroughPaths).toStrictEqual([]);
@@ -313,7 +313,7 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
-  it("takes the overlay candidates by their real paths, as write_through's are", () => {
+  it("takes the overlay candidates by their real paths, as write-through's are", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       exists: alwaysExists,
       deviceOf: () => 1,
@@ -323,7 +323,7 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots.sort()).toStrictEqual(["/tmp", "/var/home/runner"]);
   });
 
-  it("adds an overlay for each host mount under an overlay root, but not under write_through", () => {
+  it("adds an overlay for each host mount under an overlay root, but not under write-through", () => {
     const plan = resolveFilesystemPlan("ephemeral", "/home/runner/out", ENV, {
       exists: alwaysExists,
       lstat: notLink,
@@ -367,9 +367,9 @@ describe("resolveFilesystemPlan", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
   });
 
-  it("resolves and pre-creates write_through targets, then excludes only what's actually covered by them", () => {
+  it("resolves and pre-creates write-through targets, then excludes only what's actually covered by them", () => {
     // Self-hosted layout: GITHUB_WORKSPACE is not under HOME, so it keeps its
-    // own overlay, one that contains a narrower write_through entry.
+    // own overlay, one that contains a narrower write-through entry.
     const selfHostedEnv = { ...ENV, GITHUB_WORKSPACE: "/workspace" };
     const mkdir = vi.fn();
     const plan = resolveFilesystemPlan("ephemeral", "./dist", selfHostedEnv, {
@@ -433,7 +433,7 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
-  it("wraps an unsupported $VAR in write_through: as INVALID_WRITE_THROUGH_PATH", () => {
+  it("wraps an unsupported $VAR in write-through: as INVALID_WRITE_THROUGH_PATH", () => {
     expect.assertions(2);
     try {
       resolveFilesystemPlan("ephemeral", "$SECRET_TOKEN/x", ENV);
@@ -443,8 +443,8 @@ describe("resolveFilesystemPlan", () => {
     }
   });
 
-  it("wraps a determineOverlayRoots failure as FILESYSTEM_PLAN_FAILED, not a write_through problem", () => {
-    // exists() fails on a fixed candidate path, not on write_through's input.
+  it("wraps a determineOverlayRoots failure as FILESYSTEM_PLAN_FAILED, not a write-through problem", () => {
+    // exists() fails on a fixed candidate path, not on write-through's input.
     expect.assertions(2);
     try {
       resolveFilesystemPlan("ephemeral", "", ENV, {
@@ -460,7 +460,7 @@ describe("resolveFilesystemPlan", () => {
 });
 
 describe("validateFilesystemInputs", () => {
-  it("throws FILESYSTEM_INPUT_CONFLICT for write_through: / in ephemeral mode", () => {
+  it("throws FILESYSTEM_INPUT_CONFLICT for write-through: / in ephemeral mode", () => {
     expect.assertions(2);
     try {
       validateFilesystemInputs("ephemeral", ["/"]);
@@ -508,7 +508,7 @@ describe("validateFilesystemInputs", () => {
   });
 
   it("allows /run, and any path under it, to be re-exposed on top of the coverage tmpfs", () => {
-    // write_through opens exactly what it names: the whole host /run, or a single
+    // write-through opens exactly what it names: the whole host /run, or a single
     // path under it, re-exposed over the empty /run tmpfs (see oci-config.ts).
     for (const path of ["/run", "/var/run", "/run/snapd.socket", "/run/myapp"]) {
       expect(() => validateFilesystemInputs("persistent", [path])).not.toThrow();

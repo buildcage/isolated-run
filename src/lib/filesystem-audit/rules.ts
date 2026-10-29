@@ -1,5 +1,5 @@
 /**
- * expected_filesystem_rules: the accesses a step is expected to make, one rule
+ * expected-filesystem-rules: the accesses a step is expected to make, one rule
  * per line as `<program> <access> <path>`, the accessed-paths table's columns.
  * An access no rule names is unexpected.
  *
@@ -20,7 +20,7 @@ import { escapeForDisplay, unescapeDisplay } from "./escape.ts";
 import { MEMFD_PREFIX, unnumbered } from "./paths.ts";
 import { BIT, ORDER } from "./record.ts";
 
-export const EXPECTED_RULES_INPUT = "expected_filesystem_rules";
+export const EXPECTED_RULES_INPUT = "expected-filesystem-rules";
 
 /** Where the summary's example keeps the rules in a config file. */
 export const CONFIG_FILE_EXAMPLE = "path/to/buildcage.yml";
@@ -52,7 +52,7 @@ export interface ExpectedRules {
 /** A list of rules and where its first line sits. */
 export interface RuleSource {
   text: string;
-  /** `input` for the workflow's own value, `config` for config_file's. */
+  /** `input` for the workflow's own value, `config` for config-file's. */
   origin: "input" | "config";
   /** Absent when the lines are not on the file's lines; see ConfigValueOrigin. */
   firstLine?: number;

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies that a write_through: entry which would open a way out of the
+# Verifies that a write-through: entry which would open a way out of the
 # sandbox fails the step before the command runs. Drives dist/main.cjs
 # directly, like the other run integration tests.
 set -uo pipefail
@@ -10,7 +10,7 @@ require_local_image
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 
-# Misconfiguration guard: `write_through: /var/tmp/buildcage-<uid>` (or an
+# Misconfiguration guard: `write-through: /var/tmp/buildcage-<uid>` (or an
 # ancestor of it) would recursively re-expose the sandbox's own rootfs
 # read-write, so assertScratchBaseNotWritable in sandbox/paths.ts must
 # fail the step closed rather than silently running with that hole open.
@@ -26,17 +26,17 @@ INPUT_RUN="true" \
   node dist/main.cjs
 GUARD_CODE=$?
 
-echo "=== Sandbox write_through:$SCRATCH_BASE Fail-Closed Assertion ==="
+echo "=== Sandbox write-through:$SCRATCH_BASE Fail-Closed Assertion ==="
 echo ""
 if [ "$GUARD_CODE" != "0" ]; then
-  echo "  PASS  write_through: $SCRATCH_BASE was rejected (fails closed)"
+  echo "  PASS  write-through: $SCRATCH_BASE was rejected (fails closed)"
 else
-  echo "  FAIL  write_through: $SCRATCH_BASE was accepted (should fail closed, exit 0)"
+  echo "  FAIL  write-through: $SCRATCH_BASE was accepted (should fail closed, exit 0)"
   exit 1
 fi
 echo ""
 
-# An earlier step could plant a symlink under write_through, so an entry
+# An earlier step could plant a symlink under write-through, so an entry
 # through one must fail before the command runs.
 LINK_WORKDIR=$(mktemp -d)
 LINK_TARGET=$(mktemp -d)
@@ -57,12 +57,12 @@ LINK_OUTPUT=$(
 LINK_CODE=$?
 echo "$LINK_OUTPUT"
 
-echo "=== Sandbox write_through: through a symlink Fail-Closed Assertion ==="
+echo "=== Sandbox write-through: through a symlink Fail-Closed Assertion ==="
 echo ""
 if [ "$LINK_CODE" != "0" ] && echo "$LINK_OUTPUT" | grep -q "a symlink" && [ ! -e "$LINK_TARGET/written" ]; then
-  echo "  PASS  write_through: ./cache -> $LINK_TARGET was rejected before the command ran"
+  echo "  PASS  write-through: ./cache -> $LINK_TARGET was rejected before the command ran"
 else
-  echo "  FAIL  write_through: through a symlink was not rejected (exit $LINK_CODE)"
+  echo "  FAIL  write-through: through a symlink was not rejected (exit $LINK_CODE)"
   exit 1
 fi
 echo ""

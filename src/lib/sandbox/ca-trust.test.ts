@@ -216,7 +216,7 @@ describe("writeCaTrustFiles", () => {
         `could not add the proxy CA to the CA directory ${SUSE_ANCHORS} ` +
           `(EACCES: permission denied, ${SUSE_ANCHORS}/private); a tool that reads it through ` +
           "GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that " +
-          "the runner user can read it, or use proxy_engine: universal.",
+          "the runner user can read it, or use proxy-engine: universal.",
       ]);
     });
 
@@ -345,7 +345,7 @@ describe("writeCaTrustFiles", () => {
       ).toEqual([]);
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("/opt/java/lib/security/cacerts");
-      expect(warnings[0]).toContain("proxy_engine: universal");
+      expect(warnings[0]).toContain("proxy-engine: universal");
     });
 
     it("skips every keystore and warns once when there is no pinnable keytool", () => {
@@ -366,7 +366,7 @@ describe("writeCaTrustFiles", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain(keystores.join(", "));
       expect(warnings[0]).toContain("Install a JDK outside those paths");
-      expect(warnings[0]).toContain("proxy_engine: universal");
+      expect(warnings[0]).toContain("proxy-engine: universal");
     });
 
     it("returns nothing, and does not warn, when the runner has no JVM keystore", () => {
@@ -717,7 +717,7 @@ describe("assertWriteThroughClearOfCaTrust", () => {
     ).not.toThrow();
   });
 
-  // write_through entries arrive resolved, so naming the link or its target
+  // write-through entries arrive resolved, so naming the link or its target
   // both reach here as the target.
   it.each([["/opt/anchors"], ["/opt/anchors/corp.pem"]])(
     "refuses %s when the CA directory is a symlink to /opt/anchors",

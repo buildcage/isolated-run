@@ -17,7 +17,7 @@
 
       The stack reads bottom to top, in the order the mounts are applied: the
       runner's own files, the read-only root, the writable exceptions, the
-      overlay `filesystem_mode: ephemeral` puts over those, and the sandbox's
+      overlay `filesystem-mode: ephemeral` puts over those, and the sandbox's
       own mounts last of all. The build CA is the `inspect` engine's.
 
       A layer sits over the paths it covers, so each one spans its group's
@@ -259,13 +259,13 @@
 
           <div class="group writable">
             <div class="layer ephemeral cover">
-              <div class="layer-label">filesystem_mode: ephemeral</div>
+              <div class="layer-label">filesystem-mode: ephemeral</div>
               <div class="note">writes discarded when the step ends, except the paths you list</div>
             </div>
 
             <div class="layer cover">
               <div class="layer-label">Writable</div>
-              <div class="note">writes land on the runner, plus anything in write_through</div>
+              <div class="note">writes land on the runner, plus anything in write-through</div>
             </div>
 
             <div class="path">$GITHUB_WORKSPACE</div>

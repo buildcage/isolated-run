@@ -175,7 +175,7 @@ describe("withAwsKeyNames", () => {
 describe("awsKeysTruncationNote", () => {
   it("points to the artifact, or to how to get it", () => {
     expect(awsKeysTruncationNote(true)).toContain("artifact uploaded for this run");
-    expect(awsKeysTruncationNote(false)).toContain("set upload_traffic_artifact: true");
+    expect(awsKeysTruncationNote(false)).toContain("set upload-traffic-artifact: true");
   });
 });
 

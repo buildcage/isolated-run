@@ -23,11 +23,11 @@ case "$MODE" in
     assert_summary_contains "(restrict would block: aws-key-not-allowed" \
       "the call signed with the switched role's key is one restrict would block"
     # A single account is quoted on one line, commented out until it is checked.
-    if grep -A1 -F "aws_key_check: true" <<< "$SUMMARY" |
-      grep -qE "# allowed_aws_role_accounts: \"$SWITCHED_ACCOUNT\" # lets (the key|key [0-9]+) through; assumed in this run, check it is yours"; then
-      pass "the restrict example carries aws_key_check and the switched role's account"
+    if grep -A1 -F "aws-key-check: true" <<< "$SUMMARY" |
+      grep -qE "# allowed-aws-role-accounts: \"$SWITCHED_ACCOUNT\" # lets (the key|key [0-9]+) through; assumed in this run, check it is yours"; then
+      pass "the restrict example carries aws-key-check and the switched role's account"
     else
-      fail "the restrict example does not carry aws_key_check followed by the switched role's account"
+      fail "the restrict example does not carry aws-key-check followed by the switched role's account"
     fi
     ;;
   *)

@@ -54,9 +54,10 @@ export async function uploadFilesystemAuditArtifact(
   }
 }
 
-/** Set the filesystem_audit_artifact_name output, empty when none was
+/** Set the filesystem-audit-artifact-name output, under both its spellings, empty when none was
  *  uploaded. Written after the command, which is last-write-wins over
  *  anything the command itself wrote to the same key. */
 export function setFilesystemAuditOutput(name: string): void {
+  core.setOutput("filesystem-audit-artifact-name", name);
   core.setOutput("filesystem_audit_artifact_name", name);
 }

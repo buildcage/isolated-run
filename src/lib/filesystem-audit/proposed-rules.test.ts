@@ -41,7 +41,7 @@ describe("rulesToAdd", () => {
     );
   });
 
-  it("reads back as the same rules, header and all, when added to expected_filesystem_rules", () => {
+  it("reads back as the same rules, header and all, when added to expected-filesystem-rules", () => {
     const file = rulesToAdd([row("bash", "R", "./c"), row("*", "W", "./d/**")]);
     const { rules } = parseExpectedRules([{ text: file, origin: "input", firstLine: 1 }]);
     expect(rules.map((r) => r.ref)).toStrictEqual([

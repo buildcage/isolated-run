@@ -140,7 +140,7 @@ describe("runSandboxedCommand", () => {
     expect(mocks.runIsolated.mock.calls[0][0].cancel).toBe(cancel);
   });
 
-  describe("filesystem_audit", () => {
+  describe("filesystem-audit", () => {
     const AUDIT = {
       outPath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.jsonl",
       pidFilePath: "/var/tmp/buildcage-1001/filesystem-audit-deadbeef.pid",
@@ -208,7 +208,7 @@ describe("runSandboxedCommand", () => {
       expect(mocks.auditStop).toHaveBeenCalledOnce();
     });
 
-    it("does nothing when filesystem_audit is off", async () => {
+    it("does nothing when filesystem-audit is off", async () => {
       await runSandboxedCommand(options(), deps);
 
       expect(mocks.extractTracer).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe("runSandboxedCommand", () => {
 
       await expect(runSandboxedCommand(auditing(), deps)).rejects.toThrow(
         new SandboxError(
-          "filesystem_audit could not start (docker cp failed); the command was not run.",
+          "filesystem-audit could not start (docker cp failed); the command was not run.",
           "FILESYSTEM_AUDIT_UNAVAILABLE",
         ),
       );
@@ -471,17 +471,17 @@ describe("runSandboxedCommand", () => {
       ["persistent mode, under $HOME", {}, true],
       ["ephemeral mode", { filesystemMode: "ephemeral" as const }, false],
       [
-        "ephemeral mode, under a write_through entry",
+        "ephemeral mode, under a write-through entry",
         { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pki"] },
         true,
       ],
       [
-        "ephemeral mode, under a write_through entry beside it",
+        "ephemeral mode, under a write-through entry beside it",
         { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/home/runner/.pk"] },
         false,
       ],
       [
-        "ephemeral mode, write_through: /",
+        "ephemeral mode, write-through: /",
         { filesystemMode: "ephemeral" as const, writeThroughPaths: ["/"] },
         true,
       ],
@@ -523,19 +523,19 @@ describe("runSandboxedCommand", () => {
       );
     });
 
-    it("fails the step on a copy of the CA, pointing at fail_on_ca_residue", async () => {
+    it("fails the step on a copy of the CA, pointing at fail-on-ca-residue", async () => {
       mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => onResidue("COPIED"));
 
       await expect(runSandboxedCommand(options({ proxyEngine: "inspect" }), deps)).rejects.toThrow(
         expect.objectContaining({
           code: "NSS_DATABASE_CA_COPIED",
-          message: expect.stringMatching(/COPIED.*fail_on_ca_residue: false/),
+          message: expect.stringMatching(/COPIED.*fail-on-ca-residue: false/),
         }),
       );
       expect(mocks.releaseNssDbDirs).toHaveBeenCalledWith(NSS_DB, RELEASE);
     });
 
-    it("only warns about a copy of the CA under fail_on_ca_residue: false", async () => {
+    it("only warns about a copy of the CA under fail-on-ca-residue: false", async () => {
       mocks.settleNssDbSlot.mockImplementation((_files, { onResidue }) => {
         onResidue("COPIED");
         return "written";
@@ -544,7 +544,7 @@ describe("runSandboxedCommand", () => {
       await runSandboxedCommand(options({ proxyEngine: "inspect", failOnCaResidue: false }), deps);
 
       expect(mocks.warn).toHaveBeenCalledWith(
-        expect.stringMatching(/COPIED.*fail_on_ca_residue is false/),
+        expect.stringMatching(/COPIED.*fail-on-ca-residue is false/),
       );
     });
 
@@ -718,7 +718,7 @@ describe("runSandboxedCommand", () => {
     );
   });
 
-  it("leaves it writable in ephemeral mode, where no write_through reaches it", async () => {
+  it("leaves it writable in ephemeral mode, where no write-through reaches it", async () => {
     await runSandboxedCommand(
       options({ filesystemMode: "ephemeral", overlayRoots: ["/home/runner"] }),
       deps,
@@ -753,7 +753,7 @@ describe("runSandboxedCommand", () => {
       ]);
     });
 
-    it("keeps them read-only in ephemeral mode too, unless write_through names one", async () => {
+    it("keeps them read-only in ephemeral mode too, unless write-through names one", async () => {
       await runSandboxedCommand(
         options({
           env,

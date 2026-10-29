@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the sandbox, as the `run:` input of a proxy_engine: inspect step
+# Runs inside the sandbox, as the `run:` input of a proxy-engine: inspect step
 # with the AWS access key check on (see test/integration-test-inspect-aws-keys.sh).
 # The fixture origin stands in for every AWS host, and answers
 # /sts/same-account and /sts/other-account with an AssumeRole response for a
@@ -7,10 +7,10 @@
 #
 # ---------------------------------------------------------------------------
 # Under test:
-#   aws_key_check: true
-#   allowed_aws_role_accounts: 111111111111
+#   aws-key-check: true
+#   allowed-aws-role-accounts: 111111111111
 #   AWS_ACCESS_KEY_ID:    ${AKIA}TESTSTARTKEY0001
-#   allowed_url_rules:
+#   allowed-url-rules:
 #     * https://**.amazonaws.com/**
 #     POST http://sts.us-east-1.amazonaws.com/sts/**
 #     GET https://allowed.example.com/public/**

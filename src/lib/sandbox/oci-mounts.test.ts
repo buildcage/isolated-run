@@ -64,7 +64,7 @@ describe("withHostShmSize", () => {
 });
 
 describe("writableDirsOf", () => {
-  it("keeps workdir, home, /tmp and RUNNER_TEMP, plus whatever write_through named", () => {
+  it("keeps workdir, home, /tmp and RUNNER_TEMP, plus whatever write-through named", () => {
     expect(
       writableDirsOf({
         workdir: "/home/runner/work/repo/repo",
@@ -86,7 +86,7 @@ describe("writableDirsOf", () => {
   });
 
   it("dedupes, so a RUNNER_TEMP that is already a writable path is bound once", () => {
-    // Nested under $HOME on a GitHub-hosted runner, and a write_through entry
+    // Nested under $HOME on a GitHub-hosted runner, and a write-through entry
     // may name it too. Either way it must not be bind-mounted twice.
     expect(
       writableDirsOf({ home: "/home/runner", runnerTemp: "/tmp", writablePaths: ["/home/runner"] }),
@@ -113,7 +113,7 @@ describe("persistentLayers", () => {
     expect(writablePaths).toStrictEqual(new Set(["/home/runner", "/tmp"]));
   });
 
-  it("mounts nothing under `write_through: /`, the whole root being writable already", () => {
+  it("mounts nothing under `write-through: /`, the whole root being writable already", () => {
     // Still reports the paths, since oci-protected-paths.ts reads them to
     // decide what not to force read-only.
     const { mounts, writablePaths } = persistentLayers(["/home/runner"], fresh, {
@@ -150,14 +150,14 @@ describe("ephemeralLayers", () => {
     ]);
   });
 
-  it("punches each write_through entry back through as a plain rw rbind", () => {
+  it("punches each write-through entry back through as a plain rw rbind", () => {
     const { mounts } = ephemeralLayers({ overlayRoots: [], allowWrite: ["/var/cache"] }, fresh);
     expect(mounts).toStrictEqual([
       { destination: "/var/cache", type: "none", source: "/var/cache", options: ["rbind", "rw"] },
     ]);
   });
 
-  it("orders overlays shallow-first, then the write_through entries shallow-first", () => {
+  it("orders overlays shallow-first, then the write-through entries shallow-first", () => {
     // A deeper mount applied before the shallower one containing it would be
     // buried by it.
     const { mounts } = ephemeralLayers(
@@ -175,7 +175,7 @@ describe("ephemeralLayers", () => {
     ]);
   });
 
-  it("reports both the overlay roots and the write_through paths as writable", () => {
+  it("reports both the overlay roots and the write-through paths as writable", () => {
     const { writablePaths } = ephemeralLayers(
       { overlayRoots: [root("/home")], allowWrite: ["/var/cache"] },
       fresh,
@@ -183,7 +183,7 @@ describe("ephemeralLayers", () => {
     expect(writablePaths).toStrictEqual(new Set(["/home", "/var/cache"]));
   });
 
-  it("refuses a write_through entry inside a destination runc mounts fresh content at", () => {
+  it("refuses a write-through entry inside a destination runc mounts fresh content at", () => {
     expect(() => ephemeralLayers({ overlayRoots: [], allowWrite: ["/proc/sys"] }, fresh)).toThrow(
       /which the sandbox mounts itself/,
     );

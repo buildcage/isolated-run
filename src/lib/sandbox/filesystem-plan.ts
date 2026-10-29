@@ -1,7 +1,7 @@
 /**
  * Turns the filesystem inputs into the plan runSandboxedCommand needs: the
- * write_through targets, resolved and pre-created, plus the overlay roots
- * `filesystem_mode: ephemeral` ends up needing.
+ * write-through targets, resolved and pre-created, plus the overlay roots
+ * `filesystem-mode: ephemeral` ends up needing.
  *
  * Its own module so write-through.ts and ephemeral-fs.ts need not depend on
  * each other; it also turns their own error classes into SandboxError codes.
@@ -32,7 +32,7 @@ import {
 } from "./write-through.ts";
 
 /**
- * Validates write_through: paths against the filesystem mode, with no I/O.
+ * Validates write-through: paths against the filesystem mode, with no I/O.
  * The step calls it early, on the paths as written, so a plain mistake fails
  * before the privileged preflights; resolveFilesystemPlan's call, on the paths
  * it mounts, is the authoritative one.
@@ -44,8 +44,8 @@ export function validateFilesystemInputs(
 ): void {
   if (filesystemMode === "ephemeral" && writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
     throw new SandboxError(
-      "write_through: / drops the read-only restriction wholesale, which has no meaning in " +
-        "filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists " +
+      "write-through: / drops the read-only restriction wholesale, which has no meaning in " +
+        "filesystem-mode: ephemeral -- it would persist every write, the one thing that mode exists " +
         "to prevent. List the paths that must survive instead.",
       "FILESYSTEM_INPUT_CONFLICT",
     );
@@ -57,7 +57,7 @@ export function validateFilesystemInputs(
     );
     if (reserved) {
       throw new SandboxError(
-        `write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS ` +
+        `write-through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS ` +
           `and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to ` +
           "depends on the runner, so every one it could be is refused rather than working on one " +
           "machine and not the next. Name a containing directory instead to persist writes around it.",
@@ -68,7 +68,7 @@ export function validateFilesystemInputs(
 }
 
 export interface FilesystemPlan {
-  /** filesystem_mode: ephemeral only; already folded (determineOverlayRoots), plus the host
+  /** filesystem-mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
   /** Normalized, free of symlinks and pre-created, in either filesystem mode.
@@ -77,7 +77,7 @@ export interface FilesystemPlan {
   writeThroughPaths: string[];
   /** The runner files whose writes reach the runner, through the mediation
    *  (runner-output-files.ts): every one the step has in persistent mode, and
-   *  in ephemeral mode only those a write_through entry covers, at any path
+   *  in ephemeral mode only those a write-through entry covers, at any path
    *  the host's mounts show them at. The rest stay under the overlay and are
    *  discarded with it. */
   mediatedVariables: MediatedVariable[];
@@ -98,7 +98,7 @@ export interface ResolveFilesystemPlanDeps {
   isDirectory?: (path: string) => boolean;
 }
 
-/** Parse and resolve write_through: input, with no I/O, so the step can reject
+/** Parse and resolve write-through: input, with no I/O, so the step can reject
  *  a bad entry before its preflights. */
 export function resolveWriteThroughInput(
   writeThroughInput: string,
@@ -108,14 +108,14 @@ export function resolveWriteThroughInput(
     return resolveWriteThroughPaths(writeThroughInput, env);
   } catch (e) {
     throw new SandboxError(
-      `Invalid write_through: ${errorMessage(e)}`,
+      `Invalid write-through: ${errorMessage(e)}`,
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
 }
 
 /**
- * Resolves and pre-creates the write_through targets (write-through.ts) and,
+ * Resolves and pre-creates the write-through targets (write-through.ts) and,
  * in ephemeral mode, folds the overlay-root candidates down to what is needed
  * (ephemeral-fs.ts). Throws only SandboxError.
  */
@@ -180,7 +180,7 @@ export function resolveFilesystemPlan(
     for (const path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
   } catch (e) {
     throw new SandboxError(
-      `Invalid write_through: ${errorMessage(e)}`,
+      `Invalid write-through: ${errorMessage(e)}`,
       "INVALID_WRITE_THROUGH_PATH",
     );
   }
@@ -202,9 +202,9 @@ export function resolveFilesystemPlan(
     return { overlayRoots: [], writeThroughPaths, mediatedVariables };
 
   // Its own code: a failure reading the fixed candidates or the mount table is
-  // not a write_through input problem.
+  // not a write-through input problem.
   try {
-    // Real paths, as write_through's are, so the two compare.
+    // Real paths, as write-through's are, so the two compare.
     const { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
     const overlayCandidates = [home, runnerTemp, tmp, workdir].filter((p): p is string =>
       Boolean(p),
@@ -217,7 +217,7 @@ export function resolveFilesystemPlan(
     return { overlayRoots, writeThroughPaths, mediatedVariables };
   } catch (e) {
     throw new SandboxError(
-      `Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`,
+      `Failed to determine filesystem-mode: ephemeral's overlay roots: ${errorMessage(e)}`,
       "FILESYSTEM_PLAN_FAILED",
     );
   }

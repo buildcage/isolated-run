@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { inputEnvName, legacyInputName } from "#core/lib/actions/input-names.ts";
+
 import { ACTION_INPUTS } from "../inputs.ts";
 import { caTrustAdditions, type CaTrustFiles } from "./ca-trust.ts";
 import type { Warn } from "./scratch-dir.ts";
@@ -45,7 +47,7 @@ const RUNNER_ONLY_ENV_KEYS = new Set([
 // and this action is a JavaScript one, so no other action's inputs reach this
 // process to be missed. env-loader.test.ts holds the list to action.yml.
 export const ACTION_INPUT_ENV_KEYS = new Set(
-  ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`),
+  ACTION_INPUTS.flatMap((input) => [inputEnvName(input), inputEnvName(legacyInputName(input))]),
 );
 
 function isRunnerOnly(key: string): boolean {

@@ -6,11 +6,11 @@ import { ownerToken } from "./container.ts";
 
 /** The rule inputs the proxy gets, each in an environment variable of its own. */
 export const PROXY_RULE_INPUTS: RuleInputName[] = [
-  "allowed_https_rules",
-  "allowed_http_rules",
-  "allowed_ip_rules",
-  "allowed_url_rules",
-  "allowed_tls_rules",
+  "allowed-https-rules",
+  "allowed-http-rules",
+  "allowed-ip-rules",
+  "allowed-url-rules",
+  "allowed-tls-rules",
 ];
 
 export interface ComposeEnvOptions {

@@ -2,7 +2,7 @@ import type { Access, Agg } from "./agg.ts";
 import type { Lines } from "./fold-tree.ts";
 import type { RuleMatcher } from "./rules.ts";
 
-/** Where a line of the recording stands against expected_filesystem_rules. */
+/** Where a line of the recording stands against expected-filesystem-rules. */
 export type RuleMark = { rule: string } | { unexpected: true };
 
 /** The names a rule is matched against: a program's by its rank, and a path's. */
@@ -12,7 +12,7 @@ export interface RuleNames {
 }
 
 /**
- * Matches each access against expected_filesystem_rules, if any, marks each
+ * Matches each access against expected-filesystem-rules, if any, marks each
  * line of the recording by them, and gathers what they did not take, every
  * access without rules, into `lines`.
  */

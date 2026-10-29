@@ -8,7 +8,7 @@ const REQUIREMENTS =
 /** The step's failure when the tracer could not start. */
 export function auditUnavailable(reason: string): SandboxError {
   return new SandboxError(
-    `filesystem_audit could not start (${reason}); the command was not run.`,
+    `filesystem-audit could not start (${reason}); the command was not run.`,
     "FILESYSTEM_AUDIT_UNAVAILABLE",
   );
 }

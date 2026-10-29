@@ -220,7 +220,7 @@ describe("assertNoSymlinkInWriteThrough", () => {
   });
 });
 
-describe("write_through checks on the real filesystem", () => {
+describe("write-through checks on the real filesystem", () => {
   let root = "";
 
   beforeAll(() => {

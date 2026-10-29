@@ -122,9 +122,9 @@ describe("computeReportOutcomes", () => {
     expect(blockedOutcome(r).shouldFail).toBe(true);
   });
 
-  // Audit's outcome never depends on known_blocked_rules matching, so the
+  // Audit's outcome never depends on known-blocked-rules matching, so the
   // notice text shouldn't either.
-  it("audit-mode notice text stays fixed even when known_blocked_rules matches every blocked connection", () => {
+  it("audit-mode notice text stays fixed even when known-blocked-rules matches every blocked connection", () => {
     const knownBlockedRules = ["known-bad.example.com:443"];
     const r = report({
       parameters: reportParams({ mode: "audit", knownBlockedRules }),
@@ -203,7 +203,7 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("leaves out a reason known_blocked_rules expects", () => {
+    it("leaves out a reason known-blocked-rules expects", () => {
       const knownBlockedRules = ["s3.amazonaws.com"];
       const timeline = [
         blocked("aws-key-not-allowed"),
@@ -224,7 +224,7 @@ describe("computeReportOutcomes", () => {
       );
     });
 
-    it("is left out when known_blocked_rules expects every such block", () => {
+    it("is left out when known-blocked-rules expects every such block", () => {
       const knownBlockedRules = ["sts.amazonaws.com"];
       const timeline = [blocked("aws-key-not-allowed")];
       const r: InspectReportData = {
@@ -369,8 +369,8 @@ describe("computeReportOutcomes", () => {
         ]),
         options({
           extraInputs: [
-            "aws_key_check: true",
-            '# allowed_aws_role_accounts: "222222222222" # lets key 1 through; assumed in this run, check it is yours',
+            "aws-key-check: true",
+            '# allowed-aws-role-accounts: "222222222222" # lets key 1 through; assumed in this run, check it is yours',
           ],
         }),
       );
@@ -403,7 +403,7 @@ describe("computeReportOutcomes", () => {
       expect(section).not.toContain("assumed in this run");
       // The account is commented out inside the example's step, at its inputs' indent.
       expect(markdown).toMatch(
-        /^ {10}aws_key_check: true\n {10}# allowed_aws_role_accounts: "222222222222" # lets key 1 through; /m,
+        /^ {10}aws-key-check: true\n {10}# allowed-aws-role-accounts: "222222222222" # lets key 1 through; /m,
       );
     });
 
@@ -550,8 +550,8 @@ describe("computeReportOutcomes", () => {
         { host: "registry.npmjs.org", port: "443", ruleType: "HTTPS", reason: "-", count: 3 },
       ],
     });
-    const markdown = markdownOf(r, options({ extraInputs: ["aws_key_check: true"] }));
-    expect(markdown).toMatch(/^ {10}aws_key_check: true$/m);
+    const markdown = markdownOf(r, options({ extraInputs: ["aws-key-check: true"] }));
+    expect(markdown).toMatch(/^ {10}aws-key-check: true$/m);
   });
 
   it("escapes structural Markdown in stepLabel so a label can't inject into the heading", () => {
@@ -831,7 +831,7 @@ describe("writeReportSummary", () => {
     vi.unstubAllEnvs();
   });
 
-  // A blocked connection under restrict + fail_on_blocked is the one outcome
+  // A blocked connection under restrict + fail-on-blocked is the one outcome
   // that has to reach all three destinations at once.
   function blockedReport() {
     return report({
@@ -957,7 +957,7 @@ describe("writeReportSummary", () => {
     },
     {
       artifact: false,
-      says: "Set upload_traffic_artifact: true to get every request as an artifact.",
+      says: "Set upload-traffic-artifact: true to get every request as an artifact.",
     },
   ])("warns when Restrict Would Block is cut (artifact: $artifact)", async ({ artifact, says }) => {
     const warning = vi.fn();

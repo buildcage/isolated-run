@@ -2,7 +2,7 @@
 # Verifies, in persistent mode, that a `docker` under $HOME earlier on PATH is
 # never run, and that the docker config directory and this action's checkout
 # are read-only inside the sandbox and cannot be renamed away, while a
-# write_through entry inside the config directory stays writable. See
+# write-through entry inside the config directory stays writable. See
 # sandbox/host-commands.ts. The stand-in only leaves a marker file.
 #
 # A second sandbox puts the config directory inside a workspace nested in
@@ -65,9 +65,9 @@ else
 fi
 
 if touch '$NESTED_WRITABLE/probe' 2>/dev/null; then
-  echo 'OK: a write_through entry inside it stays writable'
+  echo 'OK: a write-through entry inside it stays writable'
 else
-  echo 'UNEXPECTED: a write_through entry inside it was not writable'
+  echo 'UNEXPECTED: a write-through entry inside it was not writable'
   rc=1
 fi
 

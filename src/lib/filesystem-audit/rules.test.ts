@@ -180,7 +180,7 @@ describe("parseExpectedRules", () => {
   ])("refuses %j", (text, reason) => {
     const parsing = () => parse(text);
     expect(parsing).toThrow(SandboxError);
-    expect(parsing).toThrow(`Invalid expected_filesystem_rules at ${reason}`);
+    expect(parsing).toThrow(`Invalid expected-filesystem-rules at ${reason}`);
   });
 });
 

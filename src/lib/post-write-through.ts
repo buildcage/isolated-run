@@ -1,8 +1,8 @@
 /**
- * The write_through the post step pins against, when config_file set it.
+ * The write-through the post step pins against, when config-file set it.
  *
- * The post step cannot read config_file again: by the end of the job a later
- * step's sandbox may have rewritten it, and pinning against a write_through
+ * The post step cannot read config-file again: by the end of the job a later
+ * step's sandbox may have rewritten it, and pinning against a write-through
  * without the path a command wrote to could trust a binary planted there.
  * GITHUB_STATE is no better, since a process outside the sandbox can write
  * that. The scratch base is hidden from every sandbox, so the main step
@@ -40,7 +40,7 @@ export function saveWriteThroughForPost(
 
 /**
  * The saved value, removed once read. Undefined when the main step saved
- * none: no config_file, or a step that failed before its command ran.
+ * none: no config-file, or a step that failed before its command ran.
  */
 export function takeWriteThroughForPost(
   env: NodeJS.ProcessEnv,

@@ -152,7 +152,7 @@ describe("reportStepTraffic", () => {
   });
 
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
-    const extraInputs = vi.fn(() => ["aws_key_check: true"]);
+    const extraInputs = vi.fn(() => ["aws-key-check: true"]);
     await reportStepTraffic(
       options({
         extraInputs,
@@ -166,7 +166,7 @@ describe("reportStepTraffic", () => {
       actionRepo: "buildcage/isolated-run",
       actionRef: "v1",
       runCommand: "npm ci",
-      extraInputs: ["aws_key_check: true"],
+      extraInputs: ["aws-key-check: true"],
       actionVersion: "1.2.3",
       stepLabel: "build",
       failOnBlocked: true,
@@ -279,7 +279,7 @@ describe("reportStepTraffic", () => {
     { mode: "restrict", failOnBlocked: false, fails: false },
     { mode: "audit", failOnBlocked: true, fails: false },
   ])(
-    "fails the step when the report cannot be fetched only under restrict with fail_on_blocked ($mode, fail_on_blocked=$failOnBlocked)",
+    "fails the step when the report cannot be fetched only under restrict with fail-on-blocked ($mode, fail-on-blocked=$failOnBlocked)",
     async ({ mode, failOnBlocked, fails }) => {
       mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 
@@ -290,7 +290,7 @@ describe("reportStepTraffic", () => {
       expect(mocks.writeReportSummary).not.toHaveBeenCalled();
       if (fails) {
         expect(annotation.error).toHaveBeenCalledWith(
-          "Failed to fetch sandbox report: container is gone; failing the step under restrict with fail_on_blocked",
+          "Failed to fetch sandbox report: container is gone; failing the step under restrict with fail-on-blocked",
         );
         expect(process.exitCode).toBe(1);
       } else {
@@ -302,12 +302,12 @@ describe("reportStepTraffic", () => {
     },
   );
 
-  it("fails the step when writing the summary fails under restrict with fail_on_blocked", async () => {
+  it("fails the step when writing the summary fails under restrict with fail-on-blocked", async () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
 
     await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
-      "Failed to write the report summary: summary file is gone; failing the step under restrict with fail_on_blocked",
+      "Failed to write the report summary: summary file is gone; failing the step under restrict with fail-on-blocked",
     );
     expect(process.exitCode).toBe(1);
   });
@@ -352,7 +352,7 @@ describe("reportStepTraffic", () => {
     { case: "upload failed", wants: true, uploaded: undefined, fetchFails: false, name: "" },
     { case: "report failed", wants: true, uploaded: undefined, fetchFails: true, name: "" },
   ])(
-    "sets traffic_artifact_name on every path ($case)",
+    "sets traffic-artifact-name on every path ($case)",
     async ({ wants, uploaded, fetchFails, name }) => {
       mocks.uploadTrafficArtifact.mockResolvedValue(uploaded);
       if (fetchFails) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
@@ -363,14 +363,14 @@ describe("reportStepTraffic", () => {
     },
   );
 
-  it("fails the step when the output cannot be set under restrict with fail_on_blocked", async () => {
+  it("fails the step when the output cannot be set under restrict with fail-on-blocked", async () => {
     mocks.setTrafficArtifactOutput.mockImplementation(() => {
       throw new Error("Missing file at path: /github/output");
     });
 
     await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
-      "Failed to set the traffic_artifact_name output: Missing file at path: /github/output; failing the step under restrict with fail_on_blocked",
+      "Failed to set the traffic-artifact-name output: Missing file at path: /github/output; failing the step under restrict with fail-on-blocked",
     );
     expect(process.exitCode).toBe(1);
   });

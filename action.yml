@@ -8,98 +8,184 @@ inputs:
   run:
     description: "Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow run: step). Runs under bash -e; start with a #! line to use another interpreter."
     required: true
-  config_file:
-    description: "YAML file, relative to the workspace, setting any input but run and the deprecated writable. An input the workflow sets wins; rule lists and write_through are combined. See docs/reference.md#config-file."
+  config-file:
+    description: "YAML file, relative to the workspace, setting any input but run and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
     required: false
     default: ""
-  proxy_mode:
-    description: "Traffic policy: audit records every destination the command reaches and blocks nothing (allowed_*_rules have no effect in this mode), or restrict (default) allows only what the rules match and blocks the rest. Run audit once, take the allowlist from its report, then switch to restrict."
+  proxy-mode:
+    description: "Traffic policy: audit records every destination the command reaches and blocks nothing (allowed-*-rules have no effect in this mode), or restrict (default) allows only what the rules match and blocks the rest. Run audit once, take the allowlist from its report, then switch to restrict."
     required: false
-  proxy_engine:
+  proxy-engine:
     description: "Network enforcement engine: inspect (default, terminates TLS to enforce on method and URL) or universal (network-level proxy, needs no CA trust)"
     required: false
-  allowed_https_rules:
+  allowed-https-rules:
     description: "HTTPS allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., '*.example.com:443 ~^custom\\.pattern:443$'"
     required: false
     default: ""
-  allowed_http_rules:
+  allowed-http-rules:
     description: "HTTP allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., 'example.com:80'"
     required: false
     default: ""
-  allowed_ip_rules:
+  allowed-ip-rules:
     description: "IP address allow rules (address, CIDR block, wildcard or ~regex), separated by whitespace. Port required. e.g., '192.168.1.1:443 10.0.0.1:8080'"
     required: false
     default: ""
-  allowed_url_rules:
-    description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy_engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
+  allowed-url-rules:
+    description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy-engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
     required: false
     default: ""
-  allowed_tls_rules:
-    description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy_engine: inspect. e.g., 'db.example.com:5432'"
+  allowed-tls-rules:
+    description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy-engine: inspect. e.g., 'db.example.com:5432'"
     required: false
     default: ""
-  aws_key_check:
-    description: "Experimental. Block AWS API requests signed with any key but the step's own AWS_ACCESS_KEY_ID. Default false. Requires proxy_engine: inspect and AWS_ACCESS_KEY_ID in the step's environment. See docs/reference.md#aws-access-key-check."
+  aws-key-check:
+    description: "Experimental. Block AWS API requests signed with any key but the step's own AWS_ACCESS_KEY_ID. Default false. Requires proxy-engine: inspect and AWS_ACCESS_KEY_ID in the step's environment. See docs/reference.md#aws-access-key-check."
     required: false
-  allowed_aws_role_accounts:
-    description: "Experimental. AWS account IDs whose roles the step may assume, whose keys then pass aws_key_check too, separated by commas or whitespace. Requires aws_key_check: true. See docs/reference.md#aws-access-key-check."
+  allowed-aws-role-accounts:
+    description: "Experimental. AWS account IDs whose roles the step may assume, whose keys then pass aws-key-check too, separated by commas or whitespace. Requires aws-key-check: true. See docs/reference.md#aws-access-key-check."
     required: false
     default: ""
-  upload_traffic_artifact:
+  upload-traffic-artifact:
     description: "Upload the observed traffic as a JSON artifact. It keeps every URL verbatim, so treat it as sensitive. Default false. See docs/reference.md#traffic-artifact."
     required: false
-  traffic_artifact_retention_days:
+  traffic-artifact-retention-days:
     description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
     required: false
     default: ""
-  fail_on_blocked:
+  fail-on-blocked:
     description: "Fail the step if any connection was blocked (restrict mode only). Default true."
     required: false
-  fail_on_ca_residue:
-    description: "proxy_engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
+  fail-on-ca-residue:
+    description: "proxy-engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
     required: false
-  known_blocked_rules:
-    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy_engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail_on_blocked is true. See docs/reference.md#blocked-rules-known_blocked_rules."
+  known-blocked-rules:
+    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy-engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail-on-blocked is true. See docs/reference.md#blocked-rules-known_blocked_rules."
     required: false
     default: ""
-  write_through:
+  write-through:
     description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write_through-paths."
     required: false
     default: ""
   writable:
-    description: "Deprecated: the former name of write_through. Still works; set write_through instead."
+    description: "Deprecated: the former name of write-through. Still works; set write-through instead."
     required: false
     default: ""
-  filesystem_mode:
-    description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in write_through. Use this to stop a step from planting files (e.g. ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up."
+  filesystem-mode:
+    description: "persistent (default) keeps writes to $HOME/$RUNNER_TEMP/$GITHUB_WORKSPACE/tmp on the host after the step ends. ephemeral discards them instead (via an overlay), except for paths listed in write-through. Use this to stop a step from planting files (e.g. ~/.bashrc, ~/.npmrc) that a later, non-isolated step would pick up."
     required: false
-  filesystem_audit:
+  filesystem-audit:
     description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Fails the step on a host that cannot run it. See docs/reference.md#filesystem-audit."
     required: false
-  upload_filesystem_audit_artifact:
+  upload-filesystem-audit-artifact:
     description: "Upload the filesystem audit's full record as an artifact. It holds every path the step touched, so treat it as sensitive. Default false. See docs/filesystem-audit.md#the-artifact."
     required: false
-  filesystem_audit_retention_days:
+  filesystem-audit-retention-days:
     description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
     required: false
     default: ""
-  expected_filesystem_rules:
+  expected-filesystem-rules:
     description: "Experimental. The file accesses the step is expected to make, one `<program> <access> <path>` rule per line; with them the summary lists only the accesses outside them. See docs/filesystem-audit.md#expected-accesses."
     required: false
     default: ""
-  fail_on_unexpected_file_access:
-    description: "Fail the step if an access fell outside expected_filesystem_rules (any access, when there are none) or could not be checked against them, in audit mode too. Needs filesystem_audit: record. Default false."
+  fail-on-unexpected-file-access:
+    description: "Fail the step if an access fell outside expected-filesystem-rules (any access, when there are none) or could not be checked against them, in audit mode too. Needs filesystem-audit: record. Default false."
     required: false
   label:
     description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"
     required: false
     default: ""
 
+  # The underscore spelling of each name above, still accepted.
+  config_file:
+    description: "Alias of config-file."
+    required: false
+    default: ""
+  proxy_mode:
+    description: "Alias of proxy-mode."
+    required: false
+  proxy_engine:
+    description: "Alias of proxy-engine."
+    required: false
+  allowed_https_rules:
+    description: "Alias of allowed-https-rules."
+    required: false
+    default: ""
+  allowed_http_rules:
+    description: "Alias of allowed-http-rules."
+    required: false
+    default: ""
+  allowed_ip_rules:
+    description: "Alias of allowed-ip-rules."
+    required: false
+    default: ""
+  allowed_url_rules:
+    description: "Alias of allowed-url-rules."
+    required: false
+    default: ""
+  allowed_tls_rules:
+    description: "Alias of allowed-tls-rules."
+    required: false
+    default: ""
+  aws_key_check:
+    description: "Alias of aws-key-check."
+    required: false
+  allowed_aws_role_accounts:
+    description: "Alias of allowed-aws-role-accounts."
+    required: false
+    default: ""
+  upload_traffic_artifact:
+    description: "Alias of upload-traffic-artifact."
+    required: false
+  traffic_artifact_retention_days:
+    description: "Alias of traffic-artifact-retention-days."
+    required: false
+    default: ""
+  fail_on_blocked:
+    description: "Alias of fail-on-blocked."
+    required: false
+  fail_on_ca_residue:
+    description: "Alias of fail-on-ca-residue."
+    required: false
+  known_blocked_rules:
+    description: "Alias of known-blocked-rules."
+    required: false
+    default: ""
+  write_through:
+    description: "Alias of write-through."
+    required: false
+    default: ""
+  filesystem_mode:
+    description: "Alias of filesystem-mode."
+    required: false
+  filesystem_audit:
+    description: "Alias of filesystem-audit."
+    required: false
+  upload_filesystem_audit_artifact:
+    description: "Alias of upload-filesystem-audit-artifact."
+    required: false
+  filesystem_audit_retention_days:
+    description: "Alias of filesystem-audit-retention-days."
+    required: false
+    default: ""
+  expected_filesystem_rules:
+    description: "Alias of expected-filesystem-rules."
+    required: false
+    default: ""
+  fail_on_unexpected_file_access:
+    description: "Alias of fail-on-unexpected-file-access."
+    required: false
+
 outputs:
+  traffic-artifact-name:
+    description: "Name of the uploaded traffic artifact, when upload-traffic-artifact produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested."
+  filesystem-audit-artifact-name:
+    description: "Name of the uploaded filesystem audit artifact, when upload-filesystem-audit-artifact produced one. Empty otherwise, including when the upload failed."
+
+  # The underscore spelling of each name above, set to the same value.
   traffic_artifact_name:
-    description: "Name of the uploaded traffic artifact, when upload_traffic_artifact produced one. Empty otherwise, so a later step can tell an upload apart from none having been requested."
+    description: "Alias of traffic-artifact-name."
   filesystem_audit_artifact_name:
-    description: "Name of the uploaded filesystem audit artifact, when upload_filesystem_audit_artifact produced one. Empty otherwise, including when the upload failed."
+    description: "Alias of filesystem-audit-artifact-name."
 
 runs:
   using: node24

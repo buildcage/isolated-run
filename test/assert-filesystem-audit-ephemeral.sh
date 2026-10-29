@@ -31,7 +31,7 @@ assert_one_row "A delete of a lower-layer file has one row" ' D +(gnu)?rm +\./MA
 assert_one_row "A lower-layer file mapped shared and made writable has one row" ' RW +python3\.[0-9]+ +\./renovate\.json$'
 
 assert_one_row "A discarded write has one row" ' W +bash +\./discarded\.txt$'
-assert_one_row "A write under write_through has one row" ' W +bash +\./kept/written\.txt$'
+assert_one_row "A write under write-through has one row" ' W +bash +\./kept/written\.txt$'
 
 # $GITHUB_OUTPUT is written back and $GITHUB_STEP_SUMMARY discarded; both go
 # by name.
@@ -47,13 +47,13 @@ echo ""
 echo "=== Ephemeral Step Host Assertions ==="
 echo ""
 
-check_status "The write under write_through reached the host" "$(test -f kept/written.txt && echo yes || echo no)" yes
+check_status "The write under write-through reached the host" "$(test -f kept/written.txt && echo yes || echo no)" yes
 check_status "The discarded write did not" "$(test -e discarded.txt && echo yes || echo no)" no
 check_status "The lower-layer files are as checked out" \
   "$(git diff --quiet -- README.md LICENSE SECURITY.md MAINTAINERS.md renovate.json && echo yes || echo no)" yes
 # git keeps only the exec bit, so the chmod is checked by its mode.
 check_status "The chmod did not reach the host" "$(stat -c %a LICENSE)" "$(stat -c %a README.md)"
 check_status "The moved file's new name did not reach the host" "$(test -e SECURITY.moved && echo yes || echo no)" no
-check_status "The step's output went through write_through" "$PROBE_OUTPUT" kept
+check_status "The step's output went through write-through" "$PROBE_OUTPUT" kept
 
 assert_results

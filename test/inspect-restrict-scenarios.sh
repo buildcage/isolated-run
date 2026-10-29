@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the sandbox, as the `run:` input of a real proxy_engine:
+# Runs inside the sandbox, as the `run:` input of a real proxy-engine:
 # inspect step (see test/integration-test-inspect-restrict.sh): the cases in
 # scenarios/inspect-restrict.sh, then those that depend on what the runner has
 # installed.

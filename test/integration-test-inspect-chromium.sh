@@ -1,9 +1,9 @@
 #!/bin/bash
 # chrome-headless-shell must trust the proxy CA through the slot the action adds
 # to the runner's own NSS database. What the command writes to that database is
-# kept where filesystem_mode keeps writes, below a write_through: entry under
+# kept where filesystem-mode keeps writes, below a write-through: entry under
 # ephemeral included, less the slot; a copy of the CA left there fails the step
-# unless fail_on_ca_residue is false. A database the runner user cannot write
+# unless fail-on-ca-residue is false. A database the runner user cannot write
 # is left alone with a warning. Directories made for a new database are removed
 # afterwards, and removing one on the host mid-command gives a warning.
 set -uo pipefail
@@ -120,7 +120,7 @@ else
 fi
 
 echo ""
-echo "--- the same command under filesystem_mode: ephemeral ---"
+echo "--- the same command under filesystem-mode: ephemeral ---"
 HOME_E="$TMPDIR/home-e"
 mkdir -p "$HOME_E"
 chrome_step "$HOME_E" "touch \$HOME/.pki/nssdb/written-by-the-command" INPUT_FILESYSTEM_MODE=ephemeral
@@ -173,7 +173,7 @@ else
 fi
 
 echo ""
-echo "--- the same under filesystem_mode: ephemeral, below a write_through: entry ---"
+echo "--- the same under filesystem-mode: ephemeral, below a write-through: entry ---"
 HOME_H="$TMPDIR/home-h"
 mkdir -p "$HOME_H/.pki/nssdb"
 printf 'library=\nname=the runner'"'"'s own\n' >"$HOME_H/.pki/nssdb/pkcs11.txt"
@@ -204,8 +204,8 @@ HOME_F="$TMPDIR/home-f"
 mkdir -p "$HOME_F/.pki/nssdb"
 chrome_step "$HOME_F" "cp /dev/buildcage-nssdb/cert9.db \$HOME/.pki/nssdb/copy.db"
 if [ "$RUN_EXIT" != "0" ] && grep -q "copied the proxy CA into the NSS database at $HOME_F/.pki/nssdb" <<<"$OUT" &&
-  grep -q "fail_on_ca_residue: false" <<<"$OUT"; then
-  pass "the step failed, naming the database and pointing at fail_on_ca_residue"
+  grep -q "fail-on-ca-residue: false" <<<"$OUT"; then
+  pass "the step failed, naming the database and pointing at fail-on-ca-residue"
 else
   fail "the step did not fail on the copy (exit $RUN_EXIT)"
 fi
@@ -224,7 +224,7 @@ chrome_step "$HOME_G" "
 $SHOW
 $CHECK untrusted"
 if [ "$RUN_EXIT" = "0" ] && grep -q "the runner user cannot write $HOME_G/.pki/nssdb" <<<"$OUT" &&
-  grep -q "use proxy_engine: universal" <<<"$OUT" && grep -q "no nssdb mount" <<<"$OUT"; then
+  grep -q "use proxy-engine: universal" <<<"$OUT" && grep -q "no nssdb mount" <<<"$OUT"; then
   pass "the step warned, naming the database and pointing at universal, and mounted nothing"
 else
   fail "the step failed, gave no warning, or mounted over the database (exit $RUN_EXIT)"

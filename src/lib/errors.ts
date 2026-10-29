@@ -4,7 +4,7 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  * Intentional error in the run action's own logic. Image provenance failures throw
  * ProvenanceError instead (see core/lib/provenance/errors.ts); invalid ACL rule syntax
  * throws InvalidRulesError instead (see core/lib/acl/rules.ts); a malformed boolean,
- * retention, proxy_engine or proxy_mode input throws InvalidInputError (see
+ * retention, proxy-engine or proxy-mode input throws InvalidInputError (see
  * core/lib/actions/inputs.ts).
  *
  * Codes that carry more than their name says:
@@ -16,22 +16,22 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  *   DOCKER_UNAVAILABLE                docker CLI missing from PATH or a docker command failed
  *   UNSAFE_PRIMARY_GID                the runner's primary GID is privileged and no safe substitute GID exists
  *   ROOT_RUNNER                       the runner is uid 0, where DAC alone would guard root-owned host sockets
- *   INVALID_FILESYSTEM_AUDIT          filesystem_audit input was neither off nor record
- *   INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS  filesystem_audit_retention_days was not a whole number above zero
- *   FILESYSTEM_AUDIT_UNAVAILABLE      filesystem_audit: record, but the tracer could not be extracted, started or attached
- *   INVALID_EXPECTED_FILESYSTEM_RULES expected_filesystem_rules held a line that is not a rule, or the rules
- *                                     or fail_on_unexpected_file_access were set without filesystem_audit: record
- *   FILESYSTEM_INPUT_CONFLICT         filesystem_mode/write_through inputs combined in a disallowed way, or a
+ *   INVALID_FILESYSTEM_AUDIT          filesystem-audit input was neither off nor record
+ *   INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS  filesystem-audit-retention-days was not a whole number above zero
+ *   FILESYSTEM_AUDIT_UNAVAILABLE      filesystem-audit: record, but the tracer could not be extracted, started or attached
+ *   INVALID_EXPECTED_FILESYSTEM_RULES expected-filesystem-rules held a line that is not a rule, or the rules
+ *                                     or fail-on-unexpected-file-access were set without filesystem-audit: record
+ *   FILESYSTEM_INPUT_CONFLICT         filesystem-mode/write-through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
- *   INVALID_WRITE_THROUGH_PATH        a write_through entry failed path-resolution rules (unknown $VAR, etc.)
- *   WRITE_THROUGH_TARGET_MISSING      a write_through entry resolves to a well-known GITHUB_* file that doesn't exist
- *   WRITE_THROUGH_TARGET_UNCREATABLE  a write_through entry doesn't exist and the runner couldn't create it
- *   ALLOW_WRITE_REMOVED               the removed allow_write input was supplied (renamed to write_through)
- *   OVERLAYFS_UNSUPPORTED             filesystem_mode: ephemeral's overlayfs preflight probe failed
+ *   INVALID_WRITE_THROUGH_PATH        a write-through entry failed path-resolution rules (unknown $VAR, etc.)
+ *   WRITE_THROUGH_TARGET_MISSING      a write-through entry resolves to a well-known GITHUB_* file that doesn't exist
+ *   WRITE_THROUGH_TARGET_UNCREATABLE  a write-through entry doesn't exist and the runner couldn't create it
+ *   ALLOW_WRITE_REMOVED               the removed allow_write input was supplied (renamed to write-through)
+ *   OVERLAYFS_UNSUPPORTED             filesystem-mode: ephemeral's overlayfs preflight probe failed
  *   OVERLAY_PROBE_CLEANUP_FAILED      that probe mounted fine, but its root-owned leftovers could not be removed,
  *                                     which is what ephemeral's own cleanup needs too
- *   FILESYSTEM_PLAN_FAILED            computing filesystem_mode: ephemeral's overlay roots failed for a reason
- *                                     unrelated to write_through's own syntax (e.g. a permissions error reading
+ *   FILESYSTEM_PLAN_FAILED            computing filesystem-mode: ephemeral's overlay roots failed for a reason
+ *                                     unrelated to write-through's own syntax (e.g. a permissions error reading
  *                                     one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
  *   SCRATCH_BASE_UNSAFE               the sandbox scratch base exists but isn't a private directory the action owns
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
@@ -43,15 +43,15 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  *                                     GITHUB_ENV/GITHUB_PATH/GITHUB_STATE file goes through a symlink the
  *                                     sandboxed command can replace, or through too many symlinks to resolve
  *   NSS_DATABASE_CA_COPIED            inspect engine only: what the command wrote to the runner's NSS database
- *                                     carries a copy of the proxy CA, under fail_on_ca_residue: true
+ *                                     carries a copy of the proxy CA, under fail-on-ca-residue: true
  *   NSS_DATABASE_WRITE_BACK_FAILED    inspect engine only: what the command wrote to the runner's NSS database
  *                                     could not be written back
  *   SANDBOX_TERMINATED                a signal ended run-isolated.sh, so the command's exit status is unknown
  *   CANCELLED_BEFORE_RUN              the step was cancelled while the sandbox was being prepared
  *   SANDBOX_LAUNCH_FAILED             `sudo run-isolated.sh` could not be started at all
  *   SCRATCH_BASE_SYMLINKED            /var/tmp, the sandbox scratch base's parent, resolves through a symlink
- *   INVALID_AWS_ACCOUNTS              an allowed_aws_role_accounts entry is not a 12-digit account ID
- *   AWS_KEY_CHECK_NOT_SET             allowed_aws_role_accounts is set without aws_key_check: true
+ *   INVALID_AWS_ACCOUNTS              an allowed-aws-role-accounts entry is not a 12-digit account ID
+ *   AWS_KEY_CHECK_NOT_SET             allowed-aws-role-accounts is set without aws-key-check: true
  *   AWS_ACCESS_KEY_MISSING            the AWS access key check is on but the step has no AWS_ACCESS_KEY_ID to start from
  */
 export type SandboxErrorCode =

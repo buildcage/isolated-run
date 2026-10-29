@@ -163,6 +163,6 @@ describe("the counts", () => {
 describe("wouldBlockTruncationNote", () => {
   it("points to the artifact, or to how to get it", () => {
     expect(wouldBlockTruncationNote(true)).toContain("artifact uploaded for this run");
-    expect(wouldBlockTruncationNote(false)).toContain("set upload_traffic_artifact: true");
+    expect(wouldBlockTruncationNote(false)).toContain("set upload-traffic-artifact: true");
   });
 });

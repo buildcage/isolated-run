@@ -77,14 +77,14 @@ describe("readStepFilesystemAudit", () => {
     // The proposed rules' note follows the details.
     expect(summaries[0]).toContain(
       "```\n\n</details>\n\n<details>\n<summary>📝 Expected filesystem rules</summary>\n\n" +
-        "Once `expected_filesystem_rules` lists the file accesses this step is expected to make, " +
+        "Once `expected-filesystem-rules` lists the file accesses this step is expected to make, " +
         "the summary shows only the accesses no rule matches.\n\n" +
         "`expected-filesystem-rules-to-add.txt` in this run's filesystem audit artifact " +
         "(`buildcage-filesystem-audit-deadbeef`) has a rule for each access. " +
         "Review the rules, replace the parts of paths and programs that change between runs with `*` or `**`, and add them to " +
-        "`expected_filesystem_rules`, under `with:` or in the step's config file if it has one. " +
-        "To keep a long list out of the workflow, move it to a config file and name that file in `config_file:` under `with:`:\n\n" +
-        `\`\`\`yaml\n# path/to/buildcage.yml\nfilesystem_audit: record\n${UPLOAD_NOTE}\nupload_filesystem_audit_artifact: true\nexpected_filesystem_rules: |\n`,
+        "`expected-filesystem-rules`, under `with:` or in the step's config file if it has one. " +
+        "To keep a long list out of the workflow, move it to a config file and name that file in `config-file:` under `with:`:\n\n" +
+        `\`\`\`yaml\n# path/to/buildcage.yml\nfilesystem-audit: record\n${UPLOAD_NOTE}\nupload-filesystem-audit-artifact: true\nexpected-filesystem-rules: |\n`,
     );
     // Below them, not under the heading.
     expect(summaries[0]).toContain(
@@ -508,11 +508,11 @@ describe("readStepFilesystemAudit", () => {
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
     expect(summaries[0]).toContain(
-      " · set `upload_filesystem_audit_artifact: true` for the full record · [how to read this](",
+      " · set `upload-filesystem-audit-artifact: true` for the full record · [how to read this](",
     );
     expect(notes).toEqual([
       "_…truncated: the filesystem audit exceeded GitHub's Job Summary size limit; " +
-        "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact._\n\n",
+        "set upload-filesystem-audit-artifact: true to get every access as a downloadable artifact._\n\n",
     ]);
   });
 
@@ -663,7 +663,7 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("Filesystem Activity");
   });
 
-  it("fails the step under restrict with fail_on_blocked when the output cannot be set", async () => {
+  it("fails the step under restrict with fail-on-blocked when the output cannot be set", async () => {
     const exitCode = process.exitCode;
     const note = annotation();
     const { deps: d, summaries } = deps({
@@ -679,8 +679,8 @@ describe("readStepFilesystemAudit", () => {
       );
 
       expect(note.error).toHaveBeenCalledWith(
-        "Failed to set the filesystem_audit_artifact_name output: EACCES; " +
-          "failing the step under restrict with fail_on_blocked",
+        "Failed to set the filesystem-audit-artifact-name output: EACCES; " +
+          "failing the step under restrict with fail-on-blocked",
       );
       expect(note.warning).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
@@ -708,8 +708,8 @@ describe("readStepFilesystemAudit", () => {
 
       expect(outputs).toEqual([""]);
       expect(note.error).toHaveBeenCalledWith(
-        "Failed to set the filesystem_audit_artifact_name output: EACCES; " +
-          "failing the step under restrict with fail_on_blocked",
+        "Failed to set the filesystem-audit-artifact-name output: EACCES; " +
+          "failing the step under restrict with fail-on-blocked",
       );
       expect(note.warning).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
@@ -718,7 +718,7 @@ describe("readStepFilesystemAudit", () => {
     }
   });
 
-  it("only warns when the output cannot be set outside restrict with fail_on_blocked", async () => {
+  it("only warns when the output cannot be set outside restrict with fail-on-blocked", async () => {
     const note = annotation();
     const { deps: d, summaries } = deps({
       setOutput: () => {
@@ -732,7 +732,7 @@ describe("readStepFilesystemAudit", () => {
     );
 
     expect(note.warning).toHaveBeenCalledWith(
-      "Failed to set the filesystem_audit_artifact_name output: GITHUB_OUTPUT is gone",
+      "Failed to set the filesystem-audit-artifact-name output: GITHUB_OUTPUT is gone",
     );
     expect(summaries[0]).toContain("Filesystem Activity");
   });

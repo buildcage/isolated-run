@@ -46,7 +46,7 @@ const SYSCALL_PREFIX = "syscall:";
 export interface SummaryOptions extends Prefixes {
   /** The proxy's start, in epoch seconds. */
   startedAt?: number;
-  /** expected_filesystem_rules, when given: each access is matched against them. */
+  /** expected-filesystem-rules, when given: each access is matched against them. */
   rules?: RuleMatcher;
   /** Whether to gather the rules proposed for what no rule takes, every
    *  access when there are none. */

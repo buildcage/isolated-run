@@ -259,7 +259,7 @@ describe("prepareNssDb", () => {
       expect(existsSync(join(scratch, "nssdb"))).toBe(false);
       expect(existsSync(join(base, "nssdb-ledger.json"))).toBe(false);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(reason));
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("use proxy_engine: universal"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("use proxy-engine: universal"));
     },
   );
 

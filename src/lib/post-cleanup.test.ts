@@ -273,7 +273,7 @@ describe("planPostCleanup", () => {
     planPostCleanup(STATE, ENV, note, d);
 
     expect(note.warning).toHaveBeenCalledWith(
-      "run post-cleanup: filesystem_audit cleanup failed: EBUSY",
+      "run post-cleanup: filesystem-audit cleanup failed: EBUSY",
     );
     expect(released).toContain("after the scratch dir");
   });

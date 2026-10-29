@@ -77,7 +77,7 @@ export interface ProtectedPathsInput {
   /** Paths the mount layers keep writable, so not forced read-only here. */
   writablePaths: Set<string>;
   freshMountDestinations: Set<string>;
-  /** `write_through: /`, the documented full opt-out, so no host mount is forced. */
+  /** `write-through: /`, the documented full opt-out, so no host mount is forced. */
   disableReadonly: boolean;
 }
 
@@ -91,10 +91,10 @@ export function resolveProtectedPaths({
   disableReadonly,
 }: ProtectedPathsInput): { maskedPaths: string[]; readonlyPaths: string[] } {
   // runc applies maskedPaths after every mount, so a still-listed mask would
-  // bind /dev/null back over a directory a write_through entry re-exposed. Only
+  // bind /dev/null back over a directory a write-through entry re-exposed. Only
   // an entry naming the directory itself, or `/`, lifts it: one under the
   // default-writable /tmp or $HOME stays masked. The /proc masks are not in
-  // this set and hold even under `write_through: /`.
+  // this set and hold even under `write-through: /`.
   const extraMaskedHostPaths = maskedRuntimeDir(env).filter(
     // $XDG_RUNTIME_DIR is used as given, trailing slash included.
     (p) => !writablePaths.has("/") && !writablePaths.has(p.replace(/\/+$/, "")),

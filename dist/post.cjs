@@ -194,6 +194,26 @@ function createAnnotation(enabled) {
 }
 const annotate = createAnnotation(!0);
 //#endregion
+//#region src/core/lib/actions/input-names.ts
+function inputEnvName(name) {
+	return `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
+}
+function legacyInputName(name) {
+	return name.replaceAll("-", "_");
+}
+function normalizeInputNames(env, names) {
+	let warnings = [];
+	for (let name of names) {
+		let legacy = legacyInputName(name);
+		if (legacy === name) continue;
+		let legacyEnvName = inputEnvName(legacy), value = env[legacyEnvName] ?? "";
+		if (delete env[legacyEnvName], !value.trim()) continue;
+		let current = env[inputEnvName(name)] ?? "";
+		current.trim() ? current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}: ${name} is set.`) : env[inputEnvName(name)] = value;
+	}
+	return warnings;
+}
+//#endregion
 //#region src/core/lib/docker/args.ts
 function fileArgs(composeFiles) {
 	return composeFiles.flatMap((file) => ["-f", file]);
@@ -258,18 +278,45 @@ var SandboxError = class extends ActionError {};
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
 	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
+const ACTION_INPUTS = [
+	"run",
+	"config-file",
+	"proxy-mode",
+	"proxy-engine",
+	"allowed-https-rules",
+	"allowed-http-rules",
+	"allowed-ip-rules",
+	"allowed-url-rules",
+	"allowed-tls-rules",
+	"known-blocked-rules",
+	"write-through",
+	"expected-filesystem-rules",
+	"writable",
+	"aws-key-check",
+	"allowed-aws-role-accounts",
+	"upload-traffic-artifact",
+	"traffic-artifact-retention-days",
+	"fail-on-blocked",
+	"fail-on-ca-residue",
+	"filesystem-mode",
+	"filesystem-audit",
+	"upload-filesystem-audit-artifact",
+	"filesystem-audit-retention-days",
+	"fail-on-unexpected-file-access",
+	"label"
+];
 function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
-	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
 function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$3("write_through"),
+			writeThrough: getInput$3("write-through"),
 			writable: getInput$3("writable"),
 			allowWrite: getInput$3("allow_write")
 		}, notice)
@@ -760,7 +807,7 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 	try {
 		cleanupLeftoverAudit(targets.containerName, annotation, deps);
 	} catch (e) {
-		annotation.warning(`run post-cleanup: filesystem_audit cleanup failed: ${errorMessage(e)}`);
+		annotation.warning(`run post-cleanup: filesystem-audit cleanup failed: ${errorMessage(e)}`);
 	}
 	let reclaimed = !1;
 	try {
@@ -873,14 +920,14 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
-		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
 	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 function splitWriteThroughInput(input) {
@@ -1007,6 +1054,7 @@ async function stopProxyContainer({ containerName, projectName }) {
 	});
 }
 function main() {
+	normalizeInputNames(process.env, ACTION_INPUTS);
 	let savedWriteThrough = takeWriteThroughForPost(process.env);
 	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
 	let targets = planPostCleanup({
