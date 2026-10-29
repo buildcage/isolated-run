@@ -1,13 +1,13 @@
 # AWS access key check
 
 > [!WARNING]
-> `aws_key_check` and `allowed_aws_role_accounts` are **experimental**: their behavior, inputs, and
+> `aws-key-check` and `allowed-aws-role-accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver. Without them,
 > nothing on this page applies. Try them in a non-critical workflow first, and pin this action to a
 > commit SHA rather than a version tag if you adopt it.
 
-`aws_key_check: true` blocks a request to an AWS API unless it is signed with the key the step
-was given. `allowed_aws_role_accounts` names the accounts whose roles the step may assume, so the
+`aws-key-check: true` blocks a request to an AWS API unless it is signed with the key the step
+was given. `allowed-aws-role-accounts` names the accounts whose roles the step may assume, so the
 keys those roles get pass too. [Getting started](#getting-started) walks through adopting it.
 
 On this page a key means an access key ID: `AKIA…` for a long-term key, `ASIA…` for temporary
@@ -52,7 +52,7 @@ as its SNS topic; IAM closes those, see
 
 ### What it needs
 
-- The default `proxy_engine: inspect`. `universal` never sees a request's headers, so the check
+- The default `proxy-engine: inspect`. `universal` never sees a request's headers, so the check
   fails the step there, in `audit` too.
 - An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. Without one, or with a value that is
   not an access key ID, the step fails before the proxy starts, in `audit` too.
@@ -88,13 +88,13 @@ A step passes the check when:
 
 - It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
   and Terraform.
-- It assumes roles only in accounts in `allowed_aws_role_accounts`, through STS `AssumeRole`, or
+- It assumes roles only in accounts in `allowed-aws-role-accounts`, through STS `AssumeRole`, or
   `AssumeRoleWithWebIdentity` sent as a form (the Query protocol,
   `application/x-www-form-urlencoded`) as an AWS SDK sends it: the CDK's deploy roles, Terraform's
   `assume_role`, or a CLI profile whose `role_arn` starts from `credential_source = Environment` or
   a `web_identity_token_file`.
 - It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
-  credential of an account in `allowed_aws_role_accounts`.
+  credential of an account in `allowed-aws-role-accounts`.
 - It pulls from or pushes to ECR through the registry API, with a client such as `crane`, `skopeo`
   or Jib.
 - It sends unsigned requests, or a token such as CodeArtifact's or an API Gateway authorizer's, to a
@@ -121,7 +121,7 @@ The ones that come up most in CI are Bedrock API keys and presigned URLs someone
 ## Getting started
 
 Turn the check on in `audit` mode first: nothing is blocked, and the report shows what `restrict`
-would block. A step that uses only the credentials it is given needs `aws_key_check` alone:
+would block. A step that uses only the credentials it is given needs `aws-key-check` alone:
 
 ```yaml
 - uses: aws-actions/configure-aws-credentials@<sha>
@@ -130,8 +130,8 @@ would block. A step that uses only the credentials it is given needs `aws_key_ch
     aws-region: us-east-1
 - uses: buildcage/isolated-run@<sha>
   with:
-    proxy_mode: audit
-    aws_key_check: true
+    proxy-mode: audit
+    aws-key-check: true
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
@@ -139,7 +139,7 @@ would block. A step that uses only the credentials it is given needs `aws_key_ch
 reached, so read them before switching.
 
 A step that assumes roles of its own, as the CDK does, also names the accounts those roles are in.
-`allowed_aws_role_accounts` works only with `aws_key_check: true`; without it the step fails. Start
+`allowed-aws-role-accounts` works only with `aws-key-check: true`; without it the step fails. Start
 with the account of the role the step is given:
 
 ```yaml
@@ -150,10 +150,10 @@ with the account of the role the step is given:
     aws-region: us-east-1
 - uses: buildcage/isolated-run@<sha>
   with:
-    proxy_mode: audit
-    aws_key_check: true
-    allowed_aws_role_accounts: ${{ steps.aws.outputs.aws-account-id }}
-    upload_traffic_artifact: true
+    proxy-mode: audit
+    aws-key-check: true
+    allowed-aws-role-accounts: ${{ steps.aws.outputs.aws-account-id }}
+    upload-traffic-artifact: true
     run: npx cdk deploy
 ```
 
@@ -169,7 +169,7 @@ Then, with the report described in [Reading the report](#reading-the-report):
 3. Read **⚠️ Restrict Would Block** in the report; see [In `audit`](#in-audit).
    [Troubleshooting](#troubleshooting) gives the usual causes of each reason.
 4. Switch the step to `restrict`. The report's **Switch to restrict mode** example carries over the
-   URL rules, `aws_key_check: true` and the accounts you named.
+   URL rules, `aws-key-check: true` and the accounts you named.
 
 ## Reading the report
 
@@ -233,7 +233,7 @@ so one no URL rule allows can carry an `aws-` reason too.
 
 A key's row adds `from a role in <account>` when an STS call in the run issued it for a role.
 Communication details marks each of these requests `(restrict would block: <reason>)`, and with
-`upload_traffic_artifact: true` the traffic artifact has them all, with the reason in `wouldBlock`.
+`upload-traffic-artifact: true` the traffic artifact has them all, with the reason in `wouldBlock`.
 If the tables do not fit the Job Summary, they are cut and a warning annotation says so.
 
 ### In `restrict`
@@ -245,8 +245,8 @@ with an `aws-` reason. The ones they allow and the check blocks are listed under
 
 ### The restrict example
 
-The report's **Switch to restrict mode** example includes `aws_key_check: true` and
-`allowed_aws_role_accounts`. The accounts it lists are the ones you gave, plus each account the run
+The report's **Switch to restrict mode** example includes `aws-key-check: true` and
+`allowed-aws-role-accounts`. The accounts it lists are the ones you gave, plus each account the run
 assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
 block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
 step can assume a role, including one in an account its author controls, so each added account is
@@ -255,8 +255,8 @@ account alone lets through: the keys in **⚠️ Restrict Would Block** from its
 registry requests they signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
 
 ```yaml
-aws_key_check: true
-allowed_aws_role_accounts: |
+aws-key-check: true
+allowed-aws-role-accounts: |
   111111111111
   # 222222222222 # lets key 3 through; assumed in this run, check it is yours
 ```
@@ -274,7 +274,7 @@ anything the example sets, so both are still blocked after the switch.
 The Bearer token in `AWS_BEARER_TOKEN_BEDROCK`, a Bedrock API key, names no account the proxy can
 see, so it is blocked as `aws-unsupported-credential`. Call Bedrock with the role keys
 `configure-aws-credentials` gets through OIDC instead: they are signed with SigV4 and pass with
-`aws_key_check: true` alone, given a role allowed `bedrock:InvokeModel`.
+`aws-key-check: true` alone, given a role allowed `bedrock:InvokeModel`.
 
 ### Downloading a presigned URL
 
@@ -294,9 +294,9 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would Block**
 in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. After those
 tables, the report links here for each reason they show; in `restrict` it leaves out a reason whose
-every block `known_blocked_rules` expects. Look the reason up below.
+every block `known-blocked-rules` expects. Look the reason up below.
 
-To accept a block you expect, list its host or URL in `known_blocked_rules` as for any other: it
+To accept a block you expect, list its host or URL in `known-blocked-rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
 [Reference](./reference.md#aws-access-key-check).
 
@@ -311,13 +311,13 @@ The request was signed with a key the proxy does not know. Look first at which r
 - To a URL carrying `X-Amz-Credential`: a presigned URL someone else signed. See
   [Downloading a presigned URL](#downloading-a-presigned-url).
 - To a `git-codecommit` host: a CodeCommit static Git credential of an account not in
-  `allowed_aws_role_accounts`. Add the account, or use CodeCommit's credential helper.
+  `allowed-aws-role-accounts`. Add the account, or use CodeCommit's credential helper.
 
 **Every request signed after some point**, whatever its host: a key the proxy did not learn. Its
 row in **🔑 AWS Keys** has the **Source**:
 
 - `role in <account>`: an assumed role. STS issued the key, but the proxy learns it only for a role
-  in an account in `allowed_aws_role_accounts`. Add the account once you have checked it is yours.
+  in an account in `allowed-aws-role-accounts`. Add the account once you have checked it is yours.
   If it is already there in `audit`, the STS call was itself one `restrict` would block, so its
   answer taught no key. The line in Communication details ending in `→ issued key N` is that call.
 - `unknown`, from one of:
@@ -340,7 +340,7 @@ An unsigned request to a host the proxy treats as serving every account:
 
 - A Cognito user pool call made without AWS credentials, or the IAM Identity Center portal. Sign it,
   or move it to a step of its own without the check, whose URL rules allow only that host.
-- `AssumeRoleWithWebIdentity` with no `allowed_aws_role_accounts`, or not sent as a form, or
+- `AssumeRoleWithWebIdentity` with no `allowed-aws-role-accounts`, or not sent as a form, or
   `AssumeRoleWithSAML`. Name the role's account, send the call as an SDK does, or get the
   credentials before the step.
 - A host that names a resource but is missing from the [list](#which-hosts).
@@ -348,7 +348,7 @@ An unsigned request to a host the proxy treats as serving every account:
 
 ### `aws-role-not-allowed`
 
-`AssumeRoleWithWebIdentity` for a role in an account not in `allowed_aws_role_accounts`. Add the
+`AssumeRoleWithWebIdentity` for a role in an account not in `allowed-aws-role-accounts`. Add the
 account.
 
 ### `aws-unsupported-credential`
@@ -420,7 +420,7 @@ them on those, through a customized bootstrap template:
   ```
 
   Add it as a statement to an existing policy. List every account the step deploys to, those in
-  `allowed_aws_role_accounts` included, or the role cannot assume its roles there. A real policy
+  `allowed-aws-role-accounts` included, or the role cannot assume its roles there. A real policy
   also needs exceptions for resources AWS owns, such as the SSM public parameters under
   `/aws/service/` that the CDK reads to look up an AMI; AWS's
   [data perimeter guidance](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_data-perimeters.html)
@@ -446,7 +446,7 @@ them on those, through a customized bootstrap template:
   answer the proxy cannot read, because the client asked for JSON or it is unusually large, is not
   learned, and requests signed with it are blocked. Neither such an answer nor one over plain HTTP
   names an account in the restrict example.
-- A connection `allowed_tls_rules` or `allowed_ip_rules` passes through is never decrypted, so the
+- A connection `allowed-tls-rules` or `allowed-ip-rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible
   to `docker inspect` on the runner while the step runs. A key ID is not a secret on its own:
@@ -474,10 +474,10 @@ host:
 | CodeCommit                                                                               | allowed, as Git's first request is unsigned | `Basic`: see²                              |
 
 1. `AssumeRoleWithWebIdentity` sent as a form, as the SDKs send it, for a role in an account in
-   `allowed_aws_role_accounts` is allowed, and for one in any other account is
+   `allowed-aws-role-accounts` is allowed, and for one in any other account is
    `aws-role-not-allowed`. With no account named it stays `aws-no-credential`.
 2. A `Basic` login passes with a known key as its user name, as CodeCommit's credential helper sends
-   it, or with a static Git credential of an account in `allowed_aws_role_accounts`, and is
+   it, or with a static Git credential of an account in `allowed-aws-role-accounts`, and is
    `aws-key-not-allowed` otherwise. Any other token is `aws-unsupported-credential`.
 
 The proxy looks for a credential in a form body only on hosts that serve every account and on
@@ -493,7 +493,7 @@ The proxy knows only these three kinds of key, and blocks any other:
 - **The key the step starts with**, read from `AWS_ACCESS_KEY_ID` in the step's environment, which
   is where `aws-actions/configure-aws-credentials` puts it. It is taken as given: the proxy does not
   ask AWS whose key it is, so a key of another account set there by mistake passes too.
-- **Keys STS issues for a role in one of the `allowed_aws_role_accounts`**, through `AssumeRole` or
+- **Keys STS issues for a role in one of the `allowed-aws-role-accounts`**, through `AssumeRole` or
   `AssumeRoleWithWebIdentity`. The proxy reads the role ARN and the new access key ID from the
   answer, which AWS writes, and adds the key. This is what lets tools that assume roles mid-step
   keep working, such as the CDK assuming its `cdk-hnb659fds-deploy-role-*` roles, Terraform's
@@ -533,7 +533,7 @@ names a resource ([below](#which-hosts)). A form body it cannot read through is 
 
 A CodeCommit `Basic` login carries a key too: the user name CodeCommit's Git credential helper sends
 is the key ID, checked the same way. A static CodeCommit Git credential names its account instead
-(`<user>-at-<account>`), and passes when that account is in `allowed_aws_role_accounts`. Either way
+(`<user>-at-<account>`), and passes when that account is in `allowed-aws-role-accounts`. Either way
 the repository is looked up in that account.
 
 #### Which hosts
@@ -588,7 +588,7 @@ API, and whoever owns it can read what was sent, `User-Agent` and query string i
 own logs. Allow them by name, as you would any other host:
 
 ```yaml
-allowed_url_rules: |
+allowed-url-rules: |
   * https://111111111111.dkr.ecr.us-east-1.amazonaws.com/**
   GET|PUT https://my-artifacts.s3.us-east-1.amazonaws.com/**
 ```

@@ -1,31 +1,31 @@
 # Filesystem audit
 
 > [!WARNING]
-> `filesystem_audit` is **experimental**: its behavior, inputs, and output format may still change
+> `filesystem-audit` is **experimental**: its behavior, inputs, and output format may still change
 > in a future release without following semver. Try it in a non-critical workflow first, and pin
 > this action to a commit SHA rather than a version tag if you adopt it.
 
-`filesystem_audit: record` records every file the isolated step reads, writes, moves, deletes,
+`filesystem-audit: record` records every file the isolated step reads, writes, moves, deletes,
 changes the attributes of, and executes, and adds a **Filesystem Activity Report** section to the
 Job Summary:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
   with:
-    filesystem_audit: record
+    filesystem-audit: record
     run: npm ci
 ```
 
 It watches from the kernel, so a static binary or a tool that bypasses libc is seen like any other,
-and it works the same whatever `proxy_mode` and `proxy_engine` are set to. It records and never
-blocks an access: [`filesystem_mode` and `write_through`](../README.md#filesystem-access) decide
+and it works the same whatever `proxy-mode` and `proxy-engine` are set to. It records and never
+blocks an access: [`filesystem-mode` and `write-through`](../README.md#filesystem-access) decide
 what the step may write.
 
 - [What it is for](#what-it-is-for)
 - [Before you turn it on](#before-you-turn-it-on)
 - [Getting started](#getting-started)
 - [Reading the summary](#reading-the-summary)
-- [Choosing `write_through`](#choosing-write_through)
+- [Choosing `write-through`](#choosing-write-through)
 - [Expected accesses](#expected-accesses)
 - [Troubleshooting](#troubleshooting)
 - [What it does not record](#what-it-does-not-record)
@@ -35,12 +35,12 @@ what the step may write.
 
 ## What it is for
 
-- **Finding what `write_through` needs** under `filesystem_mode: ephemeral`: the audit shows where
+- **Finding what `write-through` needs** under `filesystem-mode: ephemeral`: the audit shows where
   the step wrote, so you keep only what a later step reads. See
-  [Choosing `write_through`](#choosing-write_through).
+  [Choosing `write-through`](#choosing-write-through).
 - **Checking what a dependency read, wrote, ran, or was refused.** See
   [What to look for](#what-to-look-for).
-- **Noticing a change** from the accesses a step usually makes: with `expected_filesystem_rules`,
+- **Noticing a change** from the accesses a step usually makes: with `expected-filesystem-rules`,
   the summary lists only the accesses outside them. See [Expected accesses](#expected-accesses).
 
 It suits a step's first runs, a dependency update, or an investigation. It can also stay on, since a
@@ -79,7 +79,7 @@ A host that falls short fails the step before the command runs, with the reason;
 
 ## Getting started
 
-With `filesystem_audit: record` alone, as above, the step's Job Summary gets a **Filesystem Activity
+With `filesystem-audit: record` alone, as above, the step's Job Summary gets a **Filesystem Activity
 Report** section after the traffic report. The full record, with every access in order, is uploaded
 only when asked for, as the traffic artifact is. It can be downloaded from the run's page, or by a
 later step to query with `jq`, as in [The artifact](#the-artifact):
@@ -88,17 +88,17 @@ later step to query with `jq`, as in [The artifact](#the-artifact):
 - id: build
   uses: buildcage/isolated-run@<sha>
   with:
-    filesystem_audit: record
-    upload_filesystem_audit_artifact: true
+    filesystem-audit: record
+    upload-filesystem-audit-artifact: true
     run: npm ci
 
-- if: steps.build.outputs.filesystem_audit_artifact_name != ''
+- if: steps.build.outputs.filesystem-audit-artifact-name != ''
   uses: actions/download-artifact@<sha>
   with:
-    name: ${{ steps.build.outputs.filesystem_audit_artifact_name }}
+    name: ${{ steps.build.outputs.filesystem-audit-artifact-name }}
 ```
 
-The `filesystem_audit_artifact_name` output names the uploaded artifact. It is empty when nothing
+The `filesystem-audit-artifact-name` output names the uploaded artifact. It is empty when nothing
 was uploaded, and without the `if:`, `download-artifact` would then download every artifact of the
 run.
 
@@ -107,7 +107,7 @@ Each step with the audit on gets its own section and, when uploaded, its own art
 artifact, so several steps in one job never collide. Each section follows its step's traffic report,
 and both headings carry the step's `label`, so set `label` to tell the steps apart.
 
-`filesystem_audit_retention_days` sets how long the artifact is kept; see
+`filesystem-audit-retention-days` sets how long the artifact is kept; see
 [Reference](./reference.md#action-inputs). The artifact names each program the step ran but not its
 arguments, which can carry secrets. It still holds every path the step touched, including the names
 of files it only tried to open, so treat it as sensitive, like the traffic artifact.
@@ -179,8 +179,8 @@ A step that touched no file shows `No file access was recorded.` instead of all 
   gives each read's parent process.
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
-  `$GITHUB_PATH` is refused (`w!`) unless `write_through` names it, since both are read-only in the
-  sandbox otherwise, but the attempt is still worth looking into. `filesystem_mode: ephemeral`
+  `$GITHUB_PATH` is refused (`w!`) unless `write-through` names it, since both are read-only in the
+  sandbox otherwise, but the attempt is still worth looking into. `filesystem-mode: ephemeral`
   discards such writes; see the [README](../README.md#filesystem-access).
 - **A program you did not expect.** An `X` row names every program the step started, under the
   program that started it, so a `postinstall` script that runs `curl` or a binary it just downloaded
@@ -319,34 +319,36 @@ or `unshare`, which fails with `EPERM`. The artifact records each once per progr
 as a `syscall` line; the summary leaves it out, since many programs try a system call and carry on
 without it, as Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it
 either way. A program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step
-fails with `EPERM`, set `upload_filesystem_audit_artifact: true` and look for a `syscall` line in
+fails with `EPERM`, set `upload-filesystem-audit-artifact: true` and look for a `syscall` line in
 the artifact. One the profile allows only for some arguments, as `clone`, is not recorded even when
 refused, since the kernel's own `EPERM` for it would read the same.
 
 A program killed for a 32-bit system call is noted under the heading and shows in the details as
 `syscall:32-bit <name> (killed)`; a thread killed while others run on is not recorded.
 
-## Choosing `write_through`
+<a id="choosing-write_through"></a>
 
-Under `filesystem_mode: ephemeral` every write is thrown away when the step ends, except under the
-paths `write_through` names. Two kinds of path are easy to miss:
+## Choosing `write-through`
+
+Under `filesystem-mode: ephemeral` every write is thrown away when the step ends, except under the
+paths `write-through` names. Two kinds of path are easy to miss:
 
 - **The runner's files.** `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` are written like any other
   file, so the step's outputs and its own summary are lost unless named. The audit shows them under
-  those names whether `write_through` names them or not. `$GITHUB_ENV` and `$GITHUB_PATH` are
+  those names whether `write-through` names them or not. `$GITHUB_ENV` and `$GITHUB_PATH` are
   read-only in either mode, and need naming to be written at all.
 - **Caches.** `actions/cache`, and setup actions with `cache:`, save a directory such as `~/.npm`
   after the job. Unless it is named, the save finds nothing the step added to it.
 
 To name only what a later step needs:
 
-1. Run the step with `filesystem_mode: ephemeral`, `filesystem_audit: record` and
-   `upload_filesystem_audit_artifact: true`, and in `write_through` only what you already know a
+1. Run the step with `filesystem-mode: ephemeral`, `filesystem-audit: record` and
+   `upload-filesystem-audit-artifact: true`, and in `write-through` only what you already know a
    later step reads.
 2. Look at the `W`, `D`, `A` and `M` rows under **Accessed Paths**. A file a tool writes under a
    temporary name and then renames into place shows `M` under the temporary name and `W` under the
    new one.
-3. Of those, add to `write_through` what a later step or the end of the job uses: build output,
+3. Of those, add to `write-through` what a later step or the end of the job uses: build output,
    test reports, coverage, a cache directory. Run again. The rest is what ephemeral discards on
    purpose.
 
@@ -356,8 +358,8 @@ off:
 ```yaml
 - uses: buildcage/isolated-run@<sha>
   with:
-    filesystem_mode: ephemeral
-    write_through: |
+    filesystem-mode: ephemeral
+    write-through: |
       $GITHUB_OUTPUT
       ./dist
     run: npm ci && npm run build
@@ -366,14 +368,14 @@ off:
 ## Expected accesses
 
 A build touches thousands of files, the same ones run after run, so a change is hard to spot in the
-full tables. `expected_filesystem_rules` is a baseline: it lists what the step is expected to touch,
+full tables. `expected-filesystem-rules` is a baseline: it lists what the step is expected to touch,
 and the section then shows only what falls outside it:
 
 ```
 ## Filesystem Activity Report
 
 ### ⚠️ Unexpected Accesses (1)
-1,204 recorded operations matched `expected_filesystem_rules`.
+1,204 recorded operations matched `expected-filesystem-rules`.
 R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused
 | Program               | Command                | Access | Path       |
 | --------------------- | ---------------------- | ------ | ---------- |
@@ -388,13 +390,13 @@ install against a baseline.
 
 ### Setting up a baseline
 
-1. Run the step with the audit on and `upload_filesystem_audit_artifact: true`. The artifact then
+1. Run the step with the audit on and `upload-filesystem-audit-artifact: true`. The artifact then
    holds `expected-filesystem-rules-to-add.txt`, a rule for each access the run made, folded as the
    accessed paths are, and the **Expected filesystem rules** element of the summary links to it:
 
    ```text
-   # Rules for the file accesses no expected_filesystem_rules matched in this run.
-   # Review them, then add them to expected_filesystem_rules, under with: or in a config_file.
+   # Rules for the file accesses no expected-filesystem-rules matched in this run.
+   # Review them, then add them to expected-filesystem-rules, under with: or in a config-file.
    # ...
 
    /usr/local/bin/node  RWD  ./node_modules/**
@@ -422,15 +424,15 @@ install against a baseline.
    `dir/**` rule covers before adding it: where the files under it matter, find them in the
    artifact's `filesystem-audit.jsonl` and list them instead.
 
-3. Add the rule lines to `expected_filesystem_rules`. Comment and blank lines are skipped, so
+3. Add the rule lines to `expected-filesystem-rules`. Comment and blank lines are skipped, so
    they can stay:
 
    ```yaml
    - uses: buildcage/isolated-run@<sha>
      with:
-       filesystem_audit: record
-       upload_filesystem_audit_artifact: true
-       expected_filesystem_rules: |
+       filesystem-audit: record
+       upload-filesystem-audit-artifact: true
+       expected-filesystem-rules: |
          /usr/local/bin/node  RWD  ./node_modules/**
          /usr/local/bin/node  R    ~/.npmrc
 
@@ -439,14 +441,14 @@ install against a baseline.
    ```
 
    With many rules, a [config file](./reference.md#config-file) keeps them out of the workflow.
-   Name it in `config_file`, and put the same keys in it:
+   Name it in `config-file`, and put the same keys in it:
 
    ```yaml
    # path/to/buildcage.yml
-   filesystem_audit: record
+   filesystem-audit: record
    # Needed for the proposed rules; also uploads the full record.
-   upload_filesystem_audit_artifact: true
-   expected_filesystem_rules: |
+   upload-filesystem-audit-artifact: true
+   expected-filesystem-rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
      /usr/local/bin/node  R    ~/.npmrc
 
@@ -457,19 +459,19 @@ install against a baseline.
    On `pull_request_target`, and on a `workflow_run` a pull request started, a config file cannot be
    used, so the rules go under `with:` there.
 
-4. Once the baseline holds steady, set `fail_on_unexpected_file_access: true` to fail the step on an
-   access outside it. Keep `upload_filesystem_audit_artifact: true` while you want new rules
+4. Once the baseline holds steady, set `fail-on-unexpected-file-access: true` to fail the step on an
+   access outside it. Keep `upload-filesystem-audit-artifact: true` while you want new rules
    proposed: each run then uploads an artifact holding every path the step touched, and for a run
    with an access outside the rules, it also holds the rules to add, as below. Drop the key when you
    do not.
 
 ### Keeping it up to date
 
-A run with rules and `upload_filesystem_audit_artifact: true` proposes a file only when a recorded
+A run with rules and `upload-filesystem-audit-artifact: true` proposes a file only when a recorded
 access fell outside them. It holds a rule for each access no rule matched, whether the rules are
 set under `with:` or in a config file, so it never repeats a rule you have. Review those rules: add
 the ones a change you know of explains, such as a dependency update, where the step keeps its
-rules, and look into the rest. Under `fail_on_unexpected_file_access`, a run that fails on an access
+rules, and look into the rest. Under `fail-on-unexpected-file-access`, a run that fails on an access
 the rules should have matched still proposes the file, so the rules can be fixed from it.
 
 Only the accesses no rule matched count toward a fold, so no `dir/**` row comes of paths
@@ -484,12 +486,12 @@ when the artifact could not be prepared or uploaded. The element then says so, a
 warning gives the cause.
 
 The traffic report's **Switch to restrict mode** example stands for the whole step, with no
-`config_file`: the settings the step took from a config file are written under `with:`, so remove
-the step's `config_file` line when you paste it. It leaves out `expected_filesystem_rules`, which
+`config-file`: the settings the step took from a config file are written under `with:`, so remove
+the step's `config-file` line when you paste it. It leaves out `expected-filesystem-rules`, which
 the summary's **Expected filesystem rules** element proposes, and where the step has rules, a
 comment says to add them back, under `with:` or in a config file. It also leaves out
-`upload_filesystem_audit_artifact`, which you add back to keep getting proposed rules, and adds
-`fail_on_unexpected_file_access: true` when the step set it.
+`upload-filesystem-audit-artifact`, which you add back to keep getting proposed rules, and adds
+`fail-on-unexpected-file-access: true` when the step set it.
 
 ### What the summary shows
 
@@ -498,12 +500,12 @@ comment says to add them back, under `with:` or in a config file. It also leaves
   adds.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
-- `fail_on_unexpected_file_access: true` fails the step instead, in `audit` mode too, with the
+- `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too, with the
   verdict as a caution rather than a warning. It also fails the step when not every access could be
   checked against the rules: when the recording could not be read or summarized, or misses some
   accesses. The verdict then says `file access check incomplete`. Without rules, it counts every
   access as unexpected, so a step that sets it and loses its rules fails rather than passing
-  unchecked. It needs `filesystem_audit: record`, and the step fails before it starts without it.
+  unchecked. It needs `filesystem-audit: record`, and the step fails before it starts without it.
   Skipped hooks do not fail it; see [Skipped hooks](#skipped-hooks).
 - In the artifact, each line the rules were matched against carries `rule`, where the rule that
   took it was written, or `unexpected`; see [Fields](#fields).
@@ -541,8 +543,8 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
   of the field it is in, as a path may hold one. A value holding only comments and blank lines
   counts as unset, with a warning.
 
-The step fails before the command runs when the rules are set without `filesystem_audit: record`,
-and on a line that is not a rule, with `Invalid expected_filesystem_rules at <where>: <reason>`:
+The step fails before the command runs when the rules are set without `filesystem-audit: record`,
+and on a line that is not a rule, with `Invalid expected-filesystem-rules at <where>: <reason>`:
 other than three fields, a quote not closed or not ending its field, an access of other letters,
 an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component between
 two slashes in a path (`a//b`, `a/./b`, `a//`), or a number or `thread-self` in a `/proc` path.
@@ -565,7 +567,7 @@ is written `/missing/`.
 ## Troubleshooting
 
 The step fails before the command runs with
-`filesystem_audit could not start (<reason>); the command was not run.`
+`filesystem-audit could not start (<reason>); the command was not run.`
 
 | Reason                               | What to do                                                                                                                                                                   |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -611,7 +613,7 @@ The summary can also open with a warning, or be missing:
 - **A program in the step dies with `Bad system call`.** It made a 32-bit system call, which the
   audit refuses; see [What changes in the step](#what-changes-in-the-step).
 
-With `fail_on_unexpected_file_access: true`, an incomplete record, a recording that could not be
+With `fail-on-unexpected-file-access: true`, an incomplete record, a recording that could not be
 read and one that could not be summarized also fail the step, but not a summary that could not be
 written; see [What the summary shows](#what-the-summary-shows).
 
@@ -632,7 +634,7 @@ sets `CONFIG_PREEMPT_RCU=y`.
 
 `host_missed` counts skips anywhere on the host while the step ran, and a skip cannot be tied to the
 step: 0 means none of the step's accesses was skipped, and a nonzero count only that some may be,
-so it does not fail the step, even with `fail_on_unexpected_file_access: true`. For a complete
+so it does not fail the step, even with `fail-on-unexpected-file-access: true`. For a complete
 record, use a kernel that does not pause the hooks, such as one booted with `preempt=voluntary`
 where the kernel offers that mode.
 
@@ -672,7 +674,7 @@ can act on the record in the ways below.
 **Altering the record.** The tracer runs as root on the runner host, outside the sandbox, and is
 watching the sandbox's cgroup before the step starts. It writes under `/var/tmp/buildcage-<uid>`,
 which every sandbox sees only as a tmpfs it cannot write to, holding nothing but its own read-only
-`exec/`, even under `write_through: /`. The step cannot signal or trace the tracer, which is outside
+`exec/`, even under `write-through: /`. The step cannot signal or trace the tracer, which is outside
 its PID namespace, and the report is rendered on the host after the step exits. A process running
 as the same user outside any sandbox can still replace the recording before it is read, the same
 accepted limitation as the staging directory under
@@ -681,7 +683,7 @@ accepted limitation as the staging directory under
 **Reading another step's record.** No sandbox can, a concurrent one included. A process running as
 the same user outside any sandbox can, as can a job sharing the machine and the user, which
 [Where it will not run](./security.md#where-it-will-not-run) rules out. An artifact uploaded under
-`upload_filesystem_audit_artifact: true` can be downloaded by any job in the run and anyone who can
+`upload-filesystem-audit-artifact: true` can be downloaded by any job in the run and anyone who can
 read the repository until it expires. It leaves out each program's arguments, but not the names
 commands pass for files: a secret a command tries to open, or uses as a symlink's target, is kept.
 
@@ -763,7 +765,7 @@ also fails the step, after the command, with the record cut where it stopped.
 
 ## The artifact
 
-With `upload_filesystem_audit_artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
+With `upload-filesystem-audit-artifact: true`, the artifact named `buildcage-filesystem-audit-<id>`
 holds `filesystem-audit.jsonl`, and the proposed rules of [Expected accesses](#expected-accesses)
 beside it. The record is one JSON object per line, in the order the tracer caught the accesses.
 Opens and path changes are written when their call returns, so lines from different threads can be
@@ -820,11 +822,11 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `syscall`    | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
 | `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
 | `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
-| `rule`       | a line the rules took, with `expected_filesystem_rules`         | where the rule that took it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined the value's lines, as outside a `\|` block |
-| `unexpected` | a line the rules did not take, with `expected_filesystem_rules` | some access of the line, such as one side of a link or of a rename, no rule took                                                                                                                           |
+| `rule`       | a line the rules took, with `expected-filesystem-rules`         | where the rule that took it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined the value's lines, as outside a `\|` block |
+| `unexpected` | a line the rules did not take, with `expected-filesystem-rules` | some access of the line, such as one side of a link or of a rename, no rule took                                                                                                                           |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted`, `exchange`
-and `unexpected` are absent rather than `false`. Without `expected_filesystem_rules`, no line has
+and `unexpected` are absent rather than `false`. Without `expected-filesystem-rules`, no line has
 `rule` or `unexpected`, and with them a line the rules are not matched against has neither.
 
 `path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the

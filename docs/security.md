@@ -37,16 +37,16 @@ unmodified.
 Four things sit outside the model by design.
 
 - **Whoever writes the workflow.** The allowlist is configured alongside the command, by the same
-  people, so Buildcage is not a control against them. A `config_file` is no different. On
+  people, so Buildcage is not a control against them. A `config-file` is no different. On
   `pull_request_target`, and `workflow_run` triggered by a pull request, the workspace may hold the
-  pull request's own code, so `config_file` is refused there. On other events it is read from
+  pull request's own code, so `config-file` is refused there. On other events it is read from
   whatever the workflow checked out, so whoever can write that copy sets the rules.
 - **Another step in the same job.** A compromised or untrustworthy action running as another step
   can use `docker exec` or `docker cp`, or the host root a passwordless-sudo runner grants by
   default, to tamper with the proxy container's state, its traffic log above all. Sigstore proves
   the image was genuine at startup, not afterwards. The report marks a log that doesn't start where
   a real proxy run would as incomplete, and fails the step for it under `restrict` with
-  `fail_on_blocked`, which catches wholesale erasure but not a format-aware forgery. The defense
+  `fail-on-blocked`, which catches wholesale erasure but not a format-aware forgery. The defense
   here is procedural: don't place an untrusted step immediately around this action.
 - **What the command reads.** It restricts where the command can send data, not what it can open, so
   a compromised dependency can still read `~/.aws/credentials` or `~/.docker/config.json`; it just
@@ -80,16 +80,16 @@ the set of destinations a step needs smaller.
 | Encodes data into DNS queries                                                                                      | Answered locally and never forwarded; an outside resolver is unreachable                                                                                     |
 | Uses DNS over TLS or DNS over HTTPS                                                                                | Redirected to the proxy like any other TCP and checked on its SNI, so an outside resolver is reachable only if its own host and port are allowlisted         |
 | Tunnels over ICMP, raw UDP or QUIC, or falls back to IPv6                                                          | Dropped before the proxy; only TCP is redirected to it, and the proxy reaches allowed names over IPv4                                                        |
-| Connects to a raw address                                                                                          | Checked against `allowed_ip_rules`, and blocked when nothing matches                                                                                         |
+| Connects to a raw address                                                                                          | Checked against `allowed-ip-rules`, and blocked when nothing matches                                                                                         |
 | Speaks something that is not HTTP to a port no rule covers                                                         | Read as a request by the stage it is handed to and blocked, and counted as blocked like any other                                                            |
 | Escalates privileges, or reaches a container runtime socket                                                        | Nothing to escalate to: every capability set is empty, and the host's `/run`, where the sockets live, is an empty tmpfs                                      |
 | Reads another process's memory                                                                                     | Structurally refused by the kernel across a PID namespace boundary, capabilities or not                                                                      |
 | Ignores the proxy variables entirely                                                                               | No effect: interception is at the network level, not opt-in                                                                                                  |
-| Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed_url_rules` and listed beside it, so pasting them never permits more than the command sent                                 |
-| Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail_on_blocked` (the default) |
+| Sends `*` as its method, `Host` or path in audit, to plant a wildcard in the suggested rules                       | Left out of the suggested `allowed-url-rules` and listed beside it, so pasting them never permits more than the command sent                                 |
+| Floods the proxy log until earlier entries rotate away                                                             | A log that no longer starts where a real run does is not accepted as a complete record: the step fails under `restrict` with `fail-on-blocked` (the default) |
 | Replaces its `$GITHUB_STEP_SUMMARY` with a symlink, FIFO or directory, or removes it, to stop the report           | The command only ever writes a copy, and the host writes the real file itself, so the report still lands; a copy that is not a regular file fails the step   |
 | Fills `$GITHUB_STEP_SUMMARY` to GitHub's 1 MiB limit so the report has no room                                     | The report takes its room first and the command's summary is cut, with a warning; the verdict is applied before any summary is written                       |
-| Writes its own `traffic_artifact_name`/`filesystem_audit_artifact_name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The host writes the real file from the command's copy and sets the names itself afterwards; a copy that is not a regular file fails the step                 |
+| Writes its own `traffic-artifact-name`/`filesystem-audit-artifact-name`, or a symlink or FIFO, to `$GITHUB_OUTPUT` | The host writes the real file from the command's copy and sets the names itself afterwards; a copy that is not a regular file fails the step                 |
 
 ## The network boundary
 
@@ -112,7 +112,7 @@ A rule matches on the name the request carried, the SNI or the `Host` header. On
 HAProxy resolves that name itself and rewrites the destination to the result (`do-resolve` and
 `set-dst`), so the address the command chose is discarded. A forged `Host`, a doctored `/etc/hosts`,
 or an SNI naming one host while the connection aims at another all reach the server the name belongs
-to: destination spoofing is removed rather than detected. A connection an `allowed_ip_rules` entry
+to: destination spoofing is removed rather than detected. A connection an `allowed-ip-rules` entry
 covers is the one exception: that rule names the address itself, so the connection goes there
 whatever name it carries. A name with anything but letters, digits, `.`, `_` and `-` in it never
 reaches a rule, in `audit` too: `universal` blocks such an SNI (`invalid-sni`) or plaintext `Host`
@@ -174,7 +174,7 @@ it answers on every one of them.
 This has two consequences:
 
 - **An internal mirror running on the runner itself is not reachable by name.** Name it with
-  `allowed_ip_rules` instead, which skips this guard. The same applies to a public name that
+  `allowed-ip-rules` instead, which skips this guard. The same applies to a public name that
   resolves to the runner's own public address, which a self-hosted runner may well have.
 - The list is read once at startup, and on a containerized runner it holds that container's
   addresses rather than the real host's.
@@ -185,7 +185,7 @@ except in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any
 rule naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits
 the address, `**:80` or `~^.*:80$`, is not. Under `universal`, no rule does. Reaching a cloud
 metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
-`allowed_ip_rules` is the intended path for it. That path skips this guard except for the listener:
+`allowed-ip-rules` is the intended path for it. That path skips this guard except for the listener:
 a connection to port `10024` of an internal address is blocked there too, whatever the IP rules say
 and in `audit` as well.
 
@@ -255,16 +255,16 @@ invocation, so no step inherits anything another one left behind.
   (writable, where tools lock via `/var/lock`) and the proxy's own `resolv.conf` (which
   `/etc/resolv.conf` symlinks into `/run`) are added back. `/var/run` is a symlink to `/run` on
   every mainstream distribution, so it is covered too; on a host where it is a separate directory,
-  that directory gets the same empty tmpfs. A `write_through:` entry re-exposes what it names on
-  top: `/run/<x>` one path, `/run` the whole directory, `write_through: /` the whole host.
+  that directory gets the same empty tmpfs. A `write-through:` entry re-exposes what it names on
+  top: `/run/<x>` one path, `/run` the whole directory, `write-through: /` the whole host.
   Re-exposing a daemon socket reopens egress through it, and re-exposing all of `/run` leaves the
   outbound restriction nearly pointless, so it is the caller's deliberate call; by default none of
   it is reachable. The `/proc` masks below are separate: they guard kernel-memory reads, not
-  filesystem access, and hold even under `write_through: /`.
+  filesystem access, and hold even under `write-through: /`.
 - **`$XDG_RUNTIME_DIR` is masked when it sits outside `/run`**, which a self-hosted runner may point
   under `/tmp` or `$HOME`. Rootless Docker and Podman and a `systemd --user` session bus keep their
   sockets there, and reaching that bus lets a compromised command start a unit outside every
-  namespace, so the whole directory is replaced with an empty one. Only a `write_through:` entry
+  namespace, so the whole directory is replaced with an empty one. Only a `write-through:` entry
   naming that directory itself, or `/`, lifts the mask, so it stays masked although `/tmp` and
   `$HOME` are writable. A socket a workflow places elsewhere outside `/run` stays reachable (an
   `ssh-agent` under `$TMPDIR`, say); see
@@ -304,13 +304,13 @@ names them, so a symlinked `$HOME` does not turn a mount under it read-only. The
 rootfs staging directory is never one of them, so that recursion cannot re-expose the host `/` as a
 writable copy.
 
-`write_through:` adds further paths for tools that need to write elsewhere, and `/` disables the
+`write-through:` adds further paths for tools that need to write elsewhere, and `/` disables the
 restriction entirely. The sandbox's own mounts outrank it: `/etc/resolv.conf` and, under `inspect`,
 the augmented system CA store, CA directories, JVM keystores and NSS database are mounted after every
-writable exception, so `write_through: /etc` cannot take the sandbox's DNS or CA trust with it. The
+writable exception, so `write-through: /etc` cannot take the sandbox's DNS or CA trust with it. The
 CA-only file sits under the sandbox's own `/dev`. Naming one of those paths directly, or a filesystem
 runc mounts fresh such as `/proc` or `/dev`, fails the step rather than being silently overridden;
-without that, `write_through: /proc` would shadow the sandbox's procfs with the host's and undo the
+without that, `write-through: /proc` would shadow the sandbox's procfs with the host's and undo the
 PID-namespace separation above. The NSS database's directory is the exception: naming it has the
 command's changes to it written back.
 
@@ -318,7 +318,7 @@ An entry that is a symlink, or goes through one, fails the step: runc follows sy
 source and destination, so the mount would land wherever the symlink leads. An earlier step can
 plant one where it writes, pointing at `/proc` or at a directory the sandbox keeps read-only but the
 runner user can write anyway (`/usr/local/bin` and `/opt/hostedtoolcache` are world-writable on
-GitHub-hosted runners); see [`write_through` paths](./reference.md#write_through-paths). A process
+GitHub-hosted runners); see [`write-through` paths](./reference.md#write-through-paths). A process
 an earlier step of this job left running, or another job running as the same user on the same
 machine, can still swap a directory for a symlink between the check and the mount; see
 [Threat model](#threat-model) and [Where it will not run](#where-it-will-not-run).
@@ -327,16 +327,16 @@ After the command exits, the step keeps running on the host to read the report a
 sandbox down, so what it runs is kept out of those paths:
 
 - `docker` and `sudo` are pinned, before either first runs and again in the post step, to a binary
-  outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write_through:`. This applies in
+  outside `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, `$RUNNER_TEMP` and `write-through:`. This applies in
   `ephemeral` mode too, since an earlier step's writes there survive. The step fails if either is on
   `$PATH` only inside those paths. Both also run with `PATH` stripped of those paths: `sudo`
   resolves what it runs there when sudoers sets no `secure_path`, and `docker` finds its
   `docker-credential-*` helpers there. A helper that is a symlink into them is not caught.
-  `write_through: /` turns all of this off, since no path is left outside them.
+  `write-through: /` turns all of this off, since no path is left outside them.
 - Under `inspect`, the `keytool` that adds the CA to the JVM keystores is pinned the same way,
   `$JAVA_HOME/bin` before `$PATH`, and runs with an empty environment, so the command's
   `JAVA_TOOL_OPTIONS` or `LD_PRELOAD` stays inside the sandbox. Without one, the step skips the
-  keystores and warns. `java` is never run: its keystore is found by following its symlinks. `write_through: /` turns
+  keystores and warns. `java` is never run: its keystore is found by following its symlinks. `write-through: /` turns
   this pinning off too.
 - Under `inspect`, Chromium's NSS database gets a read-only slot on one the proxy's `certutil` made
   from the CA certificate alone, appended to a copy of its `pkcs11.txt`. The runner's database, which
@@ -348,8 +348,8 @@ sandbox down, so what it runs is kept out of those paths:
 - The runner's install directory, which holds the `node` later JavaScript actions and post steps
   run on, the runner's `_actions` directory, which holds every action's checkout, and the docker
   CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`), which holds its plugins, are
-  read-only inside the sandbox, unless `write_through:` names the directory itself or `uses: ./`
-  makes this action's checkout the workspace. The workspace, `$RUNNER_TEMP` or a `write_through:`
+  read-only inside the sandbox, unless `write-through:` names the directory itself or `uses: ./`
+  makes this action's checkout the workspace. The workspace, `$RUNNER_TEMP` or a `write-through:`
   entry inside one stays writable. The writable directories above them are made mount points, so
   they cannot be renamed away. A read-only mount protects only a symlink's target, so a symlink on
   the way to any of them that sits in a writable path, where the command could replace it with a
@@ -361,9 +361,9 @@ sandbox down, so what it runs is kept out of those paths:
 A command that writes the docker config (`docker login`, `gcloud auth configure-docker`) therefore
 fails in `persistent` mode; give it a step of its own.
 
-All of this is `filesystem_mode: persistent`, the default and the stable mode.
-`filesystem_mode: ephemeral` (**experimental**) replaces it with an overlay that discards every
-write not named in `write_through:`, closing off using a writable exception itself to plant a
+All of this is `filesystem-mode: persistent`, the default and the stable mode.
+`filesystem-mode: ephemeral` (**experimental**) replaces it with an overlay that discards every
+write not named in `write-through:`, closing off using a writable exception itself to plant a
 payload for a later step. See [Filesystem access](../README.md#filesystem-access).
 
 ### What it keeps from the runner
@@ -404,7 +404,7 @@ first, a fallback step reads the container's identity back from job state, stops
 deletes the scratch directory, but nothing stops the sandbox. `sudo`, `run-isolated.sh` and the
 command are left running, still confined and with no network once the proxy is gone, and the command
 can go on writing to the host's files while an `if: always()` step or a post step runs: every
-writable path in `persistent` mode, the `write_through:` ones in `ephemeral`. That happens only if
+writable path in `persistent` mode, the `write-through:` ones in `ephemeral`. That happens only if
 the action is killed within those 5 seconds, before it kills the sandbox itself. The command's own
 life is tied to `run-isolated.sh`'s by a two-hop `setpriv --pdeathsig=KILL` chain, so an
 out-of-memory kill on the script takes the whole sandboxed process tree with it rather than leaving
@@ -434,11 +434,11 @@ decrypts nothing: HAProxy classifies each connection by what it can read at the 
 checks that against the allowlist.
 
 - **HTTPS**: the SNI from the TLS ClientHello, read without terminating the connection, so the
-  command validates the origin's own certificate itself. Checked against `allowed_https_rules`.
-- **HTTP**: the `Host` header, checked against `allowed_http_rules`. A request carrying none is
+  command validates the origin's own certificate itself. Checked against `allowed-https-rules`.
+- **HTTP**: the `Host` header, checked against `allowed-http-rules`. A request carrying none is
   blocked with 400, since there is nothing to check it against.
 - **A connection to a bare address**: nothing at all. It skipped DNS, so there is no name to read.
-  It is matched against `allowed_ip_rules` as `ip:port` and, when nothing matches, blocked. The
+  It is matched against `allowed-ip-rules` as `ip:port` and, when nothing matches, blocked. The
   address is the one the connection goes to; an SNI it carries is ignored, since the client chose it.
 
 Because nothing in the command has to trust an injected CA or be told about a proxy, this engine
@@ -446,7 +446,7 @@ covers any language or package manager, a pinned certificate included.
 
 A connection to a bare address never reaches the
 [inward-resolution guard](#a-name-may-not-resolve-inward): it skips DNS and `do-resolve` entirely,
-on a separate code path, and `allowed_ip_rules` is what decides it.
+on a separate code path, and `allowed-ip-rules` is what decides it.
 
 ### Inspect proxy engine
 
@@ -459,11 +459,11 @@ connection, so an audit run records everything without being configured for it f
 
 | Rule                  | What it permits                            | Decided by           | Decrypted |
 | --------------------- | ------------------------------------------ | -------------------- | --------- |
-| `allowed_https_rules` | any method and path on the host, over TLS  | Host header          | yes       |
-| `allowed_http_rules`  | any method and path on the host, plaintext | Host header          | n/a       |
-| `allowed_url_rules`   | the named methods on matching URLs         | Host header and path | yes       |
-| `allowed_tls_rules`   | TLS to the named host and port             | SNI and port         | **no**    |
-| `allowed_ip_rules`    | TCP to the address and port, any protocol  | address and port     | **no**    |
+| `allowed-https-rules` | any method and path on the host, over TLS  | Host header          | yes       |
+| `allowed-http-rules`  | any method and path on the host, plaintext | Host header          | n/a       |
+| `allowed-url-rules`   | the named methods on matching URLs         | Host header and path | yes       |
+| `allowed-tls-rules`   | TLS to the named host and port             | SNI and port         | **no**    |
+| `allowed-ip-rules`    | TCP to the address and port, any protocol  | address and port     | **no**    |
 
 Three mechanisms make that enforceable:
 
@@ -484,8 +484,8 @@ Three mechanisms make that enforceable:
   for which variables are set and what that does not cover.
 
 An allowed AWS API host serves every AWS account, so a step can sign requests to it with a key of its
-own and have AWS record what it sends in that account's CloudTrail. `aws_key_check` lets through only
-the step's own key, keys STS issues for roles in `allowed_aws_role_accounts`, keys ECR signs a
+own and have AWS record what it sends in that account's CloudTrail. `aws-key-check` lets through only
+the step's own key, keys STS issues for roles in `allowed-aws-role-accounts`, keys ECR signs a
 presigned S3 URL with, and CodeCommit Git credentials of those accounts. Most unsigned requests are
 blocked too; [Which hosts](./aws.md#which-hosts) lists the exceptions, chiefly a host that names its
 resource, such as an S3 bucket, where the URL rules decide. The check cannot see which account a
@@ -528,7 +528,7 @@ the real target is inside the tunnel:
 
 For this to work, the allowed domain and the target domain have to sit on the same CDN or hosting
 infrastructure. Closing the gap needs the proxy to terminate TLS and read that header, which is what
-[`inspect`](#inspect-proxy-engine) does: `allowed_url_rules` matches on the real `Host`, so a
+[`inspect`](#inspect-proxy-engine) does: `allowed-url-rules` matches on the real `Host`, so a
 fronted request lands outside any host rule it was written for.
 
 Staying on `universal`, allow as few domains as you can, and prefer a service's own domain
@@ -538,10 +538,10 @@ pattern that has changed.
 
 ### Passthrough rules are an uninspected pipe
 
-`allowed_tls_rules` and `allowed_ip_rules` are passed through as raw TCP and recorded with a byte
+`allowed-tls-rules` and `allowed-ip-rules` are passed through as raw TCP and recorded with a byte
 count and nothing more, since neither carries a name the proxy could re-terminate TLS for. Once an
 `ip:port` pair is allowlisted, any TCP-based protocol can use that path, and its protocol is never
-checked. Prefer domain rules, and keep `allowed_ip_rules` for destinations that genuinely have no
+checked. Prefer domain rules, and keep `allowed-ip-rules` for destinations that genuinely have no
 stable hostname.
 
 `universal` sees nothing inside any tunnel, not only these: a rule reaches as far as a host and a
@@ -567,18 +567,18 @@ matched.
 
 Everything else is printed as it was sent, parameter names included, so most of what a blocked
 request tried to send is still there. Two things this does not cover: a credential in the path,
-which `allowed_url_rules` is written against and so cannot be hidden, and one in a parameter the
+which `allowed-url-rules` is written against and so cannot be hidden, and one in a parameter the
 list does not name. It also replaces an exfiltration payload the sender happened to name `code` or
 `key`, so **read a suspected attempt out of the
 [traffic artifact](./reference.md#traffic-artifact)**, which keeps every value verbatim, rather than
 out of the summary.
 
-An `allowed_url_rules` block suggested by an audit run never carries a query at all: rules match on
+An `allowed-url-rules` block suggested by an audit run never carries a query at all: rules match on
 the path, and a recorded query is as likely to hold a one-off token as anything reusable.
 
 ### Filesystem audit
 
-`filesystem_audit: record` records what the step touches; it never blocks an access, so it is a
+`filesystem-audit: record` records what the step touches; it never blocks an access, so it is a
 visibility aid, not a control. The step cannot alter the record or leave the cgroup it is watched
 through: the tracer runs as root on the runner host, outside the sandbox and its PID namespace,
 writes where no sandbox can, and the report is rendered after the step exits. A tracer that cannot
@@ -595,7 +595,7 @@ anyone who can read the repository can download it until it expires. See
 
 - **Reading credentials.** A compromised dependency can read `~/.aws/credentials`,
   `~/.docker/config.json` or any other local credential file; it just cannot send them outside the
-  allowlist, in either `filesystem_mode`. The same reach extends to an agent socket the workflow
+  allowlist, in either `filesystem-mode`. The same reach extends to an agent socket the workflow
   started for itself, an `ssh-agent` holding a deploy key or a `gpg-agent` holding a signing key: a
   read-only mount does not stop `connect(2)` on a live Unix socket, and a network namespace has
   nothing to do with a pathname `AF_UNIX` one. The command never gets the private key, which is the
@@ -609,15 +609,15 @@ anyone who can read the repository can download it until it expires. See
   [reference](reference.md#github_output-and-github_step_summary)). It sets outputs for later steps
   as an un-sandboxed step would, but not by writing a file a payload could ride in. A payload can
   still ride `~/.bashrc`, `~/.npmrc` and anything else under a writable exception, a later step's
-  `config_file` included. `GITHUB_ENV`, `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is
+  `config-file` included. `GITHUB_ENV`, `GITHUB_PATH` and `GITHUB_STATE` are the exception: each is
   read-only inside the sandbox in either mode, and cannot be renamed or replaced, as the runner's
   install directory cannot (see [What it can write](#what-it-can-write)). What `GITHUB_ENV` and
-  `GITHUB_PATH` set reaches every later step and post step at once, and `write_through:` can open
+  `GITHUB_PATH` set reaches every later step and post step at once, and `write-through:` can open
   either by naming it. Only this action's post step
   reads `GITHUB_STATE`. Workflow commands printed to stdout are not stopped: in a job that sets
   `ACTIONS_ALLOW_UNSECURE_COMMANDS: true`, `::set-env::` and `::add-path::` reach later steps the
-  way the two files would. `filesystem_mode: ephemeral` closes this off for everything except what
-  `write_through:` names. Naming only the outputs a later step needs, such as `./dist`, also
+  way the two files would. `filesystem-mode: ephemeral` closes this off for everything except what
+  `write-through:` names. Naming only the outputs a later step needs, such as `./dist`, also
   discards a payload planted elsewhere in `$GITHUB_WORKSPACE`. A named path is as exposed as in
   `persistent` mode.
 
@@ -626,7 +626,7 @@ anyone who can read the repository can download it until it expires. See
   `~/.gradle/init.d`, runs inside the next step's sandbox with that step's secrets and the hosts it
   allows. Making it the last step in the job does not close it off either: every action's post step
   runs after the last step, outside any sandbox, with whatever it left in `$HOME`. What holds is
-  `filesystem_mode: ephemeral` with `write_through:` narrowed to the outputs the step really has to
+  `filesystem-mode: ephemeral` with `write-through:` narrowed to the outputs the step really has to
   produce, leaving out `$HOME`.
 
 - **The Job Summary.** The report is rendered from the runner host after the command has exited, and
@@ -640,7 +640,7 @@ anyone who can read the repository can download it until it expires. See
   enforces (see [`$GITHUB_OUTPUT` and
   `$GITHUB_STEP_SUMMARY`](./reference.md#github_output-and-github_step_summary)).
   Where the report is meant to be an audit trail, take it from
-  `upload_traffic_artifact: true` instead: the JSON is uploaded when the step ends, and is not a
+  `upload-traffic-artifact: true` instead: the JSON is uploaded when the step ends, and is not a
   file a later step can append a line to.
 - **Masking the report, or silencing its annotations.** The command's stdout reaches the runner,
   which reads workflow commands from it as from any step. `::add-mask::` registers a string as a
@@ -649,7 +649,7 @@ anyone who can read the repository can download it until it expires. See
   in the report and in any allowlist suggestion. `::stop-commands::` halts command processing, so
   this action's `::error::` and `::warning::` annotations print as plain text. Neither changes what
   was blocked: `restrict` blocks a disallowed connection as it is made, independent of anything the
-  command prints, and `upload_traffic_artifact: true` is uploaded as a file rather than passed
+  command prints, and `upload-traffic-artifact: true` is uploaded as a file rather than passed
   through the masker, so its JSON records each host unmasked and stays the trustworthy audit trail.
 - **Exhausting the host.** The OCI spec sets no `linux.resources`, so there is no memory, pids or
   CPU ceiling, and capability bounding and seccomp cannot close this either, since a legitimate
@@ -662,7 +662,7 @@ anyone who can read the repository can download it until it expires. See
 - **Reading a step's staging directory from outside any sandbox.** `/var/tmp/buildcage-<uid>` is
   hidden from every sandbox, which sees only its own read-only `exec/` there, but a process running
   as the same user outside one can still read it.
-- **`filesystem_audit` records, it does not enforce.** It never blocks an access. See
+- **`filesystem-audit` records, it does not enforce.** It never blocks an access. See
   [Filesystem audit](#filesystem-audit) for what its record can be trusted for.
 
 ### Where it will not run
@@ -682,7 +682,7 @@ sandbox itself:
   a GitHub-hosted runner gives every job a fresh virtual machine. The other job's unwrapped steps
   can write wherever this step can, so the sandbox does not separate the two jobs. They can also
   swap a path for a symlink after the step has checked it and before the path is used: a
-  `write_through:` entry before runc mounts it, or, under `inspect`, the NSS database before what
+  `write-through:` entry before runc mounts it, or, under `inspect`, the NSS database before what
   the command wrote is written back there. That gains them nothing they could not do as the same
   user directly. Run each job in an environment of its own, as GitHub-hosted runners do (a
   self-hosted runner that takes one job and is then replaced), or give each runner its own user
@@ -717,13 +717,13 @@ does not. Fetching dependencies is usually what puts a package registry on the l
 - name: Install
   uses: buildcage/isolated-run@<sha>
   with:
-    allowed_https_rules: registry.npmjs.org:443
+    allowed-https-rules: registry.npmjs.org:443
     run: npm ci --ignore-scripts
 
 - name: Build and test
   uses: buildcage/isolated-run@<sha>
   with:
-    allowed_https_rules: "" # nothing
+    allowed-https-rules: "" # nothing
     run: |
       npm run build
       npm test

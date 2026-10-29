@@ -56,8 +56,8 @@ vp run build      # rolldown → the committed dist/ bundles
 ├── dist/                    # Bundled output (rolldown → CommonJS), committed
 ├── docker/
 │   ├── common/              # Image files every engine shares: s6 services, init-iptables
-│   ├── universal/           # proxy_engine: universal
-│   ├── inspect/             # proxy_engine: inspect
+│   ├── universal/           # proxy-engine: universal
+│   ├── inspect/             # proxy-engine: inspect
 │   ├── gen-seccomp-profile/ # Go: derives the seccomp filter from Docker's default profile
 │   ├── filesystem-audit/    # Go and eBPF: the filesystem audit tracer
 │   ├── compose.*.yaml       # The action's compose file, and the overlays its tests and dev loop add
@@ -90,7 +90,7 @@ running kernel, and `filesystem-audit` is the tracer.
 
 ## Running it locally
 
-Action inputs become uppercase environment variables locally (`proxy_mode` is `PROXY_MODE`).
+Action inputs become uppercase environment variables locally (`proxy-mode` is `PROXY_MODE`).
 
 ### The sandbox dev loop
 
@@ -155,7 +155,7 @@ the Node run.
 | ------------------------------------------------ | -------------------------------------------------------------------------- |
 | `make test_integration`                          | Every integration test CI runs, as the four groups below                   |
 | `make test_integration_sandbox_linux`            | The action's integration tests on a Linux host                             |
-| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write_through:`, scratch, mounts        |
+| `make test_integration_sandbox_linux_filesystem` | Its first half: filesystem modes, `write-through:`, scratch, mounts        |
 | `make test_integration_sandbox_linux_runtime`    | Its second half: defaults, processes, signals, the proxy's lifecycle       |
 | `make test_integration_sandbox_linux_signals`    | The second half's cancel tests alone, which CI runs on 22.04 too           |
 | `make test_integration_sandbox_universal`        | The ones that need the universal engine's fixture origin                   |
