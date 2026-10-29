@@ -95,23 +95,34 @@ function shownPrefixes({ cwd, workspace, home }: Prefixes): [string[], string][]
   ];
 }
 
+// What follows `prefix` in `path`: "" for the prefix itself, undefined for a
+// path outside it. A working directory may be "/".
+function rest(path: string, prefix: string): string | undefined {
+  if (path === prefix) return "";
+  const head = prefix === "/" ? "/" : `${prefix}/`;
+  return path.startsWith(head) ? path.slice(head.length) : undefined;
+}
+
 export function relativize(path: string, prefixes: Prefixes): string {
   if (isRunnerFile(path)) return `$${path.slice(RUNNER_FILE.length)}`;
   for (const [spellings, shown] of shownPrefixes(prefixes)) {
     for (const p of spellings) {
-      if (path === p) return shown;
-      if (path.startsWith(`${p}/`)) return `${shown}/${path.slice(p.length + 1)}`;
+      const tail = rest(path, p);
+      if (tail !== undefined) return tail ? `${shown}/${tail}` : shown;
     }
   }
   return path;
 }
 
+const under = (path: string, prefix: string): boolean =>
+  path === prefix || path.startsWith(`${prefix}/`);
+
 /** The path as relativize shows it, and as it would without the working
  *  directory, where that differs: a rule may name it either way. */
 export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
   const shown = relativize(path, prefixes);
-  const other = relativize(path, { ...prefixes, cwd: [] });
-  return other === shown ? [shown] : [shown, other];
+  // A path outside the working directory shows the same either way.
+  return under(shown, ".") ? [shown, relativize(path, { ...prefixes, cwd: [] })] : [shown];
 }
 
 // Each prefix may be reached by two spellings (as given and with symlinks
@@ -123,15 +134,14 @@ export function canonical(path: string, prefixes: Prefixes): string {
   if (variable) return RUNNER_FILE + variable;
   for (const [spellings] of shownPrefixes(prefixes)) {
     for (const spelling of spellings) {
-      if (path === spelling) return spellings[0];
-      if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
+      const tail = rest(path, spelling);
+      if (tail === undefined) continue;
+      const [first] = spellings;
+      return !tail ? first : first === "/" ? `/${tail}` : `${first}/${tail}`;
     }
   }
   return path;
 }
-
-const under = (path: string, prefix: string): boolean =>
-  path === prefix || path.startsWith(`${prefix}/`);
 
 // Paths in the working directory first, then the workspace, $HOME and the rest.
 export function sortKey(path: string): [number, string] {

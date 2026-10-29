@@ -43,6 +43,7 @@ const mocks = {
   readTrafficArtifactInputs: vi.fn(),
   readStepLabel: vi.fn(),
   readWorkingDirectory: vi.fn(),
+  assertSandboxUserCanSearch: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -810,9 +811,23 @@ describe("runSandboxStep", () => {
     );
   });
 
+  it("checks the sandbox's user can enter working-directory before the proxy starts", async () => {
+    const workingDirectory = { input: "app", dir: "/w/app", real: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.assertSandboxUserCanSearch.mockImplementation(() => {
+      throw new SandboxError("cannot search", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("cannot search");
+    expect(mocks.assertSandboxUserCanSearch).toHaveBeenCalledWith(workingDirectory, ENV);
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
   it("sets PWD to the workspace without working-directory", async () => {
     await runSandboxStep({ ...ENV }, deps);
 
+    expect(mocks.assertSandboxUserCanSearch).not.toHaveBeenCalled();
     expect(mocks.runSandboxedCommand.mock.calls[0][0].envOverrides).toStrictEqual({
       PWD: ENV.GITHUB_WORKSPACE,
     });

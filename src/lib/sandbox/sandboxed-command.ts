@@ -60,7 +60,7 @@ import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, MountEntry, MountinfoEntry, OverlayDirs } from "./types.ts";
-import { assertSandboxCanEnter, type WorkingDirectory } from "./working-directory.ts";
+import { assertSandboxShows, type WorkingDirectory } from "./working-directory.ts";
 
 /**
  * The sandbox's own end of the direct veth link to the proxy's buildcage0
@@ -491,10 +491,9 @@ export function assembleBundle(
       ),
     });
     if (options.workingDirectory)
-      assertSandboxCanEnter(options.workingDirectory, {
+      assertSandboxShows(options.workingDirectory, {
         mounts: config.mounts,
         maskedPaths: config.linux.maskedPaths,
-        ...identity,
       });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));

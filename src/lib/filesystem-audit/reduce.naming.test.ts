@@ -176,6 +176,17 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["R node ./a", "R node $GITHUB_WORKSPACE/b"]);
   });
 
+  it("takes / as a working directory like any other", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/etc/a" },
+        { kind: "read", comm: "node", path: "/work/b" },
+      ),
+      { ...PREFIXES, cwd: ["/"] },
+    );
+    expect(lines(md)).toEqual(["R node ./etc/a", "R node ./work/b"]);
+  });
+
   it("names the workspace and home roots themselves", () => {
     const summary = summarize([
       { kind: "read", comm: "node", path: "/work" },

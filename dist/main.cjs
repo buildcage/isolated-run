@@ -15471,7 +15471,7 @@ function resolveConfigPath(path, env, baseDir) {
 	try {
 		real = (0, node_fs.realpathSync)(full);
 	} catch {
-		throw pathError("was not found. Check out the repository in an earlier step.");
+		throw pathError(`(${full}) was not found. Check out the repository in an earlier step.`);
 	}
 	if (isOutside((0, node_fs.realpathSync)(workspace), real)) throw pathError("leads outside the workspace.");
 	return real;
@@ -30326,7 +30326,7 @@ function shouldDeserializeResponse(parsedResponse) {
 	return result = shouldDeserialize === void 0 ? !0 : typeof shouldDeserialize == "boolean" ? shouldDeserialize : shouldDeserialize(parsedResponse), result;
 }
 async function deserializeResponseBody(jsonContentTypes, xmlContentTypes, response, options, parseXML) {
-	let parsedResponse = await parse$2(jsonContentTypes, xmlContentTypes, response, options, parseXML);
+	let parsedResponse = await parse$3(jsonContentTypes, xmlContentTypes, response, options, parseXML);
 	if (!shouldDeserializeResponse(parsedResponse)) return parsedResponse;
 	let operationSpec = getOperationRequestInfo(parsedResponse.request)?.operationSpec;
 	if (!operationSpec || !operationSpec.responses) return parsedResponse;
@@ -30402,7 +30402,7 @@ function handleErrorResponse(parsedResponse, operationSpec, responseSpec, option
 		shouldReturnResponse: !1
 	};
 }
-async function parse$2(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
+async function parse$3(jsonContentTypes, xmlContentTypes, operationResponse, opts, parseXML) {
 	if (!operationResponse.request.streamResponseStatusCodes?.has(operationResponse.status) && operationResponse.bodyAsText) {
 		let text = operationResponse.bodyAsText, contentType = operationResponse.headers.get("Content-Type") || "", contentComponents = contentType ? contentType.split(";").map((component) => component.toLowerCase()) : [];
 		try {
@@ -63930,7 +63930,7 @@ function expand(template, context) {
 		return encodeReserved(literal);
 	}), template === "/" ? template : template.replace(/\/$/, "");
 }
-function parse$1(options) {
+function parse$2(options) {
 	let method = options.method.toUpperCase(), url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}"), headers = Object.assign({}, options.headers), body, parameters = omit(options, [
 		"method",
 		"baseUrl",
@@ -63948,7 +63948,7 @@ function parse$1(options) {
 	}, body === void 0 ? null : { body }, options.request ? { request: options.request } : null);
 }
 function endpointWithDefaults(defaults, route, options) {
-	return parse$1(merge(defaults, route, options));
+	return parse$2(merge(defaults, route, options));
 }
 function withDefaults$2(oldDefaults, newDefaults) {
 	let DEFAULTS2 = merge(oldDefaults, newDefaults), endpoint2 = endpointWithDefaults.bind(null, DEFAULTS2);
@@ -63956,7 +63956,7 @@ function withDefaults$2(oldDefaults, newDefaults) {
 		DEFAULTS: DEFAULTS2,
 		defaults: withDefaults$2.bind(null, DEFAULTS2),
 		merge: merge.bind(null, DEFAULTS2),
-		parse: parse$1
+		parse: parse$2
 	});
 }
 var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
@@ -63972,7 +63972,7 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 }));
 //#endregion
 //#region node_modules/.pnpm/content-type@3.1.1/node_modules/content-type/dist/index.js
-function parse(header, options) {
+function parse$1(header, options) {
 	let stopFlags = SEMI_FLAG | (options?.comma === !0 ? COMMA_FLAG : 0), len = header.length, valueStart = options?.start ?? 0;
 	for (; (CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0;) valueStart++;
 	let index = valueStart, typeFlags = 0, whitespace = -1, stop = options?.parameters === !1 ? COMMA_FLAG : 0;
@@ -64281,7 +64281,7 @@ async function fetchWrapper(requestOptions) {
 async function getResponseData(response) {
 	let contentType = response.headers.get("content-type");
 	if (!contentType) return response.text().catch(noop$1);
-	let mimetype = parse(contentType);
+	let mimetype = parse$1(contentType);
 	if (isJSONResponse(mimetype)) {
 		let text = "";
 		try {
@@ -72574,31 +72574,38 @@ function shownPrefixes({ cwd, workspace, home }) {
 		[home, "~"]
 	];
 }
+function rest(path, prefix) {
+	if (path === prefix) return "";
+	let head = prefix === "/" ? "/" : `${prefix}/`;
+	return path.startsWith(head) ? path.slice(head.length) : void 0;
+}
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
 	for (let [spellings, shown] of shownPrefixes(prefixes)) for (let p of spellings) {
-		if (path === p) return shown;
-		if (path.startsWith(`${p}/`)) return `${shown}/${path.slice(p.length + 1)}`;
+		let tail = rest(path, p);
+		if (tail !== void 0) return tail ? `${shown}/${tail}` : shown;
 	}
 	return path;
 }
+const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 function ruleSpellings(path, prefixes) {
-	let shown = relativize(path, prefixes), other = relativize(path, {
+	let shown = relativize(path, prefixes);
+	return under(shown, ".") ? [shown, relativize(path, {
 		...prefixes,
 		cwd: []
-	});
-	return other === shown ? [shown] : [shown, other];
+	})] : [shown];
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
 	for (let [spellings] of shownPrefixes(prefixes)) for (let spelling of spellings) {
-		if (path === spelling) return spellings[0];
-		if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
+		let tail = rest(path, spelling);
+		if (tail === void 0) continue;
+		let [first] = spellings;
+		return tail ? first === "/" ? `/${tail}` : `${first}/${tail}` : first;
 	}
 	return path;
 }
-const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 function sortKey(path) {
 	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
 }
@@ -73870,6 +73877,107 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
+//#region src/lib/sandbox/runtime-sockets.ts
+const RUNTIME_SOCKET_PATHS = [
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+	"/run/containerd/containerd.sock",
+	"/var/run/docker/containerd/containerd.sock",
+	"/run/buildkit/buildkitd.sock",
+	"/run/podman/podman.sock",
+	"/var/run/crio/crio.sock",
+	"/run/dbus/system_bus_socket",
+	"/var/run/dbus/system_bus_socket"
+];
+function rootlessRuntimeSocketPaths(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+//#endregion
+//#region src/lib/sandbox/identity.ts
+function assertNonRootUid(uid) {
+	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
+}
+const PRIVILEGED_GROUP_NAMES = new Set([
+	"root",
+	"docker",
+	"containerd",
+	"podman",
+	"lxd",
+	"libvirt",
+	"libvirt-qemu",
+	"kvm",
+	"sudo",
+	"wheel"
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
+	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	lookupGroups: (keys) => {
+		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
+		if (!getent) return { lines: "" };
+		try {
+			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
+				encoding: "utf8",
+				stdio: "pipe",
+				timeout: 5e3
+			}) };
+		} catch (e) {
+			let { status, stdout } = e;
+			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
+		}
+	},
+	gidOf: (path) => (0, node_fs.statSync)(path).gid
+};
+function readGroupNamesByGid(groupFile, nssLines, host) {
+	let sources = [];
+	try {
+		sources.push(host.readGroupFile(groupFile));
+	} catch {}
+	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
+	let map = new Map();
+	for (let line of sources.join("\n").split("\n")) {
+		if (!line || line.startsWith("#")) continue;
+		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
+		if (!name || !Number.isInteger(gid)) continue;
+		let names = map.get(gid);
+		names ? names.push(name) : map.set(gid, [name]);
+	}
+	return map;
+}
+function ownerGids(paths, host) {
+	let gids = new Set();
+	for (let p of paths) try {
+		gids.add(host.gidOf(p));
+	} catch {}
+	return gids;
+}
+function resolveSandboxGid(primaryGid, env, options = {}) {
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
+		String(primaryGid),
+		...PRIVILEGED_GROUP_NAMES,
+		...FALLBACK_GROUP_NAMES,
+		"65534"
+	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
+	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
+	let substitute = (gid) => gid === primaryGid ? {
+		gid,
+		...reported
+	} : {
+		gid,
+		substitutedFrom: primaryGid,
+		...reported
+	}, gidForName = (name) => {
+		if (groupNamesByGid) {
+			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
+		}
+	};
+	for (let name of FALLBACK_GROUP_NAMES) {
+		let gid = gidForName(name);
+		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
+	}
+	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
+//#endregion
 //#region src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
@@ -73898,78 +74006,43 @@ function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
 	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
 const withoutTrailingSlash = (path) => path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 function workingDirectoryOf(env) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
 	if ((0, node_path.isAbsolute)(input) || workspace) return withoutTrailingSlash((0, node_path.normalize)((0, node_path.isAbsolute)(input) ? input : (0, node_path.join)(workspace, input)));
 }
-function isWorkspace(dir, env) {
+function isWorkspace(dir, env, realpath = node_fs.realpathSync) {
+	let workspace = env.GITHUB_WORKSPACE;
+	if (!workspace) return !1;
 	let spelled = (path) => withoutTrailingSlash((0, node_path.normalize)(path));
-	return !!env.GITHUB_WORKSPACE && spelled(dir) === spelled(env.GITHUB_WORKSPACE);
+	if (spelled(dir) === spelled(workspace)) return !0;
+	try {
+		return realpath(dir) === realpath(workspace);
+	} catch {
+		return !1;
+	}
 }
 const invalid = (message) => new SandboxError(message, "INVALID_WORKING_DIRECTORY");
-function readWorkingDirectory(env, { realpath = realPathOf, stat = node_fs.statSync } = {}) {
+function readWorkingDirectory(env, { realpath = node_fs.realpathSync, stat = node_fs.statSync } = {}) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "";
 	if (!input) return;
-	let dir = workingDirectoryOf(env);
-	if (!dir) throw invalid(`working-directory ${JSON.stringify(input)} is relative and $GITHUB_WORKSPACE is not set.`);
-	let real;
+	let dir = workingDirectoryOf(env), named = `working-directory ${JSON.stringify(input)}`;
+	if (!dir) throw invalid(`${named} is relative and $GITHUB_WORKSPACE is not set.`);
+	let real, st;
 	try {
-		real = realpath(dir);
-	} catch {
+		real = realpath(dir), st = stat(real);
+	} catch (e) {
+		let code = e.code;
+		if (code !== "ENOENT" && code !== "ENOTDIR") throw invalid(`${named} (${dir}) could not be read: ${errorMessage(e)}`);
 		let hint = /^~|\$/.test(input) ? " Variables and ~ are not expanded; use an expression such as ${{ runner.temp }}." : "";
-		throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) does not exist.${hint}`);
+		throw invalid(`${named} (${dir}) does not exist.${hint}`);
 	}
-	if (!stat(real).isDirectory()) throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) is not a directory.`);
+	if (!st.isDirectory()) throw invalid(`${named} (${dir}) is not a directory.`);
 	return {
 		input,
 		dir,
 		real,
-		isWorkspace: isWorkspace(dir, env)
+		isWorkspace: isWorkspace(dir, env, realpath)
 	};
 }
 function hiddenWorkingDirectory(cwd, mounts, maskedPaths) {
@@ -73988,11 +74061,16 @@ function unsearchableAncestor(real, { uid, gid }, stat = node_fs.statSync) {
 	for (let d = real; dirs.unshift(d), d !== "/"; d = (0, node_path.dirname)(d));
 	return dirs.find((d) => !searchable(stat(d), uid, gid));
 }
-function assertSandboxCanEnter(wd, spec, stat) {
+function assertSandboxUserCanSearch(wd, env, { uid = process.getuid(), gid = resolveSandboxGid(process.getgid(), env).gid, stat = node_fs.statSync } = {}) {
+	let blocked = unsearchableAncestor(wd.real, {
+		uid,
+		gid
+	}, stat);
+	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`);
+}
+function assertSandboxShows(wd, spec) {
 	let hidden = hiddenWorkingDirectory(wd.real, spec.mounts, spec.maskedPaths);
 	if (hidden) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: ${hidden}.`);
-	let blocked = unsearchableAncestor(wd.real, spec, stat);
-	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: the sandbox's user (uid ${spec.uid}, gid ${spec.gid}, no supplementary groups) cannot search ${blocked}.`);
 }
 //#endregion
 //#region src/lib/filesystem-audit/line-file.ts
@@ -74094,7 +74172,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
-	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env) ? relativize(workingDirectory, {
+	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath) ? relativize(workingDirectory, {
 		...options,
 		cwd: []
 	}) : void 0, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
@@ -74218,6 +74296,50 @@ function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	return { expected: rules };
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
@@ -74299,7 +74421,12 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 }
 //#endregion
 //#region src/lib/filesystem-example-inputs.ts
-const yamlScalar = (text) => /^[\w/][\w./-]*$/.test(text) ? text : JSON.stringify(text);
+function yamlScalar(text) {
+	try {
+		if ((0, import_dist$5.parse)(text) === text) return text;
+	} catch {}
+	return JSON.stringify(text);
+}
 function filesystemExampleInputs({ workingDirectory, filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
 	let lines = [];
 	workingDirectory && !workingDirectory.isWorkspace && lines.push(`working-directory: ${yamlScalar(workingDirectory.input)}`), filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
@@ -76103,107 +76230,6 @@ function onRealRunnerDir(path, env, realpath) {
 	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
 }
 //#endregion
-//#region src/lib/sandbox/runtime-sockets.ts
-const RUNTIME_SOCKET_PATHS = [
-	"/var/run/docker.sock",
-	"/run/docker.sock",
-	"/run/containerd/containerd.sock",
-	"/var/run/docker/containerd/containerd.sock",
-	"/run/buildkit/buildkitd.sock",
-	"/run/podman/podman.sock",
-	"/var/run/crio/crio.sock",
-	"/run/dbus/system_bus_socket",
-	"/var/run/dbus/system_bus_socket"
-];
-function rootlessRuntimeSocketPaths(env) {
-	let dir = env.XDG_RUNTIME_DIR;
-	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
-}
-//#endregion
-//#region src/lib/sandbox/identity.ts
-function assertNonRootUid(uid) {
-	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
-}
-const PRIVILEGED_GROUP_NAMES = new Set([
-	"root",
-	"docker",
-	"containerd",
-	"podman",
-	"lxd",
-	"libvirt",
-	"libvirt-qemu",
-	"kvm",
-	"sudo",
-	"wheel"
-]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
-	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	lookupGroups: (keys) => {
-		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
-		if (!getent) return { lines: "" };
-		try {
-			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
-				encoding: "utf8",
-				stdio: "pipe",
-				timeout: 5e3
-			}) };
-		} catch (e) {
-			let { status, stdout } = e;
-			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
-		}
-	},
-	gidOf: (path) => (0, node_fs.statSync)(path).gid
-};
-function readGroupNamesByGid(groupFile, nssLines, host) {
-	let sources = [];
-	try {
-		sources.push(host.readGroupFile(groupFile));
-	} catch {}
-	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
-	let map = new Map();
-	for (let line of sources.join("\n").split("\n")) {
-		if (!line || line.startsWith("#")) continue;
-		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
-		if (!name || !Number.isInteger(gid)) continue;
-		let names = map.get(gid);
-		names ? names.push(name) : map.set(gid, [name]);
-	}
-	return map;
-}
-function ownerGids(paths, host) {
-	let gids = new Set();
-	for (let p of paths) try {
-		gids.add(host.gidOf(p));
-	} catch {}
-	return gids;
-}
-function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
-		String(primaryGid),
-		...PRIVILEGED_GROUP_NAMES,
-		...FALLBACK_GROUP_NAMES,
-		"65534"
-	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
-	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
-	let substitute = (gid) => gid === primaryGid ? {
-		gid,
-		...reported
-	} : {
-		gid,
-		substitutedFrom: primaryGid,
-		...reported
-	}, gidForName = (name) => {
-		if (groupNamesByGid) {
-			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
-		}
-	};
-	for (let name of FALLBACK_GROUP_NAMES) {
-		let gid = gidForName(name);
-		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
-	}
-	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
-	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
-}
-//#endregion
 //#region src/lib/sandbox/filesystem-audit-tracer.ts
 const END_LINE = /"kind":"end"[^\n]*\n$/;
 function cgroupFsPath(cgroupsPath) {
@@ -76807,9 +76833,9 @@ function assembleBundle(dir, options, deps) {
 	}
 	let caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, layout, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(layout.persisting, options, hostMounts, deps), identity = resolveIdentity(env, options.warn, deps);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(layout.persisting, options, hostMounts, deps);
 		config = buildOciConfig(baseSpec, {
-			identity,
+			identity: resolveIdentity(env, options.warn, deps),
 			cwd: options.workingDirectory?.real,
 			writable: {
 				...layout.defaultDirs,
@@ -76837,10 +76863,9 @@ function assembleBundle(dir, options, deps) {
 			renameGuardDirs,
 			extraInternalMounts: options.internalMounts,
 			extraMaskedPaths: maskedRunnerFiles(options.maskedPaths ?? [], layout.persisting, hostMounts, deps)
-		}), options.workingDirectory && assertSandboxCanEnter(options.workingDirectory, {
+		}), options.workingDirectory && assertSandboxShows(options.workingDirectory, {
 			mounts: config.mounts,
-			maskedPaths: config.linux.maskedPaths,
-			...identity
+			maskedPaths: config.linux.maskedPaths
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
@@ -77563,6 +77588,7 @@ const realDeps = {
 	readTrafficArtifactInputs,
 	readStepLabel,
 	readWorkingDirectory,
+	assertSandboxUserCanSearch,
 	saveWriteThroughForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
@@ -77685,10 +77711,10 @@ function readStepInputs(env, deps) {
 		aws: deps.readAwsKeyInputs({ proxyEngine }, env)
 	};
 }
-function preflight({ filesystemMode, writeThroughInput, baseDir, filesystemAudit, annotation }, env, deps) {
+function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDir, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), workingDirectory && deps.assertSandboxUserCanSearch(workingDirectory, env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
 	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
 		baseDir,
 		warn: deps.warn

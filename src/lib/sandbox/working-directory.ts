@@ -3,14 +3,15 @@
  * write-through and config-file, and `./` in the filesystem audit, are
  * relative to.
  */
-import { statSync, type Stats } from "node:fs";
+import { realpathSync, statSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
 import { inputEnvName } from "#core/lib/actions/input-names.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
+import { resolveSandboxGid } from "./identity.ts";
 import { isAtOrUnder } from "./paths.ts";
-import { realPathOf } from "./symlinks.ts";
 import type { MountEntry } from "./types.ts";
 
 export const WORKING_DIRECTORY_INPUT = "working-directory";
@@ -41,10 +42,21 @@ export function workingDirectoryOf(env: NodeJS.ProcessEnv): string | undefined {
   return withoutTrailingSlash(normalize(isAbsolute(input) ? input : join(workspace!, input)));
 }
 
-/** Whether `dir` is the workspace, so `./` still means what it always has. */
-export function isWorkspace(dir: string, env: NodeJS.ProcessEnv): boolean {
+/** Whether `dir` is the workspace, however spelled, so `./` still means what it always has. */
+export function isWorkspace(
+  dir: string,
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string = realpathSync,
+): boolean {
+  const workspace = env.GITHUB_WORKSPACE;
+  if (!workspace) return false;
   const spelled = (path: string) => withoutTrailingSlash(normalize(path));
-  return Boolean(env.GITHUB_WORKSPACE) && spelled(dir) === spelled(env.GITHUB_WORKSPACE!);
+  if (spelled(dir) === spelled(workspace)) return true;
+  try {
+    return realpath(dir) === realpath(workspace);
+  } catch {
+    return false;
+  }
 }
 
 export interface ReadWorkingDirectoryDeps {
@@ -61,29 +73,30 @@ const invalid = (message: string) => new SandboxError(message, "INVALID_WORKING_
  */
 export function readWorkingDirectory(
   env: NodeJS.ProcessEnv,
-  { realpath = realPathOf, stat = statSync }: ReadWorkingDirectoryDeps = {},
+  { realpath = realpathSync, stat = statSync }: ReadWorkingDirectoryDeps = {},
 ): WorkingDirectory | undefined {
   const input = env[inputEnvName(WORKING_DIRECTORY_INPUT)]?.trim() ?? "";
   if (!input) return undefined;
   const dir = workingDirectoryOf(env);
-  if (!dir) {
-    throw invalid(
-      `working-directory ${JSON.stringify(input)} is relative and $GITHUB_WORKSPACE is not set.`,
-    );
-  }
+  const named = `working-directory ${JSON.stringify(input)}`;
+  if (!dir) throw invalid(`${named} is relative and $GITHUB_WORKSPACE is not set.`);
   let real: string;
+  let st: Stats;
   try {
     real = realpath(dir);
-  } catch {
+    st = stat(real);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR")
+      throw invalid(`${named} (${dir}) could not be read: ${errorMessage(e)}`);
     // Like the workflow's own working-directory:, the input expands nothing.
     const hint = /^~|\$/.test(input)
       ? " Variables and ~ are not expanded; use an expression such as ${{ runner.temp }}."
       : "";
-    throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) does not exist.${hint}`);
+    throw invalid(`${named} (${dir}) does not exist.${hint}`);
   }
-  if (!stat(real).isDirectory())
-    throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) is not a directory.`);
-  return { input, dir, real, isWorkspace: isWorkspace(dir, env) };
+  if (!st.isDirectory()) throw invalid(`${named} (${dir}) is not a directory.`);
+  return { input, dir, real, isWorkspace: isWorkspace(dir, env, realpath) };
 }
 
 /**
@@ -135,21 +148,33 @@ export function unsearchableAncestor(
   return dirs.find((d) => !searchable(stat(d), uid, gid));
 }
 
-/** Throws unless the sandbox can start in `real`; see the two checks above. */
-export function assertSandboxCanEnter(
+/** Throws unless the sandbox's user, with the GID resolveSandboxGid gives it,
+ *  can search its way to `real`. */
+export function assertSandboxUserCanSearch(
   wd: WorkingDirectory,
-  spec: { mounts: MountEntry[]; maskedPaths: string[]; uid: number; gid: number },
-  stat?: (path: string) => Stats,
+  env: NodeJS.ProcessEnv,
+  {
+    uid = process.getuid!(),
+    gid = resolveSandboxGid(process.getgid!(), env).gid,
+    stat = statSync,
+  }: { uid?: number; gid?: number; stat?: (path: string) => Stats } = {},
+): void {
+  const blocked = unsearchableAncestor(wd.real, { uid, gid }, stat);
+  if (blocked)
+    throw invalid(
+      `working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: the sandbox's user ` +
+        `(uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`,
+    );
+}
+
+/** Throws unless the sandbox `spec` describes shows the host's own `real`. */
+export function assertSandboxShows(
+  wd: WorkingDirectory,
+  spec: { mounts: MountEntry[]; maskedPaths: string[] },
 ): void {
   const hidden = hiddenWorkingDirectory(wd.real, spec.mounts, spec.maskedPaths);
   if (hidden)
     throw invalid(
       `working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: ${hidden}.`,
-    );
-  const blocked = unsearchableAncestor(wd.real, spec, stat);
-  if (blocked)
-    throw invalid(
-      `working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: the sandbox's user ` +
-        `(uid ${spec.uid}, gid ${spec.gid}, no supplementary groups) cannot search ${blocked}.`,
     );
 }

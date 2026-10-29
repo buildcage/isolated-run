@@ -262,7 +262,7 @@ export function readStepFilesystemAudit(
   };
   // The legend names the working directory only where `./` is not the workspace.
   const cwdNamed =
-    workingDirectory && !isWorkspace(workingDirectory, env)
+    workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath)
       ? relativize(workingDirectory, { ...options, cwd: [] })
       : undefined;
   // What the verdict says of accesses that could not all be checked, which

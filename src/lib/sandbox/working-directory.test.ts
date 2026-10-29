@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import {
-  assertSandboxCanEnter,
+  assertSandboxShows,
+  assertSandboxUserCanSearch,
   hiddenWorkingDirectory,
   isWorkspace,
   readWorkingDirectory,
@@ -52,11 +53,21 @@ describe("workingDirectoryOf", () => {
 });
 
 describe("isWorkspace", () => {
+  const missing = () => {
+    throw new Error("ENOENT");
+  };
+
   it("compares as normalized paths", () => {
-    expect(isWorkspace(WS, envWith(undefined, `${WS}/`))).toBe(true);
-    expect(isWorkspace(`${WS}/app/..`, envWith())).toBe(true);
-    expect(isWorkspace(`${WS}/app`, envWith())).toBe(false);
-    expect(isWorkspace(WS, envWith(undefined, null))).toBe(false);
+    expect(isWorkspace(WS, envWith(undefined, `${WS}/`), missing)).toBe(true);
+    expect(isWorkspace(`${WS}/app/..`, envWith(), missing)).toBe(true);
+    expect(isWorkspace(`${WS}/app`, envWith(), missing)).toBe(false);
+    expect(isWorkspace(WS, envWith(undefined, null), missing)).toBe(false);
+  });
+
+  it("compares the real paths of other spellings", () => {
+    const realpath = (path: string) => path.replace("/link", WS);
+    expect(isWorkspace("/link", envWith(), realpath)).toBe(true);
+    expect(isWorkspace("/link/app", envWith(), realpath)).toBe(false);
   });
 });
 
@@ -95,9 +106,10 @@ describe("readWorkingDirectory", () => {
     }
     throw new Error("not refused");
   };
-  const missing = () => {
-    throw new Error("ENOENT");
+  const failing = (code: string) => () => {
+    throw Object.assign(new Error(`${code}: failed`), { code });
   };
+  const missing = failing("ENOENT");
 
   it("refuses a relative input without the workspace", () => {
     expect(refused(envWith("app", null), {})).toBe(
@@ -108,6 +120,18 @@ describe("readWorkingDirectory", () => {
   it("refuses a directory that does not exist, which runc would create as root", () => {
     expect(refused(envWith("app"), { realpath: missing })).toBe(
       `working-directory "app" (${WS}/app) does not exist.`,
+    );
+  });
+
+  it("takes a file on the way as a directory that does not exist", () => {
+    expect(refused(envWith("a.txt/b"), { realpath: failing("ENOTDIR") })).toBe(
+      `working-directory "a.txt/b" (${WS}/a.txt/b) does not exist.`,
+    );
+  });
+
+  it("passes on any other failure as it is", () => {
+    expect(refused(envWith("app"), { realpath, stat: failing("EACCES") })).toBe(
+      `working-directory "app" (${WS}/app) could not be read: EACCES: failed`,
     );
   });
 
@@ -193,28 +217,43 @@ describe("unsearchableAncestor", () => {
   });
 });
 
-describe("assertSandboxCanEnter", () => {
+describe("assertSandboxShows", () => {
   const wd = { input: "app", dir: `${WS}/app`, real: `${WS}/app`, isWorkspace: false };
-  const spec = { mounts: [], maskedPaths: [], uid: 1001, gid: 1001 };
 
-  it("passes a visible, searchable directory", () => {
-    expect(() => assertSandboxCanEnter(wd, spec, () => stats())).not.toThrow();
+  it("passes a directory the sandbox shows", () => {
+    expect(() => assertSandboxShows(wd, { mounts: [], maskedPaths: [] })).not.toThrow();
   });
 
   it("refuses one the sandbox would not see", () => {
-    expect(() =>
-      assertSandboxCanEnter(wd, { ...spec, maskedPaths: ["/home/runner"] }, () => stats()),
-    ).toThrow(
+    expect(() => assertSandboxShows(wd, { mounts: [], maskedPaths: ["/home/runner"] })).toThrow(
       `working-directory "app" (${WS}/app) is unusable: /home/runner is hidden from the sandbox.`,
     );
+  });
+});
+
+describe("assertSandboxUserCanSearch", () => {
+  const wd = { input: "app", dir: `${WS}/app`, real: `${WS}/app`, isWorkspace: false };
+  const user = { uid: 1001, gid: 1001 };
+
+  it("passes a searchable directory", () => {
+    expect(() =>
+      assertSandboxUserCanSearch(wd, envWith(), { ...user, stat: () => stats() }),
+    ).not.toThrow();
   });
 
   it("refuses one the sandbox's user cannot search", () => {
     expect(() =>
-      assertSandboxCanEnter(wd, spec, (path) => stats(path === WS ? { mode: 0o700 } : {})),
+      assertSandboxUserCanSearch(wd, envWith(), {
+        ...user,
+        stat: (path) => stats(path === WS ? { mode: 0o700 } : {}),
+      }),
     ).toThrow(
-      `working-directory "app" (${WS}/app) is unusable: the sandbox's user ` +
-        `(uid 1001, gid 1001, no supplementary groups) cannot search ${WS}.`,
+      expect.objectContaining({
+        code: "INVALID_WORKING_DIRECTORY",
+        message:
+          `working-directory "app" (${WS}/app) is unusable: the sandbox's user ` +
+          `(uid 1001, gid 1001, no supplementary groups) cannot search ${WS}.`,
+      }),
     );
   });
 });

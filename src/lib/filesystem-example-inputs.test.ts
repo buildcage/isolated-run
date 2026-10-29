@@ -73,8 +73,10 @@ describe("filesystemExampleInputs", () => {
       "write-through: |",
       "  dist",
     ]);
-    expect(inputsOf(at("my app"))).toStrictEqual(['working-directory: "my app"']);
-    expect(inputsOf(at("../shared"))).toStrictEqual(['working-directory: "../shared"']);
+    expect(inputsOf(at("my app"))).toStrictEqual(["working-directory: my app"]);
+    expect(inputsOf(at("../shared"))).toStrictEqual(["working-directory: ../shared"]);
+    for (const input of ["null", "true", "2024", "a: b", "#x", "[x", "*x"])
+      expect(inputsOf(at(input))).toStrictEqual([`working-directory: ${JSON.stringify(input)}`]);
     expect(inputsOf(at("./", true))).toStrictEqual([]);
   });
 

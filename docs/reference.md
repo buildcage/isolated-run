@@ -947,16 +947,16 @@ use an expression such as `${{ runner.temp }}` instead.
 ```
 
 - The directory has to exist. The step fails before setting anything up when it does not, when it
-  is not a directory, when the sandbox cannot see it, as under `/dev/shm`, which the sandbox
-  mounts its own copy of, or when the step's user cannot enter it without its supplementary groups,
-  which the sandbox drops.
+  is not a directory, or when the step's user cannot enter it without its supplementary groups,
+  which the sandbox drops. It fails before the command runs when the sandbox cannot see it, as under
+  `/dev/shm`, which the sandbox mounts its own copy of.
 - Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
   `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
-  a path in the working directory either way.
+  a path in the working directory either way, with or without `working-directory`.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.

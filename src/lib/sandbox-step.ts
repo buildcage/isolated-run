@@ -84,7 +84,11 @@ import {
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
-import { readWorkingDirectory, workingDirectoryOf } from "./sandbox/working-directory.ts";
+import {
+  assertSandboxUserCanSearch,
+  readWorkingDirectory,
+  workingDirectoryOf,
+} from "./sandbox/working-directory.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
@@ -140,6 +144,7 @@ const realDeps = {
   readTrafficArtifactInputs,
   readStepLabel,
   readWorkingDirectory,
+  assertSandboxUserCanSearch,
   saveWriteThroughForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -394,7 +399,14 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
  * command may write, before the image is verified or the proxy started.
  */
 export function preflight(
-  { filesystemMode, writeThroughInput, baseDir, filesystemAudit, annotation }: StepInputs,
+  {
+    filesystemMode,
+    writeThroughInput,
+    workingDirectory,
+    baseDir,
+    filesystemAudit,
+    annotation,
+  }: StepInputs,
   env: NodeJS.ProcessEnv,
   deps: SandboxStepDeps,
 ): FilesystemPlan {
@@ -415,6 +427,7 @@ export function preflight(
   );
 
   // Before image verification and the proxy start.
+  if (workingDirectory) deps.assertSandboxUserCanSearch(workingDirectory, env);
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
