@@ -127,8 +127,8 @@ own; any other value fails the step before the sandbox is set up.
 ## Config file
 
 `config-file` names a YAML file in the repository that sets any input but `run` and the deprecated
-`writable` ([The former input names](#the-former-input-names)), so the policy can sit beside the code
-that needs it:
+`writable` ([The former input names](#the-former-input-names)), so the policy can sit beside the
+code that needs it:
 
 ```yaml
 # path/to/buildcage-config.yml
