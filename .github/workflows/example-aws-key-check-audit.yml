@@ -33,7 +33,7 @@ jobs:
       # through. No STS answer issued the dependency's key, so no account lets
       # it through.
       - name: Discover required URLs and accounts with isolated-run
-        uses: buildcage/isolated-run@7231a9514976bc228a07871b58a87aa99af442a1 # v2.4.1
+        uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
         env:
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
