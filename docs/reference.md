@@ -30,36 +30,31 @@ underscores (`proxy_mode` for `proxy-mode`), as earlier versions named it. When 
 spellings, a list input (the rule inputs, `write-through`, `expected-filesystem-rules`) takes the
 lines of both, and any other input takes the hyphenated value, warning when the two differ.
 
-| Input                              | Default      | Description                                                                                                                                                                                                                                                                 |
-| ---------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run`                              | required     | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                                                                                                                               |
-| `config-file`                      | empty        | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                                                                                                                                                                        |
-| `proxy-mode`                       | `restrict`   | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                                                                                                                                                                             |
-| `proxy-engine`                     | `inspect`    | `inspect` or `universal`. See [Engines](../README.md#engines).                                                                                                                                                                                                              |
-| `fail-on-blocked`                  | `true`       | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                                                                                                                                                                                     |
-| `fail-on-ca-residue`               | `true`       | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium).                                                                                                                                                        |
-| `aws-key-check`                    | `false`      | `inspect` only, **experimental**. Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`. See [AWS access key check](#aws-access-key-check).                                                                                                     |
-| `allowed-aws-role-accounts`        | empty        | `inspect` only, **experimental**. AWS accounts whose roles the step may assume; the keys those roles issue, and static CodeCommit Git credentials of these accounts, pass the check too. Requires `aws-key-check: true`. See [AWS access key check](#aws-access-key-check). |
-| `write-through`                    | empty        | Paths whose writes reach the real host filesystem. See [`write-through` paths](#write-through-paths).                                                                                                                                                                       |
-| `filesystem-mode`                  | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access).                                                                                                                                                                    |
-| `filesystem-audit`                 | `off`        | `record` logs the step's file accesses (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                                       |
-| `upload-filesystem-audit-artifact` | `false`      | Upload the filesystem audit's full record as an artifact (**experimental**). See [Filesystem audit](#filesystem-audit).                                                                                                                                                     |
-| `filesystem-audit-retention-days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
-| `expected-filesystem-rules`        | empty        | The file accesses the step is expected to make (**experimental**); the summary then lists only those outside them. Requires `filesystem-audit: record`. See [Filesystem audit](#filesystem-audit).                                                                          |
-| `fail-on-unexpected-file-access`   | `false`      | Fail the step when an access fell outside `expected-filesystem-rules` (any access, when there are none) or could not be checked against them, in `audit` mode too. Needs `filesystem-audit: record`                                                                         |
-| `writable`                         | empty        | Deprecated: the former name of `write-through`. Still works; set `write-through` instead.                                                                                                                                                                                   |
-| `label`                            | empty        | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                                                                                                                                                              |
-| `upload-traffic-artifact`          | `false`      | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                                                                                                                                                                                  |
-| `traffic-artifact-retention-days`  | empty        | How long to keep that artifact, as a whole number of days; empty uses the repository's own default, and a value above the repository's maximum is lowered to it, with a warning                                                                                             |
+An input whose default is `true` or `false` takes only those two values, and a `-retention-days`
+input takes a whole number of days above zero, lowered with a warning to the repository's maximum.
+Left empty, each input takes its default, which for a `-retention-days` input is the repository's
+own; any other value fails the step before the sandbox is set up.
 
-`fail-on-blocked`, `fail-on-ca-residue`, `upload-traffic-artifact`,
-`upload-filesystem-audit-artifact`, `fail-on-unexpected-file-access` and `aws-key-check` take
-`true` or `false`, `filesystem-mode`
-`persistent` or `ephemeral`, `filesystem-audit` `off` or `record`, and
-`traffic-artifact-retention-days` and `filesystem-audit-retention-days` a whole number above zero.
-Left empty, each takes its default; any other value fails the step before the sandbox is set up.
+### General inputs
 
-### Rule inputs
+| Input         | Default  | Description                                                                                                                   |
+| ------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `run`         | required | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
+| `config-file` | empty    | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
+| `label`       | empty    | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
+
+### Network inputs
+
+| Input                             | Default    | Description                                                                                                          |
+| --------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `proxy-mode`                      | `restrict` | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                      |
+| `proxy-engine`                    | `inspect`  | `inspect` or `universal`. See [Engines](../README.md#engines).                                                       |
+| `fail-on-blocked`                 | `true`     | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                              |
+| `fail-on-ca-residue`              | `true`     | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium). |
+| `upload-traffic-artifact`         | `false`    | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                           |
+| `traffic-artifact-retention-days` | empty      | How long to keep that artifact, in days                                                                              |
+
+#### Rule inputs
 
 All of these are empty by default, and all of them are additive: a connection is allowed when any
 rule in any input matches. Which ones apply depends on the engine.
@@ -86,10 +81,39 @@ variable, counted without comments and blank lines. A larger one fails the step 
 starts; write fewer, broader rules, such as [wildcards](#wildcards). This only matters with
 `config-file`, as a workflow's own value already has to fit for the runner to start the step.
 
+### AWS key check inputs
+
+Both are `inspect` only and **experimental**. See [AWS access key check](#aws-access-key-check).
+
+| Input                       | Default | Description                                                                                                                                                                            |
+| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aws-key-check`             | `false` | Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`                                                                                                      |
+| `allowed-aws-role-accounts` | empty   | AWS accounts whose roles the step may assume; the keys those roles issue, and static CodeCommit Git credentials of these accounts, pass the check too. Requires `aws-key-check: true`. |
+
+### Filesystem inputs
+
+| Input             | Default      | Description                                                                                              |
+| ----------------- | ------------ | -------------------------------------------------------------------------------------------------------- |
+| `write-through`   | empty        | Paths whose writes reach the real host filesystem. See [`write-through` paths](#write-through-paths).    |
+| `filesystem-mode` | `persistent` | `persistent` or `ephemeral` (**experimental**). See [Filesystem access](../README.md#filesystem-access). |
+
+### Filesystem audit inputs
+
+All of these are **experimental**. See [Filesystem audit](#filesystem-audit).
+
+| Input                              | Default | Description                                                                                                                                                                                             |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filesystem-audit`                 | `off`   | `off` or `record`; `record` logs the step's file accesses                                                                                                                                               |
+| `expected-filesystem-rules`        | empty   | The file accesses the step is expected to make; the summary then lists only those outside them. Requires `filesystem-audit: record`.                                                                    |
+| `fail-on-unexpected-file-access`   | `false` | Fail the step when an access fell outside `expected-filesystem-rules` (any access, when there are none) or could not be checked against them, in `audit` mode too. Requires `filesystem-audit: record`. |
+| `upload-filesystem-audit-artifact` | `false` | Upload the filesystem audit's full record as an artifact                                                                                                                                                |
+| `filesystem-audit-retention-days`  | empty   | How long to keep that artifact, in days                                                                                                                                                                 |
+
 ### Config file
 
 `config-file` names a YAML file in the repository that sets any input but `run` and the deprecated
-`writable`, so the policy can sit beside the code that needs it:
+`writable` ([The former input names](#the-former-input-names)), so the policy can sit beside the code
+that needs it:
 
 ```yaml
 # path/to/buildcage-config.yml

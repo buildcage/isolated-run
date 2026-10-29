@@ -12,12 +12,20 @@ inputs:
     description: "YAML file, relative to the workspace, setting any input but run and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
     required: false
     default: ""
+  label:
+    description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"
+    required: false
+    default: ""
   proxy-mode:
     description: "Traffic policy: audit records every destination the command reaches and blocks nothing (allowed-*-rules have no effect in this mode), or restrict (default) allows only what the rules match and blocks the rest. Run audit once, take the allowlist from its report, then switch to restrict."
     required: false
   proxy-engine:
     description: "Network enforcement engine: inspect (default, terminates TLS to enforce on method and URL) or universal (network-level proxy, needs no CA trust)"
     required: false
+  allowed-url-rules:
+    description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy-engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
+    required: false
+    default: ""
   allowed-https-rules:
     description: "HTTPS allow rules (wildcard or ~regex), separated by whitespace. Port required. e.g., '*.example.com:443 ~^custom\\.pattern:443$'"
     required: false
@@ -30,12 +38,25 @@ inputs:
     description: "IP address allow rules (address, CIDR block, wildcard or ~regex), separated by whitespace. Port required. e.g., '192.168.1.1:443 10.0.0.1:8080'"
     required: false
     default: ""
-  allowed-url-rules:
-    description: "URL allow rules, one per line, as '<methods> <url>'. Methods are separated by | or , and * means any. Requires proxy-engine: inspect. e.g., 'GET|HEAD https://registry.npmjs.org/**'"
-    required: false
-    default: ""
   allowed-tls-rules:
     description: "TLS destinations passed through undecrypted, judged on SNI alone, separated by whitespace. Port required. Requires proxy-engine: inspect. e.g., 'db.example.com:5432'"
+    required: false
+    default: ""
+  known-blocked-rules:
+    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy-engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail-on-blocked is true. See docs/reference.md#blocked-rules-known-blocked-rules."
+    required: false
+    default: ""
+  fail-on-blocked:
+    description: "Fail the step if any connection was blocked (restrict mode only). Default true."
+    required: false
+  fail-on-ca-residue:
+    description: "proxy-engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
+    required: false
+  upload-traffic-artifact:
+    description: "Upload the observed traffic as a JSON artifact. It keeps every URL verbatim, so treat it as sensitive. Default false. See docs/reference.md#traffic-artifact."
+    required: false
+  traffic-artifact-retention-days:
+    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
     required: false
     default: ""
   aws-key-check:
@@ -45,29 +66,8 @@ inputs:
     description: "Experimental. AWS account IDs whose roles the step may assume, whose keys then pass aws-key-check too, separated by commas or whitespace. Requires aws-key-check: true. See docs/reference.md#aws-access-key-check."
     required: false
     default: ""
-  upload-traffic-artifact:
-    description: "Upload the observed traffic as a JSON artifact. It keeps every URL verbatim, so treat it as sensitive. Default false. See docs/reference.md#traffic-artifact."
-    required: false
-  traffic-artifact-retention-days:
-    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
-    required: false
-    default: ""
-  fail-on-blocked:
-    description: "Fail the step if any connection was blocked (restrict mode only). Default true."
-    required: false
-  fail-on-ca-residue:
-    description: "proxy-engine: inspect only. Whether a command that leaves a copy of the proxy CA in the NSS database Chromium reads fails the step (true, default) or only warns (false). With false, the copy is written back. See docs/reference.md#chromium."
-    required: false
-  known-blocked-rules:
-    description: "Traffic expected to be blocked, one rule per line: a host rule (wildcard or ~regex) or, under proxy-engine: inspect, a URL rule. Blocked traffic matching one doesn't fail the step even when fail-on-blocked is true. See docs/reference.md#blocked-rules-known-blocked-rules."
-    required: false
-    default: ""
   write-through:
     description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write-through-paths."
-    required: false
-    default: ""
-  writable:
-    description: "Deprecated: the former name of write-through. Still works; set write-through instead."
     required: false
     default: ""
   filesystem-mode:
@@ -76,13 +76,6 @@ inputs:
   filesystem-audit:
     description: "Experimental. record logs the file accesses of the isolated step; off (default) does not. Fails the step on a host that cannot run it. See docs/reference.md#filesystem-audit."
     required: false
-  upload-filesystem-audit-artifact:
-    description: "Upload the filesystem audit's full record as an artifact. It holds every path the step touched, so treat it as sensitive. Default false. See docs/filesystem-audit.md#the-artifact."
-    required: false
-  filesystem-audit-retention-days:
-    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
-    required: false
-    default: ""
   expected-filesystem-rules:
     description: "Experimental. The file accesses the step is expected to make, one `<program> <access> <path>` rule per line; with them the summary lists only the accesses outside them. See docs/filesystem-audit.md#expected-accesses."
     required: false
@@ -90,8 +83,15 @@ inputs:
   fail-on-unexpected-file-access:
     description: "Fail the step if an access fell outside expected-filesystem-rules (any access, when there are none) or could not be checked against them, in audit mode too. Needs filesystem-audit: record. Default false."
     required: false
-  label:
-    description: "Label appended to this step's Job Summary heading, e.g. 'npm install'. Useful to tell steps apart when `run` is used more than once in the same job"
+  upload-filesystem-audit-artifact:
+    description: "Upload the filesystem audit's full record as an artifact. It holds every path the step touched, so treat it as sensitive. Default false. See docs/filesystem-audit.md#the-artifact."
+    required: false
+  filesystem-audit-retention-days:
+    description: "How long to keep that artifact, in days. Empty uses the repository's own default, and a value above the repository maximum is lowered to it, with a warning."
+    required: false
+    default: ""
+  writable:
+    description: "Deprecated: the former name of write-through. Still works; set write-through instead."
     required: false
     default: ""
 
@@ -106,6 +106,10 @@ inputs:
   proxy_engine:
     description: "Alias of proxy-engine."
     required: false
+  allowed_url_rules:
+    description: "Alias of allowed-url-rules."
+    required: false
+    default: ""
   allowed_https_rules:
     description: "Alias of allowed-https-rules."
     required: false
@@ -118,26 +122,12 @@ inputs:
     description: "Alias of allowed-ip-rules."
     required: false
     default: ""
-  allowed_url_rules:
-    description: "Alias of allowed-url-rules."
-    required: false
-    default: ""
   allowed_tls_rules:
     description: "Alias of allowed-tls-rules."
     required: false
     default: ""
-  aws_key_check:
-    description: "Alias of aws-key-check."
-    required: false
-  allowed_aws_role_accounts:
-    description: "Alias of allowed-aws-role-accounts."
-    required: false
-    default: ""
-  upload_traffic_artifact:
-    description: "Alias of upload-traffic-artifact."
-    required: false
-  traffic_artifact_retention_days:
-    description: "Alias of traffic-artifact-retention-days."
+  known_blocked_rules:
+    description: "Alias of known-blocked-rules."
     required: false
     default: ""
   fail_on_blocked:
@@ -146,8 +136,18 @@ inputs:
   fail_on_ca_residue:
     description: "Alias of fail-on-ca-residue."
     required: false
-  known_blocked_rules:
-    description: "Alias of known-blocked-rules."
+  upload_traffic_artifact:
+    description: "Alias of upload-traffic-artifact."
+    required: false
+  traffic_artifact_retention_days:
+    description: "Alias of traffic-artifact-retention-days."
+    required: false
+    default: ""
+  aws_key_check:
+    description: "Alias of aws-key-check."
+    required: false
+  allowed_aws_role_accounts:
+    description: "Alias of allowed-aws-role-accounts."
     required: false
     default: ""
   write_through:
@@ -160,13 +160,6 @@ inputs:
   filesystem_audit:
     description: "Alias of filesystem-audit."
     required: false
-  upload_filesystem_audit_artifact:
-    description: "Alias of upload-filesystem-audit-artifact."
-    required: false
-  filesystem_audit_retention_days:
-    description: "Alias of filesystem-audit-retention-days."
-    required: false
-    default: ""
   expected_filesystem_rules:
     description: "Alias of expected-filesystem-rules."
     required: false
@@ -174,6 +167,13 @@ inputs:
   fail_on_unexpected_file_access:
     description: "Alias of fail-on-unexpected-file-access."
     required: false
+  upload_filesystem_audit_artifact:
+    description: "Alias of upload-filesystem-audit-artifact."
+    required: false
+  filesystem_audit_retention_days:
+    description: "Alias of filesystem-audit-retention-days."
+    required: false
+    default: ""
 
 outputs:
   traffic-artifact-name:
