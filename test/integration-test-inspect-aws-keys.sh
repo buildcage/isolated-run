@@ -2,7 +2,7 @@
 # Drives dist/main.cjs against a real inspect-engine proxy with the AWS access
 # key check on: restrict blocks what the check blocks (scenarios in
 # test/inspect-aws-keys-scenarios.sh), audit lets it through and notes it, and
-# a step with no key to start from, or under proxy_engine: universal, fails
+# a step with no key to start from, or under proxy-engine: universal, fails
 # before the proxy starts.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
@@ -90,7 +90,7 @@ assert_summary_matches "POST https://cloudformation\.us-east-1\.amazonaws\.com/ 
   "an AssumeRole answer to a key restrict would block taught its key"
 assert_summary_contains "| key 2 from a role in 999999999999 | \`ssm.us-east-1.amazonaws.com\`, \`sqs.us-east-1.amazonaws.com\` | 2 |" \
   "the requests signed with a key an AssumeRole answer issued are one row, naming the role's account"
-assert_summary_contains "allowed_aws_role_accounts: |" "the restrict example lists the accounts one to a line"
+assert_summary_contains "allowed-aws-role-accounts: |" "the restrict example lists the accounts one to a line"
 assert_summary_matches "^ +111111111111$" \
   "the restrict example names the account given, unmarked" \
   "the restrict example does not name the account given on a line of its own"
@@ -103,7 +103,7 @@ else
 fi
 
 echo ""
-echo "--- aws_key_check alone: the step's own key, and no role's ---"
+echo "--- aws-key-check alone: the step's own key, and no role's ---"
 aws_step keyonly \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="restrict" \
@@ -118,7 +118,7 @@ else
 fi
 
 echo ""
-echo "--- aws_key_check alone, audited: every account a role was assumed in ---"
+echo "--- aws-key-check alone, audited: every account a role was assumed in ---"
 aws_step keyonlyaudit \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_MODE="audit" \
@@ -143,7 +143,7 @@ else
 fi
 
 echo ""
-echo "--- aws_key_check alone, audited: what naming an account would let through ---"
+echo "--- aws-key-check alone, audited: what naming an account would let through ---"
 # OIDC into 111111111111, its key pulls a layer from ECR, and the layer's
 # presigned URL is fetched with the key ECR signed it with. None is learned
 # with no account named, and naming 111111111111 would let all three through.
@@ -166,7 +166,7 @@ assert_summary_contains "| key 1 | ⚠️ restrict would block (aws-key-not-allo
   "AWS Keys says the web identity call's key came from a role in its account"
 assert_summary_contains "| key 2 | ⚠️ restrict would block (aws-key-not-allowed) | ECR layer URL (from key 1) |" \
   "AWS Keys says which key's registry request ECR issued a key to"
-assert_summary_contains '# allowed_aws_role_accounts: "111111111111" # lets key 1, key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours' \
+assert_summary_contains '# allowed-aws-role-accounts: "111111111111" # lets key 1, key 2 and its AssumeRoleWithWebIdentity call through; assumed in this run, check it is yours' \
   "the restrict example names the web identity call, its key and the key ECR issued to it under the account"
 
 echo ""
@@ -188,7 +188,7 @@ else
 fi
 
 echo ""
-echo "--- under proxy_engine: universal ---"
+echo "--- under proxy-engine: universal ---"
 aws_step universal \
   AWS_ACCESS_KEY_ID="${AKIA}TESTSTARTKEY0001" \
   INPUT_PROXY_ENGINE="universal" \
@@ -196,7 +196,7 @@ aws_step universal \
   INPUT_ALLOWED_URL_RULES="" \
   INPUT_RUN="true"
 RUN_EXIT=$?
-if [ "$RUN_EXIT" != "0" ] && grep -qF "has no effect with proxy_engine: universal" "$TMPDIR/universal.log"; then
+if [ "$RUN_EXIT" != "0" ] && grep -qF "has no effect with proxy-engine: universal" "$TMPDIR/universal.log"; then
   pass "a universal step with the check on fails in audit too, naming the engine"
 else
   fail "a universal step with the check on did not fail in audit (exit $RUN_EXIT)"

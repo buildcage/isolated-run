@@ -1,5 +1,5 @@
 /**
- * The proposed expected_filesystem_rules: a rule for each access the rules did
+ * The proposed expected-filesystem-rules: a rule for each access the rules did
  * not take, every access without rules, uploaded with the recording for the
  * user to add wherever the step keeps its rules.
  */
@@ -37,7 +37,7 @@ export const UPLOAD_NOTE = "# Needed for the proposed rules; also uploads the fu
 /** The proposed file's first lines: what it holds and what to do with it. */
 export const RULES_TO_ADD_HEADER = [
   `# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
-  `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`,
+  `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config-file.`,
   "#",
   "# Each line is <program> <access> <path>. In a program or path, * matches within one",
   "# component and ** across them; ./ is the workspace and ~/ is $HOME. A part that",

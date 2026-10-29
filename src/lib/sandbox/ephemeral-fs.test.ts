@@ -27,21 +27,21 @@ describe("determineOverlayRoots", () => {
     ]);
   });
 
-  it("excludes a candidate that is itself named in write_through", () => {
+  it("excludes a candidate that is itself named in write-through", () => {
     const candidates = [ENV.HOME, "/tmp"];
     expect(
       determineOverlayRoots(candidates, [ENV.HOME], { exists, deviceOf: sameDevice }),
     ).toStrictEqual(["/tmp"]);
   });
 
-  it("keeps a candidate that is only an ancestor of a narrower write_through entry", () => {
+  it("keeps a candidate that is only an ancestor of a narrower write-through entry", () => {
     const candidates = [ENV.HOME, "/tmp"];
     expect(
       determineOverlayRoots(candidates, [`${ENV.HOME}/.npmrc`], { exists, deviceOf: sameDevice }),
     ).toStrictEqual([ENV.HOME, "/tmp"]);
   });
 
-  it("excludes a candidate that is a descendant of a broader write_through entry", () => {
+  it("excludes a candidate that is a descendant of a broader write-through entry", () => {
     const candidates = [`${ENV.HOME}/.cache`, "/tmp"];
     expect(
       determineOverlayRoots(candidates, [ENV.HOME], { exists, deviceOf: sameDevice }),
@@ -260,7 +260,7 @@ describe("nestedMountRoots", () => {
     ).toStrictEqual(["/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x"]);
   });
 
-  it("leaves a mount under write_through to that path's own rbind", () => {
+  it("leaves a mount under write-through to that path's own rbind", () => {
     expect(
       nestedMountRoots(["/home/runner"], ext4("/home/runner/out", "/home/runner/out/cache"), [
         "/home/runner/out",
@@ -296,9 +296,9 @@ describe("nestedMountRoots", () => {
 
     expect(roots).toStrictEqual(["/home/runner/_tool"]);
     expect(warnings).toStrictEqual([
-      'filesystem_mode: ephemeral cannot overlay the host mount "/home/runner/remote", so the ' +
+      'filesystem-mode: ephemeral cannot overlay the host mount "/home/runner/remote", so the ' +
         "command sees the empty directory beneath it: it is a FUSE mount (fuse.sshfs) without " +
-        "allow_other, which root cannot read. Use filesystem_mode: persistent if the command " +
+        "allow_other, which root cannot read. Use filesystem-mode: persistent if the command " +
         "needs its contents.",
       expect.stringContaining('"/home/runner/ntfs"'),
       expect.stringContaining('"/home/runner/plain"'),
@@ -361,7 +361,7 @@ describe("formatFilesystemPlanLog", () => {
     );
   });
 
-  it("lists the mode, folded overlay roots, then write_through entries for ephemeral mode", () => {
+  it("lists the mode, folded overlay roots, then write-through entries for ephemeral mode", () => {
     expect(
       formatFilesystemPlanLog("ephemeral", ["/home/runner", "/tmp"], [ENV.GITHUB_WORKSPACE], []),
     ).toStrictEqual([

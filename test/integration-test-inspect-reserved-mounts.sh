@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies that a write_through: entry the inspect engine's CA directory mount
+# Verifies that a write-through: entry the inspect engine's CA directory mount
 # would shadow is refused when the CA directory is a symlink, whether the entry
 # names the link or where it leads. Drives dist/main.cjs directly, without the
 # real action wrapper.
@@ -61,26 +61,26 @@ fixture_up inspect
 run_instance "$CA_DIR_LINK" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 if [ "$CODE" != "0" ] && grep -qF "symlinks are not followed. Name the path it leads to instead: \"$TARGET\"" "$WORKDIR/step.log"; then
-  pass "write_through: $CA_DIR_LINK is refused as a symlink to $TARGET"
+  pass "write-through: $CA_DIR_LINK is refused as a symlink to $TARGET"
 else
-  fail "write_through: $CA_DIR_LINK was accepted (exit $CODE)"
+  fail "write-through: $CA_DIR_LINK was accepted (exit $CODE)"
 fi
 
 run_instance "$TARGET" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 if [ "$CODE" != "0" ] && grep -qF "is in the CA directory \"$CA_DIR_LINK\" (a symlink to \"$TARGET\")" "$WORKDIR/step.log"; then
-  pass "write_through: $TARGET is refused when $CA_DIR_LINK links to it"
+  pass "write-through: $TARGET is refused when $CA_DIR_LINK links to it"
 else
-  fail "write_through: $TARGET was accepted (exit $CODE)"
+  fail "write-through: $TARGET was accepted (exit $CODE)"
 fi
 
 # The parent stays allowed, and the CA copy still lands where the link leads.
 run_instance "$TARGET_PARENT" "test -f '$TARGET/buildcage-proxy-ca.pem'"
 CODE=$(cat "$WORKDIR/exit_code")
 if [ "$CODE" = "0" ]; then
-  pass "write_through: the directory holding $TARGET is allowed, and the CA lands in $TARGET"
+  pass "write-through: the directory holding $TARGET is allowed, and the CA lands in $TARGET"
 else
-  fail "write_through: the directory holding $TARGET failed the step (exit $CODE)"
+  fail "write-through: the directory holding $TARGET failed the step (exit $CODE)"
 fi
 
 assert_results

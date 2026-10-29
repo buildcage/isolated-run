@@ -49,7 +49,7 @@ describe("saveWriteThroughForPost and takeWriteThroughForPost", () => {
     expect(readdirSync(base)).toStrictEqual([]);
   });
 
-  it("save an empty write_through as such, not as nothing saved", () => {
+  it("save an empty write-through as such, not as nothing saved", () => {
     saveWriteThroughForPost(ENV, "", base);
 
     expect(takeWriteThroughForPost(ENV, base)).toBe("");

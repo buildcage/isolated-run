@@ -10943,7 +10943,7 @@ function splitRawRegexUrl(regex, rule) {
 	let schemeSep = SCHEME_SEP.exec(regex);
 	if (!schemeSep) throw Error(`Invalid regex in rule "${rule}": expected "://" (or an escaped equivalent like ":\\/\\/ ") separating the scheme from the host, so the host and path can be matched separately`);
 	let schemes = rawRegexSchemes(regex.slice(0, schemeSep.index), rule), hostStart = schemeSep.index + schemeSep[0].length, pathSep = SLASH_TOKEN.exec(regex.slice(hostStart));
-	if (!pathSep) throw Error(`Invalid regex in rule "${rule}": expected a "/" (or "\\/") after "://" to start the path; a host-only rule belongs in allowed_https_rules instead`);
+	if (!pathSep) throw Error(`Invalid regex in rule "${rule}": expected a "/" (or "\\/") after "://" to start the path; a host-only rule belongs in allowed-https-rules instead`);
 	let pathStart = hostStart + pathSep.index, hostPart = regex.slice(hostStart, pathStart), pathPart = regex.slice(pathStart);
 	checkRawRegexHalf(hostPart, "host half", rule, !1), checkRawRegexHalf(pathPart, "path half", rule, !1), rejectUserinfo(hostPart, rule);
 	let { domain: hostOnly } = splitDomainFromPortPattern(hostPart);
@@ -15413,10 +15413,38 @@ var require_identity$1 = __commonJSMin(((exports) => {
 	require_cst();
 	var lexer = require_lexer(), lineCounter = require_line_counter(), parser = require_parser(), publicApi = require_public_api(), visit = require_visit();
 	exports.Composer = composer.Composer, exports.Document = Document.Document, exports.Schema = Schema.Schema, exports.YAMLError = errors.YAMLError, exports.YAMLParseError = errors.YAMLParseError, exports.YAMLWarning = errors.YAMLWarning, exports.Alias = Alias.Alias, exports.isAlias = identity.isAlias, exports.isCollection = identity.isCollection, exports.isDocument = identity.isDocument, exports.isMap = identity.isMap, exports.isNode = identity.isNode, exports.isPair = identity.isPair, exports.isScalar = identity.isScalar, exports.isSeq = identity.isSeq, exports.Pair = Pair.Pair, exports.Scalar = Scalar.Scalar, exports.YAMLMap = YAMLMap.YAMLMap, exports.YAMLSeq = YAMLSeq.YAMLSeq, exports.Lexer = lexer.Lexer, exports.LineCounter = lineCounter.LineCounter, exports.Parser = parser.Parser, exports.parse = publicApi.parse, exports.parseAllDocuments = publicApi.parseAllDocuments, exports.parseDocument = publicApi.parseDocument, exports.stringify = publicApi.stringify, exports.visit = visit.visit, exports.visitAsync = visit.visitAsync;
-}))(), ConfigFileError = class extends ActionError {};
+}))();
+init_core();
 function inputEnvName(name) {
 	return `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
 }
+function legacyInputName(name) {
+	return name.replaceAll("-", "_");
+}
+function normalizeInputNames(env, names, lists = []) {
+	let warnings = [];
+	for (let name of names) {
+		let legacy = legacyInputName(name);
+		if (legacy === name) continue;
+		let legacyEnvName = inputEnvName(legacy), value = env[legacyEnvName] ?? "";
+		if (delete env[legacyEnvName], !value.trim()) continue;
+		let envName = inputEnvName(name), current = env[envName] ?? "";
+		current.trim() ? lists.includes(name) ? env[envName] = `${current}\n${value}` : current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}, as ${name} is also set.`) : env[envName] = value;
+	}
+	return warnings;
+}
+function setOutputUnderBothNames(name, value, setOutput$1 = setOutput) {
+	let failures = [];
+	for (let output of [name, legacyInputName(name)]) try {
+		setOutput$1(output, value);
+	} catch (e) {
+		failures.push(e);
+	}
+	if (failures.length > 0) throw failures[0];
+}
+//#endregion
+//#region src/core/lib/actions/config-file.ts
+var ConfigFileError = class extends ActionError {};
 function refuseUntrustedEvent(env) {
 	let event = env.GITHUB_EVENT_NAME, triggeredBy;
 	if (event === "workflow_run") {
@@ -15424,18 +15452,18 @@ function refuseUntrustedEvent(env) {
 			let runEvent = JSON.parse((0, node_fs.readFileSync)(env.GITHUB_EVENT_PATH ?? "", "utf8")).workflow_run?.event;
 			triggeredBy = typeof runEvent == "string" ? runEvent : void 0;
 		} catch (e) {
-			throw new ConfigFileError(`config_file cannot be used: the workflow_run event payload could not be read (${errorMessage(e)}).`, "CONFIG_FILE_UNTRUSTED_EVENT");
+			throw new ConfigFileError(`config-file cannot be used: the workflow_run event payload could not be read (${errorMessage(e)}).`, "CONFIG_FILE_UNTRUSTED_EVENT");
 		}
 		if (!triggeredBy?.startsWith("pull_request")) return;
 	} else if (event !== "pull_request_target") return;
-	throw new ConfigFileError(`config_file cannot be used on ${triggeredBy ? `workflow_run triggered by ${triggeredBy}` : event}: the workspace may hold a pull request's code, which could then rewrite its own rules. Set the inputs in the workflow instead.`, "CONFIG_FILE_UNTRUSTED_EVENT");
+	throw new ConfigFileError(`config-file cannot be used on ${triggeredBy ? `workflow_run triggered by ${triggeredBy}` : event}: the workspace may hold a pull request's code, which could then rewrite its own rules. Set the inputs in the workflow instead.`, "CONFIG_FILE_UNTRUSTED_EVENT");
 }
 function isOutside(root, path) {
 	let inside = (0, node_path.relative)(root, path);
 	return inside === ".." || inside.startsWith(`..${node_path.sep}`);
 }
 function resolveConfigPath(path, env) {
-	let pathError = (reason) => new ConfigFileError(`config_file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
+	let pathError = (reason) => new ConfigFileError(`config-file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
 	if ((0, node_path.isAbsolute)(path)) throw pathError("must be relative to the workspace.");
 	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(workspace, path);
 	if (isOutside(workspace, full)) throw pathError("leads outside the workspace.");
@@ -15472,7 +15500,7 @@ function valueNodes(doc) {
 	return nodesOf(doc.contents);
 }
 function parseConfig(text, path, known) {
-	let invalid = (reason) => new ConfigFileError(`Invalid config_file ${JSON.stringify(path)}: ${reason}`, "CONFIG_FILE_INVALID"), lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(text, { lineCounter });
+	let invalid = (reason) => new ConfigFileError(`Invalid config-file ${JSON.stringify(path)}: ${reason}`, "CONFIG_FILE_INVALID"), lineCounter = new import_dist$5.LineCounter(), doc = (0, import_dist$5.parseDocument)(text, { lineCounter });
 	for (let warning of doc.warnings) process.emitWarning(warning);
 	if (doc.errors.length > 0) throw invalid(doc.errors[0].message);
 	let js;
@@ -15487,17 +15515,21 @@ function parseConfig(text, path, known) {
 		let node = resolved(nodes.get(key), doc), [start, end] = node.range, at = lineCounter.linePos(start).line;
 		if (node.type === import_dist$5.Scalar.BLOCK_LITERAL) return at + 1;
 		if (node.type !== import_dist$5.Scalar.BLOCK_FOLDED) return value.includes("\n") || lineCounter.linePos(end).line !== at ? void 0 : at;
-	}, values = new Map();
-	for (let [key, value] of Object.entries(js)) {
-		if (!known.includes(key)) throw invalid(`unknown key ${JSON.stringify(key)}. Allowed keys: ${known.join(", ")}.`);
-		if (value == null) values.set(key, { text: "" });
-		else if ([
-			"string",
-			"number",
-			"boolean"
-		].includes(typeof value)) {
+	}, own = new Set(doc.contents.items.filter(({ key }) => !isMergeKey(key, doc)).map(({ key }) => resolved(key, doc)).filter(import_dist$5.isScalar).map((key) => String(key.value))), keys = new Map();
+	for (let key of Object.keys(js)) {
+		let name = known.find((input) => key === input || key === legacyInputName(input));
+		if (!name) throw invalid(`unknown key ${JSON.stringify(key)}. Allowed keys: ${known.join(", ")}.`);
+		let other = keys.get(name);
+		if (other === void 0 || own.has(key) && !own.has(other)) keys.set(name, key);
+		else if (own.has(key) || !own.has(other)) throw invalid(`${name} is set twice, also as ${legacyInputName(name)}.`);
+	}
+	let values = new Map();
+	for (let [name, key] of keys) {
+		let value = js[key];
+		if (value == null) values.set(name, { text: "" });
+		else if (typeof value == "string" || typeof value == "number" || typeof value == "boolean") {
 			let text = String(value);
-			values.set(key, {
+			values.set(name, {
 				text,
 				line: lineOf(key, text)
 			});
@@ -15506,14 +15538,14 @@ function parseConfig(text, path, known) {
 	return values;
 }
 function applyConfigFile(env, { known, lists }) {
-	let path = env[inputEnvName("config_file")]?.trim() ?? "";
+	let path = env[inputEnvName("config-file")]?.trim() ?? "";
 	if (!path) return;
 	refuseUntrustedEvent(env);
 	let full = resolveConfigPath(path, env), text;
 	try {
 		text = (0, node_fs.readFileSync)(full, "utf8");
 	} catch (e) {
-		throw new ConfigFileError(`config_file ${JSON.stringify(path)} could not be read: ${errorMessage(e)}`, "CONFIG_FILE_PATH");
+		throw new ConfigFileError(`config-file ${JSON.stringify(path)} could not be read: ${errorMessage(e)}`, "CONFIG_FILE_PATH");
 	}
 	let values = parseConfig(text, path, known), ignored = [], origins = new Map();
 	for (let [name, { text: value, line }] of values) {
@@ -15533,7 +15565,7 @@ function applyConfigFile(env, { known, lists }) {
 	}
 	return ignored.length ? {
 		path: full,
-		warning: `Ignored from config_file ${path}, set by the workflow: ${ignored.join(", ")}`,
+		warning: `Ignored from config-file ${path}, set by the workflow: ${ignored.join(", ")}`,
 		origins
 	} : {
 		path: full,
@@ -15564,29 +15596,29 @@ function readBooleanInput(name, fallback, getInput) {
 	throw new InvalidInputError(`Invalid ${name}: ${JSON.stringify(value)}. Must be true or false.`, "INVALID_BOOLEAN_INPUT");
 }
 function readRetentionDays(getInput) {
-	let days = getInput("traffic_artifact_retention_days");
+	let days = getInput("traffic-artifact-retention-days");
 	if (days !== "") {
-		if (!/^[1-9]\d*$/.test(days)) throw new InvalidInputError(`Invalid traffic_artifact_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
+		if (!/^[1-9]\d*$/.test(days)) throw new InvalidInputError(`Invalid traffic-artifact-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_TRAFFIC_ARTIFACT_RETENTION_DAYS");
 		return Number(days);
 	}
 }
 function readTrafficArtifactInputs(getInput$12 = getInput) {
 	return {
-		upload: readBooleanInput("upload_traffic_artifact", !1, getInput$12),
+		upload: readBooleanInput("upload-traffic-artifact", !1, getInput$12),
 		retentionDays: readRetentionDays(getInput$12)
 	};
 }
 const ENGINES = ["universal", "inspect"];
 function resolveProxyEngine(input) {
 	let trimmed = input?.trim() || "inspect";
-	if (trimmed === "transparent") throw new InvalidInputError("proxy_engine: transparent has been renamed. Use proxy_engine: universal.", "INVALID_PROXY_ENGINE");
-	if (!ENGINES.includes(trimmed)) throw new InvalidInputError(`Invalid proxy_engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`, "INVALID_PROXY_ENGINE");
+	if (trimmed === "transparent") throw new InvalidInputError("proxy-engine: transparent has been renamed. Use proxy-engine: universal.", "INVALID_PROXY_ENGINE");
+	if (!ENGINES.includes(trimmed)) throw new InvalidInputError(`Invalid proxy-engine: ${JSON.stringify(input)}. Must be one of ${ENGINES.join(", ")}.`, "INVALID_PROXY_ENGINE");
 	return trimmed;
 }
 const PROXY_MODES = ["audit", "restrict"];
 function resolveProxyMode(input) {
 	let trimmed = input?.trim() || "restrict";
-	if (!PROXY_MODES.includes(trimmed)) throw new InvalidInputError(`Invalid proxy_mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`, "INVALID_PROXY_MODE");
+	if (!PROXY_MODES.includes(trimmed)) throw new InvalidInputError(`Invalid proxy-mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`, "INVALID_PROXY_MODE");
 	return trimmed;
 }
 //#endregion
@@ -15594,16 +15626,16 @@ function resolveProxyMode(input) {
 function checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, warn) {
 	if (proxyEngine === "inspect") return;
 	let unsupported = [];
-	if (urlRules.length > 0 && unsupported.push("allowed_url_rules"), tlsRules.length > 0 && unsupported.push("allowed_tls_rules"), unsupported.length === 0) return;
-	let list = unsupported.join(" and "), reason = `${list} ${unsupported.length > 1 ? "have" : "has"} no effect with proxy_engine: ${proxyEngine}, which only sees the host and port, never a method or a path.`;
-	if (proxyMode === "audit") warn(`${reason} They are ignored for this run. Switch to proxy_engine: inspect if you need to enforce a method or a path.`);
-	else throw new InvalidInputError(`${reason} In restrict mode that means ${list} would not actually be enforced, so the step would look protected but isn't. Switch to proxy_engine: inspect, or remove ${list} from your workflow.`, "INVALID_PROXY_ENGINE");
+	if (urlRules.length > 0 && unsupported.push("allowed-url-rules"), tlsRules.length > 0 && unsupported.push("allowed-tls-rules"), unsupported.length === 0) return;
+	let list = unsupported.join(" and "), reason = `${list} ${unsupported.length > 1 ? "have" : "has"} no effect with proxy-engine: ${proxyEngine}, which only sees the host and port, never a method or a path.`;
+	if (proxyMode === "audit") warn(`${reason} They are ignored for this run. Switch to proxy-engine: inspect if you need to enforce a method or a path.`);
+	else throw new InvalidInputError(`${reason} In restrict mode that means ${list} would not actually be enforced, so the step would look protected but isn't. Switch to proxy-engine: inspect, or remove ${list} from your workflow.`, "INVALID_PROXY_ENGINE");
 }
 function checkKnownBlockedUrlRuleSupport({ proxyEngine, proxyMode, knownBlockedUrlRules }, warn) {
 	if (proxyEngine === "inspect" || knownBlockedUrlRules.length === 0) return;
-	let reason = `known_blocked_rules contains URL rules (a method and a URL) that need proxy_engine: inspect, which alone sees a method or a path; proxy_engine: ${proxyEngine} sees only the host and port, so these rules match no blocked connection and acknowledge nothing.`;
-	if (proxyMode === "audit") warn(`${reason} They are ignored for this run. Drop the method to acknowledge the whole host, or switch to proxy_engine: inspect.`);
-	else throw new InvalidInputError(`${reason} Drop the method to acknowledge the whole host, or switch to proxy_engine: inspect.`, "INVALID_PROXY_ENGINE");
+	let reason = `known-blocked-rules contains URL rules (a method and a URL) that need proxy-engine: inspect, which alone sees a method or a path; proxy-engine: ${proxyEngine} sees only the host and port, so these rules match no blocked connection and acknowledge nothing.`;
+	if (proxyMode === "audit") warn(`${reason} They are ignored for this run. Drop the method to acknowledge the whole host, or switch to proxy-engine: inspect.`);
+	else throw new InvalidInputError(`${reason} Drop the method to acknowledge the whole host, or switch to proxy-engine: inspect.`, "INVALID_PROXY_ENGINE");
 }
 //#endregion
 //#region src/core/lib/actions/log.ts
@@ -16382,7 +16414,7 @@ function parseIpRulesOrThrow(rulesInput) {
 	for (let rule of rules) {
 		if (rule.startsWith("~")) continue;
 		let host = rule.slice(0, rule.lastIndexOf(":"));
-		if (!IP_RULE_HOST.test(host)) throw new InvalidRulesError(`IP rule "${rule}" names a host, not an address. allowed_ip_rules is matched against the address a connection goes to; allow a name with allowed_https_rules or allowed_http_rules instead.`, "INVALID_RULES");
+		if (!IP_RULE_HOST.test(host)) throw new InvalidRulesError(`IP rule "${rule}" names a host, not an address. allowed-ip-rules is matched against the address a connection goes to; allow a name with allowed-https-rules or allowed-http-rules instead.`, "INVALID_RULES");
 		if (!isIpRuleAddress(host)) throw new InvalidRulesError(`IP rule "${rule}" is not an IPv4 address: write four octets, each a decimal from 0 to 255 without a leading zero (10.0.0.1, not 010.0.0.1) or a wildcard (10.0.*.*, or 10.** across dots), and a CIDR prefix from 0 to 32.`, "INVALID_RULES");
 	}
 	return rules;
@@ -16399,10 +16431,10 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 init_core();
 function readRuleInputs(getInput$11 = getInput) {
 	let rules = buildACLRules({
-		httpsRulesInput: getInput$11("allowed_https_rules"),
-		httpRulesInput: getInput$11("allowed_http_rules"),
-		ipRulesInput: getInput$11("allowed_ip_rules")
-	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$11("known_blocked_rules")), urlRulesInput = getInput$11("allowed_url_rules"), tlsRules = parseRulesOrThrow(getInput$11("allowed_tls_rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
+		httpsRulesInput: getInput$11("allowed-https-rules"),
+		httpRulesInput: getInput$11("allowed-http-rules"),
+		ipRulesInput: getInput$11("allowed-ip-rules")
+	}), knownBlockedRules = parseKnownBlockedRulesOrThrow(getInput$11("known-blocked-rules")), urlRulesInput = getInput$11("allowed-url-rules"), tlsRules = parseRulesOrThrow(getInput$11("allowed-tls-rules")), compiledUrlRules = buildUrlRulesOrThrow(urlRulesInput);
 	checkRulesCompileOrThrow({
 		...rules,
 		tlsRules,
@@ -16419,12 +16451,12 @@ function readRuleInputs(getInput$11 = getInput) {
 	};
 }
 const RULE_LISTS = {
-	allowed_https_rules: "httpsRules",
-	allowed_http_rules: "httpRules",
-	allowed_ip_rules: "ipRules",
-	allowed_url_rules: "urlRules",
-	allowed_tls_rules: "tlsRules",
-	known_blocked_rules: "knownBlockedRules"
+	"allowed-https-rules": "httpsRules",
+	"allowed-http-rules": "httpRules",
+	"allowed-ip-rules": "ipRules",
+	"allowed-url-rules": "urlRules",
+	"allowed-tls-rules": "tlsRules",
+	"known-blocked-rules": "knownBlockedRules"
 };
 function checkRuleListSizesOrThrow(rules, names) {
 	for (let name of names) {
@@ -23245,11 +23277,11 @@ function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}
 //#endregion
 //#region src/lib/compose-env.ts
 const PROXY_RULE_INPUTS = [
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules"
+	"allowed-https-rules",
+	"allowed-http-rules",
+	"allowed-ip-rules",
+	"allowed-url-rules",
+	"allowed-tls-rules"
 ];
 function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, httpsRules, httpRules, ipRules, urlRules, tlsRules, awsKey, awsRoleAccounts }, env, hostAddresses = listHostIpv4Addresses) {
 	return {
@@ -70881,7 +70913,6 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 };
 //#endregion
 //#region src/lib/filesystem-audit/artifact.ts
-init_core();
 function filesystemAuditArtifactName(containerName) {
 	return artifactName("buildcage-filesystem-audit", containerName);
 }
@@ -70904,13 +70935,13 @@ async function uploadFilesystemAuditArtifact(files, containerName, retentionDays
 	}
 }
 function setFilesystemAuditOutput(name) {
-	setOutput("filesystem_audit_artifact_name", name);
+	setOutputUnderBothNames("filesystem-audit-artifact-name", name);
 }
 //#endregion
 //#region src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
-		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail_on_blocked`), process.exitCode = 1) : annotation.warning(message);
+		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail-on-blocked`), process.exitCode = 1) : annotation.warning(message);
 	};
 }
 //#endregion
@@ -71013,7 +71044,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 	let base = `${blockedCount} blocked ${COUNT_NOUN} detected by buildcage ${engineLabel}`;
 	if (isAudit) return base;
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
-	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known_blocked_rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known_blocked_rules)`;
+	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known-blocked-rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known-blocked-rules)`;
 }
 function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
 	let outcome = determineBlockedOutcome({
@@ -71130,7 +71161,7 @@ function redactCredentialQuery(url) {
 	return url.slice(0, start + 1) + query + url.slice(end);
 }
 function communicationTruncationNote(artifactAvailable) {
-	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload_traffic_artifact: true to get the rest as a downloadable artifact"}._\n\n`;
+	return `_…truncated: the full communication log exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the rest" : "set upload-traffic-artifact: true to get the rest as a downloadable artifact"}._\n\n`;
 }
 function renderCommunicationDetailsBody(timeline, startedAt, lineNote = () => void 0) {
 	let isNoise = clientEndedNoise(timeline), relevant = timeline.filter((e) => !isNoise(e)), connected = connectedHosts(relevant), shown = relevant.filter((e) => !isRedundantDns(e, connected));
@@ -71260,7 +71291,7 @@ function renderHostTable(rows, { showReason = !1 } = {}) {
 	})));
 }
 function hostTableTruncationNote(artifactAvailable) {
-	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload_traffic_artifact: true to get every request as a downloadable artifact"}._\n`;
+	return `_…truncated: the host tables exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request" : "set upload-traffic-artifact: true to get every request as a downloadable artifact"}._\n`;
 }
 function usesLine(actionRepo, actionRef, actionVersion) {
 	return `  uses: ${actionRepo}@${actionRef}${actionVersion ? ` # ${actionVersion}` : ""}\n`;
@@ -71283,7 +71314,7 @@ function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 	return md += "<summary>🛡️ Switch to restrict mode</summary>\n\n", md += "```yaml\n", md += indented, md += "```\n\n", appendix && (md += appendix), footnote && (md += `<sub>*${footnote}*</sub>\n\n`), md += "</details>\n", md;
 }
 function restrictExampleTruncationNote(artifactAvailable) {
-	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload_traffic_artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
+	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload-traffic-artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
 }
 //#endregion
 //#region src/core/lib/report/render/inspect-example.ts
@@ -71393,16 +71424,16 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 	let { writable, leftOut } = partitionRequests(requests ?? []), lines = ruleLinesFrom(writable);
 	if (lines.length === 0 && leftOut.length === 0 && allowedIpRules.length === 0 && allowedTlsRules.length === 0) return "";
 	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	if (yaml += "    proxy_mode: restrict\n", lines.length > 0) {
-		yaml += "    allowed_url_rules: |\n";
+	if (yaml += "    proxy-mode: restrict\n", lines.length > 0) {
+		yaml += "    allowed-url-rules: |\n";
 		for (let line of lines) yaml += `      ${line}\n`;
 	}
 	if (allowedTlsRules.length > 0) {
-		yaml += "    allowed_tls_rules: |\n";
+		yaml += "    allowed-tls-rules: |\n";
 		for (let rule of allowedTlsRules) yaml += `      ${rule}\n`;
 	}
 	if (allowedIpRules.length > 0) {
-		yaml += "    allowed_ip_rules: |\n";
+		yaml += "    allowed-ip-rules: |\n";
 		for (let rule of allowedIpRules) yaml += `      ${rule}\n`;
 	}
 	return yaml += exampleStepTail(step), restrictExampleBlock(yaml, {
@@ -71413,9 +71444,9 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 //#endregion
 //#region src/core/lib/report/render/universal-example.ts
 const ruleTypeToParam = {
-	HTTPS: "allowed_https_rules",
-	HTTP: "allowed_http_rules",
-	IP: "allowed_ip_rules"
+	HTTPS: "allowed-https-rules",
+	HTTP: "allowed-http-rules",
+	IP: "allowed-ip-rules"
 };
 function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step = {}) {
 	if (!auditedRows || auditedRows.length === 0) return "";
@@ -71426,7 +71457,7 @@ function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step 
 	}
 	if (groups.size === 0) return "";
 	let yaml = exampleStepHead(actionRepo, actionRef, step);
-	yaml += "    proxy_mode: restrict\n", yaml += "    proxy_engine: universal\n";
+	yaml += "    proxy-mode: restrict\n", yaml += "    proxy-engine: universal\n";
 	for (let [param, rules] of groups) {
 		yaml += `    ${param}: >-\n`;
 		for (let rule of rules) yaml += `      ${rule}\n`;
@@ -71697,7 +71728,7 @@ function withAwsKeyNames(timeline) {
 	});
 }
 function awsKeysTruncationNote(artifactAvailable) {
-	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run names every request's key" : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact"}._\n`;
+	return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run names every request's key" : "set upload-traffic-artifact: true to get every request's key as a downloadable artifact"}._\n`;
 }
 function checkCell(key) {
 	return key.blocked ? `🚫 ${key.blocked}` : key.wouldBlock ? `⚠️ restrict would block (${key.wouldBlock})` : key.allowed ? "✅ passed" : "not checked";
@@ -71902,7 +71933,7 @@ function auditedKey(e) {
 }
 const WOULD_BLOCK_ID = "traffic-would-block";
 function wouldBlockTruncationNote(artifactAvailable) {
-	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload_traffic_artifact: true to get every one as a downloadable artifact"}._\n`;
+	return `_…truncated: the requests restrict would block exceeded GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every one" : "set upload-traffic-artifact: true to get every one as a downloadable artifact"}._\n`;
 }
 function wouldBlockVerdictItems(timeline) {
 	let count = timeline.filter(letThrough).length;
@@ -72644,7 +72675,7 @@ function isTracer(pid, readFile) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/rules.ts
-const EXPECTED_RULES_INPUT = "expected_filesystem_rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+const EXPECTED_RULES_INPUT = "expected-filesystem-rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
 	for (; i < line.length;) {
@@ -72798,7 +72829,7 @@ var RuleMatcher = class {
 //#region src/lib/filesystem-audit/proposed-rules.ts
 const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [
 	`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
-	`# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`,
+	`# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config-file.`,
 	"#",
 	"# Each line is <program> <access> <path>. In a program or path, * matches within one",
 	"# component and ** across them; ./ is the workspace and ~/ is $HOME. A part that",
@@ -73646,7 +73677,7 @@ function proposalOf(state, artifact) {
 function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
 	if (proposal === "nothing-to-add") return;
 	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`, where, steps = !1;
-	if (proposal === "not-requested") where = `Set \`upload_filesystem_audit_artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
+	if (proposal === "not-requested") where = `Set \`upload-filesystem-audit-artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
 	else if (proposal === "too-many-paths") where = "No rules were proposed: the accesses touched too many distinct paths.";
 	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";
 	else {
@@ -73660,9 +73691,9 @@ ${intro}\n\n` + (steps ? useSteps(where) : `${where}\n\n`) + `[How to write the 
 `;
 }
 function useSteps(where) {
-	return `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config_file:\` under \`with:\`:\n\n\`\`\`yaml
-# path/to/buildcage.yml\nfilesystem_audit: record
-# Needed for the proposed rules; also uploads the full record.\nupload_filesystem_audit_artifact: true
+	return `${where} Review the rules, replace the parts of paths and programs that change between runs with \`*\` or \`**\`, and add them to \`${EXPECTED_RULES_INPUT}\`, under \`with:\` or in the step's config file if it has one. To keep a long list out of the workflow, move it to a config file and name that file in \`config-file:\` under \`with:\`:\n\n\`\`\`yaml
+# path/to/buildcage.yml\nfilesystem-audit: record
+# Needed for the proposed rules; also uploads the full record.\nupload-filesystem-audit-artifact: true
 ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
   /usr/local/bin/node  R    ~/.npmrc
 \`\`\`
@@ -73670,10 +73701,10 @@ ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
 `;
 }
 function filesystemLegendNote(artifact, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload_filesystem_audit_artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
+	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload-filesystem-audit-artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
 }
 function filesystemTruncationNote(artifact, cause = "size") {
-	let rest = artifact === "not-requested" ? "set upload_filesystem_audit_artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
+	let rest = artifact === "not-requested" ? "set upload-filesystem-audit-artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
 	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
 //#endregion
@@ -73777,7 +73808,7 @@ function moveCommandSummaryLast(path, commandBytes) {
 	}), cut;
 }
 function fullReportLocation(artifactAvailable) {
-	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+	return artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has the full report" : "set upload-traffic-artifact: true to get the full report as a downloadable artifact";
 }
 function reportDidNotFitMessage(artifactAvailable) {
 	return `The buildcage traffic report did not fit in GitHub's Job Summary size limit; ${fullReportLocation(artifactAvailable)}. The step's verdict was still enforced.`;
@@ -73815,7 +73846,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 		commandBytes,
 		fallbackLine: reportDidNotFitLine(artifactAvailable)
 	});
-	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload_traffic_artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
+	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
 //#region src/lib/filesystem-audit/line-file.ts
@@ -73894,7 +73925,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		try {
 			deps.setOutput(artifactName);
 		} catch (e) {
-			failOrWarn(annotation, failClosed)(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+			failOrWarn(annotation, failClosed)(`Failed to set the filesystem-audit-artifact-name output: ${errorMessage(e)}`);
 		}
 	}, settled = (result, verdictItems = {}) => ({
 		expected: "not-requested",
@@ -73916,7 +73947,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
-	}, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	}, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
@@ -73968,7 +73999,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 function reportUnexpected(summary, failOnUnexpected, annotation, empty) {
 	if (!summary?.unexpected) return {};
 	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, message = n === void 0 ? `File accesses fell outside ${outside}${empty ? "," : ""} on too many distinct paths to list.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
-	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
+	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {
 	let writer, written = !1, dropCopy = (e) => {
@@ -74027,12 +74058,13 @@ function ruleSources(value, config) {
 		firstLine: config?.line
 	}].filter((source) => source.text.trim());
 }
+const EXPECTED_RULES_ENV = inputEnvName(EXPECTED_RULES_INPUT);
 function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	let sources = ruleSources(value, config);
 	if (sources.length === 0) return;
 	let rules = parseExpectedRules(sources);
 	if (rules.rules.length === 0) return { expected: void 0 };
-	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 	return { expected: rules };
 }
 //#endregion
@@ -74098,14 +74130,14 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 function resolveWriteThroughEntry(rawLine, env) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write_through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
-		if (!value) throw Error(`write_through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
 	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write_through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write_through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
 	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 function splitWriteThroughInput(input) {
@@ -74140,39 +74172,39 @@ function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, re
 	}), link = resolved.links[0];
 	if (link === void 0) return;
 	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
-	throw Error(`write_through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
+	throw Error(`write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
 }
 function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
 	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write_through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
 }
 function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir$1 } = {}) {
 	let missing = resolvedPaths.filter((path) => !exists(path));
 	for (let path of missing) {
 		let ancestor = (0, node_path.dirname)(path);
 		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
-		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
 	}
 	for (let path of missing) try {
 		mkdir(path);
 	} catch (e) {
-		throw new WriteThroughTargetUncreatableError(`write_through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
 	}
 }
 //#endregion
 //#region src/lib/filesystem-example-inputs.ts
 function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
 	let lines = [];
-	filesystemMode !== "persistent" && lines.push(`filesystem_mode: ${filesystemMode}`);
+	filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write_through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem_audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config_file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail_on_unexpected_file_access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail_on_unexpected_file_access: true"), lines;
+	return paths.length > 0 && lines.push("write-through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem-audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config-file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail-on-unexpected-file-access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail-on-unexpected-file-access: true"), lines;
 }
 //#endregion
 //#region src/lib/filesystem-audit/mode.ts
 const FILESYSTEM_AUDIT = ["off", "record"];
 function resolveFilesystemAudit(input) {
 	let trimmed = input?.trim() || "off";
-	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem_audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
+	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem-audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
 	return trimmed;
 }
 //#endregion
@@ -74180,51 +74212,51 @@ function resolveFilesystemAudit(input) {
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
 	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem_mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
 //#endregion
 //#region src/lib/inputs.ts
 init_core();
 const LIST_INPUTS = [
-	"allowed_https_rules",
-	"allowed_http_rules",
-	"allowed_ip_rules",
-	"allowed_url_rules",
-	"allowed_tls_rules",
-	"known_blocked_rules",
-	"write_through",
-	"expected_filesystem_rules"
+	"allowed-https-rules",
+	"allowed-http-rules",
+	"allowed-ip-rules",
+	"allowed-url-rules",
+	"allowed-tls-rules",
+	"known-blocked-rules",
+	"write-through",
+	"expected-filesystem-rules"
 ], ACTION_INPUTS = [
 	"run",
-	"config_file",
-	"proxy_mode",
-	"proxy_engine",
+	"config-file",
+	"proxy-mode",
+	"proxy-engine",
 	...LIST_INPUTS,
 	"writable",
-	"aws_key_check",
-	"allowed_aws_role_accounts",
-	"upload_traffic_artifact",
-	"traffic_artifact_retention_days",
-	"fail_on_blocked",
-	"fail_on_ca_residue",
-	"filesystem_mode",
-	"filesystem_audit",
-	"upload_filesystem_audit_artifact",
-	"filesystem_audit_retention_days",
-	"fail_on_unexpected_file_access",
+	"aws-key-check",
+	"allowed-aws-role-accounts",
+	"upload-traffic-artifact",
+	"traffic-artifact-retention-days",
+	"fail-on-blocked",
+	"fail-on-ca-residue",
+	"filesystem-mode",
+	"filesystem-audit",
+	"upload-filesystem-audit-artifact",
+	"filesystem-audit-retention-days",
+	"fail-on-unexpected-file-access",
 	"label"
 ], NOT_IN_CONFIG_FILE = [
 	"run",
-	"config_file",
+	"config-file",
 	"writable"
 ], CONFIG_FILE_INPUTS = {
 	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
 	lists: LIST_INPUTS
 };
 function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
-	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write_through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	return writable.trim() ? (notice("writable: is now called write_through:; writable: still works, but consider updating to write_through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
 function readRunCommand(getInput$7 = getInput) {
 	let runInput = getInput$7("run", { trimWhitespace: !1 });
@@ -74233,28 +74265,28 @@ function readRunCommand(getInput$7 = getInput) {
 }
 function readProxyInputs(getInput$8 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$8("proxy_engine")),
-		proxyMode: resolveProxyMode(getInput$8("proxy_mode"))
+		proxyEngine: resolveProxyEngine(getInput$8("proxy-engine")),
+		proxyMode: resolveProxyMode(getInput$8("proxy-mode"))
 	};
 }
 function readFilesystemInputs(notice, getInput$3 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem_mode")),
+		filesystemMode: resolveFilesystemMode(getInput$3("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$3("write_through"),
+			writeThrough: getInput$3("write-through"),
 			writable: getInput$3("writable"),
 			allowWrite: getInput$3("allow_write")
 		}, notice)
 	};
 }
 function readFilesystemAuditInput(getInput$2 = getInput) {
-	return resolveFilesystemAudit(getInput$2("filesystem_audit"));
+	return resolveFilesystemAudit(getInput$2("filesystem-audit"));
 }
 function readFilesystemAuditArtifactInputs(getInput$4 = getInput) {
-	let days = getInput$4("filesystem_audit_retention_days");
-	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
+	let days = getInput$4("filesystem-audit-retention-days");
+	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload_filesystem_audit_artifact", !1, getInput$4),
+		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$4),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
@@ -74262,13 +74294,13 @@ function readStepLabel(getInput$5 = getInput) {
 	return getInput$5("label") || void 0;
 }
 function readFailOnCaResidue(getInput$1 = getInput) {
-	return readBooleanInput("fail_on_ca_residue", !0, getInput$1);
+	return readBooleanInput("fail-on-ca-residue", !0, getInput$1);
 }
 function readFailOnBlocked(getInput$6 = getInput) {
-	return readBooleanInput("fail_on_blocked", !0, getInput$6);
+	return readBooleanInput("fail-on-blocked", !0, getInput$6);
 }
 function readFailOnUnexpectedFileAccess(getInput$9 = getInput) {
-	return readBooleanInput("fail_on_unexpected_file_access", !1, getInput$9);
+	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$9);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
@@ -74277,15 +74309,15 @@ const AWS_KEY_CHECK_OFF = {
 function readAwsKeyInputs({ proxyEngine }, env, getInput$10 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$10("allowed_aws_role_accounts"));
+		roleAccounts = parseAwsAccounts(getInput$10("allowed-aws-role-accounts"));
 	} catch (e) {
 		let { message } = e;
-		throw new SandboxError(`allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
+		throw new SandboxError(`allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws_key_check", !1, getInput$10);
-	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config_file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
+	let check = readBooleanInput("aws-key-check", !1, getInput$10);
+	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config-file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
-	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check and allowed_aws_role_accounts.`, "INVALID_PROXY_ENGINE");
+	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check and allowed-aws-role-accounts.`, "INVALID_PROXY_ENGINE");
 	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
 	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
 	return {
@@ -74296,7 +74328,7 @@ function readAwsKeyInputs({ proxyEngine }, env, getInput$10 = getInput) {
 const NO_CREDENTIAL = "aws-no-credential", ROLE_NOT_ALLOWED = "aws-role-not-allowed";
 function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	if (!key) return [];
-	let lines = ["aws_key_check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), known = awsKeys(timeline), passes = (e, account, seen) => {
+	let lines = ["aws-key-check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), known = awsKeys(timeline), passes = (e, account, seen) => {
 		let { keyRef, roleAccount } = awsFieldsOf(e);
 		switch (e.wouldBlock) {
 			case void 0: return !0;
@@ -74321,18 +74353,18 @@ function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
 		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
-	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed_aws_role_accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
+	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed-aws-role-accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed-aws-role-accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed-aws-role-accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
 }
 //#endregion
 //#region src/lib/overlayfs-preflight.ts
-const REQUIREMENT$1 = `filesystem_mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem_mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
+const REQUIREMENT$1 = `filesystem-mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem-mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
 function describeOverlayFailure(e) {
 	let captured = capturedStderr(e);
 	return `overlayfs probe mount failed. ${REQUIREMENT$1}${captured ? ` (${captured})` : ""}`;
 }
 function describeProbeCleanupFailure(dir, e) {
 	let captured = capturedStderr(e);
-	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem_mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem_mode: persistent instead.${captured ? ` (${captured})` : ""}`;
+	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem-mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem-mode: persistent instead.${captured ? ` (${captured})` : ""}`;
 }
 function removeProbeDir(dir, exec) {
 	retryBriefly(() => exec(hostCommand("sudo"), [
@@ -74862,7 +74894,7 @@ function walkPlan(home, path, lstat) {
 	};
 }
 function warnNotAdded(warn, reason) {
-	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy_engine: universal for it.`);
+	warn?.(`could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step will not trust the proxy; use proxy-engine: universal for it.`);
 }
 function prepareNssDb(containerName, dir, home, deps = {}, { homeUpper } = {}) {
 	let { exec = defaultExec$3, lstat = defaultLstat, stat = defaultStat$1, realpath = node_fs.realpathSync, warn } = deps;
@@ -75267,7 +75299,7 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 		inject: ({ ca, deps }, destination, path) => {
 			deps.copyDir(deps.realpath(destination), path), deps.writeFile((0, node_path.join)(path, "buildcage-proxy-ca.pem"), `${ca}\n`, 420);
 		},
-		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy_engine: universal.`,
+		notAdded: (destination, e) => `could not add the proxy CA to the CA directory ${destination} (${errorMessage(e)}); a tool that reads it through GnuTLS or p11-kit (such as wget on RHEL or SUSE) will not trust the proxy. Check that the runner user can read it, or use proxy-engine: universal.`,
 		mountOptions: READ_ONLY,
 		reserve: {
 			refuses: (entry, destination) => isAtOrUnder(entry, destination),
@@ -75277,7 +75309,7 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 	jvmKeystore: {
 		find: ({ env, tools, deps }) => {
 			let keystores = discoverJvmKeystores(env, tools.java, deps);
-			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write_through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy_engine: universal.`), []) : keystores;
+			return !tools.keytool && keystores.length > 0 ? (deps.warn?.(`could not add the proxy CA to the JVM keystores (${keystores.join(", ")}): found no keytool outside the paths a sandboxed command can write to (\$HOME, \$GITHUB_WORKSPACE, /tmp, \$RUNNER_TEMP, write-through:). A Java step will not trust the proxy. Install a JDK outside those paths (a system package, or RUNNER_TOOL_CACHE outside \$HOME), or use proxy-engine: universal.`), []) : keystores;
 		},
 		copyName: (i) => `jvm-keystore-${i}`,
 		inject: ({ caCertPath, tools, deps }, destination, path) => {
@@ -75294,7 +75326,7 @@ const POINT_AT_OWN_CA = ["NODE_EXTRA_CA_CERTS", "DENO_CERT"], POINT_AT_SYSTEM_ST
 				"changeit"
 			], {});
 		},
-		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy_engine: universal for a JVM build whose keystore cannot be rewritten.`,
+		notAdded: (destination) => `could not add the proxy CA to the JVM keystore ${destination}; a Java step will not trust it. Use proxy-engine: universal for a JVM build whose keystore cannot be rewritten.`,
 		mountOptions: READ_ONLY,
 		reserve: {
 			refuses: (entry, destination) => entry === destination,
@@ -75379,7 +75411,7 @@ function assertWriteThroughClearOfCaTrust(files, writeThroughPaths, realpath) {
 	});
 	for (let path of writeThroughPaths) for (let { reserve, destination } of covered) {
 		let resolved = realpath(destination);
-		if ("refuses" in reserve && reserve.refuses(path, resolved)) throw new WritablePathConflictError(`write_through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`);
+		if ("refuses" in reserve && reserve.refuses(path, resolved)) throw new WritablePathConflictError(`write-through entry ${JSON.stringify(path)} ${reserve.refusal(destination, resolved)}`);
 	}
 }
 function caTrustAdditions(files, env) {
@@ -75420,7 +75452,7 @@ const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-
 	"ACTIONS_RESULTS_URL",
 	"ACTIONS_CACHE_SERVICE_V2",
 	"ACTIONS_CACHE_MODE"
-]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.map((input) => `INPUT_${input.toUpperCase()}`));
+]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.flatMap((input) => [inputEnvName(input), inputEnvName(legacyInputName(input))]));
 function isRunnerOnly(key) {
 	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
 }
@@ -75504,7 +75536,7 @@ function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirec
 		} catch (e) {
 			reason = `the runner cannot stat it (${errorMessage(e)})`;
 		}
-		reason === void 0 ? roots.push(path) : warn?.(`filesystem_mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem_mode: persistent if the command needs its contents.`);
+		reason === void 0 ? roots.push(path) : warn?.(`filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem-mode: persistent if the command needs its contents.`);
 	}
 	return roots;
 }
@@ -75628,7 +75660,7 @@ const realHostProbes = {
 	}
 };
 function auditUnavailable(reason) {
-	return new SandboxError(`filesystem_audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+	return new SandboxError(`filesystem-audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
 }
 function hostCannotAudit(reason) {
 	let e = auditUnavailable(reason);
@@ -75719,7 +75751,7 @@ function assertOverlayPathsAreOptionSafe(roots) {
 			upper,
 			work
 		].find((p) => p.includes(",") || p.includes(":"));
-		if (bad !== void 0) throw new WritablePathConflictError(`filesystem_mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount option cannot contain "," or ":", and the kernel offers no way to escape them. Use filesystem_mode: persistent, which binds the directory directly.`);
+		if (bad !== void 0) throw new WritablePathConflictError(`filesystem-mode: ephemeral cannot overlay ${JSON.stringify(bad)}: an overlay mount option cannot contain "," or ":", and the kernel offers no way to escape them. Use filesystem-mode: persistent, which binds the directory directly.`);
 	}
 }
 function ephemeralLayers({ overlayRoots, allowWrite }, freshMountDestinations) {
@@ -75903,17 +75935,17 @@ function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
-	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write_through: / drops the read-only restriction wholesale, which has no meaning in filesystem_mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
+	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write-through: / drops the read-only restriction wholesale, which has no meaning in filesystem-mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
 		let reserved = [...reservedInternalDestinations(), ...reservedRealPaths].find((r) => isAtOrUnder(path, r));
-		if (reserved) throw new SandboxError(`write_through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
+		if (reserved) throw new SandboxError(`write-through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
 function resolveWriteThroughInput(writeThroughInput, env) {
 	try {
 		return resolveWriteThroughPaths(writeThroughInput, env);
 	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
@@ -75942,7 +75974,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	try {
 		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
 	} catch (e) {
-		throw new SandboxError(`Invalid write_through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
@@ -75972,7 +76004,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 			mediatedVariables
 		};
 	} catch (e) {
-		throw new SandboxError(`Failed to determine filesystem_mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+		throw new SandboxError(`Failed to determine filesystem-mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
 }
 function readHostMounts(deps) {
@@ -76639,7 +76671,7 @@ function extractCaTrust(containerName, dir, options, layout, { extractCaCert, wr
 				info
 			}, { homeUpper: homeUpperFor(dir, options, layout.persisting) })
 		}, preset = presetCaVariables(files, env, realpath);
-		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy_engine: inspect; unset them for this step, or use proxy_engine: universal.`), files;
+		return preset.length > 0 && warn(`these CA variables are already set and do not point at the proxy CA: ${preset.map((name) => `${name} (${env[name]})`).join(", ")}. A tool reading one fails TLS under proxy-engine: inspect; unset them for this step, or use proxy-engine: universal.`), files;
 	} catch (e) {
 		throw asSandboxError(e, "Failed to extract the proxy's CA from the proxy image", "CA_EXTRACT_FAILED");
 	}
@@ -76756,8 +76788,8 @@ function finishNssDb(caTrust, persisting, options, deps) {
 			persist,
 			caPem: readFile(caTrust.ownCaPath),
 			onResidue: (message) => {
-				if (!failOnCaResidue) warn(`buildcage: ${message} (fail_on_ca_residue is false, so the step carries on)`);
-				else throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail_on_ca_residue: false (a copy of the CA is then written back).`, "NSS_DATABASE_CA_COPIED");
+				if (!failOnCaResidue) warn(`buildcage: ${message} (fail-on-ca-residue is false, so the step carries on)`);
+				else throw new SandboxError(`${message}. To let the step carry on with only a warning, set fail-on-ca-residue: false (a copy of the CA is then written back).`, "NSS_DATABASE_CA_COPIED");
 			}
 		}) === "discarded" && info(`buildcage: what the command wrote to the NSS database at ${nssDb.destination} is discarded, as the filesystem mode discards writes there`);
 	} catch (e) {
@@ -77315,7 +77347,6 @@ function writeTrafficFile(path, records) {
 }
 //#endregion
 //#region src/lib/traffic-artifact.ts
-init_core();
 async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
 	ensureOwnScratchBase(scratchBase);
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
@@ -77335,7 +77366,7 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 	}
 }
 function setTrafficArtifactOutput(name) {
-	setOutput("traffic_artifact_name", name);
+	setOutputUnderBothNames("traffic-artifact-name", name);
 }
 //#endregion
 //#region src/lib/step-report.ts
@@ -77393,7 +77424,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	try {
 		setTrafficArtifactOutput(artifactName);
 	} catch (e) {
-		fail(`Failed to set the traffic_artifact_name output: ${errorMessage(e)}`);
+		fail(`Failed to set the traffic-artifact-name output: ${errorMessage(e)}`);
 	}
 }
 async function writeMoreSummary(blocks, env, annotation, { commandBytes } = {}, overrides = {}) {
@@ -77523,15 +77554,17 @@ function writeBackMediatedFile(file, annotation, deps) {
 	};
 }
 function readStepInputs(env, deps) {
-	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run", configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
+	for (let ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) deps.warn(ignored);
+	let configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
-	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env.INPUT_EXPECTED_FILESYSTEM_RULES ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
-	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail_on_unexpected_file_access needs filesystem_audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
+	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env[EXPECTED_RULES_ENV] ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
+	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
 	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
-	filesystemAudit === "record" && annotation.warning("filesystem_audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail_on_unexpected_file_access fails it on every file access." : "."));
+	filesystemAudit === "record" && annotation.warning("filesystem-audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail-on-unexpected-file-access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
 		proxyEngine,
@@ -77567,7 +77600,7 @@ function readStepInputs(env, deps) {
 function preflight({ filesystemMode, writeThroughInput, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write_through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
 	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn: deps.warn });
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
 	return plan;

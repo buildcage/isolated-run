@@ -130,7 +130,7 @@ const AWS_KEYS_ID = "traffic-aws-keys";
 export function awsKeysTruncationNote(artifactAvailable: boolean): string {
   const rest = artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run names every request's key"
-    : "set upload_traffic_artifact: true to get every request's key as a downloadable artifact";
+    : "set upload-traffic-artifact: true to get every request's key as a downloadable artifact";
   return `_…truncated: the AWS keys exceeded GitHub's Job Summary size limit; ${rest}._\n`;
 }
 

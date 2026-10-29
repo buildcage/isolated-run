@@ -52,7 +52,7 @@ export interface SandboxRuntimeWiring {
   scratchBaseAliases?: string[];
 }
 
-/** `filesystem_mode: ephemeral` only. Already fully resolved/folded by
+/** `filesystem-mode: ephemeral` only. Already fully resolved/folded by
  *  ephemeral-fs.ts and the step itself before this is called; buildOciConfig does
  *  no path resolution of its own here, only mount assembly and ordering. */
 export interface EphemeralPolicy {
@@ -63,13 +63,13 @@ export interface EphemeralPolicy {
 export interface BuildOciConfigOptions {
   identity: SandboxIdentity;
   /** Always used for `process.cwd` (workdir) regardless of mode. In ephemeral
-   *  mode the write_through paths are consumed as `ephemeral.allowWrite`
+   *  mode the write-through paths are consumed as `ephemeral.allowWrite`
    *  instead, so `writablePaths` is read only when `ephemeral` is absent:
    *  the `!ephemeral` half of `disableReadonly` below is what enforces that,
-   *  and dropping it would let `write_through: /` disable the read-only root
+   *  and dropping it would let `write-through: /` disable the read-only root
    *  in ephemeral mode too. */
   writable: WritablePolicy;
-  /** Present iff `filesystem_mode: ephemeral`. Carries the same write_through
+  /** Present iff `filesystem-mode: ephemeral`. Carries the same write-through
    *  paths as `writable.writablePaths`: one input, two mount strategies. */
   ephemeral?: EphemeralPolicy;
   runtime: SandboxRuntimeWiring;
@@ -85,7 +85,7 @@ export interface BuildOciConfigOptions {
   /** See host-protected-paths.ts's renameGuardDirs. */
   renameGuardDirs?: string[];
   /** Action-owned binds carried in with the DNS and CA mounts, so a
-   *  write_through entry containing them cannot shadow them: the mediated
+   *  write-through entry containing them cannot shadow them: the mediated
    *  runner-file directory; see runner-output-files.ts. */
   extraInternalMounts?: MountEntry[];
   /** Paths masked on top of the computed set: the real runner files the
@@ -185,8 +185,8 @@ export function buildOciConfig(
     );
   }
   const caAdditions = caTrust ? caTrustAdditions(caTrust, env) : undefined;
-  // Pushed after the writable layers below: a write_through entry naming a
-  // directory that contains these (write_through: /etc) would otherwise shadow
+  // Pushed after the writable layers below: a write-through entry naming a
+  // directory that contains these (write-through: /etc) would otherwise shadow
   // them and take the sandbox's DNS and CA trust with it.
   const internalMounts = [
     {
@@ -201,14 +201,14 @@ export function buildOciConfig(
   const nofile: NofileLimit | undefined = probes.nofileRlimit();
   const freshMountDestinations = freshMountDestinationsFrom(baseSpec);
   // Order is the policy: runc's own mounts, then whichever mode's writable
-  // layers, then this action's own (which have to win over a write_through
+  // layers, then this action's own (which have to win over a write-through
   // entry containing them), then the scratch base last of all.
   const layers = ephemeral
     ? ephemeralLayers(ephemeral, freshMountDestinations)
     : persistentLayers(writableDirsOf(writable), freshMountDestinations, { disableReadonly });
   // After the writable layers, so rbind carries their submounts (workspace,
   // RUNNER_TEMP) along. Never on or around a path the sandbox mounts fresh
-  // (/dev, /proc), which under write_through: / would bring the host's back.
+  // (/dev, /proc), which under write-through: / would bring the host's back.
   const overlapsFresh = (p: string) =>
     [...freshMountDestinations].some((f) => isAtOrUnder(p, f) || isAtOrUnder(f, p));
   const renameGuards = renameGuardDirs
@@ -221,8 +221,8 @@ export function buildOciConfig(
     }));
   // Covers the host's /run, and a /var/run that isn't a link to it, with an
   // empty tmpfs (see hostRunCoverageLayers). Before the writable layers, so a
-  // write_through entry under either re-exposes that path on top of the tmpfs
-  // instead of being buried by it. Skipped under `write_through: /`, the
+  // write-through entry under either re-exposes that path on top of the tmpfs
+  // instead of being buried by it. Skipped under `write-through: /`, the
   // documented full filesystem opt-out, so /run comes back with the rest of
   // the host.
   const runCoverage = disableReadonly
@@ -294,7 +294,7 @@ export function buildOciConfig(
       seccomp: seccompProfile,
       // runc applies both after every mount, so they win over any writable
       // layer: the mediation's real runner files stay masked even under
-      // write_through.
+      // write-through.
       maskedPaths: [...new Set([...maskedPaths, ...extraMaskedPaths])],
       readonlyPaths: [...new Set([...readonlyPaths, ...readonlyHostPaths])],
     },

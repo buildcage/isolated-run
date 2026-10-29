@@ -17,7 +17,7 @@ fixture_up universal
 
 TMPDIR=$(mktemp -d)
 
-echo "--- running the sandboxed step (proxy_engine: universal, audit mode) ---"
+echo "--- running the sandboxed step (proxy-engine: universal, audit mode) ---"
 run_step --tee universal "$TMPDIR/step" \
   INPUT_PROXY_MODE="audit" \
   INPUT_FAIL_ON_BLOCKED="false" \

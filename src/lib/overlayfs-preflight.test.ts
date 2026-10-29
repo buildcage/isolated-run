@@ -16,7 +16,7 @@ describe("describeOverlayFailure", () => {
   it("mentions SANDBOX_SCRATCH_BASE and the persistent-mode fallback", () => {
     const message = describeOverlayFailure(new Error("boom"));
     expect(message).toMatch(/\/var\/tmp\/buildcage/);
-    expect(message).toMatch(/filesystem_mode: persistent/);
+    expect(message).toMatch(/filesystem-mode: persistent/);
   });
 
   it("appends captured stderr when the error carries one", () => {
@@ -169,7 +169,7 @@ describe("checkOverlayfsSupport", () => {
 
     expect(err).toBeInstanceOf(SandboxError);
     expect((err as SandboxError).code).toBe("OVERLAYFS_UNSUPPORTED");
-    expect((err as Error).message).toContain("filesystem_mode: persistent");
+    expect((err as Error).message).toContain("filesystem-mode: persistent");
     expect((err as Error).message).toContain("bad superblock");
     expect((err as Error).message).not.toContain("device or resource busy");
   });

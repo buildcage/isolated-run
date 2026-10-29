@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the sandbox, as the `run:` input of a real proxy_engine:
+# Runs inside the sandbox, as the `run:` input of a real proxy-engine:
 # universal step (see test/integration-test-universal-restrict.sh): the cases
 # in scenarios/universal-restrict.sh, then those that depend on what the runner
 # has installed or on the sandbox itself.

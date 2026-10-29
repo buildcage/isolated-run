@@ -13,7 +13,7 @@ const extension = awsKeyExtension({
   keyMapFile: AWS_KEY_MAP_FILE,
   refSecret,
 });
-// aws_key_check with no role account: nothing to learn, so no STS rules.
+// aws-key-check with no role account: nothing to learn, so no STS rules.
 const keyOnly = awsKeyExtension({ keyMapFile: AWS_KEY_MAP_FILE, refSecret });
 
 // The whole config with the check on, in the mode that blocks and the one that

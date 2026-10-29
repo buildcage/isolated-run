@@ -116,11 +116,11 @@ describe("setFilesystemAuditOutput", () => {
     vi.unstubAllEnvs();
   });
 
-  it("writes the name to GITHUB_OUTPUT", () => {
+  it("writes the name to GITHUB_OUTPUT, under both spellings", () => {
     setFilesystemAuditOutput("buildcage-filesystem-audit-deadbeef");
 
     expect(readFileSync(outputFile, "utf8")).toMatch(
-      /^filesystem_audit_artifact_name<<(\S+)\nbuildcage-filesystem-audit-deadbeef\n\1\n$/,
+      /^filesystem-audit-artifact-name<<(\S+)\nbuildcage-filesystem-audit-deadbeef\n\1\nfilesystem_audit_artifact_name<<(\S+)\nbuildcage-filesystem-audit-deadbeef\n\2\n$/,
     );
   });
 
@@ -128,7 +128,7 @@ describe("setFilesystemAuditOutput", () => {
     setFilesystemAuditOutput("");
 
     expect(readFileSync(outputFile, "utf8")).toMatch(
-      /^filesystem_audit_artifact_name<<(\S+)\n\n\1\n$/,
+      /^filesystem-audit-artifact-name<<(\S+)\n\n\1\nfilesystem_audit_artifact_name<<(\S+)\n\n\2\n$/,
     );
   });
 });

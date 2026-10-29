@@ -66,7 +66,7 @@ describe("auditUnavailable", () => {
   it("says why and that the command did not run", () => {
     expect(auditUnavailable("docker cp failed")).toStrictEqual(
       new SandboxError(
-        "filesystem_audit could not start (docker cp failed); the command was not run.",
+        "filesystem-audit could not start (docker cp failed); the command was not run.",
         "FILESYSTEM_AUDIT_UNAVAILABLE",
       ),
     );
@@ -77,7 +77,7 @@ describe("hostCannotAudit", () => {
   it("adds what the tracer needs of the host", () => {
     expect(hostCannotAudit("the tracer exited")).toStrictEqual(
       new SandboxError(
-        `filesystem_audit could not start (the tracer exited); the command was not run. ${REQUIREMENTS}`,
+        `filesystem-audit could not start (the tracer exited); the command was not run. ${REQUIREMENTS}`,
         "FILESYSTEM_AUDIT_UNAVAILABLE",
       ),
     );

@@ -34,42 +34,42 @@ import { resolveFilesystemMode, type FilesystemMode } from "./filesystem-mode.ts
 import { blockedKeys } from "./would-block.ts";
 
 const LIST_INPUTS = [
-  "allowed_https_rules",
-  "allowed_http_rules",
-  "allowed_ip_rules",
-  "allowed_url_rules",
-  "allowed_tls_rules",
-  "known_blocked_rules",
-  "write_through",
-  "expected_filesystem_rules",
+  "allowed-https-rules",
+  "allowed-http-rules",
+  "allowed-ip-rules",
+  "allowed-url-rules",
+  "allowed-tls-rules",
+  "known-blocked-rules",
+  "write-through",
+  "expected-filesystem-rules",
 ];
 
-/** Every input action.yml declares. config_file takes these less
+/** Every input action.yml declares. config-file takes these less
  *  NOT_IN_CONFIG_FILE, and its error lists them in this order. */
 export const ACTION_INPUTS = [
   "run",
-  "config_file",
-  "proxy_mode",
-  "proxy_engine",
+  "config-file",
+  "proxy-mode",
+  "proxy-engine",
   ...LIST_INPUTS,
   "writable",
-  "aws_key_check",
-  // Not merged from config_file: the workflow's accounts replace the file's.
-  "allowed_aws_role_accounts",
-  "upload_traffic_artifact",
-  "traffic_artifact_retention_days",
-  "fail_on_blocked",
-  "fail_on_ca_residue",
-  "filesystem_mode",
-  "filesystem_audit",
-  "upload_filesystem_audit_artifact",
-  "filesystem_audit_retention_days",
-  "fail_on_unexpected_file_access",
+  "aws-key-check",
+  // Not merged from config-file: the workflow's accounts replace the file's.
+  "allowed-aws-role-accounts",
+  "upload-traffic-artifact",
+  "traffic-artifact-retention-days",
+  "fail-on-blocked",
+  "fail-on-ca-residue",
+  "filesystem-mode",
+  "filesystem-audit",
+  "upload-filesystem-audit-artifact",
+  "filesystem-audit-retention-days",
+  "fail-on-unexpected-file-access",
   "label",
 ];
 
-// The step itself, the file itself, and the deprecated spelling of write_through.
-const NOT_IN_CONFIG_FILE = ["run", "config_file", "writable"];
+// The step itself, the file itself, and the deprecated spelling of write-through.
+const NOT_IN_CONFIG_FILE = ["run", "config-file", "writable"];
 
 export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
   // Marked pure so post.cjs, which uses other parts of this module, leaves it out.
@@ -85,15 +85,15 @@ export type Notice = (message: string) => void;
 
 export interface WriteThroughInputs {
   writeThrough: string;
-  /** Pre-rename spelling of write_through, still accepted. */
+  /** Pre-rename spelling of write-through, still accepted. */
   writable: string;
   /** Removed input, only read so it can be rejected with a migration hint. */
   allowWrite: string;
 }
 
 /**
- * The effective write_through: input. `writable:` is its old name and still
- * works; its lines join write_through's, as config_file's do. `allow_write:`
+ * The effective write-through: input. `writable:` is its old name and still
+ * works; its lines join write-through's, as config-file's do. `allow_write:`
  * (the ephemeral-only input this replaced) is rejected rather than ignored,
  * since ignoring it would silently discard writes the step asked to keep.
  */
@@ -103,14 +103,14 @@ export function resolveWriteThroughInput(
 ): string {
   if (allowWrite.trim()) {
     throw new SandboxError(
-      "allow_write: has been replaced by write_through:, which covers both filesystem modes. " +
+      "allow_write: has been replaced by write-through:, which covers both filesystem modes. " +
         "Rename the input; the path syntax is unchanged.",
       "ALLOW_WRITE_REMOVED",
     );
   }
   if (!writable.trim()) return writeThrough;
   notice(
-    "writable: is now called write_through:; writable: still works, but consider updating to write_through:.",
+    "writable: is now called write-through:; writable: still works, but consider updating to write-through:.",
   );
   return writeThrough.trim() ? `${writeThrough}\n${writable}` : writable;
 }
@@ -131,14 +131,14 @@ export interface ProxyInputs {
 
 export function readProxyInputs(getInput: GetInput = core.getInput): ProxyInputs {
   return {
-    proxyEngine: resolveProxyEngine(getInput("proxy_engine")),
-    proxyMode: resolveProxyMode(getInput("proxy_mode")),
+    proxyEngine: resolveProxyEngine(getInput("proxy-engine")),
+    proxyMode: resolveProxyMode(getInput("proxy-mode")),
   };
 }
 
 export interface FilesystemInputs {
   filesystemMode: FilesystemMode;
-  /** The effective write_through: text, one entry per line, unresolved. */
+  /** The effective write-through: text, one entry per line, unresolved. */
   writeThroughInput: string;
 }
 
@@ -147,10 +147,10 @@ export function readFilesystemInputs(
   getInput: GetInput = core.getInput,
 ): FilesystemInputs {
   return {
-    filesystemMode: resolveFilesystemMode(getInput("filesystem_mode")),
+    filesystemMode: resolveFilesystemMode(getInput("filesystem-mode")),
     writeThroughInput: resolveWriteThroughInput(
       {
-        writeThrough: getInput("write_through"),
+        writeThrough: getInput("write-through"),
         writable: getInput("writable"),
         allowWrite: getInput("allow_write"),
       },
@@ -160,7 +160,7 @@ export function readFilesystemInputs(
 }
 
 export function readFilesystemAuditInput(getInput: GetInput = core.getInput): FilesystemAudit {
-  return resolveFilesystemAudit(getInput("filesystem_audit"));
+  return resolveFilesystemAudit(getInput("filesystem-audit"));
 }
 
 export interface FilesystemAuditArtifactInputs {
@@ -177,16 +177,16 @@ export interface FilesystemAuditArtifactInputs {
 export function readFilesystemAuditArtifactInputs(
   getInput: GetInput = core.getInput,
 ): FilesystemAuditArtifactInputs {
-  const days = getInput("filesystem_audit_retention_days");
+  const days = getInput("filesystem-audit-retention-days");
   if (days !== "" && !/^[1-9]\d*$/.test(days)) {
     throw new SandboxError(
-      `Invalid filesystem_audit_retention_days: ${JSON.stringify(days)}. ` +
+      `Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. ` +
         "Must be a whole number of days above zero.",
       "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS",
     );
   }
   return {
-    upload: readBooleanInput("upload_filesystem_audit_artifact", false, getInput),
+    upload: readBooleanInput("upload-filesystem-audit-artifact", false, getInput),
     retentionDays: days === "" ? undefined : Number(days),
   };
 }
@@ -197,15 +197,15 @@ export function readStepLabel(getInput: GetInput = core.getInput): string | unde
 }
 
 export function readFailOnCaResidue(getInput: GetInput = core.getInput): boolean {
-  return readBooleanInput("fail_on_ca_residue", true, getInput);
+  return readBooleanInput("fail-on-ca-residue", true, getInput);
 }
 
 export function readFailOnBlocked(getInput: GetInput = core.getInput): boolean {
-  return readBooleanInput("fail_on_blocked", true, getInput);
+  return readBooleanInput("fail-on-blocked", true, getInput);
 }
 
 export function readFailOnUnexpectedFileAccess(getInput: GetInput = core.getInput): boolean {
-  return readBooleanInput("fail_on_unexpected_file_access", false, getInput);
+  return readBooleanInput("fail-on-unexpected-file-access", false, getInput);
 }
 
 export interface AwsKeyInputs {
@@ -235,7 +235,7 @@ export function readAwsKeyInputs(
 ): AwsKeyInputs {
   let roleAccounts: string[];
   try {
-    roleAccounts = parseAwsAccounts(getInput("allowed_aws_role_accounts"));
+    roleAccounts = parseAwsAccounts(getInput("allowed-aws-role-accounts"));
   } catch (e) {
     const { message } = e as Error;
     // YAML reads an unquoted 012345678901 as a number, 11 digits long.
@@ -243,17 +243,17 @@ export function readAwsKeyInputs(
       ? " Quote an ID that begins with 0, which YAML otherwise reads as a number."
       : "";
     throw new SandboxError(
-      `allowed_aws_role_accounts: ${message}. Each entry must be a 12-digit AWS account ID.${hint}`,
+      `allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${hint}`,
       "INVALID_AWS_ACCOUNTS",
     );
   }
-  const check = readBooleanInput("aws_key_check", false, getInput);
-  // Required rather than implied by the accounts, so a config_file the workflow
+  const check = readBooleanInput("aws-key-check", false, getInput);
+  // Required rather than implied by the accounts, so a config-file the workflow
   // does not show can never be what turns the check off.
   if (roleAccounts.length > 0 && !check) {
     throw new SandboxError(
-      "allowed_aws_role_accounts needs aws_key_check: true. Set it, or remove the accounts. " +
-        "A workflow cannot clear accounts its config_file names: use a file without them.",
+      "allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. " +
+        "A workflow cannot clear accounts its config-file names: use a file without them.",
       "AWS_KEY_CHECK_NOT_SET",
     );
   }
@@ -261,9 +261,9 @@ export function readAwsKeyInputs(
 
   if (proxyEngine !== "inspect") {
     throw new InvalidInputError(
-      `The AWS access key check has no effect with proxy_engine: ${proxyEngine}, which never ` +
-        "sees a request's headers. Switch to proxy_engine: inspect, or remove aws_key_check " +
-        "and allowed_aws_role_accounts.",
+      `The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never ` +
+        "sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check " +
+        "and allowed-aws-role-accounts.",
       "INVALID_PROXY_ENGINE",
     );
   }
@@ -298,7 +298,7 @@ export function awsExampleInputs(
   timeline: TrafficEvent[] = [],
 ): string[] {
   if (!key) return [];
-  const lines = ["aws_key_check: true"];
+  const lines = ["aws-key-check: true"];
   // The log is the proxy's, but only an ID goes into the YAML.
   const assumed = timeline
     .flatMap((e) => awsFieldsOf(e).assumedAccount ?? [])
@@ -355,13 +355,13 @@ export function awsExampleInputs(
   };
   const line = (a: string, text: string) => (added.has(a) ? `# ${text}${mark(a)}` : text);
   if (accounts.length === 1) {
-    lines.push(line(accounts[0], `allowed_aws_role_accounts: "${accounts[0]}"`));
+    lines.push(line(accounts[0], `allowed-aws-role-accounts: "${accounts[0]}"`));
   } else if (accounts.length > 1 && roleAccounts.length === 0) {
     // With every line commented out, the input's own line is too, so the
     // example sets nothing until one is uncommented along with it.
-    lines.push("# allowed_aws_role_accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`));
+    lines.push("# allowed-aws-role-accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`));
   } else if (accounts.length > 1) {
-    lines.push("allowed_aws_role_accounts: |", ...accounts.map((a) => `  ${line(a, a)}`));
+    lines.push("allowed-aws-role-accounts: |", ...accounts.map((a) => `  ${line(a, a)}`));
   }
   return lines;
 }

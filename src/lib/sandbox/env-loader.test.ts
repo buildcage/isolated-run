@@ -102,7 +102,7 @@ describe("resolveSandboxEnv", () => {
   it("withholds this action's own inputs, INPUT_RUN included", () => {
     const resolved = resolveSandboxEnv({
       INPUT_RUN: "echo $SECRET_INLINED_BY_THE_WORKFLOW",
-      INPUT_PROXY_MODE: "restrict",
+      "INPUT_PROXY-MODE": "restrict",
     });
     expect(resolved).toStrictEqual({});
   });
@@ -150,7 +150,7 @@ describe("ACTION_INPUT_ENV_KEYS", () => {
       "utf8",
     );
     const inputs = actionYml.slice(actionYml.indexOf("\ninputs:"), actionYml.indexOf("\noutputs:"));
-    const declared = [...inputs.matchAll(/^ {2}([A-Za-z0-9_]+):$/gm)].map(
+    const declared = [...inputs.matchAll(/^ {2}([A-Za-z0-9_-]+):$/gm)].map(
       (m) => `INPUT_${m[1].toUpperCase()}`,
     );
     expect(declared.length).toBeGreaterThan(0);

@@ -234,7 +234,7 @@ export function moveCommandSummaryLast(path: string, commandBytes: number): bool
 function fullReportLocation(artifactAvailable: boolean): string {
   return artifactAvailable
     ? "the buildcage-traffic artifact uploaded for this run has the full report"
-    : "set upload_traffic_artifact: true to get the full report as a downloadable artifact";
+    : "set upload-traffic-artifact: true to get the full report as a downloadable artifact";
 }
 
 /** Said when the report did not fit what the Job Summary had left. Omitting the
@@ -358,7 +358,7 @@ export async function writeReportSummary(
       "The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " +
         (artifactAvailable
           ? "The buildcage-traffic artifact uploaded for this run has every request."
-          : "Set upload_traffic_artifact: true to get every request as an artifact."),
+          : "Set upload-traffic-artifact: true to get every request as an artifact."),
     );
   }
 

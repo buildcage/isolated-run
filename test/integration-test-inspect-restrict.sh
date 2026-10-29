@@ -31,7 +31,7 @@ docker compose -f "$REPO_ROOT/compose.test-inspect.yaml" exec -T test-dns sh -c 
   'echo probe | nc -u -w 3 10.200.0.102 9999' > "$TMPDIR/udp-control" 2>/dev/null &
 UDP_CONTROL_PID=$!
 
-echo "--- running the sandboxed step (proxy_engine: inspect, restrict mode) ---"
+echo "--- running the sandboxed step (proxy-engine: inspect, restrict mode) ---"
 run_step --tee inspect "$TMPDIR/step" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_ALLOWED_HTTPS_RULES="sub.wildcard.example.com:443 absent.example.com:443 v6only.example.com:443 metadata.example.com:443 runner.example.com:443 impostor.example.com:443 deadend.example.com:443" \
@@ -77,7 +77,7 @@ assert_section_contains "Allowed Hosts" "| \`allowed.example.com:443\` | HTTPS |
 assert_section_contains "Allowed Hosts" "| \`allowed.example.com:80\` | HTTP |" "allowed.example.com:80 recorded as allowed"
 assert_section_contains "🚫 Blocked" "| \`blocked.example.com:443\` | HTTPS |" "blocked.example.com:443 recorded as blocked"
 assert_section_contains "Allowed Hosts" "| \`blocked.example.com:9443\` | HTTPS |" "the ~regex rule's blocked.example.com:9443 recorded as allowed"
-assert_section_contains "Allowed Hosts" "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed_ip_rules entry recorded as allowed"
+assert_section_contains "Allowed Hosts" "| \`10.200.0.100:9080\` | IP |" "the ~regex allowed-ip-rules entry recorded as allowed"
 assert_section_contains "Allowed Hosts" "| \`10.200.0.100:2525\` | IP |" "an allowed address the client sent nothing on recorded as allowed"
 assert_section_contains "Allowed Hosts" "| \`10.200.0.53:53\` | IP |" "DNS over TCP to a resolver an ip rule allows recorded as allowed"
 # No rule blocked this one and none can clear it, so it is marked as a
@@ -176,7 +176,7 @@ assert_summary_matches "⚠️ .*: HTTPS abandoned\.example\.com:443 -> client-t
 assert_summary_contains "| \`aborted.example.com\` | DNS | 🚫 dns-not-allowed |" \
   "the blocked lookup for the same name is still its own Blocked row"
 # A block made before a whole request arrived is still a block, so it is in
-# the table and in fail_on_blocked. The plain stage has no SNI to name it by:
+# the table and in fail-on-blocked. The plain stage has no SNI to name it by:
 # bytes sent to an address are named by it, as the ip rule that could pass them
 # would be, and a request to a name lands on the proxy's own address, which
 # names nothing.
@@ -218,7 +218,7 @@ else
 fi
 
 echo ""
-echo "--- CA trust survives a write_through: entry containing its mount points ---"
+echo "--- CA trust survives a write-through: entry containing its mount points ---"
 WT_TMPDIR=$(mktemp -d)
 run_step inspect "$WT_TMPDIR/step" \
   INPUT_PROXY_MODE="restrict" \
@@ -227,25 +227,25 @@ run_step inspect "$WT_TMPDIR/step" \
   INPUT_RUN="curl -sS --max-time 10 -o /dev/null https://allowed.example.com/public/pkg.tgz"
 WT_EXIT=$?
 if [ "$WT_EXIT" = "0" ]; then
-  pass "an allowed HTTPS GET still verifies against the injected CA under write_through: /etc"
+  pass "an allowed HTTPS GET still verifies against the injected CA under write-through: /etc"
 else
-  fail "write_through: /etc broke CA trust or DNS (exit $WT_EXIT; see $WT_TMPDIR/step.log)"
+  fail "write-through: /etc broke CA trust or DNS (exit $WT_EXIT; see $WT_TMPDIR/step.log)"
   cat "$WT_TMPDIR/step.log"
 fi
 if [ "$HASH_BEFORE" = "$(sha256sum "$SYSTEM_CA" | awk '{print $1}')" ]; then
-  pass "the host's system CA store is still untouched after the write_through: /etc step"
+  pass "the host's system CA store is still untouched after the write-through: /etc step"
 else
-  fail "the host's system CA store changed during the write_through: /etc step"
+  fail "the host's system CA store changed during the write-through: /etc step"
 fi
 if [ -e /etc/buildcage-ca.pem ]; then
-  fail "/etc/buildcage-ca.pem was left on the host by the write_through: /etc step"
+  fail "/etc/buildcage-ca.pem was left on the host by the write-through: /etc step"
 else
-  pass "no /etc/buildcage-ca.pem left on the host after the write_through: /etc step"
+  pass "no /etc/buildcage-ca.pem left on the host after the write-through: /etc step"
 fi
 if [ -e /dev/buildcage-ca.pem ]; then
-  fail "/dev/buildcage-ca.pem was made on the host by the write_through: /etc step"
+  fail "/dev/buildcage-ca.pem was made on the host by the write-through: /etc step"
 else
-  pass "no /dev/buildcage-ca.pem made on the host by the write_through: /etc step"
+  pass "no /dev/buildcage-ca.pem made on the host by the write-through: /etc step"
 fi
 
 rm -rf "$TMPDIR" "$WT_TMPDIR"

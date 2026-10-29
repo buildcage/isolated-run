@@ -16,28 +16,28 @@ describe("filesystemExampleInputs", () => {
   const inputsOf = (inputs: Partial<typeof given> = {}): string[] =>
     filesystemExampleInputs({ ...given, ...inputs }, GUIDE);
   const leftOut =
-    "# This step's expected_filesystem_rules are left out: add them back, under with: or in a config_file.";
+    "# This step's expected-filesystem-rules are left out: add them back, under with: or in a config-file.";
   const see = `# See ${GUIDE}#expected-accesses`;
 
   it("says to add the step's expected rules back in place of listing them", () => {
     expect(inputsOf({ failOnUnexpectedFileAccess: false })).toStrictEqual([
-      "filesystem_audit: record",
+      "filesystem-audit: record",
       leftOut,
       see,
     ]);
     expect(inputsOf({ expectedFilesystemRules: undefined })).toStrictEqual([
-      "filesystem_audit: record",
-      "fail_on_unexpected_file_access: true",
+      "filesystem-audit: record",
+      "fail-on-unexpected-file-access: true",
     ]);
   });
 
-  it("keeps fail_on_unexpected_file_access, saying it fails on every access until the rules are back", () => {
+  it("keeps fail-on-unexpected-file-access, saying it fails on every access until the rules are back", () => {
     expect(inputsOf()).toStrictEqual([
-      "filesystem_audit: record",
+      "filesystem-audit: record",
       leftOut,
-      "# Until then, fail_on_unexpected_file_access fails the step on every file access.",
+      "# Until then, fail-on-unexpected-file-access fails the step on every file access.",
       see,
-      "fail_on_unexpected_file_access: true",
+      "fail-on-unexpected-file-access: true",
     ]);
   });
 
@@ -45,7 +45,7 @@ describe("filesystemExampleInputs", () => {
     expect(inputsOf({ filesystemAudit: "off", ...NO_RULES })).toStrictEqual([]);
   });
 
-  it("writes each input that is not its default, and write_through as a block of its paths", () => {
+  it("writes each input that is not its default, and write-through as a block of its paths", () => {
     expect(
       inputsOf({
         filesystemMode: "ephemeral",
@@ -53,16 +53,16 @@ describe("filesystemExampleInputs", () => {
         ...NO_RULES,
       }),
     ).toStrictEqual([
-      "filesystem_mode: ephemeral",
-      "write_through: |",
+      "filesystem-mode: ephemeral",
+      "write-through: |",
       "  ~/.cache",
       "  ./dist",
       "  /opt/a # b",
-      "filesystem_audit: record",
+      "filesystem-audit: record",
     ]);
   });
 
-  it("leaves out a write_through holding only comments and blank lines", () => {
+  it("leaves out a write-through holding only comments and blank lines", () => {
     expect(
       inputsOf({ writeThroughInput: "# none yet\n\n", filesystemAudit: "off", ...NO_RULES }),
     ).toStrictEqual([]);

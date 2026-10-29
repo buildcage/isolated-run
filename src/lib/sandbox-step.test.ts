@@ -189,17 +189,17 @@ function orderOf(mock: { mock: { invocationCallOrder: number[] } }): number {
   return first!;
 }
 
-// expected_filesystem_rules as readExpectedFilesystemRules gives them.
+// expected-filesystem-rules as readExpectedFilesystemRules gives them.
 function givenRules(text: string, origin: "input" | "config" = "input") {
   const parsed = parseExpectedRules([{ text, origin, firstLine: 1 }]);
   return { expected: parsed.rules.length ? parsed : undefined };
 }
 
 describe("runSandboxStep", () => {
-  it("applies config_file to the step's env before reading any input, and warns of what it ignored", async () => {
+  it("applies config-file to the step's env before reading any input, and warns of what it ignored", async () => {
     mocks.applyConfigFile.mockReturnValue({
       path: "/home/runner/work/repo/repo/c.yml",
-      warning: "Ignored from config_file c.yml, set by the workflow: proxy_mode",
+      warning: "Ignored from config-file c.yml, set by the workflow: proxy-mode",
       origins: new Map(),
     });
 
@@ -207,15 +207,53 @@ describe("runSandboxStep", () => {
 
     expect(mocks.applyConfigFile).toHaveBeenCalledWith(
       ENV,
-      expect.objectContaining({ known: expect.arrayContaining(["proxy_mode"]) }),
+      expect.objectContaining({ known: expect.arrayContaining(["proxy-mode"]) }),
     );
     expect(orderOf(mocks.applyConfigFile)).toBeLessThan(orderOf(mocks.readRunCommand));
     expect(mocks.warn).toHaveBeenCalledWith(
-      "Ignored from config_file c.yml, set by the workflow: proxy_mode",
+      "Ignored from config-file c.yml, set by the workflow: proxy-mode",
     );
   });
 
-  it("saves the merged write_through for the post step when config_file was read", async () => {
+  it("reads an input's underscore spelling, before config-file, and warns of one it ignored", async () => {
+    const env = {
+      ...ENV,
+      INPUT_CONFIG_FILE: "c.yml",
+      INPUT_PROXY_MODE: "audit",
+      "INPUT_PROXY-MODE": "restrict",
+    };
+    mocks.applyConfigFile.mockImplementation((seen: NodeJS.ProcessEnv) => {
+      expect(seen).toMatchObject({ "INPUT_CONFIG-FILE": "c.yml", "INPUT_PROXY-MODE": "restrict" });
+      expect(seen).not.toHaveProperty("INPUT_PROXY_MODE");
+    });
+
+    await runSandboxStep(env, deps);
+
+    expect(mocks.warn).toHaveBeenCalledWith("Ignored proxy_mode, as proxy-mode is also set.");
+  });
+
+  it("joins a list input's two spellings", async () => {
+    const env = { ...ENV, INPUT_WRITE_THROUGH: "./a", "INPUT_WRITE-THROUGH": "./b" };
+    mocks.applyConfigFile.mockImplementation((seen: NodeJS.ProcessEnv) => {
+      expect(seen["INPUT_WRITE-THROUGH"]).toBe("./b\n./a");
+    });
+
+    await runSandboxStep(env, deps);
+
+    expect(mocks.applyConfigFile).toHaveBeenCalled();
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it("drops an input's underscore spelling from env too", async () => {
+    const env = { ...ENV, INPUT_FAIL_ON_BLOCKED: "false" };
+
+    await runSandboxStep(env, deps);
+
+    expect(env).not.toHaveProperty("INPUT_FAIL_ON_BLOCKED");
+    expect(env).not.toHaveProperty("INPUT_FAIL-ON-BLOCKED");
+  });
+
+  it("saves the merged write-through for the post step when config-file was read", async () => {
     mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", origins: new Map() });
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
@@ -228,7 +266,7 @@ describe("runSandboxStep", () => {
     expect(orderOf(mocks.saveWriteThroughForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
   });
 
-  it("saves nothing without config_file, leaving post the workflow's own input", async () => {
+  it("saves nothing without config-file, leaving post the workflow's own input", async () => {
     await runSandboxStep(ENV, deps);
 
     expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
@@ -265,7 +303,7 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it("passes the audit output paths to the command under filesystem_audit: record", async () => {
+  it("passes the audit output paths to the command under filesystem-audit: record", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
 
     await runSandboxStep(ENV, deps);
@@ -320,7 +358,7 @@ describe("runSandboxStep", () => {
     const env = {
       ...ENV,
       INPUT_RUN: "echo hello",
-      INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a\n".repeat(20_000),
+      "INPUT_EXPECTED-FILESYSTEM-RULES": "* R ./a\n".repeat(20_000),
       INPUT_DIR: "the workflow's own",
     };
     let lastRead: string | undefined;
@@ -349,15 +387,15 @@ describe("runSandboxStep", () => {
     });
   });
 
-  it("reads expected_filesystem_rules once config_file joined its own, with where they start", async () => {
+  it("reads expected-filesystem-rules once config-file joined its own, with where they start", async () => {
     const origin = { offset: 1, line: 3 };
     mocks.applyConfigFile.mockImplementation((env: NodeJS.ProcessEnv) => {
-      env.INPUT_EXPECTED_FILESYSTEM_RULES = "* R ./a\n* R ./b";
-      return { path: "/w/c.yml", origins: new Map([["expected_filesystem_rules", origin]]) };
+      env["INPUT_EXPECTED-FILESYSTEM-RULES"] = "* R ./a\n* R ./b";
+      return { path: "/w/c.yml", origins: new Map([["expected-filesystem-rules", origin]]) };
     });
     mocks.readFilesystemAuditInput.mockReturnValue("record");
 
-    await runSandboxStep({ ...ENV, INPUT_EXPECTED_FILESYSTEM_RULES: "* R ./a" }, deps);
+    await runSandboxStep({ ...ENV, "INPUT_EXPECTED-FILESYSTEM-RULES": "* R ./a" }, deps);
 
     expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith(
       "* R ./a\n* R ./b",
@@ -366,16 +404,16 @@ describe("runSandboxStep", () => {
     );
   });
 
-  it("refuses fail_on_unexpected_file_access without filesystem_audit: record, before any setup", async () => {
+  it("refuses fail-on-unexpected-file-access without filesystem-audit: record, before any setup", async () => {
     mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
 
     await expect(runSandboxStep(ENV, deps)).rejects.toThrow(
-      "fail_on_unexpected_file_access needs filesystem_audit: record",
+      "fail-on-unexpected-file-access needs filesystem-audit: record",
     );
     expect(mocks.checkScratchBaseParent).not.toHaveBeenCalled();
   });
 
-  it("runs as if rules all commented out were unset, and warns of them once, fail_on_unexpected_file_access's effect included", async () => {
+  it("runs as if rules all commented out were unset, and warns of them once, fail-on-unexpected-file-access's effect included", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
     mocks.readFailOnUnexpectedFileAccess.mockReturnValue(true);
     mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("# node R ./a"));
@@ -385,24 +423,24 @@ describe("runSandboxStep", () => {
     expect(mocks.readStepFilesystemAudit.mock.calls[0][0]).toMatchObject({ rules: undefined });
     // Once, for the one cause.
     expect(annotation.warning).toHaveBeenCalledWith(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set, " +
-        "and fail_on_unexpected_file_access fails it on every file access.",
+      "expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set, " +
+        "and fail-on-unexpected-file-access fails it on every file access.",
     );
     expect(annotation.warning).toHaveBeenCalledTimes(2);
   });
 
-  it("warns of rules all commented out without fail_on_unexpected_file_access", async () => {
+  it("warns of rules all commented out without fail-on-unexpected-file-access", async () => {
     mocks.readFilesystemAuditInput.mockReturnValue("record");
     mocks.readExpectedFilesystemRules.mockReturnValue(givenRules("# node R ./a"));
 
     await runSandboxStep(ENV, deps);
 
     expect(annotation.warning).toHaveBeenCalledWith(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set.",
+      "expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set.",
     );
   });
 
-  it("reads no inline expected_filesystem_rules when the workflow set none", async () => {
+  it("reads no inline expected-filesystem-rules when the workflow set none", async () => {
     await runSandboxStep(ENV, deps);
 
     expect(mocks.readExpectedFilesystemRules).toHaveBeenCalledWith("", undefined, "off");
@@ -418,7 +456,7 @@ describe("runSandboxStep", () => {
       knownBlockedRules: [],
     });
 
-    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("allowed_https_rules is");
+    await expect(runSandboxStep(ENV, deps)).rejects.toThrow("allowed-https-rules is");
     expect(mocks.checkUrlAndTlsRuleSupport).toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
@@ -472,7 +510,7 @@ describe("runSandboxStep", () => {
   });
 
   // An earlier step's writes under $HOME survive this step's ephemeral mode.
-  it("pins against persistent mode's paths plus write_through in ephemeral mode too", async () => {
+  it("pins against persistent mode's paths plus write-through in ephemeral mode too", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "ephemeral",
       writeThroughInput: "/opt/out",
@@ -516,7 +554,7 @@ describe("runSandboxStep", () => {
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
-  it("validates the write_through lines, resolved without touching the host", async () => {
+  it("validates the write-through lines, resolved without touching the host", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "ephemeral",
       writeThroughInput: " /opt/cache \n\n./dist\n/\n",
@@ -531,7 +569,7 @@ describe("runSandboxStep", () => {
     ]);
   });
 
-  it("warns that write_through: / gives up the outbound restriction too", async () => {
+  it("warns that write-through: / gives up the outbound restriction too", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
       writeThroughInput: "/opt/cache\n/",
@@ -542,7 +580,7 @@ describe("runSandboxStep", () => {
     expect(annotation.warning).toHaveBeenCalledExactlyOnceWith(WRITE_THROUGH_ALL_WARNING);
   });
 
-  it("does not warn when write_through names only narrower paths", async () => {
+  it("does not warn when write-through names only narrower paths", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
       writeThroughInput: "/opt/cache",
@@ -553,7 +591,7 @@ describe("runSandboxStep", () => {
     expect(annotation.warning).not.toHaveBeenCalled();
   });
 
-  it("fails on a write_through entry that does not parse before any setup", async () => {
+  it("fails on a write-through entry that does not parse before any setup", async () => {
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
       writeThroughInput: "$UNSET_DIR/cache",
@@ -631,8 +669,8 @@ describe("runSandboxStep", () => {
       ALLOWED_AWS_ROLE_ACCOUNTS: "111111111111",
     });
     expect(mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] })).toStrictEqual([
-      "aws_key_check: true",
-      'allowed_aws_role_accounts: "111111111111"',
+      "aws-key-check: true",
+      'allowed-aws-role-accounts: "111111111111"',
     ]);
     expect(log).toHaveBeenCalledWith("AWS access key check: on");
     expect(log).toHaveBeenCalledWith("AWS role accounts: 111111111111");
@@ -646,8 +684,8 @@ describe("runSandboxStep", () => {
     await runSandboxStep(ENV, deps);
 
     expect(mocks.reportStepTraffic.mock.calls[0][0].extraInputs({ timeline: [] })).toStrictEqual([
-      "aws_key_check: true",
-      "filesystem_audit: record",
+      "aws-key-check: true",
+      "filesystem-audit: record",
     ]);
   });
 
@@ -757,7 +795,7 @@ describe("runSandboxStep", () => {
     expect(annotation.warning).toHaveBeenCalledWith("url rules need the inspect engine");
   });
 
-  it("checks known_blocked_rules URL lines against the engine, host lines excluded", async () => {
+  it("checks known-blocked-rules URL lines against the engine, host lines excluded", async () => {
     mocks.readRuleInputs.mockReturnValue({
       httpsRules: [],
       httpRules: [],

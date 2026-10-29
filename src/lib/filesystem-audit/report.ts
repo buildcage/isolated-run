@@ -50,7 +50,7 @@ import { EXPECTED_RULES_INPUT, RuleMatcher, type ExpectedRules } from "./rules.t
 export const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report";
 
 export interface FilesystemAuditReportOptions {
-  /** Set only under filesystem_audit: record; undefined leaves no report. */
+  /** Set only under filesystem-audit: record; undefined leaves no report. */
   audit: FilesystemAuditPaths | undefined;
   /** Whether the tracer attached. Without it nothing is reported, as a
    *  recording found then is not trusted. Once it has, its recording is there
@@ -59,7 +59,7 @@ export interface FilesystemAuditReportOptions {
   /** A cancelled step cuts the tracer's stop short, so its record may lack the
    *  end line, and the step fails anyway. */
   cancelled: boolean;
-  /** upload_filesystem_audit_artifact: whether to upload the record at all. */
+  /** upload-filesystem-audit-artifact: whether to upload the record at all. */
   upload: boolean;
   retentionDays: number | undefined;
   containerName: string;
@@ -70,11 +70,11 @@ export interface FilesystemAuditReportOptions {
   /** Where the guide the summary links to is read from. */
   actionRepo: string;
   actionRef: string;
-  /** Under restrict with fail_on_blocked: an output that cannot be set fails the step. */
+  /** Under restrict with fail-on-blocked: an output that cannot be set fails the step. */
   failClosed: boolean;
-  /** expected_filesystem_rules, undefined when none were given. */
+  /** expected-filesystem-rules, undefined when none were given. */
   rules?: ExpectedRules;
-  /** fail_on_unexpected_file_access: an access no rule takes fails the step. */
+  /** fail-on-unexpected-file-access: an access no rule takes fails the step. */
   failOnUnexpected?: boolean;
 }
 
@@ -203,7 +203,7 @@ export function readStepFilesystemAudit(
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): ReadStepFilesystemAudit {
   const deps = { ...realDeps, ...overrides };
-  // Under fail_on_unexpected_file_access, a step without rules has every
+  // Under fail-on-unexpected-file-access, a step without rules has every
   // access unexpected.
   const rules = givenRules ?? (failOnUnexpected ? NO_RULES : undefined);
   const setOutput = (artifactName: string) => {
@@ -213,7 +213,7 @@ export function readStepFilesystemAudit(
       failOrWarn(
         annotation,
         failClosed,
-      )(`Failed to set the filesystem_audit_artifact_name output: ${errorMessage(e)}`);
+      )(`Failed to set the filesystem-audit-artifact-name output: ${errorMessage(e)}`);
     }
   };
   // Nothing to upload, and blocks that say nothing of an artifact.
@@ -260,7 +260,7 @@ export function readStepFilesystemAudit(
     rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {};
   const unchecked = (what: string): VerdictItems => {
     if (!checkIncomplete.caution) return {};
-    annotation.error(`${what}; failing the step, as fail_on_unexpected_file_access is true.`);
+    annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`);
     process.exitCode = 1;
     return checkIncomplete;
   };
@@ -320,7 +320,7 @@ export function readStepFilesystemAudit(
   const unexpected = given
     ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules)
     : {};
-  // An incomplete check exists only under fail_on_unexpected_file_access, so
+  // An incomplete check exists only under fail-on-unexpected-file-access, so
   // the unexpected accesses are a caution then too.
   const verdictItems = incomplete.caution
     ? { caution: [...(unexpected.caution ?? []), ...incomplete.caution] }
@@ -406,7 +406,7 @@ function reportUnexpected(
       ? `File accesses fell outside ${outside}${empty ? "," : ""} on too many distinct paths to list.`
       : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
-    annotation.error(`${message} Failing the step, as fail_on_unexpected_file_access is true.`);
+    annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`);
     process.exitCode = 1;
     return { caution: [what] };
   }

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Verifies that the mounts the action makes for itself survive a write_through:
+# Verifies that the mounts the action makes for itself survive a write-through:
 # entry that contains them, and that naming one of those paths directly (or a
 # destination runc mounts itself) is refused. Drives dist/main.cjs directly,
 # without the real action wrapper.
@@ -53,7 +53,7 @@ echo ""
 
 fixture_up universal
 
-# Case 1: write_through: /etc persists writes under /etc without taking the
+# Case 1: write-through: /etc persists writes under /etc without taking the
 # action's own resolv.conf mount with it. `-k` because the fixture origin's
 # certificate is self-signed and the universal engine never terminates TLS.
 run_instance "/etc" "curl -fsS -k --max-time 20 -o /dev/null https://allowed.example.com/
@@ -66,9 +66,9 @@ fi"
 CODE=$(cat "$WORKDIR/exit_code")
 
 if [ "$CODE" = "0" ]; then
-  pass "write_through: /etc left DNS working and /etc/resolv.conf read-only"
+  pass "write-through: /etc left DNS working and /etc/resolv.conf read-only"
 else
-  fail "write_through: /etc broke the step (exit $CODE)"
+  fail "write-through: /etc broke the step (exit $CODE)"
 fi
 
 if [ -f "${TESTDIR}/marker" ]; then
@@ -96,9 +96,9 @@ run_instance "/etc/resolv.conf" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 
 if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/step.log"; then
-  pass "write_through: /etc/resolv.conf is refused"
+  pass "write-through: /etc/resolv.conf is refused"
 else
-  fail "write_through: /etc/resolv.conf was accepted (exit $CODE)"
+  fail "write-through: /etc/resolv.conf was accepted (exit $CODE)"
 fi
 
 # Case 3: same for a destination runc mounts fresh content at, which would
@@ -107,9 +107,9 @@ run_instance "/proc" "true"
 CODE=$(cat "$WORKDIR/exit_code")
 
 if [ "$CODE" != "0" ]; then
-  pass "write_through: /proc is refused"
+  pass "write-through: /proc is refused"
 else
-  fail "write_through: /proc was accepted"
+  fail "write-through: /proc was accepted"
 fi
 
 # Case 4: the file a CA store candidate is a symlink to, as on RHEL, is
@@ -124,9 +124,9 @@ else
   CODE=$(cat "$WORKDIR/exit_code")
 
   if [ "$CODE" != "0" ] && grep -q "reserved" "$WORKDIR/step.log"; then
-    pass "write_through: the file $CA_LINK links to is refused"
+    pass "write-through: the file $CA_LINK links to is refused"
   else
-    fail "write_through: the file $CA_LINK links to was accepted (exit $CODE)"
+    fail "write-through: the file $CA_LINK links to was accepted (exit $CODE)"
   fi
 fi
 

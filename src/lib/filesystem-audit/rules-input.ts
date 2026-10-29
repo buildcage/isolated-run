@@ -1,9 +1,10 @@
 /**
- * Reads expected_filesystem_rules from the workflow and config_file, each rule
+ * Reads expected-filesystem-rules from the workflow and config-file, each rule
  * known by its line there.
  */
 
 import type { ConfigValueOrigin } from "#core/lib/actions/config-file.ts";
+import { inputEnvName } from "#core/lib/actions/input-names.ts";
 
 import { SandboxError } from "../errors.ts";
 import type { FilesystemAudit } from "./mode.ts";
@@ -16,7 +17,7 @@ import {
 
 /**
  * Each source's rules in the input's value: the workflow's from its first
- * line, then config_file's from where `config` says they start.
+ * line, then config-file's from where `config` says they start.
  */
 export function ruleSources(value: string, config: ConfigValueOrigin | undefined): RuleSource[] {
   const lines = value.split("\n");
@@ -28,11 +29,11 @@ export function ruleSources(value: string, config: ConfigValueOrigin | undefined
   return sources.filter((source) => source.text.trim());
 }
 
-/** The variable expected_filesystem_rules arrives in, read untrimmed, as the
- *  offset config_file gives counts its lines. */
-export const EXPECTED_RULES_ENV = "INPUT_EXPECTED_FILESYSTEM_RULES";
+/** The variable expected-filesystem-rules arrives in, read untrimmed, as the
+ *  offset config-file gives counts its lines. */
+export const EXPECTED_RULES_ENV = inputEnvName(EXPECTED_RULES_INPUT);
 
-/** expected_filesystem_rules as the step was given them. */
+/** expected-filesystem-rules as the step was given them. */
 export interface GivenRules {
   /** The rules to match, undefined where every line is a comment or blank,
    *  which the step treats as unset. */
@@ -40,7 +41,7 @@ export interface GivenRules {
 }
 
 /**
- * expected_filesystem_rules, from the input's value once config_file joined
+ * expected-filesystem-rules, from the input's value once config-file joined
  * its own, each rule known by its line there. Undefined when neither holds a
  * line. Throws on a line that is not a rule, and on rules for a step that
  * records nothing to match them against.
@@ -56,7 +57,7 @@ export function readExpectedFilesystemRules(
   if (rules.rules.length === 0) return { expected: undefined };
   if (filesystemAudit !== "record") {
     throw new SandboxError(
-      `${EXPECTED_RULES_INPUT} needs filesystem_audit: record, which records the accesses it is matched against.`,
+      `${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`,
       "INVALID_EXPECTED_FILESYSTEM_RULES",
     );
   }

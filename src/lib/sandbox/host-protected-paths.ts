@@ -48,16 +48,16 @@ export function dockerConfigDir(env: NodeJS.ProcessEnv): string | undefined {
  * persisting path contains it: the runner's install directory, the action
  * checkouts, this one's included, and the docker config directory. One that
  * is itself a persisting path is skipped: `uses: ./` runs the action from the
- * workspace, and write_through may name the config directory. A persisting
+ * workspace, and write-through may name the config directory. A persisting
  * path nested inside one stays writable, since runc remounts only the top of
  * a read-only path. One nested in another is left to the outer one, unless a
  * persisting path between them would reopen it. Each also covers the other
- * paths `mounts` shows it at (see pathAliases), unless write_through names one.
+ * paths `mounts` shows it at (see pathAliases), unless write-through names one.
  *
  * Throws when one goes through a symlink in a persisting path: the mount
  * protects only the symlink's target, and the sandbox could replace the
  * symlink itself with a directory of its own. `/` itself is not one of the
- * paths checked: under write_through: / a symlink anywhere else is replaceable
+ * paths checked: under write-through: / a symlink anywhere else is replaceable
  * too, and only one in another persisting path is refused.
  */
 export function sandboxReadonlyHostDirs(
@@ -173,7 +173,7 @@ function resolveProtectable(
  * every later step and the post step, and its GITHUB_STATE file: LD_PRELOAD in
  * GITHUB_ENV or a directory first in GITHUB_PATH would reach all of them.
  * Read-only in either mode, whatever is writable around them, unless
- * write_through names GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which
+ * write-through names GITHUB_ENV or GITHUB_PATH itself. GITHUB_STATE, which
  * only this action's post step reads, is never opened. Like
  * sandboxReadonlyHostDirs, covers each at its other paths in a persisting
  * path too, and throws when one goes through a symlink in a persisting path.

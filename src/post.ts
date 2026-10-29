@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 import * as core from "@actions/core";
 
 import { annotate } from "#core/lib/actions/annotation.ts";
+import { normalizeInputNames } from "#core/lib/actions/input-names.ts";
 import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
 
 import { readLocalImageOverride, resolveComposeFiles } from "./lib/compose-file.ts";
-import { readFilesystemInputs } from "./lib/inputs.ts";
+import { ACTION_INPUTS, CONFIG_FILE_INPUTS, readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
 import { takeWriteThroughForPost } from "./lib/post-write-through.ts";
@@ -39,7 +40,9 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 // the main step's core.saveState surfaces here via core.getState; see
 // https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#sending-values-to-the-pre-and-post-actions.
 function main(): void {
-  // The write_through the main step saved when it read config_file, which
+  // The main step has warned of any underscore spelling it ignored.
+  normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
+  // The write-through the main step saved when it read config-file, which
   // this step must not read again; the workflow's own input otherwise.
   const savedWriteThrough = takeWriteThroughForPost(process.env);
   // Before planPostCleanup, which already runs docker and sudo. The main step

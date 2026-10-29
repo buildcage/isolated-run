@@ -25,35 +25,35 @@ run_instance() {
 }
 
 echo ""
-echo "=== Sandbox known_blocked_rules Assertions ==="
+echo "=== Sandbox known-blocked-rules Assertions ==="
 echo ""
 
 trap 'fixture_down universal' EXIT
 fixture_up universal
 
-# Case 1: the only blocked connection matches known_blocked_rules -> the
-# step must succeed despite fail_on_blocked: true.
+# Case 1: the only blocked connection matches known-blocked-rules -> the
+# step must succeed despite fail-on-blocked: true.
 TMP_MATCH=$(mktemp -d)
 run_instance "$TMP_MATCH" "blocked.example.com:80"
 CODE_MATCH=$(cat "$TMP_MATCH/exit_code")
 if [ "$CODE_MATCH" = "0" ]; then
-  pass "matching known_blocked_rules kept the step from failing"
+  pass "matching known-blocked-rules kept the step from failing"
 else
-  fail "matching known_blocked_rules did not prevent failure -- exit code $CODE_MATCH, see log below"
+  fail "matching known-blocked-rules did not prevent failure -- exit code $CODE_MATCH, see log below"
   cat "$TMP_MATCH/step.log"
 fi
 rm -rf "$TMP_MATCH"
 
-# Case 2: known_blocked_rules is set but doesn't match the blocked
-# connection -> the step must still fail as normal (known_blocked_rules
+# Case 2: known-blocked-rules is set but doesn't match the blocked
+# connection -> the step must still fail as normal (known-blocked-rules
 # isn't a backdoor allowlist).
 TMP_MISMATCH=$(mktemp -d)
 run_instance "$TMP_MISMATCH" "some-other-domain.example.com:443"
 CODE_MISMATCH=$(cat "$TMP_MISMATCH/exit_code")
 if [ "$CODE_MISMATCH" != "0" ]; then
-  pass "a non-matching known_blocked_rules entry still failed the step"
+  pass "a non-matching known-blocked-rules entry still failed the step"
 else
-  fail "the step unexpectedly succeeded despite no known_blocked_rules match -- see log below"
+  fail "the step unexpectedly succeeded despite no known-blocked-rules match -- see log below"
   cat "$TMP_MISMATCH/step.log"
 fi
 rm -rf "$TMP_MISMATCH"

@@ -2,7 +2,7 @@
 # The audit-then-restrict round trip, which is what the inspect engine is for.
 #
 # Phase 1 runs a `run:` step under `audit`, checks its report enforced nothing,
-# and extracts the `allowed_url_rules` the report generated from what it saw.
+# and extracts the `allowed-url-rules` the report generated from what it saw.
 # Phase 2 runs again under `restrict`
 # with exactly those rules, and nothing else, via
 # test/inspect-roundtrip-scenarios.sh, repeating every request phase 1 made
@@ -12,8 +12,8 @@
 # workflow useless; rules that permit everything make it pointless.
 #
 # Phase 1 also sets ALLOWED_TLS_RULES, so the audit run has a real TLS
-# passthrough to record. The report echoes allowed_tls_rules/allowed_ip_rules
-# into the same fenced block as allowed_url_rules (see
+# passthrough to record. The report echoes allowed-tls-rules/allowed-ip-rules
+# into the same fenced block as allowed-url-rules (see
 # src/core/lib/report/render/inspect-example.ts), so the extraction below
 # stops at those keys. Phase 2 leaves ALLOWED_TLS_RULES empty, so the learned
 # URL rules have to stand alone.
@@ -77,29 +77,29 @@ assert_summary_contains "POST https://api.example.com/v1/thing" "the example kee
 assert_summary_contains "GET https://blocked.example.com/exfil" "the example includes a host audit merely observed, for the reader to remove"
 
 echo ""
-echo "[report] allowed_tls_rules is echoed as configured, not derived from traffic:"
-if grep -qF "allowed_tls_rules: |" <<< "$SUMMARY" && grep -qF "tlspass.example.com:443" <<< "$SUMMARY"; then
-  pass "allowed_tls_rules appears in the restrict-mode example"
+echo "[report] allowed-tls-rules is echoed as configured, not derived from traffic:"
+if grep -qF "allowed-tls-rules: |" <<< "$SUMMARY" && grep -qF "tlspass.example.com:443" <<< "$SUMMARY"; then
+  pass "allowed-tls-rules appears in the restrict-mode example"
 else
-  fail "allowed_tls_rules is missing from the restrict-mode example"
+  fail "allowed-tls-rules is missing from the restrict-mode example"
 fi
 
 RULES=$(
-  # Stops at the next top-level key (allowed_tls_rules/allowed_ip_rules are
+  # Stops at the next top-level key (allowed-tls-rules/allowed-ip-rules are
   # echoed into the same fenced block, see inspect-example.ts) as well as the
-  # closing fence, so only the allowed_url_rules value is captured.
+  # closing fence, so only the allowed-url-rules value is captured.
   awk '
-    /allowed_url_rules: \|/ { capture=1; next }
-    capture && /^ *(allowed_tls_rules|allowed_ip_rules): \|/ { exit }
+    /allowed-url-rules: \|/ { capture=1; next }
+    capture && /^ *(allowed-tls-rules|allowed-ip-rules): \|/ { exit }
     capture && /```/ { exit }
     capture { print }
   ' <<< "$SUMMARY" | sed 's/^ *//'
 )
 
 if [ -z "$RULES" ]; then
-  fail "the audit report generated no allowed_url_rules"
+  fail "the audit report generated no allowed-url-rules"
 else
-  pass "the audit report generated allowed_url_rules"
+  pass "the audit report generated allowed-url-rules"
 fi
 
 echo ""

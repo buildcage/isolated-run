@@ -96,7 +96,7 @@ describe.each([
     ],
     [
       "a delimiter that never comes",
-      "a=1\n\nx<<NEVER\ntraffic_artifact_name=ok\n",
+      "a=1\n\nx<<NEVER\ntraffic-artifact-name=ok\n",
       'line 3, output "x", never reaches its delimiter "NEVER"',
     ],
     [

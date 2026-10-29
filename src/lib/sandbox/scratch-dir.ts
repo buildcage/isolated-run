@@ -17,7 +17,7 @@ import { runPinnedHostCommand } from "./run-host-command.ts";
 // whole host `/` as a second, writable copy inside the sandbox. /var/tmp
 // itself is 1777 (writable by the non-root runner user) and execable, so
 // this subdirectory inherits that without needing root to create it.
-// buildOciConfig fails closed if a step's `write_through:` input tries to list
+// buildOciConfig fails closed if a step's `write-through:` input tries to list
 // this directory (or an ancestor of it) as writable; see
 // assertScratchBaseNotWritable.
 //
@@ -131,7 +131,7 @@ function unmountAllUnder(dir: string, deps: ScratchDirDeps, warn?: Warn): void {
  * though it's no longer listed as a mountpoint at all. Resolves on the
  * very next attempt after a brief wait.
  *
- * Falls back to `sudo rm -rf` on EACCES: filesystem_mode: ephemeral's overlay
+ * Falls back to `sudo rm -rf` on EACCES: filesystem-mode: ephemeral's overlay
  * roots (see ephemeral-fs.ts's createOverlayScratchDirs) are mounted by
  * runc running as root, and the kernel's own overlayfs implementation
  * writes bookkeeping content directly into each root's `work` dir while
@@ -153,7 +153,7 @@ function removeScratchDir(dir: string, deps: ScratchDirDeps): void {
         // This is the one call that runs as root, so ownership is checked
         // again immediately before it rather than relying on the caller's
         // own check. lstat, not stat, since a symlink here must not be
-        // followed. Safe even for filesystem_mode: ephemeral's root-owned overlay
+        // followed. Safe even for filesystem-mode: ephemeral's root-owned overlay
         // bookkeeping, since that lives inside the dir, not as the dir itself.
         const st = lstat(dir);
         if (!st.isDirectory() || st.uid !== process.getuid!()) {
@@ -177,7 +177,7 @@ function removeScratchDir(dir: string, deps: ScratchDirDeps): void {
 export type Warn = (message: string) => void;
 
 export interface CleanupScratchDirOptions {
-  /** filesystem_mode: ephemeral's own already-folded overlay-root paths (see
+  /** filesystem-mode: ephemeral's own already-folded overlay-root paths (see
    *  ephemeral-fs.ts's determineOverlayRoots), logged right before the
    *  upper/work dirs holding those writes are deleted, so there's a visible
    *  record of what was discarded. Omitted by withScratchDir's own

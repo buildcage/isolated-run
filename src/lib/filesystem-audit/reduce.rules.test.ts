@@ -5,7 +5,7 @@ import { RULES_TO_ADD_HEADER, rulesToAdd } from "./proposed-rules.ts";
 import { reduceRecording, type AuditSummary, type SummaryOptions } from "./reduce.ts";
 import { parseExpectedRules, RuleMatcher } from "./rules.ts";
 
-describe("createAuditSummary: expected_filesystem_rules", () => {
+describe("createAuditSummary: expected-filesystem-rules", () => {
   const rulesOf = (text: string) =>
     new RuleMatcher(parseExpectedRules([{ text, origin: "input", firstLine: 1 }]).rules);
 

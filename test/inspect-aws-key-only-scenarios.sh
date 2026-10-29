@@ -1,14 +1,14 @@
 #!/bin/bash
-# Runs inside the sandbox with aws_key_check on and no allowed_aws_role_accounts
+# Runs inside the sandbox with aws-key-check on and no allowed-aws-role-accounts
 # (see test/integration-test-inspect-aws-keys.sh): the step's own key passes,
 # a key AssumeRole issues, even for a role in the start key's account, is never
 # learned, and one ECR issues for a layer's presigned URL is.
 #
 # ---------------------------------------------------------------------------
 # Under test:
-#   aws_key_check:        true
+#   aws-key-check:        true
 #   AWS_ACCESS_KEY_ID:    ${AKIA}TESTSTARTKEY0001
-#   allowed_url_rules:
+#   allowed-url-rules:
 #     * https://**.amazonaws.com/**
 # ---------------------------------------------------------------------------
 set -uo pipefail

@@ -1,9 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import * as core from "@actions/core";
-
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { setOutputUnderBothNames } from "#core/lib/actions/input-names.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
@@ -58,11 +57,12 @@ export async function uploadTrafficArtifact(
 }
 
 /**
- * Set the traffic_artifact_name output, empty when no artifact was uploaded.
+ * Set the traffic-artifact-name output under both its spellings, empty when
+ * no artifact was uploaded.
  * Written on every path, after the isolated command has exited:
  * GITHUB_OUTPUT is last-write-wins, so this is what overrides anything the
  * command itself wrote to the same key.
  */
 export function setTrafficArtifactOutput(name: string): void {
-  core.setOutput("traffic_artifact_name", name);
+  setOutputUnderBothNames("traffic-artifact-name", name);
 }

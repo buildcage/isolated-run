@@ -10,7 +10,7 @@
 # runc honors it.
 #
 # The command makes no outbound connection under the default restrict mode and
-# fail_on_blocked, so the run also shows such a step passes without a
+# fail-on-blocked, so the run also shows such a step passes without a
 # misfiring blocked or incomplete-log annotation.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
@@ -68,7 +68,7 @@ echo x >> \"\$HOME/.buildcage-writable-test\"
 echo x >> /tmp/.buildcage-writable-test
 echo x >> \"\$RUNNER_TEMP/.buildcage-writable-test\"
 if touch /opt/.buildcage-writable-test 2>/dev/null; then
-  echo UNEXPECTED: /opt was writable without a write_through: entry
+  echo UNEXPECTED: /opt was writable without a write-through: entry
   exit 1
 fi
 [ -r /etc/hostname ] || { echo UNEXPECTED: /etc was not readable; exit 1; }

@@ -20,7 +20,7 @@ describe("ruleSources", () => {
     ]);
   });
 
-  it("splits config_file's lines from the workflow's where they start", () => {
+  it("splits config-file's lines from the workflow's where they start", () => {
     expect(ruleSources("* R ./a\n\n* W ./b\n* W ./c", { offset: 2, line: 7 })).toStrictEqual([
       { text: "* R ./a\n", origin: "input", firstLine: 1 },
       { text: "* W ./b\n* W ./c", origin: "config", firstLine: 7 },
@@ -38,36 +38,36 @@ describe("readExpectedFilesystemRules", () => {
     writeFileSync(join(workspace, "c.yml"), file);
     const env: NodeJS.ProcessEnv = {
       GITHUB_WORKSPACE: workspace,
-      INPUT_CONFIG_FILE: "c.yml",
+      "INPUT_CONFIG-FILE": "c.yml",
       ...(inline !== undefined && { [EXPECTED_RULES_ENV]: inline }),
     };
     const applied = applyConfigFile(env, {
-      known: ["proxy_mode", "expected_filesystem_rules"],
-      lists: ["expected_filesystem_rules"],
+      known: ["proxy-mode", "expected-filesystem-rules"],
+      lists: ["expected-filesystem-rules"],
     });
     return readExpectedFilesystemRules(
       env[EXPECTED_RULES_ENV] ?? "",
-      applied?.origins.get("expected_filesystem_rules"),
+      applied?.origins.get("expected-filesystem-rules"),
       "record",
     );
   }
 
-  it("is undefined when neither the workflow nor config_file has a line", () => {
+  it("is undefined when neither the workflow nor config-file has a line", () => {
     expect(readExpectedFilesystemRules(" ", undefined, "off")).toBeUndefined();
   });
 
-  it("reads the workflow's rules, then config_file's, by their own lines", () => {
-    const rules = read("proxy_mode: audit\nexpected_filesystem_rules: |\n  * W ./b\n", "* R ./a\n");
+  it("reads the workflow's rules, then config-file's, by their own lines", () => {
+    const rules = read("proxy-mode: audit\nexpected-filesystem-rules: |\n  * W ./b\n", "* R ./a\n");
     expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["input:1", "config:3"]);
   });
 
-  it("reads config_file's rules under an alias, by the anchor's lines", () => {
-    const rules = read("proxy_mode: &r |\n  * W ./b\nexpected_filesystem_rules: *r\n");
+  it("reads config-file's rules under an alias, by the anchor's lines", () => {
+    const rules = read("proxy-mode: &r |\n  * W ./b\nexpected-filesystem-rules: *r\n");
     expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["config:2"]);
   });
 
-  it("names config_file alone for a rule whose line YAML may have moved", () => {
-    const rules = read('expected_filesystem_rules: "* R ./a\\n* W ./b"\n');
+  it("names config-file alone for a rule whose line YAML may have moved", () => {
+    const rules = read('expected-filesystem-rules: "* R ./a\\n* W ./b"\n');
     expect(rules?.expected?.rules.map((r) => r.ref)).toStrictEqual(["config", "config"]);
   });
 
@@ -80,6 +80,6 @@ describe("readExpectedFilesystemRules", () => {
   it("refuses rules for a step that records nothing to match them against", () => {
     const reading = () => readExpectedFilesystemRules("* R ./a", undefined, "off");
     expect(reading).toThrow(SandboxError);
-    expect(reading).toThrow("expected_filesystem_rules needs filesystem_audit: record");
+    expect(reading).toThrow("expected-filesystem-rules needs filesystem-audit: record");
   });
 });

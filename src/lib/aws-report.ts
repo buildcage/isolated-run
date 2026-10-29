@@ -8,7 +8,7 @@ import { letThrough } from "./would-block.ts";
 /**
  * Links what to do about the AWS access key check's blocks, naming each reason
  * it blocked with, for the report to print after the tables that list them. A
- * block known_blocked_rules expects needs no action, so its reason is left out.
+ * block known-blocked-rules expects needs no action, so its reason is left out.
  */
 export function awsTroubleshootingBlocks(
   report: ReportData,

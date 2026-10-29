@@ -10,7 +10,7 @@ export interface FilesystemAuditPaths {
   uploadDir: string;
   /** The recording with buildcage's own records stripped, as uploaded. */
   stepPath: string;
-  /** The proposed expected_filesystem_rules, uploaded beside it. */
+  /** The proposed expected-filesystem-rules, uploaded beside it. */
   rulesPath: string;
 }
 

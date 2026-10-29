@@ -253,7 +253,7 @@ export interface PrepareNssDbOptions {
 function warnNotAdded(warn: NssDbDeps["warn"], reason: string): undefined {
   warn?.(
     `could not add the proxy CA to Chromium's NSS database: ${reason}. Chromium in this step ` +
-      "will not trust the proxy; use proxy_engine: universal for it.",
+      "will not trust the proxy; use proxy-engine: universal for it.",
   );
   return undefined;
 }

@@ -15,6 +15,7 @@ import {
   checkKnownBlockedUrlRuleSupport,
   checkUrlAndTlsRuleSupport,
 } from "#core/lib/actions/engine-rule-support.ts";
+import { normalizeInputNames } from "#core/lib/actions/input-names.ts";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { readTrafficArtifactInputs } from "#core/lib/actions/inputs.ts";
 import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
@@ -37,6 +38,7 @@ import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import { filesystemExampleInputs } from "./filesystem-example-inputs.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
 import {
+  ACTION_INPUTS,
   CONFIG_FILE_INPUTS,
   readProxyInputs,
   awsExampleInputs,
@@ -94,7 +96,7 @@ import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 const DEFAULT_ACTION_REF = "v2";
 
 export const WRITE_THROUGH_ALL_WARNING =
-  "write_through: / is for trusted code only. Against a compromised command it gives up the " +
+  "write-through: / is for trusted code only. Against a compromised command it gives up the " +
   "outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are " +
   "reachable again, a systemd --user bus included, which starts a process outside the sandbox. " +
   "The commands this action runs on the host after the command are no longer kept out of " +
@@ -281,7 +283,10 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const reportActionRef = env.GITHUB_ACTION_REF || DEFAULT_ACTION_REF;
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
-  // Before any input is read: it rewrites what they all read.
+  // Before any input is read: both rewrite the env every input is read from.
+  for (const ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) {
+    deps.warn(ignored);
+  }
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
   if (configFile?.warning) deps.warn(configFile.warning);
 
@@ -304,7 +309,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
   if (failOnUnexpectedFileAccess && filesystemAudit !== "record")
     throw new SandboxError(
-      "fail_on_unexpected_file_access needs filesystem_audit: record, which records the accesses it checks.",
+      "fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.",
       "INVALID_EXPECTED_FILESYSTEM_RULES",
     );
   // Before saveWriteThroughForPost, the first write under the scratch base.
@@ -321,13 +326,13 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   // Suppresses annotations outside a real action run, as writeReportSummary does.
   const annotation = deps.createAnnotation(Boolean(env.GITHUB_STEP_SUMMARY));
   if (filesystemAudit === "record") {
-    annotation.warning("filesystem_audit is experimental and may change.");
+    annotation.warning("filesystem-audit is experimental and may change.");
   }
   if (givenRules && !expectedFilesystemRules) {
     annotation.warning(
-      "expected_filesystem_rules holds only comments and blank lines, so the step runs as if it were not set" +
+      "expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set" +
         (failOnUnexpectedFileAccess
-          ? ", and fail_on_unexpected_file_access fails it on every file access."
+          ? ", and fail-on-unexpected-file-access fails it on every file access."
           : "."),
     );
   }
@@ -388,7 +393,7 @@ export function preflight(
   // Before any privileged setup; see assertNonRootUid.
   assertNonRootUid(deps.getuid!());
 
-  // A plain input mistake (an unset variable, or write_through: / under
+  // A plain input mistake (an unset variable, or write-through: / under
   // ephemeral) fails before the sudo/unshare/mount probes below.
   // resolveFilesystemPlan re-checks the real paths on the host.
   const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
@@ -406,7 +411,7 @@ export function preflight(
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
 
-  // Here rather than in runSandboxedCommand, so a bad write_through entry or
+  // Here rather than in runSandboxedCommand, so a bad write-through entry or
   // an uncreatable target fails before the proxy starts.
   const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
     warn: deps.warn,
@@ -569,7 +574,7 @@ export async function runSandboxStep(
 ): Promise<number> {
   const deps = { ...realDeps, ...overrides };
   const inputs = readStepInputs(env, deps);
-  // config_file can push a list input past the 128 KiB one variable may hold,
+  // config-file can push a list input past the 128 KiB one variable may hold,
   // which fails every exec that inherits it with E2BIG.
   for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);

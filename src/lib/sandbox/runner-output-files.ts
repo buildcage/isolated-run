@@ -7,7 +7,7 @@
  * the command's environment points at those, and the real files are masked from
  * it. After the step the host reads the backing files and writes the real ones
  * itself, so a symlink, FIFO, directory or permission the command could leave
- * at the real path never reaches it. Under ephemeral only a file write_through
+ * at the real path never reaches it. Under ephemeral only a file write-through
  * covers is mediated; the rest stay under the overlay and are discarded with it
  * (see FilesystemPlan.mediatedVariables).
  *
@@ -48,7 +48,7 @@ import type { MountEntry } from "./types.ts";
 
 // Where the backing directory is bound inside the sandbox. Under /dev, which
 // runc mounts as a fresh tmpfs and creates mount points in, so no host mount
-// point is needed and it cannot collide with a runner path. write_through
+// point is needed and it cannot collide with a runner path. write-through
 // cannot name it: assertNoFreshMountDestinations refuses a writable bind there.
 export const RUNNER_FILES_DIR = "/dev/buildcage-runner-files";
 

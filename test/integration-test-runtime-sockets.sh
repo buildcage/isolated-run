@@ -137,7 +137,7 @@ else
   echo "  SKIP  systemd-run --user check (systemd-run not found on this host)"
 fi
 
-# write_through names a socket under /run: it comes back as named, with no
+# write-through names a socket under /run: it comes back as named, with no
 # /var/run spelling of an old mask resolving into /run and undoing it.
 if [ -S /run/dbus/system_bus_socket ]; then
   : > "$WORKDIR/state.env"
@@ -149,9 +149,9 @@ if [ -S /run/dbus/system_bus_socket ]; then
   INPUT_RUN='if [ -S /var/run/dbus/system_bus_socket ]; then echo "REEXPOSED_BUS_IS_SOCKET=yes"; else echo "REEXPOSED_BUS_IS_SOCKET=no"; fi' \
     node dist/main.cjs >> "$WORKDIR/out.log" 2>&1
   if grep -q '^REEXPOSED_BUS_IS_SOCKET=yes$' "$WORKDIR/out.log"; then
-    pass "write_through re-exposes /run/dbus/system_bus_socket as named"
+    pass "write-through re-exposes /run/dbus/system_bus_socket as named"
   else
-    fail "write_through: /run/dbus/system_bus_socket did not bring the socket back -- see out.log"
+    fail "write-through: /run/dbus/system_bus_socket did not bring the socket back -- see out.log"
   fi
 else
   echo "  SKIP  re-exposure check (/run/dbus/system_bus_socket doesn't exist on this host)"

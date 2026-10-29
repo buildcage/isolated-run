@@ -61,10 +61,10 @@ jobs:
   #
   # Cases that need the same image share a job: runners, not job length, are
   # what a run waits on. run-isolated.sh's own mechanics
-  # (privilege drop, filesystem defaults, write_through: variations, concurrent
+  # (privilege drop, filesystem defaults, write-through: variations, concurrent
   # lifecycles) are covered more cheaply in test-integration.yml instead.
   #
-  # Runs a real sandboxed step with filesystem_audit under each filesystem_mode
+  # Runs a real sandboxed step with filesystem-audit under each filesystem-mode
   # and checks the tracer recorded its file accesses; a test-hooks build
   # surfaces the recording for the assertion.
   test_sandbox_filesystem_audit:
@@ -76,7 +76,7 @@ jobs:
       fail-fast: false
       matrix:
         # One job per kernel that GitHub-hosted runners ship, covering each
-        # architecture and each filesystem_mode twice. Kernel-dependent
+        # architecture and each filesystem-mode twice. Kernel-dependent
         # failures have so far always hit both architectures at once.
         #
         # The audit mode, runner read-only, enforcement and concurrency cases
@@ -86,7 +86,7 @@ jobs:
         include:
           - { runner: ubuntu-22.04-arm, filesystem_mode: ephemeral, concurrency: true }
           - runner: ubuntu-24.04
-            filesystem_mode: persistent
+            filesystem-mode: persistent
             audit_mode: true
             runner_read_only: true
             enforcement: true
@@ -118,6 +118,7 @@ jobs:
 
       # Verifies audit mode's Job Summary includes the auto-generated
       # restrict-mode example.
+      # Uses the underscore spellings, to keep them tested.
       - name: Run an isolated command in audit mode
         if: matrix.audit_mode
         uses: ./
@@ -153,8 +154,8 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
-          proxy_engine: universal
-          proxy_mode: audit
+          proxy-engine: universal
+          proxy-mode: audit
           run: |
             rc=0
             for dir in "$RUNNER_INSTALL_DIR/externals" "$(dirname "$RUNNER_WORKSPACE")/_actions"; do
@@ -180,7 +181,7 @@ jobs:
           printf 'int main(void){long r;__asm__ volatile("int $0x80":"=a"(r):"a"(20L));return r < 0;}' |
             gcc -x c -o "$GITHUB_WORKSPACE/int80" -
 
-      - name: Run a step with filesystem_audit enabled
+      - name: Run a step with filesystem-audit enabled
         id: audit
         uses: ./
         env:
@@ -188,11 +189,11 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/summary.md
           BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/raw.jsonl
         with:
-          proxy_engine: universal
-          proxy_mode: audit
-          filesystem_mode: ${{ matrix.filesystem_mode }}
-          filesystem_audit: record
-          upload_filesystem_audit_artifact: true
+          proxy-engine: universal
+          proxy-mode: audit
+          filesystem-mode: ${{ matrix.filesystem_mode }}
+          filesystem-audit: record
+          upload-filesystem-audit-artifact: true
           # Sourced so the step's own shell makes the accesses.
           run: . "$GITHUB_WORKSPACE/test/filesystem-audit/probe.sh"
 
@@ -208,7 +209,7 @@ jobs:
       - name: Download and check the filesystem audit artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.audit.outputs.filesystem_audit_artifact_name }}
+          name: ${{ steps.audit.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/audit
       - name: The artifact holds the step's events with buildcage's own stripped out
         run: ./test/assert-filesystem-audit-artifact.sh "$RUNNER_TEMP/audit"
@@ -219,7 +220,7 @@ jobs:
       - name: The post step removes the audit's files
         run: ./test/drive-post-step.sh
 
-      - name: Run an ephemeral step with filesystem_audit enabled
+      - name: Run an ephemeral step with filesystem-audit enabled
         id: ephemeral_audit
         if: matrix.filesystem_mode == 'ephemeral'
         uses: ./
@@ -228,11 +229,11 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/ephemeral-summary.md
           BUILDCAGE_RUN_DEBUG_RAW_FILE: ${{ runner.temp }}/ephemeral-raw.jsonl
         with:
-          proxy_engine: universal
-          proxy_mode: audit
-          filesystem_mode: ephemeral
-          filesystem_audit: record
-          write_through: |
+          proxy-engine: universal
+          proxy-mode: audit
+          filesystem-mode: ephemeral
+          filesystem-audit: record
+          write-through: |
             $GITHUB_OUTPUT
             ./kept
           run: |
@@ -268,7 +269,7 @@ jobs:
         run: ./test/drive-post-step.sh
 
       # One representative case through the real action wrapper, against real
-      # internet hosts (no fixture network), proves proxy_engine: universal
+      # internet hosts (no fixture network), proves proxy-engine: universal
       # wiring end-to-end: an allowed host reaches its origin, a blocked one does
       # not, and both verdicts reach the report.
       # Which names, ports and protocols are judged which way, and the log-line
@@ -283,11 +284,11 @@ jobs:
           # (GitHub ignores attempts to reassign it), so mirror it here too.
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         with:
-          proxy_engine: universal
-          allowed_https_rules: example.com:443
-          allowed_http_rules: example.com:80
+          proxy-engine: universal
+          allowed-https-rules: example.com:443
+          allowed-http-rules: example.com:80
           # Blocked connections below are expected, not a failure.
-          fail_on_blocked: false
+          fail-on-blocked: false
           run: |
             echo "=== allowlisted HTTP host must be reachable ==="
             wget -q -T 5 -O /dev/null http://example.com/
@@ -316,18 +317,18 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-test-summary.md
         run: ./test/assert-sandbox.sh
 
-      # config_file through the real action: the engine, the rules and
-      # fail_on_blocked it sets all reach the step. The image is universal either
+      # config-file through the real action: the engine, the rules and
+      # fail-on-blocked it sets all reach the step. The image is universal either
       # way, so the step checks for the CA inspect would have put in the sandbox.
       - name: Write the config file
         if: matrix.enforcement
         run: |
           mkdir -p e2e-config
           cat > e2e-config/buildcage.yml <<'YAML'
-          proxy_engine: universal
+          proxy-engine: universal
           # The blocked request below is expected.
-          fail_on_blocked: false
-          allowed_https_rules: |
+          fail-on-blocked: false
+          allowed-https-rules: |
             example.com:443
           YAML
 
@@ -337,7 +338,7 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
-          config_file: e2e-config/buildcage.yml
+          config-file: e2e-config/buildcage.yml
           run: |
             echo "=== the engine the file sets must be the one in use ==="
             if [ -e /dev/buildcage-ca.pem ]; then
@@ -354,7 +355,7 @@ jobs:
               exit 1
             fi
 
-      # A step's proposed expected_filesystem_rules, added to a config file for
+      # A step's proposed expected-filesystem-rules, added to a config file for
       # the same command, take every access it makes again.
       - name: Record a step for its proposed rules
         id: rules_record
@@ -363,10 +364,10 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
-          proxy_engine: universal
-          proxy_mode: audit
-          filesystem_audit: record
-          upload_filesystem_audit_artifact: true
+          proxy-engine: universal
+          proxy-mode: audit
+          filesystem-audit: record
+          upload-filesystem-audit-artifact: true
           label: rules recorded
           run: |
             cat /etc/hostname > /dev/null
@@ -376,15 +377,15 @@ jobs:
         if: matrix.enforcement
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.rules_record.outputs.filesystem_audit_artifact_name }}
+          name: ${{ steps.rules_record.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/rules
 
       - name: Add the proposed rules to a config file
         if: matrix.enforcement
         run: |
           {
-            echo "filesystem_audit: record"
-            echo "expected_filesystem_rules: |"
+            echo "filesystem-audit: record"
+            echo "expected-filesystem-rules: |"
             grep -v '^#' "$RUNNER_TEMP"/rules/expected-filesystem-rules-to-add.txt | sed 's/^/  /'
           } > e2e-config/expected-rules.yml
           cat e2e-config/expected-rules.yml
@@ -396,10 +397,10 @@ jobs:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/rules-summary.md
         with:
-          proxy_engine: universal
-          proxy_mode: audit
-          config_file: e2e-config/expected-rules.yml
-          fail_on_unexpected_file_access: true
+          proxy-engine: universal
+          proxy-mode: audit
+          config-file: e2e-config/expected-rules.yml
+          fail-on-unexpected-file-access: true
           label: rules checked
           run: |
             cat /etc/hostname > /dev/null
@@ -409,7 +410,7 @@ jobs:
         if: matrix.enforcement
         run: |
           cat "$RUNNER_TEMP/rules-summary.md"
-          grep -qF 'No access fell outside `expected_filesystem_rules`.' "$RUNNER_TEMP/rules-summary.md"
+          grep -qF 'No access fell outside `expected-filesystem-rules`.' "$RUNNER_TEMP/rules-summary.md"
           # Nothing is left to add, so no rules are proposed or pointed to.
           if grep -qF 'Expected filesystem rules' "$RUNNER_TEMP/rules-summary.md"; then
             echo "::error::a run whose rules took every access still shows the Expected filesystem rules element"
@@ -433,11 +434,11 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-a-summary.md
             with:
-              proxy_engine: universal
-              allowed_https_rules: example.com:443
-              allowed_http_rules: example.com:80
+              proxy-engine: universal
+              allowed-https-rules: example.com:443
+              allowed-http-rules: example.com:80
               label: parallel-a
-              fail_on_blocked: false
+              fail-on-blocked: false
               run: |
                 sleep 5
                 wget -q -T 5 -O /dev/null http://example.com/
@@ -453,11 +454,11 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
               BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-parallel-b-summary.md
             with:
-              proxy_engine: universal
-              allowed_https_rules: example.net:443
-              allowed_http_rules: example.net:80
+              proxy-engine: universal
+              allowed-https-rules: example.net:443
+              allowed-http-rules: example.net:80
               label: parallel-b
-              fail_on_blocked: false
+              fail-on-blocked: false
               run: |
                 wget -q -T 5 -O /dev/null http://example.net/
                 if wget -q -T 5 -O /dev/null http://example.com/ 2>&1; then
@@ -474,7 +475,7 @@ jobs:
             exit 1
           fi
 
-      # Every step makes the same missing write_through targets at once, and
+      # Every step makes the same missing write-through targets at once, and
       # the targets stay after each of them ends.
       - parallel:
           - name: sandbox-parallel-write-through-short-persistent
@@ -483,9 +484,9 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
-              proxy_engine: universal
+              proxy-engine: universal
               label: parallel-write-through-short-persistent
-              write_through: |
+              write-through: |
                 ./out
                 ./out-empty
               run: "true"
@@ -496,10 +497,10 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
-              proxy_engine: universal
-              filesystem_mode: ephemeral
+              proxy-engine: universal
+              filesystem-mode: ephemeral
               label: parallel-write-through-short-ephemeral
-              write_through: |
+              write-through: |
                 ./out
                 ./out-empty
               run: "true"
@@ -510,17 +511,17 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
-              proxy_engine: universal
-              filesystem_mode: ephemeral
+              proxy-engine: universal
+              filesystem-mode: ephemeral
               label: parallel-write-through-long
-              write_through: |
+              write-through: |
                 ./out
                 ./out-empty
               run: |
                 sleep 15
                 echo written > ./out/file
 
-      - name: Verify the write_through targets were kept
+      - name: Verify the write-through targets were kept
         if: matrix.concurrency
         run: |
           if [ "$(cat out/file 2>/dev/null)" != "written" ]; then
@@ -551,7 +552,7 @@ jobs:
           INPUT_RUN: touch "$GITHUB_WORKSPACE/should-not-run"
         run: |
           if node dist/main.cjs > "$RUNNER_TEMP/no-btf.log" 2>&1; then cat "$RUNNER_TEMP/no-btf.log"; echo "::error::the step did not fail"; exit 1; fi
-          if ! grep -q 'filesystem_audit could not start (the kernel exposes no BTF)' "$RUNNER_TEMP/no-btf.log"; then
+          if ! grep -q 'filesystem-audit could not start (the kernel exposes no BTF)' "$RUNNER_TEMP/no-btf.log"; then
             cat "$RUNNER_TEMP/no-btf.log"; echo "::error::the step failed for another reason"; exit 1
           fi
           if [ -e "$GITHUB_WORKSPACE/should-not-run" ]; then echo "::error::the command ran"; exit 1; fi
@@ -572,10 +573,10 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
         with:
-          proxy_engine: universal
-          proxy_mode: audit
-          filesystem_mode: ${{ matrix.filesystem_mode }}
-          filesystem_audit: record
+          proxy-engine: universal
+          proxy-mode: audit
+          filesystem-mode: ${{ matrix.filesystem_mode }}
+          filesystem-audit: record
           run: touch "$GITHUB_WORKSPACE/should-not-run"
 
       - name: The step failed before its command, and left no tracer, cgroup or file
@@ -621,29 +622,29 @@ jobs:
           engines: ${{ matrix.universal && 'universal inspect' || 'inspect' }}
 
       # One representative case through the real action wrapper, against real
-      # internet hosts (no fixture network), proves proxy_engine: inspect wiring
+      # internet hosts (no fixture network), proves proxy-engine: inspect wiring
       # end-to-end: engine selection, method/path enforcement via
-      # allowed_url_rules, TLS passthrough via allowed_tls_rules, and CA trust (a
+      # allowed-url-rules, TLS passthrough via allowed-tls-rules, and CA trust (a
       # plain https GET succeeding with no --insecure, despite the proxy
       # terminating TLS). Deeper scenario coverage (SSRF/forged-Host/DNS
       # non-leak/wildcard host+path/CA residue) lives in
       # test/integration-test-inspect-restrict.sh, which needs a fixture network
       # this job deliberately does not set up.
-      - name: "Run an isolated command via the real action (proxy_engine: inspect)"
+      - name: "Run an isolated command via the real action (proxy-engine: inspect)"
         id: sandbox
         uses: ./
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
         with:
-          proxy_engine: inspect
-          allowed_url_rules: "GET|HEAD https://example.com/**"
-          allowed_tls_rules: "github.com:443"
+          proxy-engine: inspect
+          allowed-url-rules: "GET|HEAD https://example.com/**"
+          allowed-tls-rules: "github.com:443"
           # Blocked connections below are expected, not a failure.
-          fail_on_blocked: false
+          fail-on-blocked: false
           # Short retention: this e2e run's own artifacts shouldn't linger.
-          upload_traffic_artifact: true
-          traffic_artifact_retention_days: 1
+          upload-traffic-artifact: true
+          traffic-artifact-retention-days: 1
           run: |
             echo "=== URL-allowed host, over TLS the proxy terminated (proves CA trust) ==="
             curl -fsS --max-time 10 https://example.com/ > /dev/null
@@ -655,14 +656,14 @@ jobs:
               exit 1
             fi
 
-            echo "=== host outside allowed_url_rules must be blocked ==="
+            echo "=== host outside allowed-url-rules must be blocked ==="
             CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://neverssl.com/)
             if [ "$CODE" != "403" ]; then
               echo "UNEXPECTED: https://neverssl.com/ returned $CODE, not 403"
               exit 1
             fi
 
-            echo "=== allowed_tls_rules host: passed through undecrypted, real cert visible ==="
+            echo "=== allowed-tls-rules host: passed through undecrypted, real cert visible ==="
             curl -fsS --max-time 10 https://github.com/ > /dev/null
 
       - name: Verify the sandbox report contains the expected allowed/blocked entries
@@ -671,10 +672,14 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/sandbox-inspect-summary.md
         run: ./test/assert-sandbox-inspect.sh
 
-      - name: Check the traffic_artifact_name output was set
+      - name: Check both traffic artifact name outputs were set
         run: |
-          if [ -z "${{ steps.sandbox.outputs.traffic_artifact_name }}" ]; then
-            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
+          if [ -z "${{ steps.sandbox.outputs.traffic-artifact-name }}" ]; then
+            echo "::error::traffic-artifact-name output was empty despite upload-traffic-artifact: true"
+            exit 1
+          fi
+          if [ "${{ steps.sandbox.outputs.traffic_artifact_name }}" != "${{ steps.sandbox.outputs.traffic-artifact-name }}" ]; then
+            echo "::error::traffic_artifact_name output differs from traffic-artifact-name"
             exit 1
           fi
 
@@ -684,7 +689,7 @@ jobs:
       - name: Download the traffic artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.sandbox.outputs.traffic_artifact_name }}
+          name: ${{ steps.sandbox.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/buildcage-traffic
 
       - name: Verify the traffic artifact
@@ -697,8 +702,8 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.universal }}
             with:
-              proxy_engine: universal
-              allowed_https_rules: example.com:443
+              proxy-engine: universal
+              allowed-https-rules: example.com:443
               label: parallel-short
               run: wget -q -T 5 -O /dev/null https://example.com/
 
@@ -708,8 +713,8 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
-              proxy_engine: inspect
-              allowed_url_rules: "GET https://example.com/**"
+              proxy-engine: inspect
+              allowed-url-rules: "GET https://example.com/**"
               label: parallel-long
               run: |
                 # Let the other step finish and clean up first.
@@ -751,8 +756,8 @@ jobs:
         env:
           BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
         with:
-          proxy_engine: inspect
-          filesystem_mode: ephemeral
+          proxy-engine: inspect
+          filesystem-mode: ephemeral
           label: ephemeral-nssdb
           run: grep -q nssdb /proc/self/mountinfo && test -d ~/.pki/nssdb
 
@@ -773,7 +778,7 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
-              proxy_engine: inspect
+              proxy-engine: inspect
               label: parallel-nssdb-short-persistent
               run: "true"
 
@@ -782,8 +787,8 @@ jobs:
             env:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
             with:
-              proxy_engine: inspect
-              filesystem_mode: ephemeral
+              proxy-engine: inspect
+              filesystem-mode: ephemeral
               label: parallel-nssdb-short-ephemeral
               run: "true"
 
@@ -793,11 +798,11 @@ jobs:
               BUILDCAGE_LOCAL_IMAGE_REF: ${{ steps.local_proxy.outputs.inspect }}
               CHROME: ${{ matrix.chrome && '1' || '' }}
             with:
-              proxy_engine: inspect
-              allowed_url_rules: "GET https://example.com/**"
+              proxy-engine: inspect
+              allowed-url-rules: "GET https://example.com/**"
               label: parallel-nssdb-long
               # Chrome's own background requests are blocked, and are not what this checks.
-              fail_on_blocked: false
+              fail-on-blocked: false
               run: |
                 sleep 15
                 if ! grep -q nssdb /proc/self/mountinfo; then
@@ -897,16 +902,16 @@ jobs:
           ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
-          proxy_engine: inspect
-          proxy_mode: restrict
-          allowed_url_rules: |
+          proxy-engine: inspect
+          proxy-mode: restrict
+          allowed-url-rules: |
             POST https://sts.us-east-1.amazonaws.com/
-          aws_key_check: true
-          allowed_aws_role_accounts: ${{ steps.accounts.outputs.role }},${{ steps.accounts.outputs.switched }}
+          aws-key-check: true
+          allowed-aws-role-accounts: ${{ steps.accounts.outputs.role }},${{ steps.accounts.outputs.switched }}
           # The block below is expected.
-          fail_on_blocked: false
-          upload_traffic_artifact: true
-          traffic_artifact_retention_days: 1
+          fail-on-blocked: false
+          upload-traffic-artifact: true
+          traffic-artifact-retention-days: 1
           run: |
             echo "=== the key the step was given ==="
             aws sts get-caller-identity > /dev/null
@@ -960,19 +965,19 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-restrict-summary.md
         run: ./test/assert-sandbox-aws-key-check.sh restrict
 
-      - name: Check the traffic_artifact_name output was set
+      - name: Check the traffic-artifact-name output was set
         env:
-          NAME: ${{ steps.restrict.outputs.traffic_artifact_name }}
+          NAME: ${{ steps.restrict.outputs.traffic-artifact-name }}
         run: |
           if [ -z "$NAME" ]; then
-            echo "::error::traffic_artifact_name output was empty despite upload_traffic_artifact: true"
+            echo "::error::traffic-artifact-name output was empty despite upload-traffic-artifact: true"
             exit 1
           fi
 
       - name: Download the traffic artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ steps.restrict.outputs.traffic_artifact_name }}
+          name: ${{ steps.restrict.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/aws-traffic
 
       - name: Verify the traffic artifact's aws objects
@@ -992,9 +997,9 @@ jobs:
           BUILDCAGE_RUN_DEBUG_SUMMARY_FILE: ${{ runner.temp }}/aws-audit-summary.md
           SWITCHED_ROLE_ARN: ${{ vars.AWS_SWITCHED_ROLE_ARN }}
         with:
-          proxy_engine: inspect
-          proxy_mode: audit
-          aws_key_check: true
+          proxy-engine: inspect
+          proxy-mode: audit
+          aws-key-check: true
           run: |
             aws sts get-caller-identity > /dev/null
             read -r AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN < <(

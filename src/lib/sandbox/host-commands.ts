@@ -24,8 +24,8 @@ const PINNED_COMMANDS = ["docker", "sudo"] as const;
 
 /**
  * Host paths whose writes outlive the command. Ephemeral mode's overlays
- * discard theirs, so only write_through counts there. The runner's own
- * directories are taken by real path, write_through entries as written: one
+ * discard theirs, so only write-through counts there. The runner's own
+ * directories are taken by real path, write-through entries as written: one
  * through a symlink is refused before it is mounted.
  */
 export function persistingWritablePaths(
@@ -124,8 +124,8 @@ export function pathOutside(
  * file it leads to now, provided that file bears the command's own name and
  * the `$PATH` entry is not itself in reach, as `/usr/bin/sudo` ->
  * `/etc/alternatives/sudo` -> `/usr/lib/cargo/bin/sudo` is under
- * `write_through: /etc`. Relative entries resolve against the workspace, so
- * they are skipped. `write_through: /` is the documented full opt-out.
+ * `write-through: /etc`. Relative entries resolve against the workspace, so
+ * they are skipped. `write-through: /` is the documented full opt-out.
  */
 export function findPinnableCommand(
   command: string,
@@ -255,7 +255,7 @@ export function jvmTools(
 }
 
 /**
- * Persistent mode's writable set plus write_through, in either mode: an earlier
+ * Persistent mode's writable set plus write-through, in either mode: an earlier
  * step's sandbox may have written there even if this one's writes are
  * discarded, and the post step cannot trust GITHUB_STATE to say which mode ran.
  * An input that does not parse never became writable, so it adds nothing.
