@@ -108,9 +108,10 @@ artifact, so several steps in one job never collide. Each section follows its st
 and both headings carry the step's `label`, so set `label` to tell the steps apart.
 
 `filesystem-audit-retention-days` sets how long the artifact is kept; see
-[Reference](./reference.md#action-inputs). The artifact names each program the step ran but not its
-arguments, which can carry secrets. It still holds every path the step touched, including the names
-of files it only tried to open, so treat it as sensitive, like the traffic artifact.
+[Reference](./reference.md#filesystem-audit-inputs). The artifact names each program the step ran
+but not its arguments, which can carry secrets. It still holds every path the step touched,
+including the names of files it only tried to open, so treat it as sensitive, like the traffic
+artifact.
 
 ## Reading the summary
 
