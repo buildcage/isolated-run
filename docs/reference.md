@@ -189,8 +189,8 @@ you move to `restrict`. Any other `proxy-mode` value, a differently cased one in
 step.
 
 Under `inspect`, `audit` is not a passive observer: TLS is still terminated, so a tool that pins a
-certificate fails there exactly as it would under `restrict`. `universal` decrypts nothing in either
-mode, so a pinned certificate works under it.
+certificate fails there exactly as it would under `restrict`. `universal`'s audit mode decrypts
+nothing and breaks nothing.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named. Run `audit` first to find those domains.
@@ -560,9 +560,9 @@ neither was uploaded, it is not kept anywhere.
 
 A row whose reason is `dns-service-not-allowed` is a service-discovery name,
 `_mongodb._tcp.cluster0.x.mongodb.net` and the like. Neither way of clearing it makes the record
-resolve, since Buildcage's resolver serves no discovery record at all (see [Service
-discovery](../README.md#service-discovery)), so the answer stays empty whatever you write, and what
-changes is only whether the row fails the step.
+resolve. Buildcage's resolver serves no discovery record at all (see
+[Service discovery](../README.md#service-discovery)), so the answer stays empty whatever you write;
+only whether the row fails the step changes.
 
 1. **Allow the host the name belongs to** (`cluster0.x.mongodb.net`). The lookup is then reported as
    `discovery` instead and leaves the table, and the step may connect to that host. This is the
@@ -669,8 +669,9 @@ request: a client that does not trust the CA, or one waiting for the server to s
 sends no SNI to an address, so the certificate the proxy answers with matches no name, and nothing
 that checks it gets further, in `audit` too. `universal` in `restrict` blocks the same connection on
 arrival. A close on an address and port that also had a request read is a keepalive close and stays
-out of the report, except after plain HTTP whose `Host` names some other host: the log records where
-that request went, not the address, so its keepalive close is counted here.
+out of the report, except where plain HTTP sent to the address carried a `Host` naming some other
+host: the log records where that request went, not the address, so its keepalive close is counted
+here.
 
 What clears one is a rule, though not a host rule. For traffic that is not HTTP, add the port to
 `allowed-ip-rules` or the name to `allowed-tls-rules`, and the connection is passed through
@@ -1059,15 +1060,15 @@ this:
   mode does, so only what the entry adds below one is checked: `~/.cache` works where `/home` links
   to `/var/home`.
 - A path that doesn't already exist is created before the step runs, always as a directory, the same
-  convention Docker itself uses for a bind mount whose host source doesn't exist yet (`docker run
-  -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
+  convention Docker itself uses for a bind mount whose host source doesn't exist yet
+  (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and
   `$GITHUB_STEP_SUMMARY` are the runner's own generated files and must already exist: a missing one
   fails the step instead of being created. Anything else missing (`./dist`, say) is created as a
   directory by the runner user, parents included, which needs the nearest existing parent to be
   writable by it (a tree it owns, or `/tmp`). Under any other parent the step fails before your
   command runs, since the command couldn't write there either. Create such a path in an earlier,
-  non-isolated step and give it to the runner user: `sudo install -d -o "$(id -u)" -g "$(id -g)"
-  /etc/something`.
+  non-isolated step and give it to the runner user:
+  `sudo install -d -o "$(id -u)" -g "$(id -g)" /etc/something`.
 - A created directory stays after the step, as with `docker run -v`, even if the step fails.
   Buildcage never removes one. A directory removed on the runner while a step runs, by a parallel
   step outside any sandbox or a `persistent` sandbox that can write its parent, is detached from
@@ -1168,7 +1169,7 @@ outright, since the writable exceptions are recursive bind-mounts and that direc
 `mount --rbind /` rootfs, so allowing it would re-expose the whole host `/` as a writable copy.
 Entries are normalized first, so `/var/tmp/./buildcage-<uid>` is caught by the same check. This
 guards against an operator's `write-through:` value, not against the command itself. The literal `/`
-is [the opt-out below](#the--opt-out) and skips the guard.
+is [the opt-out below](#the--opt-out) and skips the guard by design.
 
 ### The `/` opt-out
 
@@ -1192,8 +1193,8 @@ to `/` (a miscounted `../`, say) is refused rather than read as the opt-out.
 >   where the command can write, so the host may later run a copy the command replaced. `docker`
 >   also looks for its `docker-credential-*` helpers on the whole `$PATH`, where the command can
 >   plant one.
-> - `$XDG_RUNTIME_DIR` is not masked where it sits outside `/run`, so a `systemd --user` bus there
->   is reachable too.
+> - `$XDG_RUNTIME_DIR` is no longer masked where it sits outside `/run`, so a `systemd --user` bus
+>   there is reachable too.
 > - Symlinks are refused only in the four always-writable paths and other `write-through:` entries,
 >   though the command could replace one anywhere.
 >
