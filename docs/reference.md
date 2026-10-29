@@ -946,10 +946,9 @@ use an expression such as `${{ runner.temp }}` instead.
     run: npm ci && npm run build
 ```
 
-- The directory has to exist. The step fails before setting anything up when it does not, when it
-  is not a directory, or when the step's user cannot enter it without its supplementary groups,
-  which the sandbox drops. It fails before the command runs when the sandbox cannot see it, as under
-  `/dev/shm`, which the sandbox mounts its own copy of.
+- The step fails before the command runs when the directory does not exist, is not a directory, is
+  covered by a mount of the sandbox's own (as under `/dev/shm`), or cannot be entered by the step's
+  user without its supplementary groups, which the sandbox drops.
 - Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with

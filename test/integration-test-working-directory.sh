@@ -2,7 +2,7 @@
 # Verifies working-directory: by driving dist/main.cjs directly. The command
 # starts there with PWD set to it, a relative write-through path and config-file
 # resolve against it, and a directory that is missing or that the sandbox
-# mounts over fails the step before anything is created.
+# mounts over fails the step, the missing one left uncreated.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 

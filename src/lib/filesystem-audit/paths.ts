@@ -117,11 +117,10 @@ export function relativize(path: string, prefixes: Prefixes): string {
 const under = (path: string, prefix: string): boolean =>
   path === prefix || path.startsWith(`${prefix}/`);
 
-/** The path as relativize shows it, and as it would without the working
- *  directory, where that differs: a rule may name it either way. */
+/** The path as relativize shows it and, in the working directory, as it
+ *  would show without one: a rule may name it either way. */
 export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
   const shown = relativize(path, prefixes);
-  // A path outside the working directory shows the same either way.
   return under(shown, ".") ? [shown, relativize(path, { ...prefixes, cwd: [] })] : [shown];
 }
 

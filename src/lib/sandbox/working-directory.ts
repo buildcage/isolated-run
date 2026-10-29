@@ -23,7 +23,7 @@ export interface WorkingDirectory {
   dir: string;
   /** With symlinks resolved: where the command starts. */
   real: string;
-  /** Whether `dir` is the workspace anyway, as `.` or its full path names it. */
+  /** Whether `dir` is the workspace, however spelled. */
   isWorkspace: boolean;
 }
 
@@ -100,11 +100,9 @@ export function readWorkingDirectory(
 }
 
 /**
- * Why the sandbox would not start in `cwd`, or undefined if it would. The last
- * mount covering it decides: one that shows the host's own path there leaves
- * it as it is on the host, while a fresh filesystem (a tmpfs, /proc, /dev) or
- * a bind of something else would leave runc to create an empty one in its
- * place, silently.
+ * Why the sandbox would not show the host's `cwd`, or undefined. The last
+ * mount covering it decides: anything but a bind or overlay of the host's own
+ * path hides it, and runc would silently create an empty one there.
  */
 export function hiddenWorkingDirectory(
   cwd: string,

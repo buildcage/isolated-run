@@ -296,7 +296,6 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   }
   // Before config-file, whose path is relative to it.
   const workingDirectory = deps.readWorkingDirectory(env);
-  // What relative paths join to: the workspace when the input is not set.
   const baseDir = workingDirectory?.dir ?? workingDirectoryOf(env);
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS, baseDir);
   if (configFile?.warning) deps.warn(configFile.warning);

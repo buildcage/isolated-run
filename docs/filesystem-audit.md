@@ -530,11 +530,10 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 - **Path**: as the table shows it, `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest
   of the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without
   its ` (deleted)`. A path in the working directory also matches as `$GITHUB_WORKSPACE/` names it,
-  so `$GITHUB_WORKSPACE/web/dist/**` takes `./dist/x` under `working-directory: web`, and a rule
-  shared by steps in different directories can name the workspace that way. This holds without
-  `working-directory` too: `$GITHUB_WORKSPACE/dist/**` takes `./dist/x`. A name a command passed
-  keeps its trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches within
-  one component of a path, and `**` across them, as a whole component any number of them:
+  with or without `working-directory`, so steps in different directories can share a rule: under
+  `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` takes `./dist/x`. A name a command
+  passed keeps its trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches
+  within one component of a path, and `**` across them, as a whole component any number of them:
   `./dist/**` matches `./dist` and everything under it. Inside a component, `**` still crosses
   them: `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows
   as `\*`, which matches only a star. Regular expressions are not supported.

@@ -260,7 +260,6 @@ export function readStepFilesystemAudit(
     // Only a prepared directory takes the proposed rules.
     propose: prepared,
   };
-  // The legend names the working directory only where `./` is not the workspace.
   const cwdNamed =
     workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath)
       ? relativize(workingDirectory, { ...options, cwd: [] })
