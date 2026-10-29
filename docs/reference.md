@@ -10,6 +10,7 @@ details.
 - [Action inputs](#action-inputs)
   - [General inputs](#general-inputs)
   - [Network inputs](#network-inputs)
+    - [Rule inputs](#rule-inputs)
   - [AWS key check inputs](#aws-key-check-inputs)
   - [Filesystem inputs](#filesystem-inputs)
   - [Filesystem audit inputs](#filesystem-audit-inputs)
@@ -46,10 +47,10 @@ details.
 | --------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
 | `proxy-mode`                      | `restrict` | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                      |
 | `proxy-engine`                    | `inspect`  | `inspect` or `universal`. See [Engines](../README.md#engines).                                                       |
-| `fail-on-blocked`                 | `true`     | Fail the step when a connection was blocked, in `restrict` mode.                                                     |
+| `fail-on-blocked`                 | `true`     | Fail the step when a connection was blocked; ignored in `audit` mode.                                                |
 | `fail-on-ca-residue`              | `true`     | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium). |
 | `upload-traffic-artifact`         | `false`    | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                           |
-| `traffic-artifact-retention-days` | empty      | How long to keep that artifact, in days.                                                                             |
+| `traffic-artifact-retention-days` | empty      | How long to keep that artifact, in days. See [Spellings and values](#spellings-and-values).                          |
 
 #### Rule inputs
 
@@ -88,10 +89,10 @@ starts; write fewer, broader rules, such as [wildcards](#wildcards). This only m
 
 Both are `inspect` only and **experimental**. See [AWS access key check](#aws-access-key-check).
 
-| Input                       | Default | Description                                                                        |
-| --------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `aws-key-check`             | `false` | Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`. |
-| `allowed-aws-role-accounts` | empty   | AWS accounts whose roles the step may assume. Requires `aws-key-check: true`.      |
+| Input                       | Default | Description                                                                                                                                                                            |
+| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aws-key-check`             | `false` | Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`.                                                                                                     |
+| `allowed-aws-role-accounts` | empty   | AWS accounts whose roles the step may assume; the keys those roles issue, and static CodeCommit Git credentials of these accounts, pass the check too. Requires `aws-key-check: true`. |
 
 ### Filesystem inputs
 
@@ -104,13 +105,13 @@ Both are `inspect` only and **experimental**. See [AWS access key check](#aws-ac
 
 All of these are **experimental**. See [Filesystem audit](#filesystem-audit).
 
-| Input                              | Default | Description                                                                                                                          |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `filesystem-audit`                 | `off`   | `off` or `record`; `record` logs the step's file accesses.                                                                           |
-| `expected-filesystem-rules`        | empty   | The file accesses the step is expected to make; the summary then lists only those outside them. Requires `filesystem-audit: record`. |
-| `fail-on-unexpected-file-access`   | `false` | Fail the step on an access outside `expected-filesystem-rules`, in `audit` mode too. Requires `filesystem-audit: record`.            |
-| `upload-filesystem-audit-artifact` | `false` | Upload the filesystem audit's full record as an artifact.                                                                            |
-| `filesystem-audit-retention-days`  | empty   | How long to keep that artifact, in days.                                                                                             |
+| Input                              | Default | Description                                                                                                                                                                                             |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filesystem-audit`                 | `off`   | `off` or `record`; `record` logs the step's file accesses.                                                                                                                                              |
+| `expected-filesystem-rules`        | empty   | The file accesses the step is expected to make; the summary then lists only those outside them. Requires `filesystem-audit: record`.                                                                    |
+| `fail-on-unexpected-file-access`   | `false` | Fail the step when an access fell outside `expected-filesystem-rules` (any access, when there are none) or could not be checked against them, in `audit` mode too. Requires `filesystem-audit: record`. |
+| `upload-filesystem-audit-artifact` | `false` | Upload the filesystem audit's full record as an artifact.                                                                                                                                               |
+| `filesystem-audit-retention-days`  | empty   | How long to keep that artifact, in days. See [Spellings and values](#spellings-and-values).                                                                                                             |
 
 ### Spellings and values
 
@@ -119,10 +120,11 @@ Each input named with hyphens also takes its name spelled with underscores (`pro
 rule inputs, `write-through`, `expected-filesystem-rules`) takes the lines of both, and any other
 input takes the hyphenated value, warning when the two differ.
 
-An input whose default is `true` or `false` takes only those two values, and a `-retention-days`
-input takes a whole number of days above zero, lowered with a warning to the repository's maximum.
-Left empty, each input takes its default, which for a `-retention-days` input is the repository's
-own; any other value fails the step before the sandbox is set up.
+An input whose default is `true` or `false` takes only those two values, `filesystem-mode` and
+`filesystem-audit` only the two their rows name, and a `-retention-days` input a whole number of
+days above zero, lowered with a warning to the repository's maximum. Left empty, each input takes
+its default, which for a `-retention-days` input is the repository's own; any other value fails the
+step before the sandbox is set up.
 
 ## Config file
 
