@@ -89,7 +89,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(ruleFiles).toStrictEqual([
       {
         path: RULES,
-        content: [...RULES_TO_ADD_HEADER, "node  W  ./b", ""].join("\n"),
+        content: [...RULES_TO_ADD_HEADER, "", "node  W  ./b", ""].join("\n"),
       },
     ]);
     expect(writes[0].content.split("\n").slice(0, 2)).toStrictEqual([
@@ -136,7 +136,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     expect(md).toContain("Once `expected_filesystem_rules` lists the file accesses");
     expect(md).toContain("has a rule for each access.");
     expect(ruleFiles.map((f) => f.content)).toStrictEqual([
-      [...RULES_TO_ADD_HEADER, "node  R  ./a", "node  W  ./b", ""].join("\n"),
+      [...RULES_TO_ADD_HEADER, "", "node  R  ./a", "node  W  ./b", ""].join("\n"),
     ]);
   });
 
@@ -284,7 +284,7 @@ describe("readStepFilesystemAudit: expected_filesystem_rules", () => {
     await read.upload();
 
     expect(ruleFiles.map((f) => f.content)).toStrictEqual([
-      [...RULES_TO_ADD_HEADER, "node  W  ./b", ""].join("\n"),
+      [...RULES_TO_ADD_HEADER, "", "node  W  ./b", ""].join("\n"),
     ]);
   });
 

@@ -7,6 +7,7 @@
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
+import { RECORD_FILE } from "../sandbox/filesystem-audit-paths.ts";
 import { field } from "./escape.ts";
 import { MEMFD_PREFIX } from "./paths.ts";
 import type { AuditSummary, RuleRow } from "./reduce.ts";
@@ -37,20 +38,33 @@ export const UPLOAD_NOTE = "# Needed for the proposed rules; also uploads the fu
 export const RULES_TO_ADD_HEADER = [
   `# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
   `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`,
+  "#",
+  "# Each line is <program> <access> <path>. In a program or path, * matches within one",
+  "# component and ** across them; ./ is the workspace and ~/ is $HOME. A part that",
+  "# changes between runs needs * or ** to match the next run.",
+  "#",
+  "# A dir/** rule stands for everything the run touched under one directory; check what",
+  "# it covers before adding it. Where the files under it matter, find them in",
+  `# ${RECORD_FILE} in this artifact and list them instead.`,
 ];
 
-/** The proposed rules, in columns, under the header. */
+/** The proposed rules under the header, a block per program with its accesses
+ *  in a column, so one long program path widens only its own block. */
 export function rulesToAdd(proposed: RuleRow[]): string {
-  const rows = proposed.map((r) => [ruleField(r.program.path), r.flags, ruleField(r.path.path)]);
-  const width = (i: number): number => rows.reduce((m, row) => Math.max(m, row[i].length), 0);
-  const [programW, flagsW] = [width(0), width(1)];
-  return [
-    ...RULES_TO_ADD_HEADER,
-    ...rows.map(
-      ([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`,
-    ),
-    "",
-  ].join("\n");
+  const blocks: string[][][] = [];
+  for (const r of proposed) {
+    const row = [ruleField(r.program.path), r.flags, ruleField(r.path.path)];
+    const last = blocks.at(-1);
+    if (last?.[0][0] === row[0]) last.push(row);
+    else blocks.push([row]);
+  }
+  const lines = blocks.map((block) => {
+    const flagsW = block.reduce((m, [, flags]) => Math.max(m, flags.length), 0);
+    return block
+      .map(([program, flags, path]) => `${program}  ${flags.padEnd(flagsW)}  ${path}`)
+      .join("\n");
+  });
+  return [...RULES_TO_ADD_HEADER, "", lines.join("\n\n"), ""].join("\n");
 }
 
 /**

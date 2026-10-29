@@ -395,10 +395,16 @@ install against a baseline.
    ```text
    # Rules for the file accesses no expected_filesystem_rules matched in this run.
    # Review them, then add them to expected_filesystem_rules, under with: or in a config_file.
+   # ...
+
    /usr/local/bin/node  RWD  ./node_modules/**
    /usr/local/bin/node  R    ~/.npmrc
-   bash                 X    /usr/local/bin/node
+
+   bash  X  /usr/local/bin/node
    ```
+
+   The rest of the header sums up the rule syntax and asks for each `dir/**` rule to be checked.
+   Each program's rules form a block.
 
 2. Review the rules. A path that changes from run to run, such as a temporary file with a random
    name, or a directory where a run touched two files and the next will touch a third, needs `*` or
@@ -412,9 +418,12 @@ install against a baseline.
    ```
 
    These match any Node version on x64 or arm64. A broad rule such as `~/**` also matches
-   what is worth seeing, such as `~/.ssh`, so widen no further than needed.
+   what is worth seeing, such as `~/.ssh`, so widen no further than needed. Check what a proposed
+   `dir/**` rule covers before adding it: where the files under it matter, find them in the
+   artifact's `filesystem-audit.jsonl` and list them instead.
 
-3. Add the rule lines to `expected_filesystem_rules`, without the file's two comment lines:
+3. Add the rule lines to `expected_filesystem_rules`. Comment and blank lines are skipped, so
+   they can stay:
 
    ```yaml
    - uses: buildcage/isolated-run@<sha>
@@ -424,7 +433,8 @@ install against a baseline.
        expected_filesystem_rules: |
          /usr/local/bin/node  RWD  ./node_modules/**
          /usr/local/bin/node  R    ~/.npmrc
-         bash                 X    /usr/local/bin/node
+
+         bash  X  /usr/local/bin/node
        run: npm ci
    ```
 
@@ -439,7 +449,8 @@ install against a baseline.
    expected_filesystem_rules: |
      /usr/local/bin/node  RWD  ./node_modules/**
      /usr/local/bin/node  R    ~/.npmrc
-     bash                 X    /usr/local/bin/node
+
+     bash  X  /usr/local/bin/node
    ```
 
    A step matches the workflow's and the config file's rules together, so a rule can sit in either.

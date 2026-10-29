@@ -10,26 +10,32 @@ const row = (program: string, flags: string, path: string) => ({
   path: { path },
 });
 
-// The file's rule lines, without the header.
+// The file's rule lines, without the header and the blank line after it.
 const ruleLines = (file: string): string[] =>
-  file.split("\n").slice(RULES_TO_ADD_HEADER.length, -1);
+  file.split("\n").slice(RULES_TO_ADD_HEADER.length + 1, -1);
 
 describe("rulesToAdd", () => {
-  it("writes the proposed rules in columns under the header", () => {
+  it("writes a block per program under the header, its accesses in a column", () => {
     expect(
       rulesToAdd([
+        row("/usr/local/lib/node_modules/npm/bin/npm-cli.js", "X", "/usr/local/bin/node"),
         row("/usr/bin/node", "RW", "./node_modules/**"),
-        row("bash", "Rr!", "/proc/<pid>/status"),
+        row("/usr/bin/node", "Rr!", "/proc/<pid>/status"),
         row("/opt/my tool", "R", "#x"),
         row("bash", "R", "/proc/<pid>"),
       ]),
     ).toBe(
       [
         ...RULES_TO_ADD_HEADER,
-        "/usr/bin/node   RW   ./node_modules/**",
-        "bash            Rr!  /proc/<pid>/status",
-        '"/opt/my tool"  R    "#x"',
-        "bash            R    /proc/<pid>",
+        "",
+        "/usr/local/lib/node_modules/npm/bin/npm-cli.js  X  /usr/local/bin/node",
+        "",
+        "/usr/bin/node  RW   ./node_modules/**",
+        "/usr/bin/node  Rr!  /proc/<pid>/status",
+        "",
+        '"/opt/my tool"  R  "#x"',
+        "",
+        "bash  R  /proc/<pid>",
         "",
       ].join("\n"),
     );
@@ -38,7 +44,10 @@ describe("rulesToAdd", () => {
   it("reads back as the same rules, header and all, when added to expected_filesystem_rules", () => {
     const file = rulesToAdd([row("bash", "R", "./c"), row("*", "W", "./d/**")]);
     const { rules } = parseExpectedRules([{ text: file, origin: "input", firstLine: 1 }]);
-    expect(rules.map((r) => r.ref)).toStrictEqual(["input:3", "input:4"]);
+    expect(rules.map((r) => r.ref)).toStrictEqual([
+      `input:${RULES_TO_ADD_HEADER.length + 2}`,
+      `input:${RULES_TO_ADD_HEADER.length + 4}`,
+    ]);
   });
 
   it("leaves a memfd's name holding a blank as it is quoted already, so the rule reads back", () => {

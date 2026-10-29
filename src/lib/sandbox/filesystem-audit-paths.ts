@@ -14,6 +14,9 @@ export interface FilesystemAuditPaths {
   rulesPath: string;
 }
 
+/** The uploaded recording's file name, which the proposed rules point to. */
+export const RECORD_FILE = "filesystem-audit.jsonl";
+
 export function filesystemAuditPaths(
   containerName: string,
   scratchBase: string,
@@ -24,7 +27,7 @@ export function filesystemAuditPaths(
     outPath: join(scratchBase, `filesystem-audit-${suffix}.jsonl`),
     pidFilePath: join(scratchBase, `filesystem-audit-${suffix}.pid`),
     uploadDir,
-    stepPath: join(uploadDir, "filesystem-audit.jsonl"),
+    stepPath: join(uploadDir, RECORD_FILE),
     rulesPath: join(uploadDir, "expected-filesystem-rules-to-add.txt"),
   };
 }
