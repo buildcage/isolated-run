@@ -27,7 +27,8 @@ details.
 
 `run` is the only required input. Each input named with hyphens also takes its name spelled with
 underscores (`proxy_mode` for `proxy-mode`), as earlier versions named it. When a workflow sets both
-spellings, the hyphenated one wins and the step warns.
+spellings, a list input (the rule inputs, `write-through`, `expected-filesystem-rules`) takes the
+lines of both, and any other input takes the hyphenated value, warning when the two differ.
 
 | Input                              | Default      | Description                                                                                                                                                                                                                                                                 |
 | ---------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -80,7 +81,7 @@ Setting a rule the engine can't act on is caught before the command starts: `res
 a rule that looks like it protects the step but cannot be enforced is worse than none, and `audit`
 warns and ignores it.
 
-Each `allowed_*` input can hold about 128 KiB of rules, the most Linux passes in one environment
+Each `allowed-*` input can hold about 128 KiB of rules, the most Linux passes in one environment
 variable, counted without comments and blank lines. A larger one fails the step before the command
 starts; write fewer, broader rules, such as [wildcards](#wildcards). This only matters with
 `config-file`, as a workflow's own value already has to fit for the runner to start the step.
@@ -108,8 +109,9 @@ known-blocked-rules: |
 ```
 
 - Each key is an input name, in either spelling, and each value is written as it would be under
-  `with:`. A key that is not an input, an input set under both spellings, `writable` (use
-  `write-through`), a list or a nested mapping fails the step.
+  `with:`. A key that is not an input, `writable` (use `write-through`), a list or a nested mapping
+  fails the step, and so does an input set under both spellings, unless a merge key brings in one of
+  them: the file's own key overrides it.
 - An input the workflow sets wins over the file. The rule inputs, `expected-filesystem-rules`
   among them, and `write-through` are the exception: the file's lines are added to the workflow's.
 - The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
@@ -141,7 +143,7 @@ Each is also set under its name spelled with underscores, `traffic_artifact_name
 `audit` allows what the active engine can classify. A connection it cannot classify, such as an HTTP
 request carrying no `Host` header, is still blocked, on each engine's own terms.
 
-Because `audit` enforces nothing, the `allowed_*_rules` have no effect in it; you write them when
+Because `audit` enforces nothing, the `allowed-*-rules` have no effect in it; you write them when
 you move to `restrict`. Any other `proxy-mode` value, a differently cased one included, fails the
 step.
 
@@ -526,7 +528,7 @@ what changes is only whether the row fails the step.
    The row moves to Known Blocked Hosts, folded under that rule, and stops failing the step. Nothing
    else changes, and the host stays unreachable.
 
-Naming the service name in an `allowed_*` rule also clears the row, but it is the misleading option:
+Naming the service name in an `allowed-*` rule also clears the row, but it is the misleading option:
 it reads as permission to reach something that nothing can connect to, and the record still does not
 resolve.
 
@@ -700,7 +702,7 @@ in `known-blocked-rules`.
 
 None of the four fails the step, not even with `fail-on-blocked: true`, and a `::notice::` gives the
 count. No rule blocked them, so no rule can clear them either: `known-blocked-rules` has nothing to
-match, and an `allowed_*` entry changes nothing. What clears one is the origin coming back, or the
+match, and an `allowed-*` entry changes nothing. What clears one is the origin coming back, or the
 build reaching for something that is up.
 
 A blocked `DNS` row for the same name means something else entirely: that one is Buildcage's own
