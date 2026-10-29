@@ -161,8 +161,9 @@ added:
       print("hello")
 ```
 
-`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step, so
-they have no effect here. Use a shebang and `cd` instead.
+`shell:`, `working-directory:` and the workflow's `defaults.run` do not apply to a `uses:` step. Use
+a shebang for another shell, and the action's own `working-directory` input for another directory;
+see [Working directory](./docs/reference.md#working-directory).
 
 ### Passing values to `run`
 

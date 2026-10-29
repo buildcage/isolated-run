@@ -46,6 +46,16 @@ describe("resolveWriteThroughEntry", () => {
     expect(resolveWriteThroughEntry("dist", ENV)).toBe("/home/runner/work/repo/repo/dist");
   });
 
+  it("resolves a relative path against the working directory when given one", () => {
+    expect(resolveWriteThroughEntry("dist", ENV, "/opt/app")).toBe("/opt/app/dist");
+    expect(resolveWriteThroughEntry("../shared", ENV, `${ENV.GITHUB_WORKSPACE}/app`)).toBe(
+      `${ENV.GITHUB_WORKSPACE}/shared`,
+    );
+    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE/dist", ENV, "/opt/app")).toBe(
+      `${ENV.GITHUB_WORKSPACE}/dist`,
+    );
+  });
+
   it("leaves an absolute path untouched (after normalization)", () => {
     expect(resolveWriteThroughEntry("/usr/local/bin", ENV)).toBe("/usr/local/bin");
   });

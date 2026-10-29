@@ -15,6 +15,7 @@ import type { PostCleanupTargets } from "./lib/post-state.ts";
 import { takeWriteThroughForPost } from "./lib/post-write-through.ts";
 import { pinHostCommands, pinningPaths } from "./lib/sandbox/host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
+import { workingDirectoryOf } from "./lib/sandbox/working-directory.ts";
 
 // Untested by design, down to the end of the file: planPostCleanup decides
 // what may be torn down, and tearing it down is one `docker compose down`.
@@ -51,6 +52,8 @@ function main(): void {
     pinningPaths(
       () => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput,
       process.env,
+      // config-file cannot set it, so the workflow's input is the main step's.
+      workingDirectoryOf(process.env),
     ),
     process.env,
   );

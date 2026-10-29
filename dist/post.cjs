@@ -310,11 +310,13 @@ const LIST_INPUTS = [
 	"upload-filesystem-audit-artifact",
 	"filesystem-audit-retention-days",
 	"fail-on-unexpected-file-access",
-	"label"
+	"label",
+	"working-directory"
 ], NOT_IN_CONFIG_FILE = [
 	"run",
 	"config-file",
-	"writable"
+	"writable",
+	"working-directory"
 ], CONFIG_FILE_INPUTS = {
 	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
 	lists: LIST_INPUTS
@@ -323,13 +325,13 @@ function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$3 = getInput) {
+function readFilesystemInputs(notice, getInput$10 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem-mode")),
+		filesystemMode: resolveFilesystemMode(getInput$10("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$3("write-through"),
-			writable: getInput$3("writable"),
-			allowWrite: getInput$3("allow_write")
+			writeThrough: getInput$10("write-through"),
+			writable: getInput$10("writable"),
+			allowWrite: getInput$10("allow_write")
 		}, notice)
 	};
 }
@@ -928,14 +930,14 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env) {
+function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(baseDir || "", tildeExpanded);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
 	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
@@ -944,9 +946,9 @@ function resolveWriteThroughEntry(rawLine, env) {
 function splitWriteThroughInput(input) {
 	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
 }
-function resolveWriteThroughPaths(input, env) {
+function resolveWriteThroughPaths(input, env, baseDir) {
 	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
@@ -1042,12 +1044,17 @@ function pinHostCommands(paths, env, deps = realFindCommandDeps) {
 	}
 	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
 }
-function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
+function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf) {
 	let writeThroughPaths = [];
 	try {
-		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env, baseDir);
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
+}
+const withoutTrailingSlash = (path) => path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+function workingDirectoryOf(env) {
+	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
+	if ((0, node_path.isAbsolute)(input) || workspace) return withoutTrailingSlash((0, node_path.normalize)((0, node_path.isAbsolute)(input) ? input : (0, node_path.join)(workspace, input)));
 }
 //#endregion
 //#region src/post.ts
@@ -1067,7 +1074,7 @@ async function stopProxyContainer({ containerName, projectName }) {
 function main() {
 	normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
 	let savedWriteThrough = takeWriteThroughForPost(process.env);
-	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
+	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env, workingDirectoryOf(process.env)), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")

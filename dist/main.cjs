@@ -15462,16 +15462,16 @@ function isOutside(root, path) {
 	let inside = (0, node_path.relative)(root, path);
 	return inside === ".." || inside.startsWith(`..${node_path.sep}`);
 }
-function resolveConfigPath(path, env) {
+function resolveConfigPath(path, env, baseDir) {
 	let pathError = (reason) => new ConfigFileError(`config-file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
-	if ((0, node_path.isAbsolute)(path)) throw pathError("must be relative to the workspace.");
-	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(workspace, path);
+	if ((0, node_path.isAbsolute)(path)) throw pathError("must be a relative path.");
+	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(baseDir ?? workspace, path);
 	if (isOutside(workspace, full)) throw pathError("leads outside the workspace.");
 	let real;
 	try {
 		real = (0, node_fs.realpathSync)(full);
 	} catch {
-		throw pathError("was not found in the workspace. Check out the repository in an earlier step.");
+		throw pathError("was not found. Check out the repository in an earlier step.");
 	}
 	if (isOutside((0, node_fs.realpathSync)(workspace), real)) throw pathError("leads outside the workspace.");
 	return real;
@@ -15537,11 +15537,11 @@ function parseConfig(text, path, known) {
 	}
 	return values;
 }
-function applyConfigFile(env, { known, lists }) {
+function applyConfigFile(env, { known, lists }, baseDir) {
 	let path = env[inputEnvName("config-file")]?.trim() ?? "";
 	if (!path) return;
 	refuseUntrustedEvent(env);
-	let full = resolveConfigPath(path, env), text;
+	let full = resolveConfigPath(path, env, baseDir), text;
 	try {
 		text = (0, node_fs.readFileSync)(full, "utf8");
 	} catch (e) {
@@ -72563,33 +72563,44 @@ function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
 }
 const unmarked = (path) => path.endsWith(DELETED) ? path.slice(0, -DELETED.length) : path, leaf = (path) => path.slice(path.lastIndexOf("/") + 1), isRunnerFile = (path) => path.startsWith("\0$"), hasKnownStart = (path) => path.startsWith("/") || path.startsWith("…/") || path.startsWith(MEMFD) || isRunnerFile(path), unfoldable = (parts, path) => parts.includes("..") || path.startsWith(MEMFD) || isRunnerFile(path), PROC_NUMBERS = /^\/proc\/(?:(thread-self)|(\d+|<pid>|self)(\/task\/(?:\d+|<tid>))?)(?=\/|$|\0)/, spelledSelf = (proc) => proc === "self", unnumbered = (path, own = spelledSelf) => path.replace(PROC_NUMBERS, (_, threadSelf, proc, task) => `/proc/${own(threadSelf ? "self" : proc) ? "self" : "<pid>"}${threadSelf || task ? "/task/<tid>" : ""}`);
-function normalize$2(path, self) {
+function normalize$3(path, self) {
 	let own = self === void 0 ? () => !1 : (proc) => proc === "self" || proc === String(self);
 	return unnumbered(path.replace(/^\.\//, ""), own);
 }
+function shownPrefixes({ cwd, workspace, home }) {
+	return [
+		[cwd ?? workspace, "."],
+		[cwd ? workspace : [], "$GITHUB_WORKSPACE"],
+		[home, "~"]
+	];
+}
 function relativize(path, prefixes) {
 	if (isRunnerFile(path)) return `$${path.slice(2)}`;
-	for (let ws of prefixes.workspace) {
-		if (path === ws) return ".";
-		if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-	}
-	for (let home of prefixes.home) {
-		if (path === home) return "~";
-		if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+	for (let [spellings, shown] of shownPrefixes(prefixes)) for (let p of spellings) {
+		if (path === p) return shown;
+		if (path.startsWith(`${p}/`)) return `${shown}/${path.slice(p.length + 1)}`;
 	}
 	return path;
+}
+function ruleSpellings(path, prefixes) {
+	let shown = relativize(path, prefixes), other = relativize(path, {
+		...prefixes,
+		cwd: []
+	});
+	return other === shown ? [shown] : [shown, other];
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
-	for (let spellings of [prefixes.workspace, prefixes.home]) for (let spelling of spellings) {
+	for (let [spellings] of shownPrefixes(prefixes)) for (let spelling of spellings) {
 		if (path === spelling) return spellings[0];
 		if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
 	}
 	return path;
 }
+const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 function sortKey(path) {
-	return path === "." || path.startsWith("./") ? [0, path] : path === "~" || path.startsWith("~/") ? [1, path] : [2, path];
+	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
 }
 function components(p) {
 	return p === "/" ? ["/"] : p.startsWith("/") ? ["/", ...p.slice(1).split("/")] : p.split("/");
@@ -72803,15 +72814,18 @@ var RuleMatcher = class {
 		}
 		for (let i of node.rules) into.add(i);
 	}
-	candidates(path) {
+	candidates(paths) {
 		let found = new Set();
-		this.startingAt(path, found);
-		let any = asAnyProcess(path);
-		return any !== void 0 && this.startingAt(any, found), [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
+		for (let path of paths) {
+			this.startingAt(path, found);
+			let any = asAnyProcess(path);
+			any !== void 0 && this.startingAt(any, found);
+		}
+		return [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
 	}
 	match(program, path, bits, failed, perm) {
-		let key = `${program}\0${path}`, candidates = this.cache.get(key);
-		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.candidates(path).filter((r) => (r.program === void 0 || r.program.test(program)) && r.path.test(path)), this.cache.set(key, candidates));
+		let programs = typeof program == "string" ? [program] : program, paths = typeof path == "string" ? [path] : path, key = `${programs.join("\0")}\0\0${paths.join("\0")}`, candidates = this.cache.get(key);
+		candidates || (this.cache.size >= 1e5 && this.cache.clear(), candidates = this.candidates(paths).filter((r) => (r.program === void 0 || programs.some((p) => r.program.test(p))) && paths.some((p) => r.path.test(p))), this.cache.set(key, candidates));
 		let unmatched = 0, ref;
 		for (let c of ORDER) {
 			let bit = BIT[c];
@@ -72832,8 +72846,9 @@ const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || 
 	`# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config-file.`,
 	"#",
 	"# Each line is <program> <access> <path>. In a program or path, * matches within one",
-	"# component and ** across them; ./ is the workspace and ~/ is $HOME. A part that",
-	"# changes between runs needs * or ** to match the next run.",
+	"# component and ** across them; ./ is the working directory, $GITHUB_WORKSPACE/ the",
+	"# workspace and ~/ $HOME. A part that changes between runs needs * or ** to match",
+	"# the next run.",
 	"#",
 	"# A dir/** rule stands for everything the run touched under one directory; check what",
 	"# it covers before adding it. Where the files under it matter, find them in",
@@ -73243,6 +73258,7 @@ function createAuditSummary(prefixes) {
 			images.delete(proc);
 		}
 	}, shownPrefixes = {
+		...prefixes.cwd && { cwd: prefixes.cwd.slice(0, 1).map(escapePath) },
 		workspace: prefixes.workspace.slice(0, 1).map(escapePath),
 		home: prefixes.home.slice(0, 1).map(escapePath)
 	}, fanout = prefixes.fanout ?? 3, keep = [
@@ -73259,6 +73275,7 @@ function createAuditSummary(prefixes) {
 		...(prefixes.toolCache ?? []).map((p) => escapePath(canonical(p, prefixes))),
 		"/root",
 		"…",
+		...shownPrefixes.cwd ?? [],
 		...shownPrefixes.workspace,
 		...shownPrefixes.home,
 		...[...shownPrefixes.home, "/root"].flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
@@ -73280,13 +73297,13 @@ function createAuditSummary(prefixes) {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {
 			r = ranks.length, rankOf.set(id, r);
-			let s = name ? { path: escapeForDisplay(key) } : shown(escaped(key)), bytes = s.path.length + (s.deleted ? 10 : 0), rule = name ? s.path : ruleName(escaped(key)), ruleId = ruleIds.get(rule) ?? r;
+			let s = name ? { path: escapeForDisplay(key) } : shown(escaped(key)), bytes = s.path.length + (s.deleted ? 10 : 0), names = name ? [s.path] : ruleNames(escaped(key)), rule = names[0], ruleId = ruleIds.get(rule) ?? r;
 			ruleIds.set(rule, ruleId), ranks.push({
 				shown: s,
 				bytes,
 				leaf: leaf(s.path).length,
 				...name ? {} : { program: key },
-				ruleName: rule,
+				ruleNames: names,
 				ruleId
 			});
 		}
@@ -73310,8 +73327,8 @@ function createAuditSummary(prefixes) {
 		rowBytes: () => 0,
 		showWalked: !0
 	}), {
-		program: (rank) => ranks[rank].ruleName,
-		path: ruleName
+		program: (rank) => ranks[rank].ruleNames,
+		path: ruleNames
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
 		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
 		if (!tally.take(x, deletedPath ? components(path) : parts, id, path, cmd) || tally.givenUp) return;
@@ -73363,7 +73380,7 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
 		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
+			let p = walk(normalize$3(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
@@ -73372,7 +73389,7 @@ function createAuditSummary(prefixes) {
 				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
-					path: walk(escaped(normalize$2(path, nsPids.get(r.pid)))),
+					path: walk(escaped(normalize$3(path, nsPids.get(r.pid)))),
 					bit: bitsOf(c.letter),
 					failed: c.failed,
 					perm: c.perm,
@@ -73407,7 +73424,10 @@ function createAuditSummary(prefixes) {
 		} : { path: relativize(path, shownPrefixes) };
 	}
 	function ruleName(path) {
-		return path.startsWith(MEMFD) ? `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"` : relativize(unmarked(path), shownPrefixes);
+		return ruleNames(path)[0];
+	}
+	function ruleNames(path) {
+		return path.startsWith(MEMFD) ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), shownPrefixes);
 	}
 	function ruleRowsOf(tally) {
 		return tally.finish()?.map(({ rank, path, agg }) => {
@@ -73700,8 +73720,9 @@ ${EXPECTED_RULES_INPUT}: |\n  /usr/local/bin/node  RWD  ./node_modules/**
 
 `;
 }
-function filesystemLegendNote(artifact, guideUrl) {
-	return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${artifact === "not-requested" ? "set `upload-filesystem-audit-artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`} · [how to read this](${guideUrl})`;
+function filesystemLegendNote(artifact, guideUrl, cwd) {
+	let record = artifact === "not-requested" ? "set `upload-filesystem-audit-artifact: true` for the full record" : artifact === "upload-failed" ? "the full record could not be uploaded" : `the full record is in the ${artifactLink(artifact)}`;
+	return `${cwd ? `${codeSpan("./")} ${codeSpan(cwd)} · ${codeSpan("$GITHUB_WORKSPACE/")} workspace` : "`./` workspace"} · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 function filesystemTruncationNote(artifact, cause = "size") {
 	let rest = artifact === "not-requested" ? "set upload-filesystem-audit-artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
@@ -73849,6 +73870,131 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
+//#region src/lib/sandbox/paths.ts
+function isAtOrUnder(path, ancestor) {
+	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
+}
+function pathsOverlap(a, b) {
+	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
+}
+function pathAliases(mounts, path) {
+	let owner = mountAt(mounts, path);
+	if (!owner) return [];
+	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
+	for (let m of mounts) {
+		if (m.device !== owner.device) continue;
+		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
+		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
+	}
+	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
+}
+function mountAt(mounts, path) {
+	let found;
+	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
+	return found;
+}
+var WritablePathConflictError = class extends Error {};
+function assertScratchBaseNotWritable(writableDirs) {
+	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
+	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+}
+//#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+const withoutTrailingSlash = (path) => path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+function workingDirectoryOf(env) {
+	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
+	if ((0, node_path.isAbsolute)(input) || workspace) return withoutTrailingSlash((0, node_path.normalize)((0, node_path.isAbsolute)(input) ? input : (0, node_path.join)(workspace, input)));
+}
+function isWorkspace(dir, env) {
+	let spelled = (path) => withoutTrailingSlash((0, node_path.normalize)(path));
+	return !!env.GITHUB_WORKSPACE && spelled(dir) === spelled(env.GITHUB_WORKSPACE);
+}
+const invalid = (message) => new SandboxError(message, "INVALID_WORKING_DIRECTORY");
+function readWorkingDirectory(env, { realpath = realPathOf, stat = node_fs.statSync } = {}) {
+	let input = env[inputEnvName("working-directory")]?.trim() ?? "";
+	if (!input) return;
+	let dir = workingDirectoryOf(env);
+	if (!dir) throw invalid(`working-directory ${JSON.stringify(input)} is relative and $GITHUB_WORKSPACE is not set.`);
+	let real;
+	try {
+		real = realpath(dir);
+	} catch {
+		let hint = /^~|\$/.test(input) ? " Variables and ~ are not expanded; use an expression such as ${{ runner.temp }}." : "";
+		throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) does not exist.${hint}`);
+	}
+	if (!stat(real).isDirectory()) throw invalid(`working-directory ${JSON.stringify(input)} (${dir}) is not a directory.`);
+	return {
+		input,
+		dir,
+		real,
+		isWorkspace: isWorkspace(dir, env)
+	};
+}
+function hiddenWorkingDirectory(cwd, mounts, maskedPaths) {
+	let masked = maskedPaths.find((path) => isAtOrUnder(cwd, path));
+	if (masked) return `${masked} is hidden from the sandbox`;
+	let covering = mounts.findLast((m) => isAtOrUnder(cwd, m.destination));
+	if (!covering) return;
+	let { destination, type, source, options = [] } = covering;
+	return (type === "overlay" ? options.includes(`lowerdir=${destination}`) : options.some((o) => o === "bind" || o === "rbind") && source === destination) ? void 0 : `the sandbox mounts its own ${destination}`;
+}
+function searchable(st, uid, gid) {
+	return st.uid === uid ? !!(st.mode & 64) : st.gid === gid ? !!(st.mode & 8) : !!(st.mode & 1);
+}
+function unsearchableAncestor(real, { uid, gid }, stat = node_fs.statSync) {
+	let dirs = [];
+	for (let d = real; dirs.unshift(d), d !== "/"; d = (0, node_path.dirname)(d));
+	return dirs.find((d) => !searchable(stat(d), uid, gid));
+}
+function assertSandboxCanEnter(wd, spec, stat) {
+	let hidden = hiddenWorkingDirectory(wd.real, spec.mounts, spec.maskedPaths);
+	if (hidden) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: ${hidden}.`);
+	let blocked = unsearchableAncestor(wd.real, spec, stat);
+	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.real}) is unusable: the sandbox's user (uid ${spec.uid}, gid ${spec.gid}, no supplementary groups) cannot search ${blocked}.`);
+}
+//#endregion
 //#region src/lib/filesystem-audit/line-file.ts
 const CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
@@ -73917,7 +74063,7 @@ function runnerFiles(env, mediated, realpath) {
 	return out;
 }
 const NONE = { blocks: () => [] }, NO_RULES = { rules: [] }, filesystemAuditGuide = (actionRepo, actionRef) => `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, workingDirectory = env.GITHUB_WORKSPACE, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -73941,13 +74087,17 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), prepared = !1;
 	}
 	let options = {
+		cwd: prefixes(workingDirectory, deps.realpath),
 		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
 		home: prefixes(env.HOME, deps.realpath),
 		toolCache: prefixes(env.RUNNER_TOOL_CACHE, deps.realpath),
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
-	}, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env) ? relativize(workingDirectory, {
+		...options,
+		cwd: []
+	}) : void 0, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {
@@ -73978,7 +74128,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					startedAt,
 					priorities: FILESYSTEM_PRIORITIES,
 					cutNote,
-					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
+					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`, cwdNamed),
 					skippedHooksUrl: `${guide}#skipped-hooks`,
 					...given && { expected: hasRules ? "given" : "empty" },
 					rulesNote: rulesNote(proposalOf(proposed, artifact), {
@@ -74068,50 +74218,6 @@ function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	return { expected: rules };
 }
 //#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
-//#endregion
 //#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
@@ -74127,14 +74233,14 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env) {
+function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(env.GITHUB_WORKSPACE || "", tildeExpanded);
+	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(baseDir || "", tildeExpanded);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
 	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
@@ -74143,9 +74249,9 @@ function resolveWriteThroughEntry(rawLine, env) {
 function splitWriteThroughInput(input) {
 	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
 }
-function resolveWriteThroughPaths(input, env) {
+function resolveWriteThroughPaths(input, env, baseDir) {
 	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
 }
 var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
 function defaultExists(path) {
@@ -74193,9 +74299,10 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 }
 //#endregion
 //#region src/lib/filesystem-example-inputs.ts
-function filesystemExampleInputs({ filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
+const yamlScalar = (text) => /^[\w/][\w./-]*$/.test(text) ? text : JSON.stringify(text);
+function filesystemExampleInputs({ workingDirectory, filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
 	let lines = [];
-	filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
+	workingDirectory && !workingDirectory.isWorkspace && lines.push(`working-directory: ${yamlScalar(workingDirectory.input)}`), filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
 	let paths = splitWriteThroughInput(writeThroughInput);
 	return paths.length > 0 && lines.push("write-through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem-audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config-file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail-on-unexpected-file-access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail-on-unexpected-file-access: true"), lines;
 }
@@ -74245,11 +74352,13 @@ const LIST_INPUTS = [
 	"upload-filesystem-audit-artifact",
 	"filesystem-audit-retention-days",
 	"fail-on-unexpected-file-access",
-	"label"
+	"label",
+	"working-directory"
 ], NOT_IN_CONFIG_FILE = [
 	"run",
 	"config-file",
-	"writable"
+	"writable",
+	"working-directory"
 ], CONFIG_FILE_INPUTS = {
 	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
 	lists: LIST_INPUTS
@@ -74258,63 +74367,63 @@ function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, noti
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$7 = getInput) {
-	let runInput = getInput$7("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$5 = getInput) {
+	let runInput = getInput$5("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$8 = getInput) {
+function readProxyInputs(getInput$4 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$8("proxy-engine")),
-		proxyMode: resolveProxyMode(getInput$8("proxy-mode"))
+		proxyEngine: resolveProxyEngine(getInput$4("proxy-engine")),
+		proxyMode: resolveProxyMode(getInput$4("proxy-mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$3 = getInput) {
+function readFilesystemInputs(notice, getInput$10 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$3("filesystem-mode")),
+		filesystemMode: resolveFilesystemMode(getInput$10("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$3("write-through"),
-			writable: getInput$3("writable"),
-			allowWrite: getInput$3("allow_write")
+			writeThrough: getInput$10("write-through"),
+			writable: getInput$10("writable"),
+			allowWrite: getInput$10("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$2 = getInput) {
-	return resolveFilesystemAudit(getInput$2("filesystem-audit"));
+function readFilesystemAuditInput(getInput$8 = getInput) {
+	return resolveFilesystemAudit(getInput$8("filesystem-audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$4 = getInput) {
-	let days = getInput$4("filesystem-audit-retention-days");
+function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
+	let days = getInput$2("filesystem-audit-retention-days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$4),
+		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$2),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$5 = getInput) {
-	return getInput$5("label") || void 0;
+function readStepLabel(getInput$3 = getInput) {
+	return getInput$3("label") || void 0;
 }
-function readFailOnCaResidue(getInput$1 = getInput) {
-	return readBooleanInput("fail-on-ca-residue", !0, getInput$1);
+function readFailOnCaResidue(getInput$9 = getInput) {
+	return readBooleanInput("fail-on-ca-residue", !0, getInput$9);
 }
-function readFailOnBlocked(getInput$6 = getInput) {
-	return readBooleanInput("fail-on-blocked", !0, getInput$6);
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail-on-blocked", !0, getInput$1);
 }
-function readFailOnUnexpectedFileAccess(getInput$9 = getInput) {
-	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$9);
+function readFailOnUnexpectedFileAccess(getInput$6 = getInput) {
+	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$6);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$10 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$10("allowed-aws-role-accounts"));
+		roleAccounts = parseAwsAccounts(getInput$7("allowed-aws-role-accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws-key-check", !1, getInput$10);
+	let check = readBooleanInput("aws-key-check", !1, getInput$7);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config-file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check and allowed-aws-role-accounts.`, "INVALID_PROXY_ENGINE");
@@ -75191,35 +75300,6 @@ function releaseNssDbDirs(files, deps = {}) {
 	files.claim?.registered && releaseNssDb(files.claim.name, deps);
 }
 //#endregion
-//#region src/lib/sandbox/paths.ts
-function isAtOrUnder(path, ancestor) {
-	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
-}
-function pathsOverlap(a, b) {
-	return isAtOrUnder(a, b) || isAtOrUnder(b, a);
-}
-function pathAliases(mounts, path) {
-	let owner = mountAt(mounts, path);
-	if (!owner) return [];
-	let inFs = (0, node_path.join)(owner.root, (0, node_path.relative)(owner.mountPoint, path)), aliases = new Set();
-	for (let m of mounts) {
-		if (m.device !== owner.device) continue;
-		let alias = isAtOrUnder(inFs, m.root) ? (0, node_path.join)(m.mountPoint, (0, node_path.relative)(m.root, inFs)) : isAtOrUnder(m.root, inFs) ? m.mountPoint : void 0;
-		alias !== void 0 && !isAtOrUnder(alias, path) && mountAt(mounts, alias) === m && aliases.add(alias);
-	}
-	return [...aliases].filter((a) => ![...aliases].some((b) => b !== a && isAtOrUnder(a, b)));
-}
-function mountAt(mounts, path) {
-	let found;
-	for (let m of mounts) isAtOrUnder(path, m.mountPoint) && m.mountPoint.length >= (found?.mountPoint.length ?? 0) && (found = m);
-	return found;
-}
-var WritablePathConflictError = class extends Error {};
-function assertScratchBaseNotWritable(writableDirs) {
-	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
-}
-//#endregion
 //#region src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/certs/ca-certificates.crt",
@@ -75925,10 +76005,10 @@ function jvmTools(env, persisting, deps = realFindCommandDeps) {
 		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
 	};
 }
-function pinningPaths(readWriteThroughInput, env, realpath = realPathOf) {
+function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf) {
 	let writeThroughPaths = [];
 	try {
-		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env, baseDir);
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
@@ -75941,15 +76021,15 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRea
 		if (reserved) throw new SandboxError(`write-through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
-function resolveWriteThroughInput(writeThroughInput, env) {
+function resolveWriteThroughInput(writeThroughInput, env, baseDir) {
 	try {
-		return resolveWriteThroughPaths(writeThroughInput, env);
+		return resolveWriteThroughPaths(writeThroughInput, env, baseDir);
 	} catch (e) {
 		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
 }
 function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}) {
-	let written = resolveWriteThroughInput(writeThroughInput, env), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
+	let written = resolveWriteThroughInput(writeThroughInput, env, deps.baseDir), realpath = deps.realpath ?? realPathOf, resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))], hostMounts = filesystemMode === "ephemeral" ? readHostMounts(deps) : [], runnerFiles = MEDIATED_VARIABLES.flatMap((variable) => {
 		let path = env[variable];
 		if (!path) return [];
 		let real = onRealRunnerDir((0, node_path.normalize)(path), env, realpath), { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = deps;
@@ -76409,7 +76489,7 @@ function sandboxNamespaces(base, netnsPath) {
 function cgroupsPathFor(runnerCgroup, name) {
 	if (runnerCgroup !== void 0) return `${runnerCgroup.replace(/\/$/, "")}/${name}`;
 }
-function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [], extraInternalMounts = [], extraMaskedPaths = [] }, probes = realHostProbes) {
+function buildOciConfig(baseSpec, { identity, cwd, writable, ephemeral, runtime, env, caTrust, readonlyHostPaths = [], renameGuardDirs = [], extraInternalMounts = [], extraMaskedPaths = [] }, probes = realHostProbes) {
 	let { uid, gid } = identity, { workdir, writablePaths = [] } = writable, { netnsPath, cgroupName, rootfsBindDir, resolvConfPath, seccompProfile, execDir, envLoaderPath, scriptPath, hostMounts = [], scratchBaseAliases = [] } = runtime, disableReadonly = !ephemeral && writablePaths.includes("/");
 	caTrust && assertWriteThroughClearOfCaTrust(caTrust, ephemeral ? ephemeral.allowWrite : writablePaths, (path) => probes.realpath(path));
 	let caAdditions = caTrust ? caTrustAdditions(caTrust, env) : void 0, internalMounts = [
@@ -76467,7 +76547,7 @@ function buildOciConfig(baseSpec, { identity, writable, ephemeral, runtime, env,
 				...envLoaderArgs(envLoaderPath, scriptPath)
 			],
 			env: [],
-			cwd: workdir || "/",
+			cwd: cwd || workdir || "/",
 			capabilities: {
 				bounding: [],
 				effective: [],
@@ -76727,9 +76807,10 @@ function assembleBundle(dir, options, deps) {
 	}
 	let caTrust = proxyEngine === "inspect" ? extractCaTrust(containerName, dir, options, layout, deps) : void 0, netnsName = netnsNameFor(containerName), rootfsBindDir = (0, node_path.join)(dir, "rootfs"), config;
 	try {
-		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(layout.persisting, options, hostMounts, deps);
+		let { overlayScratchPaths, resolvConfPath, execDir, scriptPath, envLoaderPath } = writeBundleFiles(dir, options, deps), hostMounts = listHostMounts(), { readonlyHostPaths, renameGuardDirs } = prepareReadonlyHostPaths(layout.persisting, options, hostMounts, deps), identity = resolveIdentity(env, options.warn, deps);
 		config = buildOciConfig(baseSpec, {
-			identity: resolveIdentity(env, options.warn, deps),
+			identity,
+			cwd: options.workingDirectory?.real,
 			writable: {
 				...layout.defaultDirs,
 				writablePaths: writeThroughPaths
@@ -76756,6 +76837,10 @@ function assembleBundle(dir, options, deps) {
 			renameGuardDirs,
 			extraInternalMounts: options.internalMounts,
 			extraMaskedPaths: maskedRunnerFiles(options.maskedPaths ?? [], layout.persisting, hostMounts, deps)
+		}), options.workingDirectory && assertSandboxCanEnter(options.workingDirectory, {
+			mounts: config.mounts,
+			maskedPaths: config.linux.maskedPaths,
+			...identity
 		});
 	} catch (e) {
 		throw caTrust?.nssDb && deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps)), e instanceof WritablePathConflictError ? new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT") : asSandboxError(e, "Failed to build the sandbox's OCI bundle", "OCI_CONFIG_BUILD_FAILED");
@@ -77477,6 +77562,7 @@ const realDeps = {
 	readAwsKeyInputs,
 	readTrafficArtifactInputs,
 	readStepLabel,
+	readWorkingDirectory,
 	saveWriteThroughForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
@@ -77556,7 +77642,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 function readStepInputs(env, deps) {
 	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 	for (let ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) deps.warn(ignored);
-	let configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+	let workingDirectory = deps.readWorkingDirectory(env), baseDir = workingDirectory?.dir ?? workingDirectoryOf(env), configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS, baseDir);
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();
 	log(`Proxy engine: ${proxyEngine}`);
@@ -77580,6 +77666,8 @@ function readStepInputs(env, deps) {
 		reportActionRef,
 		actionRepo,
 		runInput,
+		workingDirectory,
+		baseDir,
 		proxyEngine,
 		proxyMode,
 		filesystemMode,
@@ -77597,11 +77685,14 @@ function readStepInputs(env, deps) {
 		aws: deps.readAwsKeyInputs({ proxyEngine }, env)
 	};
 }
-function preflight({ filesystemMode, writeThroughInput, filesystemAudit, annotation }, env, deps) {
+function preflight({ filesystemMode, writeThroughInput, baseDir, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
-	let writeThrough = resolveWriteThroughInput(writeThroughInput, env);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
-	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, { warn: deps.warn });
+	let writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
+		baseDir,
+		warn: deps.warn
+	});
 	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
 	return plan;
 }
@@ -77647,6 +77738,7 @@ async function finalizeStep(run, deps) {
 		containerName,
 		annotation,
 		env,
+		workingDirectory: inputs.baseDir,
 		mediated: mediation?.files.map((f) => f.variable) ?? [],
 		actionRepo,
 		actionRef: reportActionRef,
@@ -77733,6 +77825,7 @@ async function runSandboxStep(env, overrides = {}) {
 			containerName,
 			proxyNetns,
 			runInput,
+			workingDirectory: inputs.workingDirectory,
 			writeThroughPaths,
 			env,
 			proxyEngine,
@@ -77745,7 +77838,10 @@ async function runSandboxStep(env, overrides = {}) {
 			cancel: cancel.signal,
 			internalMounts: mediation?.mounts,
 			maskedPaths: mediation?.maskedPaths,
-			envOverrides: mediation?.envOverrides
+			envOverrides: {
+				...mediation?.envOverrides,
+				...inputs.baseDir && { PWD: inputs.baseDir }
+			}
 		});
 	} finally {
 		try {

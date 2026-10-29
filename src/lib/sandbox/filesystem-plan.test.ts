@@ -37,6 +37,23 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots).toStrictEqual([]);
   });
 
+  it("joins a relative entry to the working directory, refusing one through a symlink in it", () => {
+    const base = { exists: alwaysExists, realpath: (p: string) => p, lstat: notLink };
+    const app = `${ENV.GITHUB_WORKSPACE}/app`;
+    expect(
+      resolveFilesystemPlan("persistent", "dist", ENV, { ...base, baseDir: app }).writeThroughPaths,
+    ).toStrictEqual([`${app}/dist`]);
+    // As write-through: app/dist would be with app a symlink.
+    expect(() =>
+      resolveFilesystemPlan("persistent", "dist", ENV, {
+        ...base,
+        baseDir: app,
+        lstat: (p) => ({ isSymbolicLink: () => p === app }),
+        readlink: () => "packages/app",
+      }),
+    ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+  });
+
   it("pre-creates a missing write-through target in persistent mode", () => {
     const mkdir = vi.fn();
     resolveFilesystemPlan("persistent", "/opt/build-output", ENV, {

@@ -465,9 +465,16 @@ describe("pinningPaths", () => {
   const env = RUNNER_DIRS_ENV;
 
   it("is persistent mode's set plus write-through, whatever mode the step runs in", () => {
-    expect(pinningPaths(() => "/opt/out", env, asWritten)).toStrictEqual([
+    expect(pinningPaths(() => "/opt/out", env, undefined, asWritten)).toStrictEqual([
       ...PERSISTENT,
       "/opt/out",
+    ]);
+  });
+
+  it("resolves a relative write-through entry against the working directory", () => {
+    expect(pinningPaths(() => "bin", env, "/opt/app", asWritten)).toStrictEqual([
+      ...PERSISTENT,
+      "/opt/app/bin",
     ]);
   });
 
@@ -478,6 +485,7 @@ describe("pinningPaths", () => {
           throw new Error("allow_write was removed");
         },
         env,
+        undefined,
         asWritten,
       ),
     ).toStrictEqual(PERSISTENT);

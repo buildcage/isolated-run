@@ -119,9 +119,10 @@ test_integration_sandbox_linux: ## Run the action's integration tests (needs BUI
 
 .PHONY: test_integration_sandbox_linux_filesystem
 test_integration_sandbox_linux_filesystem: export INPUT_PROXY_ENGINE := universal
-test_integration_sandbox_linux_filesystem: ## The action's filesystem integration tests: modes, write-through:, scratch, mounts
+test_integration_sandbox_linux_filesystem: ## The action's filesystem integration tests: modes, write-through:, working-directory:, scratch, mounts
 	@./test/integration-test-ephemeral-fs.sh
 	@./test/integration-test-writable-dir.sh
+	@./test/integration-test-working-directory.sh
 	@./test/integration-test-fs-escape.sh
 	@./test/integration-test-scratch-isolation.sh
 	@./test/integration-test-scratch-alias.sh

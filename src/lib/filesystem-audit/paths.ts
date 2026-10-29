@@ -70,35 +70,58 @@ export function normalize(path: string, self?: number): string {
   return unnumbered(path.replace(/^\.\//, ""), own);
 }
 
-/** The workspace and $HOME, each as given and with symlinks resolved. */
+/** How a path in the workspace is shown when the working directory is not the workspace. */
+export const WORKSPACE_PREFIX = "$GITHUB_WORKSPACE";
+
+/** The working directory, the workspace and $HOME, each as given and with symlinks resolved. */
 export interface Prefixes {
+  /** What `./` stands for; the workspace when absent. An empty list shows a
+   *  path as if there were no working directory. */
+  cwd?: string[];
   workspace: string[];
   home: string[];
   /** Each path a runner file may be written at, to its variable's name. */
   runnerFiles?: ReadonlyMap<string, string>;
 }
 
+// Each prefix's spellings and how a path under it is shown. The first prefix
+// holding a path names it: the working directory before the workspace it is
+// usually in, the workspace before $HOME, which holds it on a hosted runner.
+function shownPrefixes({ cwd, workspace, home }: Prefixes): [string[], string][] {
+  return [
+    [cwd ?? workspace, "."],
+    [cwd ? workspace : [], WORKSPACE_PREFIX],
+    [home, "~"],
+  ];
+}
+
 export function relativize(path: string, prefixes: Prefixes): string {
   if (isRunnerFile(path)) return `$${path.slice(RUNNER_FILE.length)}`;
-  for (const ws of prefixes.workspace) {
-    if (path === ws) return ".";
-    if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-  }
-  for (const home of prefixes.home) {
-    if (path === home) return "~";
-    if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+  for (const [spellings, shown] of shownPrefixes(prefixes)) {
+    for (const p of spellings) {
+      if (path === p) return shown;
+      if (path.startsWith(`${p}/`)) return `${shown}/${path.slice(p.length + 1)}`;
+    }
   }
   return path;
 }
 
-// The workspace and $HOME may each be reached by two spellings (as given and
-// with symlinks resolved); fold a path onto the first so one file keys once.
-// The workspace goes first, as in relativize: a path in it stays there even
-// where a spelling of $HOME holds it.
+/** The path as relativize shows it, and as it would without the working
+ *  directory, where that differs: a rule may name it either way. */
+export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
+  const shown = relativize(path, prefixes);
+  const other = relativize(path, { ...prefixes, cwd: [] });
+  return other === shown ? [shown] : [shown, other];
+}
+
+// Each prefix may be reached by two spellings (as given and with symlinks
+// resolved); fold a path onto the first so one file keys once. The order is
+// relativize's: a path in the working directory stays there even where a
+// spelling of the workspace or $HOME holds it.
 export function canonical(path: string, prefixes: Prefixes): string {
   const variable = prefixes.runnerFiles?.get(path);
   if (variable) return RUNNER_FILE + variable;
-  for (const spellings of [prefixes.workspace, prefixes.home]) {
+  for (const [spellings] of shownPrefixes(prefixes)) {
     for (const spelling of spellings) {
       if (path === spelling) return spellings[0];
       if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
@@ -107,11 +130,15 @@ export function canonical(path: string, prefixes: Prefixes): string {
   return path;
 }
 
-// Workspace-relative paths first, then $HOME, then the rest.
+const under = (path: string, prefix: string): boolean =>
+  path === prefix || path.startsWith(`${prefix}/`);
+
+// Paths in the working directory first, then the workspace, $HOME and the rest.
 export function sortKey(path: string): [number, string] {
-  if (path === "." || path.startsWith("./")) return [0, path];
-  if (path === "~" || path.startsWith("~/")) return [1, path];
-  return [2, path];
+  if (under(path, ".")) return [0, path];
+  if (under(path, WORKSPACE_PREFIX)) return [1, path];
+  if (under(path, "~")) return [2, path];
+  return [3, path];
 }
 
 // A path's components as tree keys, "/" first for an absolute path, which

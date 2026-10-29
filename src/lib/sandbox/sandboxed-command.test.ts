@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { SandboxError } from "../errors.ts";
@@ -866,6 +869,44 @@ describe("assembleBundle", () => {
     });
     expect(mocks.writeOciConfig).not.toHaveBeenCalled();
     expect(mocks.runIsolated).not.toHaveBeenCalled();
+  });
+
+  describe("working-directory", () => {
+    // A real directory this process can enter, as the check stats the host.
+    const real = realpathSync(tmpdir());
+    const workingDirectory = { input: "app", dir: real, real, isWorkspace: false };
+    const built = (mounts: object[] = []) => ({
+      process: {},
+      mounts,
+      linux: { maskedPaths: [] },
+    });
+
+    it("starts the command there", () => {
+      mocks.buildOciConfig.mockReturnValue(built());
+
+      assembleBundle(SCRATCH, options({ workingDirectory }), deps);
+
+      expect(mocks.buildOciConfig.mock.calls[0][1].cwd).toBe(real);
+    });
+
+    it("refuses one the sandbox mounts over", () => {
+      mocks.buildOciConfig.mockReturnValue(
+        built([{ destination: real, type: "tmpfs", source: "tmpfs", options: [] }]),
+      );
+
+      expect(() => assembleBundle(SCRATCH, options({ workingDirectory }), deps)).toThrow(
+        expect.objectContaining({
+          code: "INVALID_WORKING_DIRECTORY",
+          message: `working-directory "app" (${real}) is unusable: the sandbox mounts its own ${real}.`,
+        }),
+      );
+    });
+
+    it("leaves the workspace to buildOciConfig without it", () => {
+      assembleBundle(SCRATCH, options(), deps);
+
+      expect(mocks.buildOciConfig.mock.calls[0][1].cwd).toBeUndefined();
+    });
   });
 
   // Why the order matters: see writeBundleFiles.

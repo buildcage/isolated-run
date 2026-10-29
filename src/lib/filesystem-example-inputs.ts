@@ -1,7 +1,12 @@
 import type { FilesystemAudit } from "./filesystem-audit/mode.ts";
 import { EXPECTED_RULES_INPUT, type ExpectedRules } from "./filesystem-audit/rules.ts";
 import type { FilesystemMode } from "./filesystem-mode.ts";
+import type { WorkingDirectory } from "./sandbox/working-directory.ts";
 import { splitWriteThroughInput } from "./sandbox/write-through.ts";
+
+// Plain where YAML would read it back as written, a JSON string otherwise.
+const yamlScalar = (text: string): string =>
+  /^[\w/][\w./-]*$/.test(text) ? text : JSON.stringify(text);
 
 /**
  * The filesystem inputs for the report's restrict example, each only when it
@@ -12,12 +17,14 @@ import { splitWriteThroughInput } from "./sandbox/write-through.ts";
  */
 export function filesystemExampleInputs(
   {
+    workingDirectory,
     filesystemMode,
     writeThroughInput,
     filesystemAudit,
     expectedFilesystemRules,
     failOnUnexpectedFileAccess,
   }: {
+    workingDirectory?: WorkingDirectory;
     filesystemMode: FilesystemMode;
     writeThroughInput: string;
     filesystemAudit: FilesystemAudit;
@@ -27,6 +34,9 @@ export function filesystemExampleInputs(
   guideUrl: string,
 ): string[] {
   const lines: string[] = [];
+  // Without it, relative write-through paths and config-file point elsewhere.
+  if (workingDirectory && !workingDirectory.isWorkspace)
+    lines.push(`working-directory: ${yamlScalar(workingDirectory.input)}`);
   if (filesystemMode !== "persistent") lines.push(`filesystem-mode: ${filesystemMode}`);
   const paths = splitWriteThroughInput(writeThroughInput);
   if (paths.length > 0) lines.push("write-through: |", ...paths.map((path) => `  ${path}`));

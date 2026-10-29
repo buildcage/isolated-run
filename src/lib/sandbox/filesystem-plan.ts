@@ -86,6 +86,8 @@ export interface FilesystemPlan {
 /** `warn` aside, a test-only seam onto the filesystem dependencies of
  *  assertNoSymlinkInWriteThrough, ensureWriteThroughTargetsExist and determineOverlayRoots. */
 export interface ResolveFilesystemPlanDeps {
+  /** What a relative write-through entry joins to; see resolveWriteThroughEntry. */
+  baseDir?: string;
   warn?: (message: string) => void;
   exists?: (path: string) => boolean;
   lstat?: SymlinkDeps["lstat"];
@@ -103,9 +105,10 @@ export interface ResolveFilesystemPlanDeps {
 export function resolveWriteThroughInput(
   writeThroughInput: string,
   env: NodeJS.ProcessEnv,
+  baseDir?: string,
 ): string[] {
   try {
-    return resolveWriteThroughPaths(writeThroughInput, env);
+    return resolveWriteThroughPaths(writeThroughInput, env, baseDir);
   } catch (e) {
     throw new SandboxError(
       `Invalid write-through: ${errorMessage(e)}`,
@@ -125,7 +128,7 @@ export function resolveFilesystemPlan(
   env: NodeJS.ProcessEnv,
   deps: ResolveFilesystemPlanDeps = {},
 ): FilesystemPlan {
-  const written = resolveWriteThroughInput(writeThroughInput, env);
+  const written = resolveWriteThroughInput(writeThroughInput, env, deps.baseDir);
   const realpath = deps.realpath ?? realPathOf;
   const resolved = [...new Set(written.map((p) => onRealRunnerDir(p, env, realpath)))];
   // Ephemeral mediates only the files an entry covers, which it can do through

@@ -143,6 +143,12 @@ describe("buildOciConfig", () => {
       expect(config.process.cwd).toBe(baseArgs.writable.workdir);
     });
 
+    it("starts in the working directory when given one, the workdir staying writable", () => {
+      const config = build(fakeBaseSpec(), { ...baseArgs, cwd: "/opt/app" });
+      expect(config.process.cwd).toBe("/opt/app");
+      expect(config.mounts.map((m) => m.destination)).toContain(baseArgs.writable.workdir);
+    });
+
     it("falls back to / when the step has no workdir to run in", () => {
       const config = build(fakeBaseSpec(), {
         ...baseArgs,

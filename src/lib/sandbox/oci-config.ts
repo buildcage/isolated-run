@@ -62,7 +62,9 @@ export interface EphemeralPolicy {
 
 export interface BuildOciConfigOptions {
   identity: SandboxIdentity;
-  /** Always used for `process.cwd` (workdir) regardless of mode. In ephemeral
+  /** Where the command starts: `writable.workdir` when absent. */
+  cwd?: string;
+  /** `workdir` is also where the command starts, without `cwd`. In ephemeral
    *  mode the write-through paths are consumed as `ephemeral.allowWrite`
    *  instead, so `writablePaths` is read only when `ephemeral` is absent:
    *  the `!ephemeral` half of `disableReadonly` below is what enforces that,
@@ -149,6 +151,7 @@ export function buildOciConfig(
   baseSpec: OciSpec,
   {
     identity,
+    cwd,
     writable,
     ephemeral,
     runtime,
@@ -275,7 +278,7 @@ export function buildOciConfig(
       // stdin before execing scriptPath, keeping `env:` secrets off the
       // runner's disk. See env-loader.ts.
       env: [],
-      cwd: workdir || "/",
+      cwd: cwd || workdir || "/",
       capabilities: { bounding: [], effective: [], permitted: [], inheritable: [], ambient: [] },
       noNewPrivileges: true,
       // An unwrapped step gets the runner's own RLIMIT_NOFILE, 65536 on

@@ -417,16 +417,25 @@ function useSteps(where: string): string {
 
 /**
  * The legend's second line: what the path notations mean, where the full
- * record is, and the guide that explains the rest.
+ * record is, and the guide that explains the rest. `cwd` names the working
+ * directory as it would show without one, given only where it is not the
+ * workspace.
  */
-export function filesystemLegendNote(artifact: RecordArtifact, guideUrl: string): string {
+export function filesystemLegendNote(
+  artifact: RecordArtifact,
+  guideUrl: string,
+  cwd?: string,
+): string {
   const record =
     artifact === "not-requested"
       ? "set `upload-filesystem-audit-artifact: true` for the full record"
       : artifact === "upload-failed"
         ? "the full record could not be uploaded"
         : `the full record is in the ${artifactLink(artifact)}`;
-  return `\`./\` workspace · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
+  const where = cwd
+    ? `${codeSpan("./")} ${codeSpan(cwd)} · ${codeSpan("$GITHUB_WORKSPACE/")} workspace`
+    : "`./` workspace";
+  return `${where} · \`~/\` $HOME · \`dir/**\` a folded directory · ${record} · [how to read this](${guideUrl})`;
 }
 
 /**

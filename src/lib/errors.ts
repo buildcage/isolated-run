@@ -24,6 +24,7 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  *   FILESYSTEM_INPUT_CONFLICT         filesystem-mode/write-through inputs combined in a disallowed way, or a
  *                                     writable path that collides with a mount the sandbox needs itself
  *   INVALID_WRITE_THROUGH_PATH        a write-through entry failed path-resolution rules (unknown $VAR, etc.)
+ *   INVALID_WORKING_DIRECTORY         working-directory is not a directory the sandbox can start in
  *   WRITE_THROUGH_TARGET_MISSING      a write-through entry resolves to a well-known GITHUB_* file that doesn't exist
  *   WRITE_THROUGH_TARGET_UNCREATABLE  a write-through entry doesn't exist and the runner couldn't create it
  *   ALLOW_WRITE_REMOVED               the removed allow_write input was supplied (renamed to write-through)
@@ -72,6 +73,7 @@ export type SandboxErrorCode =
   | "FILESYSTEM_AUDIT_UNAVAILABLE"
   | "INVALID_EXPECTED_FILESYSTEM_RULES"
   | "INVALID_WRITE_THROUGH_PATH"
+  | "INVALID_WORKING_DIRECTORY"
   | "WRITE_THROUGH_TARGET_MISSING"
   | "WRITE_THROUGH_TARGET_UNCREATABLE"
   | "ALLOW_WRITE_REMOVED"
