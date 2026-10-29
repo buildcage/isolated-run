@@ -148,7 +148,9 @@ func (r *recorder) add(raw []byte) error {
 
 // setProgram gives rec its process's program, after an exec the file it ran.
 // Set before a line is held for its call's result, so it is the program at
-// the event.
+// the event. An open that failed before reaching a file gets it at the
+// result, which is the same: an exec is sent only once the process's other
+// threads have sent their results or ended.
 func (r *recorder) setProgram(rec *record) {
 	switch rec.Kind {
 	case "exec":

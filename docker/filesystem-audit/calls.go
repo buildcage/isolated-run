@@ -164,7 +164,9 @@ func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 	case h.ret >= 0:
 		return nil
 	case hasName:
-		return r.write(failedOpen(string(c.name), c.cut, raw))
+		rec := failedOpen(string(c.name), c.cut, raw)
+		r.setProgram(&rec)
+		return r.write(rec)
 	}
 	if r.started {
 		r.unnamed++
