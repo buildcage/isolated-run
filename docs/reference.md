@@ -8,6 +8,13 @@ details.
 ## Contents
 
 - [Action inputs](#action-inputs)
+  - [General inputs](#general-inputs)
+  - [Network inputs](#network-inputs)
+  - [AWS key check inputs](#aws-key-check-inputs)
+  - [Filesystem inputs](#filesystem-inputs)
+  - [Filesystem audit inputs](#filesystem-audit-inputs)
+  - [Spellings and values](#spellings-and-values)
+- [Config file](#config-file)
 - [Outputs](#outputs)
 - [Operation modes](#operation-modes)
 - [Rule syntax](#rule-syntax)
@@ -25,23 +32,13 @@ details.
 
 ## Action inputs
 
-`run` is the only required input. Each input named with hyphens also takes its name spelled with
-underscores (`proxy_mode` for `proxy-mode`), as earlier versions named it. When a workflow sets both
-spellings, a list input (the rule inputs, `write-through`, `expected-filesystem-rules`) takes the
-lines of both, and any other input takes the hyphenated value, warning when the two differ.
-
-An input whose default is `true` or `false` takes only those two values, and a `-retention-days`
-input takes a whole number of days above zero, lowered with a warning to the repository's maximum.
-Left empty, each input takes its default, which for a `-retention-days` input is the repository's
-own; any other value fails the step before the sandbox is set up.
-
 ### General inputs
 
 | Input         | Default  | Description                                                                                                                   |
 | ------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `run`         | required | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
 | `config-file` | empty    | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
-| `label`       | empty    | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart                                |
+| `label`       | empty    | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart.                               |
 
 ### Network inputs
 
@@ -49,24 +46,30 @@ own; any other value fails the step before the sandbox is set up.
 | --------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
 | `proxy-mode`                      | `restrict` | `audit` or `restrict`. See [Operation modes](#operation-modes).                                                      |
 | `proxy-engine`                    | `inspect`  | `inspect` or `universal`. See [Engines](../README.md#engines).                                                       |
-| `fail-on-blocked`                 | `true`     | Fail the step when a connection was blocked (restrict mode only; ignored in audit mode)                              |
+| `fail-on-blocked`                 | `true`     | Fail the step when a connection was blocked, in `restrict` mode.                                                     |
 | `fail-on-ca-residue`              | `true`     | `inspect` only. `false` turns a copy of the CA in Chromium's NSS database into a warning. See [Chromium](#chromium). |
 | `upload-traffic-artifact`         | `false`    | Upload the observed traffic as a JSON artifact. See [Traffic artifact](#traffic-artifact).                           |
-| `traffic-artifact-retention-days` | empty      | How long to keep that artifact, in days                                                                              |
+| `traffic-artifact-retention-days` | empty      | How long to keep that artifact, in days.                                                                             |
 
 #### Rule inputs
 
 All of these are empty by default, and all of them are additive: a connection is allowed when any
 rule in any input matches. Which ones apply depends on the engine.
 
-| Input                 | `inspect` | `universal` | What one rule matches                                                                           |
-| --------------------- | :-------: | :---------: | ----------------------------------------------------------------------------------------------- |
-| `allowed-url-rules`   |    ✅     |      -      | A method and a URL: `GET https://registry.npmjs.org/**`                                         |
-| `allowed-https-rules` |    ✅     |     ✅      | A host and port reached over HTTPS: `registry.npmjs.org:443`                                    |
-| `allowed-http-rules`  |    ✅     |     ✅      | A host and port reached over plain HTTP: `deb.debian.org:80`                                    |
-| `allowed-ip-rules`    |    ✅     |     ✅      | An address and port, for connections made without DNS: `192.168.1.1:443`                        |
-| `allowed-tls-rules`   |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432`             |
-| `known-blocked-rules` |    ✅     |     ✅      | A host, or (on `inspect`) a method and URL, expected to be blocked, so it doesn't fail the step |
+| Input                                  | `inspect` | `universal` | What one rule matches                                                                           |
+| -------------------------------------- | :-------: | :---------: | ----------------------------------------------------------------------------------------------- |
+| [`allowed-url-rules`][url-rules]       |    ✅     |      -      | A method and a URL: `GET https://registry.npmjs.org/**`                                         |
+| [`allowed-https-rules`][host-rules]    |    ✅     |     ✅      | A host and port reached over HTTPS: `registry.npmjs.org:443`                                    |
+| [`allowed-http-rules`][host-rules]     |    ✅     |     ✅      | A host and port reached over plain HTTP: `deb.debian.org:80`                                    |
+| [`allowed-ip-rules`][ip-rules]         |    ✅     |     ✅      | An address and port, for connections made without DNS: `192.168.1.1:443`                        |
+| [`allowed-tls-rules`][tls-rules]       |    ✅     |      -      | A TLS destination to pass through undecrypted, judged on SNI: `db.example.com:5432`             |
+| [`known-blocked-rules`][blocked-rules] |    ✅     |     ✅      | A host, or (on `inspect`) a method and URL, expected to be blocked, so it doesn't fail the step |
+
+[url-rules]: #url-rules-allowed-url-rules
+[host-rules]: #host-rules-allowed-https-rules-allowed-http-rules-allowed-ip-rules-known-blocked-rules
+[ip-rules]: #ip-addresses-allowed-ip-rules
+[tls-rules]: #tls-passthrough-allowed-tls-rules
+[blocked-rules]: #blocked-rules-known-blocked-rules
 
 Under `inspect`, `allowed-https-rules` and `allowed-http-rules` still work and are kept for
 compatibility, but `allowed-url-rules` covers them: a host rule is the same as a URL rule with any
@@ -85,10 +88,10 @@ starts; write fewer, broader rules, such as [wildcards](#wildcards). This only m
 
 Both are `inspect` only and **experimental**. See [AWS access key check](#aws-access-key-check).
 
-| Input                       | Default | Description                                                                                                                                                                            |
-| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aws-key-check`             | `false` | Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`                                                                                                      |
-| `allowed-aws-role-accounts` | empty   | AWS accounts whose roles the step may assume; the keys those roles issue, and static CodeCommit Git credentials of these accounts, pass the check too. Requires `aws-key-check: true`. |
+| Input                       | Default | Description                                                                        |
+| --------------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `aws-key-check`             | `false` | Block AWS API requests signed with any key but the step's own `AWS_ACCESS_KEY_ID`. |
+| `allowed-aws-role-accounts` | empty   | AWS accounts whose roles the step may assume. Requires `aws-key-check: true`.      |
 
 ### Filesystem inputs
 
@@ -101,15 +104,27 @@ Both are `inspect` only and **experimental**. See [AWS access key check](#aws-ac
 
 All of these are **experimental**. See [Filesystem audit](#filesystem-audit).
 
-| Input                              | Default | Description                                                                                                                                                                                             |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `filesystem-audit`                 | `off`   | `off` or `record`; `record` logs the step's file accesses                                                                                                                                               |
-| `expected-filesystem-rules`        | empty   | The file accesses the step is expected to make; the summary then lists only those outside them. Requires `filesystem-audit: record`.                                                                    |
-| `fail-on-unexpected-file-access`   | `false` | Fail the step when an access fell outside `expected-filesystem-rules` (any access, when there are none) or could not be checked against them, in `audit` mode too. Requires `filesystem-audit: record`. |
-| `upload-filesystem-audit-artifact` | `false` | Upload the filesystem audit's full record as an artifact                                                                                                                                                |
-| `filesystem-audit-retention-days`  | empty   | How long to keep that artifact, in days                                                                                                                                                                 |
+| Input                              | Default | Description                                                                                                                          |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `filesystem-audit`                 | `off`   | `off` or `record`; `record` logs the step's file accesses.                                                                           |
+| `expected-filesystem-rules`        | empty   | The file accesses the step is expected to make; the summary then lists only those outside them. Requires `filesystem-audit: record`. |
+| `fail-on-unexpected-file-access`   | `false` | Fail the step on an access outside `expected-filesystem-rules`, in `audit` mode too. Requires `filesystem-audit: record`.            |
+| `upload-filesystem-audit-artifact` | `false` | Upload the filesystem audit's full record as an artifact.                                                                            |
+| `filesystem-audit-retention-days`  | empty   | How long to keep that artifact, in days.                                                                                             |
 
-### Config file
+### Spellings and values
+
+Each input named with hyphens also takes its name spelled with underscores (`proxy_mode` for
+`proxy-mode`), as earlier versions named it. When a workflow sets both spellings, a list input (the
+rule inputs, `write-through`, `expected-filesystem-rules`) takes the lines of both, and any other
+input takes the hyphenated value, warning when the two differ.
+
+An input whose default is `true` or `false` takes only those two values, and a `-retention-days`
+input takes a whole number of days above zero, lowered with a warning to the repository's maximum.
+Left empty, each input takes its default, which for a `-retention-days` input is the repository's
+own; any other value fails the step before the sandbox is set up.
+
+## Config file
 
 `config-file` names a YAML file in the repository that sets any input but `run` and the deprecated
 `writable` ([The former input names](#the-former-input-names)), so the policy can sit beside the code
