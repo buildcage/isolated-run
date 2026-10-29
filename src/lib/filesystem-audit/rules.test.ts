@@ -96,6 +96,14 @@ describe("parseExpectedRules", () => {
     expect(rules[1].path.test("$GITHUB_OUTPUT")).toBe(true);
   });
 
+  it("matches a wildcard in a program as in a path", () => {
+    const { rules } = parse("/opt/hostedtoolcache/node/*/x64/bin/node  R  .");
+    expect(rules[0].program!.test("/opt/hostedtoolcache/node/22.22.3/x64/bin/node")).toBe(true);
+    expect(rules[0].program!.test("/opt/hostedtoolcache/node/22/a/x64/bin/node")).toBe(false);
+    const { rules: deep } = parse("/opt/**/bin/node  R  .");
+    expect(deep[0].program!.test("/opt/hostedtoolcache/node/22.22.3/x64/bin/node")).toBe(true);
+  });
+
   it("numbers each source's lines from where it begins", () => {
     const { rules } = parseExpectedRules([
       { text: "* R ./a", origin: "input", firstLine: 1 },
