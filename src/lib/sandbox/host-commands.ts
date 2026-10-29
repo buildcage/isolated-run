@@ -263,11 +263,12 @@ export function jvmTools(
 export function pinningPaths(
   readWriteThroughInput: () => string,
   env: NodeJS.ProcessEnv,
+  baseDir: string | undefined,
   realpath: (path: string) => string = realPathOf,
 ): string[] {
   let writeThroughPaths: string[] = [];
   try {
-    writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env);
+    writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env, baseDir);
   } catch {
     // See above.
   }

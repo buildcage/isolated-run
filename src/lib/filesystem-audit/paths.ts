@@ -70,48 +70,84 @@ export function normalize(path: string, self?: number): string {
   return unnumbered(path.replace(/^\.\//, ""), own);
 }
 
-/** The workspace and $HOME, each as given and with symlinks resolved. */
+/** How a path in the workspace is shown when the working directory is not the workspace. */
+export const WORKSPACE_PREFIX = "$GITHUB_WORKSPACE";
+
+/** The working directory, the workspace and $HOME, each as given and with symlinks resolved. */
 export interface Prefixes {
+  /** What `./` stands for; the workspace when absent. An empty list shows a
+   *  path as if there were no working directory. */
+  cwd?: string[];
   workspace: string[];
   home: string[];
   /** Each path a runner file may be written at, to its variable's name. */
   runnerFiles?: ReadonlyMap<string, string>;
 }
 
-export function relativize(path: string, prefixes: Prefixes): string {
-  if (isRunnerFile(path)) return `$${path.slice(RUNNER_FILE.length)}`;
-  for (const ws of prefixes.workspace) {
-    if (path === ws) return ".";
-    if (path.startsWith(`${ws}/`)) return `./${path.slice(ws.length + 1)}`;
-  }
-  for (const home of prefixes.home) {
-    if (path === home) return "~";
-    if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
-  }
-  return path;
+// Each prefix's spellings and how a path under it is shown. The first prefix
+// holding a path names it: the working directory before the workspace it is
+// usually in, the workspace before $HOME, which holds it on a hosted runner.
+function shownPrefixes({ cwd, workspace, home }: Prefixes): [string[], string][] {
+  return [
+    [cwd ?? workspace, "."],
+    [cwd ? workspace : [], WORKSPACE_PREFIX],
+    [home, "~"],
+  ];
 }
 
-// The workspace and $HOME may each be reached by two spellings (as given and
-// with symlinks resolved); fold a path onto the first so one file keys once.
-// The workspace goes first, as in relativize: a path in it stays there even
-// where a spelling of $HOME holds it.
-export function canonical(path: string, prefixes: Prefixes): string {
-  const variable = prefixes.runnerFiles?.get(path);
-  if (variable) return RUNNER_FILE + variable;
-  for (const spellings of [prefixes.workspace, prefixes.home]) {
-    for (const spelling of spellings) {
-      if (path === spelling) return spellings[0];
-      if (path.startsWith(`${spelling}/`)) return spellings[0] + path.slice(spelling.length);
+// What follows `prefix` in `path`: "" for the prefix itself, undefined for a
+// path outside it. A working directory may be "/".
+function rest(path: string, prefix: string): string | undefined {
+  if (path === prefix) return "";
+  const head = prefix === "/" ? "/" : `${prefix}/`;
+  return path.startsWith(head) ? path.slice(head.length) : undefined;
+}
+
+export function relativize(path: string, prefixes: Prefixes): string {
+  if (isRunnerFile(path)) return `$${path.slice(RUNNER_FILE.length)}`;
+  for (const [spellings, shown] of shownPrefixes(prefixes)) {
+    for (const p of spellings) {
+      const tail = rest(path, p);
+      if (tail !== undefined) return tail ? `${shown}/${tail}` : shown;
     }
   }
   return path;
 }
 
-// Workspace-relative paths first, then $HOME, then the rest.
+const under = (path: string, prefix: string): boolean =>
+  path === prefix || path.startsWith(`${prefix}/`);
+
+/** The path as relativize shows it and, in the working directory, as it
+ *  would show without one: a rule may name it either way. */
+export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
+  const shown = relativize(path, prefixes);
+  return under(shown, ".") ? [shown, relativize(path, { ...prefixes, cwd: [] })] : [shown];
+}
+
+// Each prefix may be reached by two spellings (as given and with symlinks
+// resolved); fold a path onto the first so one file keys once. The order is
+// relativize's: a path in the working directory stays there even where a
+// spelling of the workspace or $HOME holds it.
+export function canonical(path: string, prefixes: Prefixes): string {
+  const variable = prefixes.runnerFiles?.get(path);
+  if (variable) return RUNNER_FILE + variable;
+  for (const [spellings] of shownPrefixes(prefixes)) {
+    for (const spelling of spellings) {
+      const tail = rest(path, spelling);
+      if (tail === undefined) continue;
+      const [first] = spellings;
+      return !tail ? first : first === "/" ? `/${tail}` : `${first}/${tail}`;
+    }
+  }
+  return path;
+}
+
+// Paths in the working directory first, then the workspace, $HOME and the rest.
 export function sortKey(path: string): [number, string] {
-  if (path === "." || path.startsWith("./")) return [0, path];
-  if (path === "~" || path.startsWith("~/")) return [1, path];
-  return [2, path];
+  if (under(path, ".")) return [0, path];
+  if (under(path, WORKSPACE_PREFIX)) return [1, path];
+  if (under(path, "~")) return [2, path];
+  return [3, path];
 }
 
 // A path's components as tree keys, "/" first for an absolute path, which

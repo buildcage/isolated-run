@@ -66,10 +66,12 @@ export const ACTION_INPUTS = [
   "filesystem-audit-retention-days",
   "fail-on-unexpected-file-access",
   "label",
+  "working-directory",
 ];
 
-// The step itself, the file itself, and the deprecated spelling of write-through.
-const NOT_IN_CONFIG_FILE = ["run", "config-file", "writable"];
+// The step itself, the file itself, the deprecated spelling of write-through,
+// and the directory the file's own path is relative to.
+const NOT_IN_CONFIG_FILE = ["run", "config-file", "writable", "working-directory"];
 
 export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
   // Marked pure so post.cjs, which uses other parts of this module, leaves it out.

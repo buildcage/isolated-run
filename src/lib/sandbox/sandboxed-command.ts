@@ -60,6 +60,7 @@ import { extractRuncBootstrap, type RuncBootstrap } from "./runc-bootstrap.ts";
 import { SANDBOX_SCRATCH_BASE, withScratchDir, type Warn } from "./scratch-dir.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { BuiltOciSpec, MountEntry, MountinfoEntry, OverlayDirs } from "./types.ts";
+import { assertSandboxShows, type WorkingDirectory } from "./working-directory.ts";
 
 /**
  * The sandbox's own end of the direct veth link to the proxy's buildcage0
@@ -144,6 +145,8 @@ export interface RunSandboxedCommandOptions {
   containerName: string;
   proxyNetns: string;
   runInput: string;
+  /** Where the command starts; the workspace when absent. */
+  workingDirectory?: WorkingDirectory;
   /** Already resolved (resolveWriteThroughPaths) and pre-created
    *  (ensureWriteThroughTargetsExist) by the step before this runs. Opens holes
    *  in the read-only set in persistent mode, and in the overlay in ephemeral
@@ -452,8 +455,10 @@ export function assembleBundle(
       hostMounts,
       deps,
     );
+    const identity = resolveIdentity(env, options.warn, deps);
     config = buildOciConfig(baseSpec, {
-      identity: resolveIdentity(env, options.warn, deps),
+      identity,
+      cwd: options.workingDirectory?.real,
       writable: { ...layout.defaultDirs, writablePaths: writeThroughPaths },
       ephemeral:
         filesystemMode === "ephemeral"
@@ -485,6 +490,11 @@ export function assembleBundle(
         deps,
       ),
     });
+    if (options.workingDirectory)
+      assertSandboxShows(options.workingDirectory, {
+        mounts: config.mounts,
+        maskedPaths: config.linux.maskedPaths,
+      });
   } catch (e) {
     if (caTrust?.nssDb) deps.releaseNssDbDirs(caTrust.nssDb, releaseDeps(options, deps));
     // An error already worded for the user keeps its words (asSandboxError

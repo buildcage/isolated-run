@@ -5,10 +5,11 @@ import type { RuleMatcher } from "./rules.ts";
 /** Where a line of the recording stands against expected-filesystem-rules. */
 export type RuleMark = { rule: string } | { unexpected: true };
 
-/** The names a rule is matched against: a program's by its rank, and a path's. */
+/** The names a rule is matched against: a program's by its rank, and a
+ *  path's, each with every spelling a rule may use for it. */
 export interface RuleNames {
-  program: (rank: number) => string;
-  path: (path: string) => string;
+  program: (rank: number) => readonly string[];
+  path: (path: string) => readonly string[];
 }
 
 /**

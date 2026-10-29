@@ -149,13 +149,14 @@ From the top:
 
 - A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
   any; see [What changes in the step](#what-changes-in-the-step).
-- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each action.
-  Running a program is an `X` row under the program that ran it. Programs are in the order they
-  first ran, and each one's paths in path order: the workspace, then `$HOME`, then the rest. A
-  `dir/**` row combines several paths under one directory; see [Paths](#paths). The Command column
-  lists the commands that made the row's accesses, in the order they first did, and past three, the
-  first two and how many more, as `and 2 more`; see [Which command](#how-rows-are-grouped). A
-  table that does not fit in the Job Summary leaves only its note; see [Limits](#limits).
+- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
+  action. Running a program is an `X` row under the program that ran it. Programs are in the order
+  they first ran, and each one's paths in path order: the working directory, then the rest of the
+  workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one directory;
+  see [Paths](#paths). The Command column lists the commands that made the row's accesses, in the
+  order they first did, and past three, the first two and how many more, as `and 2 more`; see
+  [Which command](#how-rows-are-grouped). A table that does not fit in the Job Summary leaves only
+  its note; see [Limits](#limits).
 - **File access details**, folded, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A run is the row of the
   command that started it, as in the table. Times count from the start of the step's proxy, on the
@@ -164,7 +165,8 @@ From the top:
 - **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
   them. It shows only when the run recorded a file access, and with rules, one outside them; see
   [Expected accesses](#expected-accesses).
-- The closing line explains the `./`, `~/` and `dir/**` notations, links to the artifact that holds
+- The closing line explains the `./`, `~/` and `dir/**` notations, and `$GITHUB_WORKSPACE/` when
+  [`working-directory`](./reference.md#working-directory) is set, links to the artifact that holds
   the full record and links to this section. Where there is no artifact, it says how to ask for
   one, or that the upload failed.
 
@@ -213,15 +215,16 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Paths
 
-| Shown as | Means                                                                                                   |
-| -------- | ------------------------------------------------------------------------------------------------------- |
-| `./…`    | Under `$GITHUB_WORKSPACE`                                                                               |
-| `~/…`    | Under `$HOME`                                                                                           |
-| `dir/**` | `dir` and what was touched directly under it, which would take three or more rows, with all their flags |
+| Shown as              | Means                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `./…`                 | Under the [working directory](./reference.md#working-directory), `$GITHUB_WORKSPACE` unless set         |
+| `$GITHUB_WORKSPACE/…` | Under `$GITHUB_WORKSPACE` but outside the working directory                                             |
+| `~/…`                 | Under `$HOME`                                                                                           |
+| `dir/**`              | `dir` and what was touched directly under it, which would take three or more rows, with all their flags |
 
-Some paths never fold into a `dir/**` row, such as the workspace, `$HOME` and a program run; see
-[How rows are grouped](#how-rows-are-grouped). `/proc`, cut, in-memory, deleted and escaped names
-have notations of their own, listed next.
+Some paths never fold into a `dir/**` row, such as the working directory, the workspace, `$HOME`
+and a program run; see [How rows are grouped](#how-rows-are-grouped). `/proc`, cut, in-memory,
+deleted and escaped names have notations of their own, listed next.
 
 ### Other notations
 
@@ -275,8 +278,8 @@ command's paths on their own, so they often name it; the artifact always does.
 
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
-- `/`, `/home`, `/tmp`, `/proc`, the workspace, `$HOME`, the directories above them,
-  `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
+- `/`, `/home`, `/tmp`, `/proc`, the working directory, the workspace, `$HOME`, the directories
+  above them, `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
 - `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`, `~/.gnupg`, the same
   directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`, which hold secrets
   or another process's descriptors, so a rule proposed for a read there names only the file read.
@@ -524,13 +527,16 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
   its own name, as the step's shell does as `bash`. Running a program is an `X` access of the
   program that ran it, as the table shows it: `bash X /usr/bin/curl`.
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
-- **Path**: as the table shows it, `./` for the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`,
-  `memfd:"name"`, and a deleted file without its ` (deleted)`. A name a command passed keeps its
-  trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches within one
-  component of a path, and `**` across them, as a whole component any number of them: `./dist/**`
-  matches `./dist` and everything under it. Inside a component, `**` still crosses them:
-  `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows as
-  `\*`, which matches only a star. Regular expressions are not supported.
+- **Path**: as the table shows it, `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest
+  of the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without
+  its ` (deleted)`. A path in the working directory also matches as `$GITHUB_WORKSPACE/` names it,
+  with or without `working-directory`, so steps in different directories can share a rule: under
+  `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` takes `./dist/x`. A name a command
+  passed keeps its trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches
+  within one component of a path, and `**` across them, as a whole component any number of them:
+  `./dist/**` matches `./dist` and everything under it. Inside a component, `**` still crosses
+  them: `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js` would not. A `*` in a name shows
+  as `\*`, which matches only a star. Regular expressions are not supported.
 - **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
   included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
   process's threads. A process the recording has no `nspid` for shows its own directory as

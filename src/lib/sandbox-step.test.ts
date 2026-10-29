@@ -42,6 +42,8 @@ const mocks = {
   readAwsKeyInputs: vi.fn(),
   readTrafficArtifactInputs: vi.fn(),
   readStepLabel: vi.fn(),
+  readWorkingDirectory: vi.fn(),
+  assertSandboxUserCanSearch: vi.fn(),
   saveWriteThroughForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -208,6 +210,7 @@ describe("runSandboxStep", () => {
     expect(mocks.applyConfigFile).toHaveBeenCalledWith(
       ENV,
       expect.objectContaining({ known: expect.arrayContaining(["proxy-mode"]) }),
+      ENV.GITHUB_WORKSPACE,
     );
     expect(orderOf(mocks.applyConfigFile)).toBeLessThan(orderOf(mocks.readRunCommand));
     expect(mocks.warn).toHaveBeenCalledWith(
@@ -773,7 +776,70 @@ describe("runSandboxStep", () => {
 
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).toBe(mocks.warn);
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).not.toBe(annotation.warning);
-    expect(mocks.resolveFilesystemPlan.mock.calls[0][3]).toStrictEqual({ warn: mocks.warn });
+    expect(mocks.resolveFilesystemPlan.mock.calls[0][3]).toStrictEqual({
+      baseDir: ENV.GITHUB_WORKSPACE,
+      warn: mocks.warn,
+    });
+  });
+
+  it("starts the command in working-directory and joins relative paths to it", async () => {
+    const workingDirectory = {
+      input: "app",
+      dir: `${ENV.GITHUB_WORKSPACE}/app`,
+      real: `${ENV.GITHUB_WORKSPACE}/packages/app`,
+      isWorkspace: false,
+    };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.applyConfigFile.mockReturnValue(undefined);
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "persistent",
+      writeThroughInput: "bin",
+    });
+
+    await runSandboxStep({ ...ENV }, deps);
+
+    expect(orderOf(mocks.readWorkingDirectory)).toBeLessThan(orderOf(mocks.applyConfigFile));
+    expect(mocks.applyConfigFile.mock.calls[0][2]).toBe(workingDirectory.dir);
+    expect(mocks.resolveFilesystemPlan.mock.calls[0][3].baseDir).toBe(workingDirectory.dir);
+    expect(mocks.pinHostCommands.mock.calls[0][0]).toContain(`${workingDirectory.dir}/bin`);
+    expect(mocks.runSandboxedCommand.mock.calls[0][0]).toMatchObject({
+      workingDirectory,
+      envOverrides: { PWD: workingDirectory.dir },
+    });
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].workingDirectory).toBe(
+      workingDirectory.dir,
+    );
+  });
+
+  it("checks the sandbox's user can enter working-directory before the proxy starts", async () => {
+    const workingDirectory = { input: "app", dir: "/w/app", real: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.assertSandboxUserCanSearch.mockImplementation(() => {
+      throw new SandboxError("cannot search", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("cannot search");
+    expect(mocks.assertSandboxUserCanSearch).toHaveBeenCalledWith(workingDirectory, ENV);
+    expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
+  it("sets PWD to the workspace without working-directory", async () => {
+    await runSandboxStep({ ...ENV }, deps);
+
+    expect(mocks.assertSandboxUserCanSearch).not.toHaveBeenCalled();
+    expect(mocks.runSandboxedCommand.mock.calls[0][0].envOverrides).toStrictEqual({
+      PWD: ENV.GITHUB_WORKSPACE,
+    });
+  });
+
+  it("refuses a bad working-directory before reading config-file", async () => {
+    mocks.readWorkingDirectory.mockImplementation(() => {
+      throw new SandboxError("no such directory", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("no such directory");
+    expect(mocks.applyConfigFile).not.toHaveBeenCalled();
   });
 
   it("suppresses annotations when this is not a real action run", async () => {

@@ -84,6 +84,11 @@ import {
 import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
+import {
+  assertSandboxUserCanSearch,
+  readWorkingDirectory,
+  workingDirectoryOf,
+} from "./sandbox/working-directory.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
@@ -138,6 +143,8 @@ const realDeps = {
   readAwsKeyInputs,
   readTrafficArtifactInputs,
   readStepLabel,
+  readWorkingDirectory,
+  assertSandboxUserCanSearch,
   saveWriteThroughForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -287,7 +294,10 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   for (const ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) {
     deps.warn(ignored);
   }
-  const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
+  // Before config-file, whose path is relative to it.
+  const workingDirectory = deps.readWorkingDirectory(env);
+  const baseDir = workingDirectory?.dir ?? workingDirectoryOf(env);
+  const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS, baseDir);
   if (configFile?.warning) deps.warn(configFile.warning);
 
   const runInput = deps.readRunCommand();
@@ -363,6 +373,8 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     reportActionRef,
     actionRepo,
     runInput,
+    workingDirectory,
+    baseDir,
     proxyEngine,
     proxyMode,
     filesystemMode,
@@ -386,7 +398,14 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
  * command may write, before the image is verified or the proxy started.
  */
 export function preflight(
-  { filesystemMode, writeThroughInput, filesystemAudit, annotation }: StepInputs,
+  {
+    filesystemMode,
+    writeThroughInput,
+    workingDirectory,
+    baseDir,
+    filesystemAudit,
+    annotation,
+  }: StepInputs,
   env: NodeJS.ProcessEnv,
   deps: SandboxStepDeps,
 ): FilesystemPlan {
@@ -396,17 +415,18 @@ export function preflight(
   // A plain input mistake (an unset variable, or write-through: / under
   // ephemeral) fails before the sudo/unshare/mount probes below.
   // resolveFilesystemPlan re-checks the real paths on the host.
-  const writeThrough = resolveWriteThroughInput(writeThroughInput, env);
+  const writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
   deps.validateFilesystemInputs(filesystemMode, writeThrough);
   if (writeThrough.includes(WRITE_THROUGH_ALL)) annotation.warning(WRITE_THROUGH_ALL_WARNING);
 
   // Before the preflights, which already run sudo.
   deps.pinHostCommands(
-    pinningPaths(() => writeThroughInput, env, deps.realPathOf),
+    pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf),
     env,
   );
 
   // Before image verification and the proxy start.
+  if (workingDirectory) deps.assertSandboxUserCanSearch(workingDirectory, env);
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
@@ -414,6 +434,7 @@ export function preflight(
   // Here rather than in runSandboxedCommand, so a bad write-through entry or
   // an uncreatable target fails before the proxy starts.
   const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
+    baseDir,
     warn: deps.warn,
   });
   if (filesystemMode === "ephemeral") {
@@ -518,6 +539,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     containerName,
     annotation,
     env,
+    workingDirectory: inputs.baseDir,
     mediated: mediation?.files.map((f) => f.variable) ?? [],
     actionRepo,
     actionRef: reportActionRef,
@@ -660,6 +682,7 @@ export async function runSandboxStep(
       containerName,
       proxyNetns,
       runInput,
+      workingDirectory: inputs.workingDirectory,
       writeThroughPaths,
       env,
       proxyEngine,
@@ -672,7 +695,12 @@ export async function runSandboxStep(
       cancel: cancel.signal,
       internalMounts: mediation?.mounts,
       maskedPaths: mediation?.maskedPaths,
-      envOverrides: mediation?.envOverrides,
+      // bash resets a PWD that names another directory; an interpreter
+      // named by #! keeps whatever it is given.
+      envOverrides: {
+        ...mediation?.envOverrides,
+        ...(inputs.baseDir && { PWD: inputs.baseDir }),
+      },
     });
   } finally {
     // The reports are written not to throw; one that does anyway still leaves

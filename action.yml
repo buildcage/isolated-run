@@ -8,8 +8,12 @@ inputs:
   run:
     description: "Command(s) to run inside the isolated sandbox (multi-line supported, like a workflow run: step). Runs under bash -e; start with a #! line to use another interpreter."
     required: true
+  working-directory:
+    description: "Directory the command starts in, relative to the workspace (default). Relative write-through paths and config-file resolve against it. See docs/reference.md#working-directory."
+    required: false
+    default: ""
   config-file:
-    description: "YAML file, relative to the workspace, setting any input but run and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
+    description: "YAML file, relative to working-directory, setting any input but run, working-directory and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
     required: false
     default: ""
   label:
@@ -67,7 +71,7 @@ inputs:
     required: false
     default: ""
   write-through:
-    description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against $GITHUB_WORKSPACE. See docs/reference.md#write-through-paths."
+    description: "Paths whose writes reach the real host filesystem, one per line: made writable under persistent, exempt from the discard under ephemeral. Relative paths resolve against working-directory. See docs/reference.md#write-through-paths."
     required: false
     default: ""
   filesystem-mode:
@@ -96,6 +100,10 @@ inputs:
     default: ""
 
   # The underscore spelling of each name above, still accepted.
+  working_directory:
+    description: "Alias of working-directory."
+    required: false
+    default: ""
   config_file:
     description: "Alias of config-file."
     required: false

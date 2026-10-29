@@ -39,8 +39,8 @@ export const WRITE_THROUGH_ALL = "/";
  * Resolve one raw write-through: line into an absolute, normalized host path:
  * 1. $NAME / ${NAME} expansion, allowlisted names only.
  * 2. A leading `~/` (only) expands to $HOME.
- * 3. A relative path resolves against $GITHUB_WORKSPACE (matching the
- *    sandbox's own cwd).
+ * 3. A relative path resolves against `baseDir`, the working directory as
+ *    workingDirectoryOf spells it, or $GITHUB_WORKSPACE when absent.
  * 4. Normalized (resolves `..`) and stripped of any trailing slash. Only a
  *    literal `/` is the WRITE_THROUGH_ALL sentinel; anything else that
  *    normalizes to it is an error.
@@ -49,7 +49,11 @@ export const WRITE_THROUGH_ALL = "/";
  * sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
  * otherwise slip past a guard that the plain path trips.
  */
-export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv): string {
+export function resolveWriteThroughEntry(
+  rawLine: string,
+  env: NodeJS.ProcessEnv,
+  baseDir: string | undefined = env.GITHUB_WORKSPACE,
+): string {
   const expanded = rawLine.replace(
     VAR_PATTERN,
     (_match, braced: string | undefined, bare: string | undefined) => {
@@ -77,9 +81,7 @@ export function resolveWriteThroughEntry(rawLine: string, env: NodeJS.ProcessEnv
     ? join(env.HOME || "", expanded.slice(2))
     : expanded;
 
-  const resolved = isAbsolute(tildeExpanded)
-    ? tildeExpanded
-    : join(env.GITHUB_WORKSPACE || "", tildeExpanded);
+  const resolved = isAbsolute(tildeExpanded) ? tildeExpanded : join(baseDir || "", tildeExpanded);
 
   // Everything downstream (the scratch-base overlap check, the mkdir, the
   // OCI mount destination) assumes an absolute path. Only reachable with $HOME
@@ -131,9 +133,10 @@ export function splitWriteThroughInput(input: string | undefined): string[] {
 export function resolveWriteThroughPaths(
   input: string | undefined,
   env: NodeJS.ProcessEnv,
+  baseDir?: string,
 ): string[] {
   const lines = splitWriteThroughInput(input);
-  return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env)))];
+  return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
 }
 
 /** Thrown by assertKnownFilesExist when a path names one of the well-known

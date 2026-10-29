@@ -27,6 +27,7 @@ details.
 - [Hidden query parameters](#hidden-query-parameters)
 - [Traffic artifact](#traffic-artifact)
 - [Filesystem audit](#filesystem-audit)
+- [Working directory](#working-directory)
 - [CA trust variables](#ca-trust-variables)
 - [`ephemeral` overlays](#ephemeral-overlays)
 - [`write-through` paths](#write-through-paths)
@@ -35,11 +36,12 @@ details.
 
 ### General inputs
 
-| Input         | Default  | Description                                                                                                                   |
-| ------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `run`         | required | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed). |
-| `config-file` | empty    | A YAML file, relative to the workspace, that sets the other inputs. See [Config file](#config-file).                          |
-| `label`       | empty    | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart.                               |
+| Input               | Default   | Description                                                                                                                                                                 |
+| ------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run`               | required  | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                               |
+| `working-directory` | workspace | The directory `run` starts in, relative to the workspace. Relative `write-through` paths and `config-file` resolve against it. See [Working directory](#working-directory). |
+| `config-file`       | empty     | A YAML file, relative to the working directory, that sets the other inputs. See [Config file](#config-file).                                                                |
+| `label`             | empty     | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart.                                                                             |
 
 ### Network inputs
 
@@ -128,9 +130,9 @@ step before the sandbox is set up.
 
 ## Config file
 
-`config-file` names a YAML file in the repository that sets any input but `run` and the deprecated
-`writable` ([The former input names](#the-former-input-names)), so the policy can sit beside the
-code that needs it:
+`config-file` names a YAML file in the repository that sets any input but `run`, `working-directory`
+and the deprecated `writable` ([The former input names](#the-former-input-names)), so the policy can
+sit beside the code that needs it:
 
 ```yaml
 # path/to/buildcage-config.yml
@@ -155,7 +157,8 @@ known-blocked-rules: |
   them: the file's own key overrides it.
 - An input the workflow sets wins over the file. The rule inputs, `expected-filesystem-rules`
   among them, and `write-through` are the exception: the file's lines are added to the workflow's.
-- The path is relative to `$GITHUB_WORKSPACE` and must stay inside it, through symlinks too. The
+- The path is relative to the [working directory](#working-directory), `$GITHUB_WORKSPACE` unless
+  `working-directory` is set, and must stay inside `$GITHUB_WORKSPACE`, through symlinks too. The
   repository has to be checked out by an earlier step.
 - `config-file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
   request event: the workspace there can hold the pull request's own code, which could rewrite the
@@ -927,6 +930,37 @@ the short form.
   rule for each such access. See
   [Expected accesses](./filesystem-audit.md#expected-accesses).
 
+## Working directory
+
+`working-directory` sets the directory `run` starts in, as the workflow's own `working-directory:`
+does for a `run:` step, which does not apply to a `uses:` step. A relative path resolves against
+`$GITHUB_WORKSPACE`, and an absolute one is taken as it is. Neither `~` nor a `$NAME` is expanded;
+use an expression such as `${{ runner.temp }}` instead.
+
+```yaml
+- uses: buildcage/isolated-run@<sha>
+  with:
+    working-directory: packages/web
+    config-file: buildcage.yml # packages/web/buildcage.yml
+    write-through: dist # packages/web/dist
+    run: npm ci && npm run build
+```
+
+- The step fails before the command runs when the directory does not exist, is not a directory, is
+  covered by a mount of the sandbox's own (as under `/dev/shm`), or cannot be entered by the step's
+  user without its supplementary groups, which the sandbox drops.
+- Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
+  set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
+  `working-directory` to a step changes where its relative `write-through` paths point: with
+  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
+- In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
+  rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
+  a path in the working directory either way, with or without `working-directory`.
+- The directory is writable only when it is somewhere the step can write anyway: the workspace,
+  `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
+  there but not write.
+- `PWD` is set to the directory as written, before symlinks are resolved, as a shell sets it.
+
 ## CA trust variables
 
 `proxy-engine: inspect` terminates TLS and re-signs it with a CA generated for the step, so the
@@ -1050,8 +1084,8 @@ this:
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
   is refused.
 - A leading `~/` expands to `$HOME`.
-- A relative path (`./dist`) resolves against `$GITHUB_WORKSPACE`, matching the sandbox's own
-  working directory.
+- A relative path (`./dist`) resolves against the [working directory](#working-directory),
+  `$GITHUB_WORKSPACE` unless `working-directory` is set.
 - Symlinks are not followed. A path that is a symlink, or goes through one anywhere along it, fails
   the step, and the error names the path it leads to, which you can write instead. Following one
   would make writable wherever it leads, and an earlier step could have pointed it at a path the
@@ -1206,7 +1240,7 @@ to `/` (a miscounted `../`, say) is refused rather than read as the opt-out.
 `write-through:` was called `writable:` before it covered both filesystem modes, and `allow_write:`
 was its `filesystem-mode: ephemeral`-only counterpart. `writable:` still works and means the same
 thing, except that its entries go through the resolution above, so a relative entry resolves against
-`$GITHUB_WORKSPACE` rather than being passed through as-is, and a `$NAME` outside the seven
+the working directory rather than being passed through as-is, and a `$NAME` outside the seven
 supported variables is refused instead of being treated as a literal path. Setting both joins their
 lines. `allow_write:` has been removed, and a step still passing it fails with a message saying so
 rather than silently discarding the writes it asked to keep.

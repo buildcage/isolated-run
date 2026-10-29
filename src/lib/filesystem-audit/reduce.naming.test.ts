@@ -130,6 +130,63 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["W bash $GITHUB_OUTPUT (deleted)"]);
   });
 
+  it("shows the working directory as ./ and the rest of the workspace as $GITHUB_WORKSPACE/", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/work/app/a" },
+        { kind: "read", comm: "git", path: "/work/.git/HEAD" },
+        { kind: "read", comm: "node", path: "/home/u/.npmrc" },
+      ),
+      { ...PREFIXES, cwd: ["/work/app"] },
+    );
+    expect(lines(md)).toEqual([
+      "R node ./a",
+      "R git $GITHUB_WORKSPACE/.git/HEAD",
+      "R node ~/.npmrc",
+    ]);
+  });
+
+  it("names the working directory and the workspace themselves", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/work/app" },
+        { kind: "read", comm: "git", path: "/work" },
+      ),
+      { ...PREFIXES, cwd: ["/work/app"] },
+    );
+    expect(lines(md)).toEqual(["R node .", "R git $GITHUB_WORKSPACE"]);
+  });
+
+  it("keeps ./ for the workspace when the working directory is the workspace", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "read", comm: "node", path: "/work/a" }),
+      { ...PREFIXES, cwd: ["/work"] },
+    );
+    expect(lines(md)).toEqual(["R node ./a"]);
+  });
+
+  it("shows the working directory as ./ even above the workspace, and folds its real path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/real/opt/a" },
+        { kind: "read", comm: "node", path: "/work/b" },
+      ),
+      { ...PREFIXES, cwd: ["/opt", "/real/opt"] },
+    );
+    expect(lines(md)).toEqual(["R node ./a", "R node $GITHUB_WORKSPACE/b"]);
+  });
+
+  it("takes / as a working directory like any other", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/etc/a" },
+        { kind: "read", comm: "node", path: "/work/b" },
+      ),
+      { ...PREFIXES, cwd: ["/"] },
+    );
+    expect(lines(md)).toEqual(["R node ./etc/a", "R node ./work/b"]);
+  });
+
   it("names the workspace and home roots themselves", () => {
     const summary = summarize([
       { kind: "read", comm: "node", path: "/work" },

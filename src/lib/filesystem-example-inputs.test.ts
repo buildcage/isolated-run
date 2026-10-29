@@ -62,6 +62,24 @@ describe("filesystemExampleInputs", () => {
     ]);
   });
 
+  it("writes working-directory first where it is not the workspace, quoted only where YAML needs it", () => {
+    const at = (input: string, isWorkspace = false) => ({
+      workingDirectory: { input, dir: `/w/${input}`, real: `/w/${input}`, isWorkspace },
+      filesystemAudit: "off" as const,
+      ...NO_RULES,
+    });
+    expect(inputsOf({ ...at("packages/app"), writeThroughInput: "dist" })).toStrictEqual([
+      "working-directory: packages/app",
+      "write-through: |",
+      "  dist",
+    ]);
+    expect(inputsOf(at("my app"))).toStrictEqual(["working-directory: my app"]);
+    expect(inputsOf(at("../shared"))).toStrictEqual(["working-directory: ../shared"]);
+    for (const input of ["null", "true", "2024", "a: b", "#x", "[x", "*x"])
+      expect(inputsOf(at(input))).toStrictEqual([`working-directory: ${JSON.stringify(input)}`]);
+    expect(inputsOf(at("./", true))).toStrictEqual([]);
+  });
+
   it("leaves out a write-through holding only comments and blank lines", () => {
     expect(
       inputsOf({ writeThroughInput: "# none yet\n\n", filesystemAudit: "off", ...NO_RULES }),

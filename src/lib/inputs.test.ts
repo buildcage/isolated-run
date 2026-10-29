@@ -34,10 +34,11 @@ const ASIA = ["A", "S", "I", "A"].join("");
 const silent = () => {};
 
 describe("CONFIG_FILE_INPUTS", () => {
-  it("names every action.yml input but run, writable and config-file itself", () => {
+  it("names every action.yml input but run, writable, config-file itself and working-directory", () => {
     const actionYml = parse(readFileSync("action.yml", "utf8")) as { inputs: object };
     const inputs = Object.keys(actionYml.inputs).filter(
-      (n) => !["run", "writable", "config-file"].includes(n) && !n.includes("_"),
+      (n) =>
+        !["run", "writable", "config-file", "working-directory"].includes(n) && !n.includes("_"),
     );
     expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
   });

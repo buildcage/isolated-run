@@ -4,8 +4,10 @@
  * An access no rule names is unexpected.
  *
  * Programs and paths are written and matched as the summary shows them,
- * escapes included (see reduce.ts's ruleName): `./` the workspace, `~/` $HOME,
- * `$GITHUB_OUTPUT` the runner file, `memfd:"name"` a file in memory.
+ * escapes included (see reduce.ts's ruleNames): `./` the working directory,
+ * `$GITHUB_WORKSPACE/` the workspace outside it, `~/` $HOME, `$GITHUB_OUTPUT`
+ * the runner file, `memfd:"name"` a file in memory. A path in the working
+ * directory also matches as it would be shown without one.
  * `*` matches within one path component and `**` across components. A `**`
  * that is a whole component also matches no component, so `./x/**` takes
  * `./x` itself. `*` as the whole program matches any program, and `\*` is a
@@ -303,33 +305,40 @@ export class RuleMatcher {
     for (const i of node.rules) into.add(i);
   }
 
-  // The rules that may take a path, in the order they were written.
-  private candidates(path: string): ExpectedRule[] {
+  // The rules that may take one of the paths, in the order they were written.
+  private candidates(paths: readonly string[]): ExpectedRule[] {
     const found = new Set<number>();
-    this.startingAt(path, found);
-    // A /proc/<pid>/ rule takes the accessing process's own directory too.
-    const any = asAnyProcess(path);
-    if (any !== undefined) this.startingAt(any, found);
+    for (const path of paths) {
+      this.startingAt(path, found);
+      // A /proc/<pid>/ rule takes the accessing process's own directory too.
+      const any = asAnyProcess(path);
+      if (any !== undefined) this.startingAt(any, found);
+    }
     return [...found].sort((a, b) => a - b).map((i) => this.rules[i]);
   }
 
   /**
    * The bits no rule takes, and the rule that took the first of the others.
-   * `program` and `path` are the names a rule is matched against.
+   * `program` and `path` are the names a rule is matched against, each one
+   * name or every spelling of it, any of which a rule may match.
    */
   match(
-    program: string,
-    path: string,
+    program: string | readonly string[],
+    path: string | readonly string[],
     bits: number,
     failed: boolean,
     perm: boolean,
   ): { unmatched: number; ref?: string } {
-    const key = `${program}\0${path}`;
+    const programs = typeof program === "string" ? [program] : program;
+    const paths = typeof path === "string" ? [path] : path;
+    const key = `${programs.join("\0")}\0\0${paths.join("\0")}`;
     let candidates = this.cache.get(key);
     if (!candidates) {
       if (this.cache.size >= CACHE_MAX) this.cache.clear();
-      candidates = this.candidates(path).filter(
-        (r) => (r.program === undefined || r.program.test(program)) && r.path.test(path),
+      candidates = this.candidates(paths).filter(
+        (r) =>
+          (r.program === undefined || programs.some((p) => r.program!.test(p))) &&
+          paths.some((p) => r.path.test(p)),
       );
       this.cache.set(key, candidates);
     }

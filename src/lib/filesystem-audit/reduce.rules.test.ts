@@ -50,6 +50,73 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     expect(rows(summary)).toStrictEqual(["cat R ./c"]);
   });
 
+  it("matches a path in the working directory as ./ or as it would be shown without it", () => {
+    const { lines, summary } = marked(
+      {
+        cwd: ["/work/app"],
+        rules: rulesOf(
+          "node R ./a\nnode R $GITHUB_WORKSPACE/app/b\nnode R /work/app/c\nnode R $GITHUB_WORKSPACE/.git/**",
+        ),
+      },
+      { kind: "read", pid: 3, comm: "node", path: "/work/app/a" },
+      { kind: "read", pid: 3, comm: "node", path: "/work/app/b" },
+      { kind: "read", pid: 3, comm: "node", path: "/work/app/c" },
+      { kind: "read", pid: 3, comm: "node", path: "/work/.git/HEAD" },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { rule?: string }).rule)).toStrictEqual([
+      "input:1",
+      "input:2",
+      undefined,
+      "input:4",
+    ]);
+    expect(rows(summary)).toStrictEqual(["node R ./c"]);
+  });
+
+  it("proposes the working directory's paths first, then the workspace's, $HOME's and the rest", () => {
+    const { summary } = marked(
+      { cwd: ["/work/app"], propose: true },
+      { kind: "read", pid: 3, comm: "cat", path: "/etc/hosts" },
+      { kind: "read", pid: 3, comm: "cat", path: "/home/u/.npmrc" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/.git/HEAD" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/app/a" },
+    );
+    expect(rows(summary)).toStrictEqual([
+      "cat R ./a",
+      "cat R $GITHUB_WORKSPACE/.git/HEAD",
+      "cat R ~/.npmrc",
+      "cat R /etc/hosts",
+    ]);
+  });
+
+  it("matches a working directory outside the workspace by its absolute path too", () => {
+    const { summary } = marked(
+      { cwd: ["/opt/app"], rules: rulesOf("node R /opt/app/**") },
+      { kind: "read", pid: 3, comm: "node", path: "/opt/app/a" },
+    );
+    expect(summary).toMatchObject({ matched: 1, unexpected: 0 });
+  });
+
+  it("matches the workspace as $GITHUB_WORKSPACE/ without a working directory, but not as ~/", () => {
+    const { lines } = marked(
+      { home: ["/"], rules: rulesOf("node R $GITHUB_WORKSPACE/a\nnode R ~/work/b") },
+      { kind: "read", pid: 3, comm: "node", path: "/work/a" },
+      { kind: "read", pid: 3, comm: "node", path: "/work/b" },
+    );
+    expect(lines.map((l) => (JSON.parse(l) as { rule?: string }).rule)).toStrictEqual([
+      "input:1",
+      undefined,
+    ]);
+  });
+
+  it("matches a program in the working directory by either spelling", () => {
+    const { summary } = marked(
+      { cwd: ["/work/app"], rules: rulesOf("$GITHUB_WORKSPACE/app/run R ./a") },
+      { kind: "exec", pid: 3, comm: "run", path: "/work/app/run" },
+      { kind: "read", pid: 3, comm: "run", path: "/work/app/a" },
+    );
+    expect(summary.proposed?.map((r) => r.path.path)).not.toContain("./a");
+  });
+
   it("proposes only the actions no rule took", () => {
     const { lines, summary } = marked(
       { rules: rulesOf("* r ./a") },

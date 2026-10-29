@@ -26,6 +26,7 @@ import {
   MEMFDS,
   normalize,
   relativize,
+  ruleSpellings,
   sortKey,
   unmarked,
   type Prefixes,
@@ -211,9 +212,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
-  // The workspace and $HOME as the paths spell them once escaped: canonical
-  // gives each path the first spelling.
+  // The working directory, the workspace and $HOME as the paths spell them
+  // once escaped: canonical gives each path the first spelling.
   const shownPrefixes = {
+    ...(prefixes.cwd && { cwd: prefixes.cwd.slice(0, 1).map(escapePath) }),
     workspace: prefixes.workspace.slice(0, 1).map(escapePath),
     home: prefixes.home.slice(0, 1).map(escapePath),
   };
@@ -237,6 +239,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     ...(prefixes.toolCache ?? []).map((p) => escapePath(canonical(p, prefixes))),
     "/root",
     "…",
+    ...(shownPrefixes.cwd ?? []),
     ...shownPrefixes.workspace,
     ...shownPrefixes.home,
     ...[...shownPrefixes.home, "/root"].flatMap((home) =>
@@ -280,7 +283,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     bytes: number;
     leaf: number;
     program?: string;
-    ruleName: string;
+    ruleNames: readonly string[];
     ruleId: number;
   }[] = [];
   const ruleIds = new Map<string, number>();
@@ -293,7 +296,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       rankOf.set(id, r);
       const s = name ? { path: escapeForDisplay(key) } : shown(escaped(key));
       const bytes = s.path.length + (s.deleted ? DELETED_MARK.length : 0);
-      const rule = name ? s.path : ruleName(escaped(key));
+      const names = name ? [s.path] : ruleNames(escaped(key));
+      const rule = names[0];
       const ruleId = ruleIds.get(rule) ?? r;
       ruleIds.set(rule, ruleId);
       ranks.push({
@@ -301,7 +305,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
         bytes,
         leaf: leaf(s.path).length,
         ...(name ? {} : { program: key }),
-        ruleName: rule,
+        ruleNames: names,
         ruleId,
       });
     }
@@ -346,7 +350,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
             rowBytes: () => 0,
             showWalked: true,
           }),
-          { program: (rank) => ranks[rank].ruleName, path: ruleName },
+          { program: (rank) => ranks[rank].ruleNames, path: ruleNames },
         )
       : undefined;
   // A rule never names the deleted mark, so the tally keys a program by its
@@ -521,8 +525,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // The name a rule is matched against, as the summary shows it: a memfd's
   // quoted, a deleted file's path alone.
   function ruleName(path: string): string {
-    if (path.startsWith(MEMFD)) return `${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`;
-    return relativize(unmarked(path), shownPrefixes);
+    return ruleNames(path)[0];
+  }
+
+  // That name, and the one without the working directory where that differs.
+  function ruleNames(path: string): string[] {
+    if (path.startsWith(MEMFD)) return [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`];
+    return ruleSpellings(unmarked(path), shownPrefixes);
   }
 
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {

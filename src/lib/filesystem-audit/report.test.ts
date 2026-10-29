@@ -386,6 +386,51 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
+  it("shows ./ as the working directory, and names it in the legend", async () => {
+    const { deps: d, summaries } = deps({
+      raw: [
+        JSON.stringify({ kind: "write", comm: "node", path: "/work/app/a.txt" }),
+        JSON.stringify({ kind: "read", comm: "git", path: "/work/.git/HEAD" }),
+      ].join("\n"),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work" },
+        workingDirectory: "/work/app",
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain("W node ./a.txt");
+    expect(summaries[0]).toContain("R git  $GITHUB_WORKSPACE/.git/HEAD");
+    expect(summaries[0]).toContain(
+      "`./` `$GITHUB_WORKSPACE/app` · `$GITHUB_WORKSPACE/` workspace · `~/` $HOME",
+    );
+  });
+
+  it("names no working directory in the legend when it is the workspace", async () => {
+    const { deps: d, summaries } = deps({
+      raw: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work/" },
+        workingDirectory: "/work",
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain("`./` workspace · `~/` $HOME");
+  });
+
   it("keeps the tool cache from folding under its realpath too", async () => {
     const reads = ["a", "b", "c"].map((leaf) =>
       JSON.stringify({ kind: "read", comm: "node", path: `/real/tool/${leaf}` }),

@@ -18,6 +18,7 @@ import {
   mediatedPathOf,
   type MediatedVariable,
 } from "../sandbox/runner-output-files.ts";
+import { isWorkspace } from "../sandbox/working-directory.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import {
   filesystemAuditArtifactName,
@@ -27,6 +28,7 @@ import {
 } from "./artifact.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { openWriter, readLines } from "./line-file.ts";
+import { relativize } from "./paths.ts";
 import { writeProposedRules, type ProposedState } from "./proposed-rules.ts";
 import {
   createAuditSummary,
@@ -65,6 +67,8 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
+  /** What `./` stands for, as workingDirectoryOf spells it: the workspace when absent. */
+  workingDirectory?: string;
   /** The runner files the command wrote through backing copies. */
   mediated: readonly MediatedVariable[];
   /** Where the guide the summary links to is read from. */
@@ -193,6 +197,7 @@ export function readStepFilesystemAudit(
     containerName,
     annotation,
     env,
+    workingDirectory = env.GITHUB_WORKSPACE,
     mediated,
     actionRepo,
     actionRef,
@@ -246,6 +251,7 @@ export function readStepFilesystemAudit(
       prepared = false;
     }
   const options: SummaryOptions = {
+    cwd: prefixes(workingDirectory, deps.realpath),
     workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
     home: prefixes(env.HOME, deps.realpath),
     toolCache: prefixes(env.RUNNER_TOOL_CACHE, deps.realpath),
@@ -254,6 +260,10 @@ export function readStepFilesystemAudit(
     // Only a prepared directory takes the proposed rules.
     propose: prepared,
   };
+  const cwdNamed =
+    workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath)
+      ? relativize(workingDirectory, { ...options, cwd: [] })
+      : undefined;
   // What the verdict says of accesses that could not all be checked, which
   // fail the step as unexpected ones would.
   const checkIncomplete: VerdictItems =
@@ -362,7 +372,7 @@ export function readStepFilesystemAudit(
           startedAt,
           priorities: FILESYSTEM_PRIORITIES,
           cutNote,
-          legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`),
+          legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`, cwdNamed),
           skippedHooksUrl: `${guide}#skipped-hooks`,
           ...(given && { expected: hasRules ? "given" : "empty" }),
           rulesNote: rulesNote(proposalOf(proposed, artifact), {
