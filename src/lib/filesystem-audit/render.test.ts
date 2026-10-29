@@ -487,6 +487,70 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` | R | `/x` |\n");
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 2 more | D | `/y` |\n");
   });
+
+  const strays = (
+    proposed: AuditSummary["proposed"],
+    killed: AuditSummary["killed"] = [],
+  ): AuditSummary => ({
+    ended: true,
+    lost: false,
+    hostMissed: 0,
+    paths: [],
+    details: proposed?.length
+      ? [{ agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" }]
+      : [],
+    killed,
+    proposed,
+    matched: 1,
+    unexpected: proposed?.length ?? 0,
+  });
+  const renderGiven = (summary: AuditSummary) =>
+    joinSummaryBlocks(
+      renderAuditSummaryBlocks(summary, {
+        title: "T",
+        startedAt: undefined,
+        priorities: FILESYSTEM_PRIORITIES,
+        cutNote: () => "",
+        expected: "given",
+      }),
+    );
+
+  it("folds the details of only the unexpected accesses after the table", () => {
+    const md = renderGiven(
+      strays([
+        { program: { path: "/bin/cat" }, commands: ["cat"], flags: "W", path: { path: "./b" } },
+      ]),
+    );
+    expect(md.indexOf("### ⚠️ Unexpected Accesses")).toBeLessThan(
+      md.indexOf("<summary>🔍 Unexpected access details"),
+    );
+    expect(md).toMatch(
+      /<details>\n<summary>🔍 Unexpected access details<\/summary>\n\n<sub>R read[^\n]*<\/sub>\n\n<sub>flags · command · path<\/sub>\n\n```\nW cat \.\/b\n```\n\n<\/details>\n$/,
+    );
+    expect(md).not.toContain("File access details");
+  });
+
+  it("prints no details where no access was unexpected", () => {
+    expect(renderGiven(strays([]))).not.toContain("<details>");
+  });
+
+  it("lists a program killed for a 32-bit syscall though every access was expected", () => {
+    const killed = {
+      agg: newAgg(),
+      flags: "!",
+      comm: "a",
+      commField: "a",
+      path: "syscall:32-bit open (killed)",
+      syscall: true as const,
+    };
+    expect(renderGiven(strays([], [killed]))).toContain(
+      "```\n! a syscall:32-bit open (killed)\n```",
+    );
+  });
+
+  it("prints no details where a note takes the place of the table", () => {
+    expect(renderGiven({ ...strays(undefined), proposedCut: true })).not.toContain("<details>");
+  });
 });
 
 describe("renderAuditSummaryBlocks: layout", () => {

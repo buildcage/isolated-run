@@ -129,6 +129,7 @@ export interface AuditSummary {
   hostMissed: number;
   /** Each part, or undefined where it was given up (see pathsCut). */
   paths: PathRow[] | undefined;
+  /** With expected-filesystem-rules, only the actions no rule took. */
   details: Row[] | undefined;
   /** Each 32-bit syscall a command was killed for, as a details row. */
   killed: KilledRow[];
@@ -151,7 +152,7 @@ export interface AuditSummary {
 /** Whether the recording holds no file access at all, which leaves the
  *  summary saying only that, and nothing to propose rules from. */
 export const recordedNoFileAccess = (summary: AuditSummary): boolean =>
-  summary.details?.length === 0;
+  summary.details?.length === 0 && !summary.matched;
 
 /**
  * Reduces a recording to an AuditSummary in two passes over its records:
@@ -359,13 +360,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // or per program for a folded row.
   const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
   const programDeletedOnly = new Map<number, boolean>();
-  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
+  // Returns the actions no rule took.
+  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): number => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     const path = deletedPath ? unmarked(x.path) : x.path;
     const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
     // Past the tally's limit, only the matching is left to do.
-    if (!left || tally!.givenUp) return;
+    if (!left || tally!.givenUp) return left;
     const program = Boolean(ranks[by].shown.deleted);
     const key = keyOf(String(id), path);
     const was = deletedOnly.get(key);
@@ -374,6 +376,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       path: (was?.path ?? true) && deletedPath,
     });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
+    return left;
   };
   // Each pid's name before its latest record.
   const commsBefore = new Map<number | undefined, string>();
@@ -490,10 +493,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
       const cmd = runner?.cmd ?? x.comm;
-      // A run is the command's that started it, as in the table.
-      details.add({ ...x, comm: cmd }, parts);
       paths.add({ ...x, comm: String(by), cmd }, parts);
-      if (tally) takeForRules(x, parts, by, cmd);
+      const left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
+      // A run is the command's that started it, as in the table.
+      if (left) details.add({ ...x, comm: cmd, bit: left }, parts);
     }
     return tally?.endLine();
   };
@@ -587,8 +590,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
       commands: commandsOf(agg),
     }));
-    // A table given up leaves no room for the details either.
-    const log = byPath && rows(kept(details));
+    // A table given up leaves no room for the details either, unless rules
+    // replace the table.
+    const log = (byPath || prefixes.rules) && rows(kept(details));
     const ruleRows = tally && ruleRowsOf(tally);
     return {
       ended,

@@ -73244,7 +73244,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
 	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
-}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0;
+}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0 && !summary.matched;
 function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
@@ -73337,13 +73337,13 @@ function createAuditSummary(prefixes) {
 		program: (rank) => ranks[rank].ruleNames,
 		path: ruleNames
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
-		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
-		if (!tally.take(x, deletedPath ? components(path) : parts, id, path, cmd) || tally.givenUp) return;
+		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
+		if (!left || tally.givenUp) return left;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
-		deletedOnly.set(key, {
+		return deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
-		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
+		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program), left;
 	}, commsBefore = new Map(), runnerOf = (r) => {
 		let before = commsBefore.get(r.pid), parent = commsBefore.get(r.ppid);
 		if (before === void 0 && parent !== void 0) return {
@@ -73403,14 +73403,17 @@ function createAuditSummary(prefixes) {
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path), by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
-				details.add({
-					...x,
-					comm: cmd
-				}, parts), paths.add({
+				paths.add({
 					...x,
 					comm: String(by),
 					cmd
-				}, parts), tally && takeForRules(x, parts, by, cmd);
+				}, parts);
+				let left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
+				left && details.add({
+					...x,
+					comm: cmd,
+					bit: left
+				}, parts);
 			}
 			return tally?.endLine();
 		}
@@ -73481,7 +73484,7 @@ function createAuditSummary(prefixes) {
 					rank: Number(comm)
 				},
 				commands: commandsOf(agg)
-			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
+			})), log = (byPath || prefixes.rules) && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
 			return {
 				ended,
 				lost,
@@ -73559,7 +73562,7 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", detailsOpen = (what) => `<details>\n<summary>🔍 ${what}</summary>\n\n`, DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	unexpected: "filesystem-unexpected",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -73613,13 +73616,13 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote }) {
+function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote, expected }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
 		level: 3,
 		section: SECTION,
-		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
+		open: detailsOpen(expected ? "Unexpected access details" : "File access details"),
 		close: DETAILS_CLOSE
 	};
 	if (!details) return {
@@ -73680,7 +73683,7 @@ function renderAuditSummaryBlocks(summary, opts) {
 	});
 	if (recordedNoFileAccess(summary) && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
-	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), summary.proposed && (summary.proposed.length || killed.length) && blocks.push(detailsBlock(summary, opts));
 	else {
 		let rows = paths && byProgramAndPath(paths);
 		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, opts));

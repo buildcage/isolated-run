@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 
 import { feed, machinery, SCRATCH_BASE, shell, PREFIXES } from "../test/filesystem-audit.ts";
 import { RULES_TO_ADD_HEADER, rulesToAdd } from "./proposed-rules.ts";
-import { reduceRecording, type AuditSummary, type SummaryOptions } from "./reduce.ts";
+import {
+  recordedNoFileAccess,
+  reduceRecording,
+  type AuditSummary,
+  type SummaryOptions,
+} from "./reduce.ts";
 import { parseExpectedRules, RuleMatcher } from "./rules.ts";
 
 describe("createAuditSummary: expected-filesystem-rules", () => {
@@ -544,6 +549,29 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     const { summary } = marked({}, { kind: "read", pid: 3, comm: "cat", path: "/work/a" });
     expect(summary.proposed).toBeUndefined();
     expect(summary.proposedCut).toBeUndefined();
+  });
+
+  it("keeps the details of only the actions no rule took", () => {
+    const { summary } = marked(
+      { rules: rulesOf("cat R ./a\ncat R ./b") },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/b" },
+      { kind: "write", pid: 3, comm: "cat", path: "/work/b" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/c" },
+    );
+    expect(summary.details?.map((r) => `${r.flags} ${r.comm} ${r.path}`)).toStrictEqual([
+      "W cat ./b",
+      "R cat ./c",
+    ]);
+  });
+
+  it("still counts the accesses every rule took as recorded", () => {
+    const { summary } = marked(
+      { rules: rulesOf("cat R ./a") },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+    );
+    expect(summary.details).toStrictEqual([]);
+    expect(recordedNoFileAccess(summary)).toBe(false);
   });
 
   it("folds the proposals as the table does, but never loosens them", () => {
