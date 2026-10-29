@@ -56,7 +56,7 @@ const UNREADABLE_NOTE =
   "> ❗ **The recording could not be read**, so this summary has none of its accesses and no\n" +
   "> artifact was uploaded.";
 const SECTION = "filesystem";
-const DETAILS_OPEN = "<details>\n<summary>🔍 File access details</summary>\n\n";
+const detailsOpen = (what: string): string => `<details>\n<summary>🔍 ${what}</summary>\n\n`;
 const DETAILS_CLOSE = "</details>\n";
 
 /** The ids renderAuditSummaryBlocks gives its blocks. */
@@ -175,20 +175,24 @@ function pathsBlock(
 // A memfd's name is quoted already, and a killed syscall's row names no path.
 const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : field(r.path));
 
+// Every access's rows, or with expected-filesystem-rules only those of what
+// no rule took.
 function detailsBlock(
-  { details, killed, detailsCut }: AuditSummary,
-  { startedAt, priorities, cutNote }: RenderOptions,
+  { details, killed, detailsCut, strayDetails, strayDetailsCut }: AuditSummary,
+  { startedAt, priorities, cutNote, expected }: RenderOptions,
 ): SummaryBlock {
   const log = {
     id: FILESYSTEM_BLOCK.log,
     priority: priorities[FILESYSTEM_BLOCK.log],
     level: 3,
     section: SECTION,
-    open: DETAILS_OPEN,
+    open: detailsOpen(expected ? "Unexpected access details" : "File access details"),
     close: DETAILS_CLOSE,
   };
-  if (!details) return { ...log, cut: "atomic", text: cutNote(detailsCut) };
-  const rows = inRecordingOrder([...details, ...killed]);
+  const shown = expected ? strayDetails : details;
+  const cut = expected ? strayDetailsCut : detailsCut;
+  if (!shown) return { ...log, cut: "atomic", text: cutNote(cut) };
+  const rows = inRecordingOrder([...shown, ...killed]);
   // Times count from the proxy's start, as the communication details do, or
   // from the first access shown when that start is unknown.
   const originMs =
@@ -223,7 +227,7 @@ function detailsBlock(
     text:
       // The legend again, as either part may be opened alone.
       `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` +
-      (detailsCut ? cutNote(detailsCut) : ""),
+      (cut ? cutNote(cut) : ""),
   };
 }
 
@@ -275,8 +279,8 @@ const operations = (n: number): string =>
  * and notes) kept whole, the accessed-paths table and the full per-command
  * record, each folded into a details element, the proposed rules' note, and
  * the legend note, also kept whole. With
- * expected-filesystem-rules, what they did not take replaces the table and
- * the details.
+ * expected-filesystem-rules, what they did not take replaces the table, and
+ * the details keep only its accesses.
  */
 export function renderAuditSummaryBlocks(
   summary: AuditSummary,
@@ -301,8 +305,11 @@ export function renderAuditSummaryBlocks(
     return [frame(`${top}\n\nNo file access was recorded.\n`)];
 
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
-  if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
-  else {
+  if (opts.expected) {
+    blocks.push(unexpectedBlock(summary, opts));
+    // Only under the table, which a note takes the place of otherwise.
+    if (summary.proposed?.length) blocks.push(detailsBlock(summary, opts));
+  } else {
     const rows = paths && byProgramAndPath(paths);
     // Empty when the step was only killed for a syscall, which the details list.
     if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));

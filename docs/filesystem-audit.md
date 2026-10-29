@@ -381,6 +381,8 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 | Program               | Command                | Access | Path       |
 | --------------------- | ---------------------- | ------ | ---------- |
 | `/usr/local/bin/node` | `node[npm ci]`, `node` | R      | `~/.npmrc` |
+
+▶ 🔍 Unexpected access details
 ```
 
 The baseline shows a new path or a new program. It cannot tell which code inside a program made an
@@ -496,9 +498,10 @@ comment says to add them back, under `with:` or in a config file. It also leaves
 
 ### What the summary shows
 
-- **Unexpected Accesses** takes the place of Accessed Paths and the details, with the same columns,
-  and is not folded; the artifact still has every access. Each row is one rule the proposed file
-  adds.
+- **Unexpected Accesses** takes the place of Accessed Paths, with the same columns, and is not
+  folded; the artifact still has every access. Each row is one rule the proposed file adds.
+- **Unexpected access details**, folded after the table, has the rows of File access details for
+  those accesses only, each with only the actions no rule took.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
 - `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too, with the

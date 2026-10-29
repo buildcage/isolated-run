@@ -142,6 +142,10 @@ export interface AuditSummary {
   proposed?: RuleRow[];
   /** Whether the proposed rules were given up. */
   proposedCut?: boolean;
+  /** With expected-filesystem-rules, the details rows of what no rule took,
+   *  or undefined where given up (see strayDetailsCut). */
+  strayDetails?: Row[];
+  strayDetailsCut?: CutCause;
   /** How many lines of the recording the rules took, and how many they did not. */
   matched: number;
   unexpected: number;
@@ -331,6 +335,17 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
     return key;
   };
+  // With rules, the details of what they did not take.
+  const strays = prefixes.rules
+    ? new Lines({
+        fanout,
+        keep,
+        limit,
+        loose,
+        nodes: limits.nodes,
+        rowBytes: (p, key) => relLength(p) + commands.get(key)!.field.length + 3,
+      })
+    : undefined;
   // What no rule takes, by program and path, folded as the accessed paths
   // are but never loosened nor cut for size.
   const tally =
@@ -355,13 +370,14 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // or per program for a folded row.
   const deletedOnly = new Map<string, { program: boolean; path: boolean }>();
   const programDeletedOnly = new Map<number, boolean>();
-  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): void => {
+  // Returns the actions no rule took.
+  const takeForRules = (x: Access, parts: string[], by: number, cmd: string): number => {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     const path = deletedPath ? unmarked(x.path) : x.path;
     const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
     // Past the tally's limit, only the matching is left to do.
-    if (!left || tally!.givenUp) return;
+    if (!left || tally!.givenUp) return left;
     const program = Boolean(ranks[by].shown.deleted);
     const key = keyOf(String(id), path);
     const was = deletedOnly.get(key);
@@ -370,6 +386,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       path: (was?.path ?? true) && deletedPath,
     });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
+    return left;
   };
   // Each pid's name before its latest record.
   const commsBefore = new Map<number | undefined, string>();
@@ -489,7 +506,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // A run is the command's that started it, as in the table.
       details.add({ ...x, comm: cmd }, parts);
       paths.add({ ...x, comm: String(by), cmd }, parts);
-      if (tally) takeForRules(x, parts, by, cmd);
+      const left = tally ? takeForRules(x, parts, by, cmd) : 0;
+      if (left) strays?.add({ ...x, comm: cmd, bit: left }, parts);
     }
     return tally?.endLine();
   };
@@ -581,6 +599,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     // A table given up leaves no room for the details either.
     const log = byPath && rows(kept(details));
     const ruleRows = tally && ruleRowsOf(tally);
+    const strayRows = strays && rows(kept(strays));
     return {
       ended,
       lost,
@@ -592,6 +611,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       detailsCut: details.cut,
       ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),
       ...(tally?.givenUp && { proposedCut: true }),
+      ...(strays && { strayDetails: strayRows, strayDetailsCut: strays.cut }),
       matched: tally?.matched ?? 0,
       unexpected: tally?.unexpected ?? 0,
     };

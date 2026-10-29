@@ -479,6 +479,29 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     expect(summary.proposedCut).toBeUndefined();
   });
 
+  it("keeps the details of only the actions no rule took", () => {
+    const { summary } = marked(
+      { rules: rulesOf("cat R ./a\ncat R ./b") },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/b" },
+      { kind: "write", pid: 3, comm: "cat", path: "/work/b" },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/c" },
+    );
+    expect(summary.strayDetails?.map((r) => `${r.flags} ${r.comm} ${r.path}`)).toStrictEqual([
+      "W cat ./b",
+      "R cat ./c",
+    ]);
+    expect(summary.strayDetailsCut).toBeUndefined();
+  });
+
+  it("keeps no details of the unexpected without rules", () => {
+    const { summary } = marked(
+      { propose: true },
+      { kind: "read", pid: 3, comm: "cat", path: "/work/a" },
+    );
+    expect(summary.strayDetails).toBeUndefined();
+  });
+
   it("folds the proposals as the table does, but never loosens them", () => {
     const write = (path: string) => ({ kind: "write", pid: 3, comm: "cat", path });
     const { summary } = marked(

@@ -487,6 +487,51 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     expect(md).toContain("| `/bin/sh` | `a`, `b`, `c` | R | `/x` |\n");
     expect(md).toContain("| `/bin/sh` | `a`, `b` and 2 more | D | `/y` |\n");
   });
+
+  const strays = (proposed: AuditSummary["proposed"]): AuditSummary => ({
+    ended: true,
+    lost: false,
+    hostMissed: 0,
+    paths: [],
+    details: [
+      { agg: newAgg(), flags: "R", comm: "cat", commField: "cat", path: "./a" },
+      { agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" },
+    ],
+    strayDetails: [{ agg: newAgg(), flags: "W", comm: "cat", commField: "cat", path: "./b" }],
+    killed: [],
+    proposed,
+    matched: 1,
+    unexpected: proposed?.length ?? 0,
+  });
+  const renderGiven = (summary: AuditSummary) =>
+    joinSummaryBlocks(
+      renderAuditSummaryBlocks(summary, {
+        title: "T",
+        startedAt: undefined,
+        priorities: FILESYSTEM_PRIORITIES,
+        cutNote: () => "",
+        expected: "given",
+      }),
+    );
+
+  it("folds the details of only the unexpected accesses after the table", () => {
+    const md = renderGiven(
+      strays([
+        { program: { path: "/bin/cat" }, commands: ["cat"], flags: "W", path: { path: "./b" } },
+      ]),
+    );
+    expect(md.indexOf("### ⚠️ Unexpected Accesses")).toBeLessThan(
+      md.indexOf("<summary>🔍 Unexpected access details"),
+    );
+    expect(md).toMatch(
+      /<details>\n<summary>🔍 Unexpected access details<\/summary>\n\n<sub>R read[^\n]*<\/sub>\n\n<sub>flags · command · path<\/sub>\n\n```\nW cat \.\/b\n```\n\n<\/details>\n$/,
+    );
+    expect(md).not.toContain("File access details");
+  });
+
+  it("prints no details where no access was unexpected", () => {
+    expect(renderGiven(strays([]))).not.toContain("<details>");
+  });
 });
 
 describe("renderAuditSummaryBlocks: layout", () => {

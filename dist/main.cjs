@@ -73301,7 +73301,14 @@ function createAuditSummary(prefixes) {
 			key = `${r}/${c.text}`, commands.has(key) || commands.set(key, c), commandKeys.set(memo, key);
 		}
 		return key;
-	}, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
+	}, strays = prefixes.rules ? new Lines({
+		fanout,
+		keep,
+		limit,
+		loose,
+		nodes: limits.nodes,
+		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
+	}) : void 0, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
 		fanout,
 		keep,
 		limit: Infinity,
@@ -73313,13 +73320,13 @@ function createAuditSummary(prefixes) {
 		program: (rank) => ranks[rank].ruleName,
 		path: ruleName
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
-		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path;
-		if (!tally.take(x, deletedPath ? components(path) : parts, id, path, cmd) || tally.givenUp) return;
+		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED), path = deletedPath ? unmarked(x.path) : x.path, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
+		if (!left || tally.givenUp) return left;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
-		deletedOnly.set(key, {
+		return deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
-		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program);
+		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program), left;
 	}, commsBefore = new Map(), runnerOf = (r) => {
 		let before = commsBefore.get(r.pid), parent = commsBefore.get(r.ppid);
 		if (before === void 0 && parent !== void 0) return {
@@ -73386,7 +73393,13 @@ function createAuditSummary(prefixes) {
 					...x,
 					comm: String(by),
 					cmd
-				}, parts), tally && takeForRules(x, parts, by, cmd);
+				}, parts);
+				let left = tally ? takeForRules(x, parts, by, cmd) : 0;
+				left && strays?.add({
+					...x,
+					comm: cmd,
+					bit: left
+				}, parts);
 			}
 			return tally?.endLine();
 		}
@@ -73454,7 +73467,7 @@ function createAuditSummary(prefixes) {
 					rank: Number(comm)
 				},
 				commands: commandsOf(agg)
-			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
+			})), log = byPath && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally), strayRows = strays && rows(kept(strays));
 			return {
 				ended,
 				lost,
@@ -73466,6 +73479,10 @@ function createAuditSummary(prefixes) {
 				detailsCut: details.cut,
 				...ruleRows && { proposed: byProgramThenPath(ruleRows) },
 				...tally?.givenUp && { proposedCut: !0 },
+				...strays && {
+					strayDetails: strayRows,
+					strayDetailsCut: strays.cut
+				},
 				matched: tally?.matched ?? 0,
 				unexpected: tally?.unexpected ?? 0
 			};
@@ -73532,7 +73549,7 @@ function skippedNote(count, url) {
 	return `> ❗ **The kernel skipped the tracer's hooks ${count.toLocaleString("en-US")} ${count === 1 ? "time" : "times"}** on the\n> runner host while this step ran. Any of them may have been this step's, so some of its
 > accesses may be missing from this summary and from the artifact.${why}`;
 }
-const SECTION = "filesystem", DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
+const SECTION = "filesystem", detailsOpen = (what) => `<details>\n<summary>🔍 ${what}</summary>\n\n`, DETAILS_CLOSE = "</details>\n", FILESYSTEM_BLOCK = {
 	unexpected: "filesystem-unexpected",
 	paths: "filesystem-paths",
 	log: "filesystem-log"
@@ -73586,21 +73603,21 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	};
 }
 const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
-function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote }) {
+function detailsBlock({ details, killed, detailsCut, strayDetails, strayDetailsCut }, { startedAt, priorities, cutNote, expected }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
 		priority: priorities[FILESYSTEM_BLOCK.log],
 		level: 3,
 		section: SECTION,
-		open: "<details>\n<summary>🔍 File access details</summary>\n\n",
+		open: detailsOpen(expected ? "Unexpected access details" : "File access details"),
 		close: DETAILS_CLOSE
-	};
-	if (!details) return {
+	}, shown = expected ? strayDetails : details, cut = expected ? strayDetailsCut : detailsCut;
+	if (!shown) return {
 		...log,
 		cut: "atomic",
-		text: cutNote(detailsCut)
+		text: cutNote(cut)
 	};
-	let rows = inRecordingOrder([...details, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
+	let rows = inRecordingOrder([...shown, ...killed]), originMs = startedAt === void 0 ? rows.reduce((m, r) => Math.min(m, r.agg.first), Infinity) : startedAt * 1e3, times = rows.map((r) => fmtSpan(r.agg, originMs)), timeW = times.reduce((m, t) => Math.max(m, t.length), 0), flagsW = rows.reduce((m, r) => Math.max(m, r.flags.length), 0), comms = rows.map((r) => r.commField), commW = comms.reduce((m, c) => Math.max(m, c.length), 0), columns = [
 		timeW && (startedAt === void 0 ? "first-last access" : "first-last access since the proxy started"),
 		"flags",
 		"command",
@@ -73609,7 +73626,7 @@ function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, 
 	return {
 		...log,
 		cut: "lines",
-		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
+		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (cut ? cutNote(cut) : "")
 	};
 }
 function unexpectedBlock(summary, { priorities, expected }) {
@@ -73653,7 +73670,7 @@ function renderAuditSummaryBlocks(summary, opts) {
 	});
 	if (recordedNoFileAccess(summary) && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
-	if (opts.expected) blocks.push(unexpectedBlock(summary, opts));
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), summary.proposed?.length && blocks.push(detailsBlock(summary, opts));
 	else {
 		let rows = paths && byProgramAndPath(paths);
 		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, opts));
