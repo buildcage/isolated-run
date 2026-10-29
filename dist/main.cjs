@@ -72773,16 +72773,36 @@ var RuleMatcher = class {
 };
 //#endregion
 //#region src/lib/filesystem-audit/proposed-rules.ts
-const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`, `# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`];
+const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [
+	`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
+	`# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config_file.`,
+	"#",
+	"# Each line is <program> <access> <path>. In a path, * matches within one component",
+	"# and ** across them; ./ is the workspace and ~/ is $HOME. A path or program that",
+	"# changes between runs needs * or ** to match the next run.",
+	"#",
+	"# A dir/** rule stands for three or more paths under one directory; check what it",
+	"# covers before adding it. Where the files under it matter, find them in",
+	"# filesystem-audit.jsonl in this artifact and list them instead."
+];
 function rulesToAdd(proposed) {
-	let rows = proposed.map((r) => [
-		ruleField(r.program.path),
-		r.flags,
-		ruleField(r.path.path)
-	]), width = (i) => rows.reduce((m, row) => Math.max(m, row[i].length), 0), [programW, flagsW] = [width(0), width(1)];
+	let blocks = [];
+	for (let r of proposed) {
+		let row = [
+			ruleField(r.program.path),
+			r.flags,
+			ruleField(r.path.path)
+		], last = blocks.at(-1);
+		last?.[0][0] === row[0] ? last.push(row) : blocks.push([row]);
+	}
+	let lines = blocks.map((block) => {
+		let flagsW = block.reduce((m, [, flags]) => Math.max(m, flags.length), 0);
+		return block.map(([program, flags, path]) => `${program}  ${flags.padEnd(flagsW)}  ${path}`).join("\n");
+	});
 	return [
 		...RULES_TO_ADD_HEADER,
-		...rows.map(([program, flags, path]) => `${program.padEnd(programW)}  ${flags.padEnd(flagsW)}  ${path}`),
+		"",
+		lines.join("\n\n"),
 		""
 	].join("\n");
 }
