@@ -284,7 +284,9 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   const actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
 
   // Before any input is read: both rewrite the env every input is read from.
-  for (const ignored of normalizeInputNames(env, ACTION_INPUTS)) deps.warn(ignored);
+  for (const ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) {
+    deps.warn(ignored);
+  }
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
   if (configFile?.warning) deps.warn(configFile.warning);
 

@@ -1,8 +1,7 @@
 import { dirname } from "node:path";
 
-import * as core from "@actions/core";
-
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { setOutputUnderBothNames } from "#core/lib/actions/input-names.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
 import { artifactName, uploadViaActionsArtifact, type UploadArtifact } from "../artifact-upload.ts";
@@ -58,6 +57,5 @@ export async function uploadFilesystemAuditArtifact(
  *  uploaded. Written after the command, which is last-write-wins over
  *  anything the command itself wrote to the same key. */
 export function setFilesystemAuditOutput(name: string): void {
-  core.setOutput("filesystem-audit-artifact-name", name);
-  core.setOutput("filesystem_audit_artifact_name", name);
+  setOutputUnderBothNames("filesystem-audit-artifact-name", name);
 }

@@ -201,15 +201,15 @@ function inputEnvName(name) {
 function legacyInputName(name) {
 	return name.replaceAll("-", "_");
 }
-function normalizeInputNames(env, names) {
+function normalizeInputNames(env, names, lists = []) {
 	let warnings = [];
 	for (let name of names) {
 		let legacy = legacyInputName(name);
 		if (legacy === name) continue;
 		let legacyEnvName = inputEnvName(legacy), value = env[legacyEnvName] ?? "";
 		if (delete env[legacyEnvName], !value.trim()) continue;
-		let current = env[inputEnvName(name)] ?? "";
-		current.trim() ? current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}: ${name} is set.`) : env[inputEnvName(name)] = value;
+		let envName = inputEnvName(name), current = env[envName] ?? "";
+		current.trim() ? lists.includes(name) ? env[envName] = `${current}\n${value}` : current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}, as ${name} is also set.`) : env[envName] = value;
 	}
 	return warnings;
 }
@@ -281,11 +281,9 @@ function resolveFilesystemMode(input) {
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
-const ACTION_INPUTS = [
-	"run",
-	"config-file",
-	"proxy-mode",
-	"proxy-engine",
+//#endregion
+//#region src/lib/inputs.ts
+const LIST_INPUTS = [
 	"allowed-https-rules",
 	"allowed-http-rules",
 	"allowed-ip-rules",
@@ -293,7 +291,13 @@ const ACTION_INPUTS = [
 	"allowed-tls-rules",
 	"known-blocked-rules",
 	"write-through",
-	"expected-filesystem-rules",
+	"expected-filesystem-rules"
+], ACTION_INPUTS = [
+	"run",
+	"config-file",
+	"proxy-mode",
+	"proxy-engine",
+	...LIST_INPUTS,
 	"writable",
 	"aws-key-check",
 	"allowed-aws-role-accounts",
@@ -307,7 +311,14 @@ const ACTION_INPUTS = [
 	"filesystem-audit-retention-days",
 	"fail-on-unexpected-file-access",
 	"label"
-];
+], NOT_IN_CONFIG_FILE = [
+	"run",
+	"config-file",
+	"writable"
+], CONFIG_FILE_INPUTS = {
+	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
+	lists: LIST_INPUTS
+};
 function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
@@ -1054,7 +1065,7 @@ async function stopProxyContainer({ containerName, projectName }) {
 	});
 }
 function main() {
-	normalizeInputNames(process.env, ACTION_INPUTS);
+	normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
 	let savedWriteThrough = takeWriteThroughForPost(process.env);
 	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env), process.env);
 	let targets = planPostCleanup({

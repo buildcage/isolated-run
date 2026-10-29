@@ -15414,23 +15414,33 @@ var require_identity$1 = __commonJSMin(((exports) => {
 	var lexer = require_lexer(), lineCounter = require_line_counter(), parser = require_parser(), publicApi = require_public_api(), visit = require_visit();
 	exports.Composer = composer.Composer, exports.Document = Document.Document, exports.Schema = Schema.Schema, exports.YAMLError = errors.YAMLError, exports.YAMLParseError = errors.YAMLParseError, exports.YAMLWarning = errors.YAMLWarning, exports.Alias = Alias.Alias, exports.isAlias = identity.isAlias, exports.isCollection = identity.isCollection, exports.isDocument = identity.isDocument, exports.isMap = identity.isMap, exports.isNode = identity.isNode, exports.isPair = identity.isPair, exports.isScalar = identity.isScalar, exports.isSeq = identity.isSeq, exports.Pair = Pair.Pair, exports.Scalar = Scalar.Scalar, exports.YAMLMap = YAMLMap.YAMLMap, exports.YAMLSeq = YAMLSeq.YAMLSeq, exports.Lexer = lexer.Lexer, exports.LineCounter = lineCounter.LineCounter, exports.Parser = parser.Parser, exports.parse = publicApi.parse, exports.parseAllDocuments = publicApi.parseAllDocuments, exports.parseDocument = publicApi.parseDocument, exports.stringify = publicApi.stringify, exports.visit = visit.visit, exports.visitAsync = visit.visitAsync;
 }))();
+init_core();
 function inputEnvName(name) {
 	return `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
 }
 function legacyInputName(name) {
 	return name.replaceAll("-", "_");
 }
-function normalizeInputNames(env, names) {
+function normalizeInputNames(env, names, lists = []) {
 	let warnings = [];
 	for (let name of names) {
 		let legacy = legacyInputName(name);
 		if (legacy === name) continue;
 		let legacyEnvName = inputEnvName(legacy), value = env[legacyEnvName] ?? "";
 		if (delete env[legacyEnvName], !value.trim()) continue;
-		let current = env[inputEnvName(name)] ?? "";
-		current.trim() ? current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}: ${name} is set.`) : env[inputEnvName(name)] = value;
+		let envName = inputEnvName(name), current = env[envName] ?? "";
+		current.trim() ? lists.includes(name) ? env[envName] = `${current}\n${value}` : current.trim() !== value.trim() && warnings.push(`Ignored ${legacy}, as ${name} is also set.`) : env[envName] = value;
 	}
 	return warnings;
+}
+function setOutputUnderBothNames(name, value, setOutput$1 = setOutput) {
+	let failures = [];
+	for (let output of [name, legacyInputName(name)]) try {
+		setOutput$1(output, value);
+	} catch (e) {
+		failures.push(e);
+	}
+	if (failures.length > 0) throw failures[0];
 }
 //#endregion
 //#region src/core/lib/actions/config-file.ts
@@ -15505,17 +15515,19 @@ function parseConfig(text, path, known) {
 		let node = resolved(nodes.get(key), doc), [start, end] = node.range, at = lineCounter.linePos(start).line;
 		if (node.type === import_dist$5.Scalar.BLOCK_LITERAL) return at + 1;
 		if (node.type !== import_dist$5.Scalar.BLOCK_FOLDED) return value.includes("\n") || lineCounter.linePos(end).line !== at ? void 0 : at;
-	}, values = new Map();
-	for (let [key, value] of Object.entries(js)) {
+	}, own = new Set(doc.contents.items.filter(({ key }) => !isMergeKey(key, doc)).map(({ key }) => resolved(key, doc)).filter(import_dist$5.isScalar).map((key) => String(key.value))), keys = new Map();
+	for (let key of Object.keys(js)) {
 		let name = known.find((input) => key === input || key === legacyInputName(input));
 		if (!name) throw invalid(`unknown key ${JSON.stringify(key)}. Allowed keys: ${known.join(", ")}.`);
-		if (values.has(name)) throw invalid(`${name} is set twice, also as ${legacyInputName(name)}.`);
+		let other = keys.get(name);
+		if (other === void 0 || own.has(key) && !own.has(other)) keys.set(name, key);
+		else if (own.has(key) || !own.has(other)) throw invalid(`${name} is set twice, also as ${legacyInputName(name)}.`);
+	}
+	let values = new Map();
+	for (let [name, key] of keys) {
+		let value = js[key];
 		if (value == null) values.set(name, { text: "" });
-		else if ([
-			"string",
-			"number",
-			"boolean"
-		].includes(typeof value)) {
+		else if (typeof value == "string" || typeof value == "number" || typeof value == "boolean") {
 			let text = String(value);
 			values.set(name, {
 				text,
@@ -70901,7 +70913,6 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 };
 //#endregion
 //#region src/lib/filesystem-audit/artifact.ts
-init_core();
 function filesystemAuditArtifactName(containerName) {
 	return artifactName("buildcage-filesystem-audit", containerName);
 }
@@ -70924,7 +70935,7 @@ async function uploadFilesystemAuditArtifact(files, containerName, retentionDays
 	}
 }
 function setFilesystemAuditOutput(name) {
-	setOutput("filesystem-audit-artifact-name", name), setOutput("filesystem_audit_artifact_name", name);
+	setOutputUnderBothNames("filesystem-audit-artifact-name", name);
 }
 //#endregion
 //#region src/lib/fail-or-warn.ts
@@ -77336,7 +77347,6 @@ function writeTrafficFile(path, records) {
 }
 //#endregion
 //#region src/lib/traffic-artifact.ts
-init_core();
 async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
 	ensureOwnScratchBase(scratchBase);
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
@@ -77356,7 +77366,7 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 	}
 }
 function setTrafficArtifactOutput(name) {
-	setOutput("traffic-artifact-name", name), setOutput("traffic_artifact_name", name);
+	setOutputUnderBothNames("traffic-artifact-name", name);
 }
 //#endregion
 //#region src/lib/step-report.ts
@@ -77545,7 +77555,7 @@ function writeBackMediatedFile(file, annotation, deps) {
 }
 function readStepInputs(env, deps) {
 	let { log, notice } = deps, actionRef = env.GITHUB_ACTION_REF ?? "", reportActionRef = env.GITHUB_ACTION_REF || "v2", actionRepo = env.GITHUB_ACTION_REPOSITORY || "buildcage/isolated-run";
-	for (let ignored of normalizeInputNames(env, ACTION_INPUTS)) deps.warn(ignored);
+	for (let ignored of normalizeInputNames(env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists)) deps.warn(ignored);
 	let configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS);
 	configFile?.warning && deps.warn(configFile.warning);
 	let runInput = deps.readRunCommand(), { proxyEngine, proxyMode } = deps.readProxyInputs();

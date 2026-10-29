@@ -229,7 +229,19 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(env, deps);
 
-    expect(mocks.warn).toHaveBeenCalledWith("Ignored proxy_mode: proxy-mode is set.");
+    expect(mocks.warn).toHaveBeenCalledWith("Ignored proxy_mode, as proxy-mode is also set.");
+  });
+
+  it("joins a list input's two spellings", async () => {
+    const env = { ...ENV, INPUT_WRITE_THROUGH: "./a", "INPUT_WRITE-THROUGH": "./b" };
+    mocks.applyConfigFile.mockImplementation((seen: NodeJS.ProcessEnv) => {
+      expect(seen["INPUT_WRITE-THROUGH"]).toBe("./b\n./a");
+    });
+
+    await runSandboxStep(env, deps);
+
+    expect(mocks.applyConfigFile).toHaveBeenCalled();
+    expect(mocks.warn).not.toHaveBeenCalled();
   });
 
   it("drops an input's underscore spelling from env too", async () => {

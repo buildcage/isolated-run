@@ -1,9 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import * as core from "@actions/core";
-
 import type { Annotation } from "#core/lib/actions/annotation.ts";
+import { setOutputUnderBothNames } from "#core/lib/actions/input-names.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { buildTrafficRecords, writeTrafficFile } from "#core/lib/report/outcome/traffic-output.ts";
 
@@ -65,6 +64,5 @@ export async function uploadTrafficArtifact(
  * command itself wrote to the same key.
  */
 export function setTrafficArtifactOutput(name: string): void {
-  core.setOutput("traffic-artifact-name", name);
-  core.setOutput("traffic_artifact_name", name);
+  setOutputUnderBothNames("traffic-artifact-name", name);
 }
