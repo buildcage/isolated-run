@@ -53,9 +53,9 @@ export async function uploadFilesystemAuditArtifact(
   }
 }
 
-/** Set the filesystem-audit-artifact-name output, under both its spellings, empty when none was
- *  uploaded. Written after the command, which is last-write-wins over
- *  anything the command itself wrote to the same key. */
+/** Set the filesystem-audit-artifact-name output under both its spellings,
+ *  empty when none was uploaded. Written after the command, which is
+ *  last-write-wins over anything the command itself wrote to the same key. */
 export function setFilesystemAuditOutput(name: string): void {
   setOutputUnderBothNames("filesystem-audit-artifact-name", name);
 }

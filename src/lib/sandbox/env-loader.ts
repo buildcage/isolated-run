@@ -46,8 +46,8 @@ const RUNNER_ONLY_ENV_KEYS = new Set([
 // the INPUT_ prefix: a workflow is free to set an `env: INPUT_DIR` of its own,
 // and this action is a JavaScript one, so no other action's inputs reach this
 // process to be missed. env-loader.test.ts holds the list to action.yml. The
-// underscore spellings are listed too, though the step has already moved them
-// to the hyphenated names, so none reaches the sandbox if that move is skipped.
+// underscore spellings are listed too, as a backstop: the step has already
+// moved them to the hyphenated names.
 export const ACTION_INPUT_ENV_KEYS = new Set(
   ACTION_INPUTS.flatMap((input) => [inputEnvName(input), inputEnvName(legacyInputName(input))]),
 );

@@ -118,7 +118,7 @@ jobs:
 
       # Verifies audit mode's Job Summary includes the auto-generated
       # restrict-mode example.
-      # Keeps the inputs' underscore spellings, still accepted.
+      # Uses the underscore spellings, to keep them tested.
       - name: Run an isolated command in audit mode
         if: matrix.audit_mode
         uses: ./

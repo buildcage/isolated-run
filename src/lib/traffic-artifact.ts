@@ -57,7 +57,7 @@ export async function uploadTrafficArtifact(
 }
 
 /**
- * Set the traffic-artifact-name output, under both its spellings, empty when
+ * Set the traffic-artifact-name output under both its spellings, empty when
  * no artifact was uploaded.
  * Written on every path, after the isolated command has exited:
  * GITHUB_OUTPUT is last-write-wins, so this is what overrides anything the
