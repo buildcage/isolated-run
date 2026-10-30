@@ -3,11 +3,12 @@ import { execFileSync, spawn } from "node:child_process";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
+import { readResolverAnswered } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
-import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
+import type { GenReportParameters, ReportData, ServiceHealth } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
@@ -41,19 +42,23 @@ export function fetchReport(
   proxyEngine: ProxyEngine,
 ): Promise<ReportData> {
   const docker = createHostDocker();
+  const health: ServiceHealth = {
+    droppedLogs: readProxyDroppedLogs(docker, containerName),
+    resolverAnswered: readResolverAnswered(docker, containerName),
+  };
   if (proxyEngine === "inspect") {
     return buildInspectReportData(
       readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
       readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
       parameters,
-      readProxyDroppedLogs(docker, containerName),
+      health,
     );
   }
   return buildUniversalReportData(
     readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
     readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
     parameters,
-    readProxyDroppedLogs(docker, containerName),
+    health,
   );
 }
 /* v8 ignore stop */

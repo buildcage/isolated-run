@@ -294,6 +294,13 @@ docker compose exec proxy curl -s --unix-socket /var/run/haproxy-health.sock \
   'http://localhost/metrics?scope=global' | grep dropped_logs
 ```
 
+The report also asks CoreDNS's health check, and fails the step in any mode when it does not answer:
+a lookup a stopped resolver never received leaves no line. To ask it by hand:
+
+```bash
+docker compose exec proxy curl -sf http://127.0.0.1:8080/health
+```
+
 ### The step fails with "never became ready"
 
 The proxy came up but one of its services never answered its own readiness check. The step prints

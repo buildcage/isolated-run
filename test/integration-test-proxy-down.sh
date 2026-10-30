@@ -2,7 +2,8 @@
 # Stops the proxy's haproxy, then its coredns, while a sandboxed command is
 # still running, and checks that the command's traffic then fails instead of
 # finding a way around the proxy, and that the step does not pass on a report
-# the stopped proxy can no longer vouch for.
+# the stopped proxy can no longer vouch for. A second step stops coredns alone,
+# which leaves the logs reading as whole.
 #
 # The command and this driver take turns through marker files in the
 # workspace: the command writes one when it is done with a phase, and waits
@@ -15,6 +16,8 @@ require_local_image universal
 
 WORKDIR=$(mktemp -d)
 STEP_PID=""
+# The running step's GITHUB_STATE and the rest, as run_step names them.
+STEP_PREFIX="$WORKDIR/step"
 
 # Bounded, so a step that hangs fails this driver instead of the job's timeout.
 STEP_END_TIMEOUT=120
@@ -43,7 +46,7 @@ stop_step() {
     STEP_PID=""
   fi
   local name
-  name=$(state_container_name "$WORKDIR/step.state")
+  name=$(state_container_name "$STEP_PREFIX.state")
   if [ -n "$name" ]; then
     docker rm -f "$name" >/dev/null 2>&1
     docker network ls -q --filter "label=com.docker.compose.project=$(proxy_project "$name")" |
@@ -64,7 +67,7 @@ echo ""
 
 fixture_up universal
 
-run_step universal "$WORKDIR/step" \
+run_step universal "$STEP_PREFIX" \
   INPUT_PROXY_MODE="restrict" \
   INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
   INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
@@ -99,7 +102,7 @@ stop_service() {
 
 CONTAINER=""
 if wait_for_step_marker serving.done; then
-  CONTAINER=$(state_container_name "$WORKDIR/step.state")
+  CONTAINER=$(state_container_name "$STEP_PREFIX.state")
   stop_service haproxy
   touch "$WORKDIR/haproxy.down"
   if wait_for_step_marker haproxy-phase.done; then
@@ -137,17 +140,17 @@ echo "--- the step's outcome ---"
 # here is the report's. fail-on-blocked is off: a stopped proxy is not a rule
 # the command broke, so it fails the step regardless.
 check_status "the step failed on the report the stopped proxy left" "$STEP_EXIT" 1
-assert_file_has "$WORKDIR/step.log" "the step's error says the logs are incomplete" \
+assert_file_has "$STEP_PREFIX.log" "the step's error says the logs are incomplete" \
   "^::error::buildcage sandbox logs are incomplete"
-assert_file_has "$WORKDIR/step.log" "the step's error says the proxy did not answer" \
+assert_file_has "$STEP_PREFIX.log" "the step's error says the proxy did not answer" \
   "The proxy did not answer the report"
 
-SUMMARY=$(cat "$WORKDIR/step.md")
+SUMMARY=$(cat "$STEP_PREFIX.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
 assert_summary_contains "| \`allowed.example.com:80\` | HTTP |" \
   "the report still lists the request made before the proxy stopped"
 
-CONTAINER=$(state_container_name "$WORKDIR/step.state")
+CONTAINER=$(state_container_name "$STEP_PREFIX.state")
 if [ -z "$CONTAINER" ]; then
   fail "the step wrote no container_name to GITHUB_STATE"
 else
@@ -166,7 +169,64 @@ fi
 if [ "$FAILURES" -gt 0 ]; then
   echo ""
   echo "--- step log ---"
-  cat "$WORKDIR/step.log"
+  cat "$STEP_PREFIX.log"
+fi
+
+echo ""
+echo "--- coredns stopped alone ---"
+# A lookup then fails with no line in either log, so only the report's own check
+# on the resolver can tell this run from a whole one. fail-on-blocked is off for
+# the same reason as above.
+FAILURES_BEFORE=$FAILURES
+STEP_PREFIX="$WORKDIR/alone"
+# shellcheck disable=SC2016 # expanded by the command's shell
+run_step universal "$STEP_PREFIX" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
+  INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
+  INPUT_ALLOWED_IP_RULES="" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN='touch alone.ready
+for _ in $(seq 1 240); do
+  [ -e alone.down ] && exit 0
+  sleep 0.5
+done
+exit 1' &
+STEP_PID=$!
+
+if wait_for_step_marker alone.ready; then
+  CONTAINER=$(state_container_name "$STEP_PREFIX.state")
+  stop_service coredns
+else
+  # Nothing below would say more than this.
+  fail "the command never started"
+  cat "$STEP_PREFIX.log"
+  assert_results
+fi
+touch "$WORKDIR/alone.down"
+
+if wait_step_gone "$STEP_END_TIMEOUT"; then
+  wait "$STEP_PID"
+  STEP_EXIT=$?
+  STEP_PID=""
+else
+  fail "the step did not end within ${STEP_END_TIMEOUT}s of the resolver stopping"
+  stop_step
+  STEP_EXIT="timeout"
+fi
+
+check_status "the step failed on the report the stopped resolver left" "$STEP_EXIT" 1
+assert_file_has "$STEP_PREFIX.log" "the step's error says the logs are incomplete" \
+  "^::error::buildcage sandbox logs are incomplete"
+assert_file_has "$STEP_PREFIX.log" "the step's error says the resolver did not answer" \
+  "The DNS resolver did not answer the report"
+SUMMARY=$(cat "$STEP_PREFIX.md")
+assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
+
+if [ "$FAILURES" -gt "$FAILURES_BEFORE" ]; then
+  echo ""
+  echo "--- step log ---"
+  cat "$STEP_PREFIX.log"
 fi
 
 assert_results
