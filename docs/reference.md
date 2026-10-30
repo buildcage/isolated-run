@@ -520,6 +520,15 @@ was blocked unexpectedly or the report is incomplete, and a WARNING otherwise. W
 count, or only requests blocked as expected, there is no alert. In the tables that follow, blocked
 requests are marked 🚫 and failed connections ⚠️.
 
+A report that is not a full record of the step fails it under `restrict` with
+`fail-on-blocked: true`, whatever survived: a log that doesn't begin where the step did, carries a
+line the report cannot read or lost lines the proxy could not write, or a proxy or resolver that
+restarted during the step, since a connection still open when the proxy stopped never gets its line.
+In `audit` mode, or with `fail-on-blocked: false`, it is a notice instead. A proxy that does not
+answer the report, because it stopped during the step and stayed down or hung, fails the step in
+both modes whatever `fail-on-blocked` says: requests made while it was down failed rather than going
+around it, but nothing recorded them.
+
 Matching is per request, so a row that counts several requests to one host counts as expected only
 when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's
 other blocked requests to fail the step. The matched rows go under **Known Blocked Hosts**,

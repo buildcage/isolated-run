@@ -69,7 +69,7 @@ run_step universal "$WORKDIR/step" \
   INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
   INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
   INPUT_ALLOWED_IP_RULES="" \
-  INPUT_FAIL_ON_BLOCKED="true" \
+  INPUT_FAIL_ON_BLOCKED="false" \
   INPUT_RUN="status=0
 bash $(printf '%q' "$REPO_ROOT/test/universal-proxy-down-scenarios.sh") || status=\$?
 echo \$status > scenarios.exit" &
@@ -134,10 +134,13 @@ check_status "every request made after a service stopped failed" "$SCENARIOS_EXI
 echo ""
 echo "--- the step's outcome ---"
 # The run script records the scenarios' result and exits 0, so a failure
-# here is the report's.
+# here is the report's. fail-on-blocked is off: a stopped proxy is not a rule
+# the command broke, so it fails the step regardless.
 check_status "the step failed on the report the stopped proxy left" "$STEP_EXIT" 1
 assert_file_has "$WORKDIR/step.log" "the step's error says the logs are incomplete" \
   "^::error::buildcage sandbox logs are incomplete"
+assert_file_has "$WORKDIR/step.log" "the step's error says the proxy did not answer" \
+  "The proxy did not answer the report"
 
 SUMMARY=$(cat "$WORKDIR/step.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"

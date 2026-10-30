@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createAnnotation } from "#core/lib/actions/annotation.ts";
 import type { InspectReportData } from "#core/lib/report/types.ts";
-import { reportParams } from "#core/lib/test/report-data.node.ts";
+import { reportParams, UNINTERRUPTED } from "#core/lib/test/report-data.node.ts";
 
 import type { UploadArtifact } from "./artifact-upload.ts";
 import type { Report } from "./report.ts";
@@ -22,6 +22,7 @@ function inspectReport(overrides: Partial<InspectReportData> = {}): Report {
     blocked: [],
     blockedCount: 0,
     logLooksPlausible: true,
+    ...UNINTERRUPTED,
     timeline: [],
     resolvedOnly: [],
     startedAt: 0,
