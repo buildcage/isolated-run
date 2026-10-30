@@ -24,7 +24,7 @@ import {
 import { hostTableTruncationNote } from "#core/lib/report/render/host-table.ts";
 import { restrictExampleTruncationNote } from "#core/lib/report/render/restrict-example.ts";
 import type { InspectReportData, UniversalReportData } from "#core/lib/report/types.ts";
-import { reportParams } from "#core/lib/test/report-data.node.ts";
+import { reportParams, UNINTERRUPTED } from "#core/lib/test/report-data.node.ts";
 
 import {
   COMMAND_SUMMARY_CUT_MESSAGE,
@@ -65,6 +65,7 @@ function report(overrides: Partial<UniversalReportData> = {}): UniversalReportDa
     failed: [],
     blockedCount: 0,
     logLooksPlausible: true,
+    ...UNINTERRUPTED,
     timeline: [],
     startedAt: undefined,
     ...overrides,

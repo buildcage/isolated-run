@@ -71011,7 +71011,11 @@ function isRedundantDns(event, connected) {
 }
 //#endregion
 //#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible }) {
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered }) {
+	if (!proxyAnswered) return {
+		level: "error",
+		shouldFail: !0
+	};
 	if (!logLooksPlausible) return isAudit ? {
 		level: "notice",
 		shouldFail: !1
@@ -71046,13 +71050,21 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
 	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known-blocked-rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known-blocked-rules)`;
 }
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, engineLabel }) {
+function describeInterruptions({ proxyAnswered, restarts }) {
+	let facts = [];
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it, and the step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), facts;
+}
+function possibleCauses(facts) {
+	return facts.length === 0 ? "Either" : "Other causes may apply too:";
+}
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, restarts, engineLabel }) {
 	let outcome = determineBlockedOutcome({
 		isAudit,
 		failOnBlocked,
 		blockedCount,
 		blockedRows,
-		logLooksPlausible
+		logLooksPlausible,
+		proxyAnswered
 	}), base = buildBlockedMessage({
 		blockedCount,
 		blockedRows,
@@ -71063,11 +71075,18 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		...outcome,
 		message: base
 	};
-	if (isAudit) return {
-		...outcome,
-		message: `${base}, but the logs are incomplete and this is not a full record`
-	};
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. Either the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	let facts = describeInterruptions({
+		proxyAnswered,
+		restarts
+	});
+	if (isAudit && proxyAnswered) {
+		let incomplete = `${base}, but the logs are incomplete and this is not a full record`;
+		return {
+			...outcome,
+			message: facts.length ? `${incomplete}. ${facts.join(" ")}` : incomplete
+		};
+	}
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -71082,6 +71101,8 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 		blockedCount: report.blockedCount,
 		blockedRows: report.blocked,
 		logLooksPlausible: report.logLooksPlausible,
+		proxyAnswered: report.proxyAnswered,
+		restarts: report.restarts,
 		engineLabel
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
@@ -71527,7 +71548,16 @@ const trafficFrame = (text) => ({
 });
 function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
-	return top += renderVerdict(report, verdictItems), report.logLooksPlausible || (top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n> Either the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).\n> A missing beginning was either removed or rotated out by traffic heavy enough to fill the\n> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand\n> made as long as a request can be.\n\n"), trafficFrame(top);
+	if (top += renderVerdict(report, verdictItems), !report.logLooksPlausible) {
+		let facts = describeInterruptions(report);
+		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).
+> A missing beginning was either removed or rotated out by traffic heavy enough to fill the
+> 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand
+> made as long as a request can be.
+
+`;
+	}
+	return trafficFrame(top);
 }
 function blockedHostsBlocks(report, fit) {
 	let blocked = report.blocked.filter((r) => !r.expected).map((r) => ({
@@ -71888,12 +71918,17 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && proxy === 0 && resolver === 0,
+		proxyAnswered: droppedLogs.answered,
+		restarts: {
+			proxy,
+			resolver
+		},
 		startedAt,
 		timeline
 	};
@@ -77093,8 +77128,9 @@ function parseDroppedLogs(metrics) {
 	return match ? Number(match[1]) : void 0;
 }
 function readProxyDroppedLogs(docker, containerId) {
+	let metrics;
 	try {
-		return parseDroppedLogs(docker.exec(containerId, [
+		metrics = docker.exec(containerId, [
 			"curl",
 			"-sf",
 			"--max-time",
@@ -77102,10 +77138,17 @@ function readProxyDroppedLogs(docker, containerId) {
 			"--unix-socket",
 			"/var/run/haproxy-health.sock",
 			"http://localhost/metrics?scope=global"
-		]));
+		]);
 	} catch {
-		return;
+		return {
+			answered: !1,
+			count: void 0
+		};
 	}
+	return {
+		answered: !0,
+		count: parseDroppedLogs(metrics)
+	};
 }
 //#endregion
 //#region src/core/lib/docker/rotated-log.ts
@@ -77142,10 +77185,13 @@ function timeOf(stamp) {
 	return Number.isNaN(parsed) ? 0 : parsed / 1e3;
 }
 async function scanDnsLog(lines, isAudit = !1) {
-	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0;
+	let seen = new Map(), discovery = new Map(), service = new Map(), headIntact, unparsed = 0, restarts = 0;
 	for await (let line of lines) {
 		let trimmed = line.trim();
-		trimmed !== "" && (headIntact ??= trimmed.endsWith("buildcage coredns starting"));
+		if (trimmed !== "") {
+			let start = trimmed.endsWith("buildcage coredns starting");
+			start && headIntact !== void 0 && restarts++, headIntact ??= start;
+		}
 		let match = DNS.exec(trimmed);
 		if (match) {
 			let time = timeOf(match[1]), allowed = match[2] === "allowed", existing = seen.get(match[3]);
@@ -77199,7 +77245,8 @@ async function scanDnsLog(lines, isAudit = !1) {
 	return {
 		events,
 		headIntact: headIntact ?? !1,
-		unparsed
+		unparsed,
+		restarts
 	};
 }
 //#endregion
@@ -77294,7 +77341,7 @@ function parseProxyLine(line, isAudit) {
 	return null;
 }
 async function scanInspectLog(lines, isAudit = !1, allowsName) {
-	let events = [], startedAt, headIntact, unparsed = 0;
+	let events = [], startedAt, headIntact, unparsed = 0, restarts = 0;
 	for await (let line of lines) {
 		let event = parseProxyLine(line, isAudit);
 		if (event) {
@@ -77304,13 +77351,14 @@ async function scanInspectLog(lines, isAudit = !1, allowsName) {
 		let trimmed = line.trim();
 		if (trimmed === "") continue;
 		let match = START$1.exec(trimmed);
-		headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+		match && headIntact !== void 0 && restarts++, headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
 	return blockUnpassedAddresses(events), allowsName && blockUnallowedNames(events, allowsName), {
 		events,
 		startedAt,
 		headIntact: headIntact ?? !1,
-		unparsed
+		unparsed,
+		restarts
 	};
 }
 function blockUnpassedAddresses(events) {
@@ -77347,7 +77395,7 @@ function hostOf(address, ruleType) {
 	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
 }
 async function scanHaproxyLog(lines, isAudit) {
-	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0;
+	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0, restarts = 0;
 	for await (let line of lines) {
 		let m = DECISION.exec(line);
 		if (m) {
@@ -77380,13 +77428,14 @@ async function scanHaproxyLog(lines, isAudit) {
 		let trimmed = line.trim();
 		if (trimmed === "") continue;
 		let start = START.exec(trimmed);
-		headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+		start && headIntact !== void 0 && restarts++, headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
 	}
 	return {
 		events,
 		startedAt,
 		headIntact: headIntact ?? !1,
-		unparsed
+		unparsed,
+		restarts
 	};
 }
 //#endregion
