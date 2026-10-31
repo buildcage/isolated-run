@@ -71011,8 +71011,8 @@ function isRedundantDns(event, connected) {
 }
 //#endregion
 //#region src/core/lib/report/outcome/blocked-outcome.ts
-function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered }) {
-	if (!proxyAnswered) return {
+function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered }) {
+	if (!proxyAnswered || !resolverAnswered) return {
 		level: "error",
 		shouldFail: !0
 	};
@@ -71050,21 +71050,22 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
 	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known-blocked-rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known-blocked-rules)`;
 }
-function describeInterruptions({ proxyAnswered, restarts }) {
+function describeInterruptions({ proxyAnswered, resolverAnswered, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it, and the step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
 }
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, restarts, engineLabel }) {
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered, restarts, engineLabel }) {
 	let outcome = determineBlockedOutcome({
 		isAudit,
 		failOnBlocked,
 		blockedCount,
 		blockedRows,
 		logLooksPlausible,
-		proxyAnswered
+		proxyAnswered,
+		resolverAnswered
 	}), base = buildBlockedMessage({
 		blockedCount,
 		blockedRows,
@@ -71077,9 +71078,10 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 	};
 	let facts = describeInterruptions({
 		proxyAnswered,
+		resolverAnswered,
 		restarts
 	});
-	if (isAudit && proxyAnswered) {
+	if (isAudit && proxyAnswered && resolverAnswered) {
 		let incomplete = `${base}, but the logs are incomplete and this is not a full record`;
 		return {
 			...outcome,
@@ -71102,6 +71104,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 		blockedRows: report.blocked,
 		logLooksPlausible: report.logLooksPlausible,
 		proxyAnswered: report.proxyAnswered,
+		resolverAnswered: report.resolverAnswered,
 		restarts: report.restarts,
 		engineLabel
 	})], undecided = describeUndecidedRequests(report, engineLabel);
@@ -71917,14 +71920,15 @@ function reduceTimeline(timeline, knownBlockedRules) {
 		blockedCount: blockedEvents.length
 	};
 }
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, droppedLogs) {
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered }) {
 	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && proxy === 0 && resolver === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && resolverAnswered && proxy === 0 && resolver === 0,
 		proxyAnswered: droppedLogs.answered,
+		resolverAnswered,
 		restarts: {
 			proxy,
 			resolver
@@ -77150,6 +77154,19 @@ function readProxyDroppedLogs(docker, containerId) {
 		count: parseDroppedLogs(metrics)
 	};
 }
+function readResolverAnswered(docker, containerId) {
+	try {
+		return docker.exec(containerId, [
+			"curl",
+			"-sf",
+			"--max-time",
+			"10",
+			"http://127.0.0.1:8080/health"
+		]), !0;
+	} catch {
+		return !1;
+	}
+}
 //#endregion
 //#region src/core/lib/docker/rotated-log.ts
 const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
@@ -77380,9 +77397,9 @@ function resolverAllows(parameters) {
 	}), allowed = resolverHosts.map((regex) => RegExp(`^(?:${regex})$`, "i"));
 	return (name) => allowed.some((regex) => regex.test(name));
 }
-async function buildInspectReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+async function buildInspectReportData(proxyLines, dnsLines, parameters, health) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanDnsLog(dnsLines, isAudit), parameters, health);
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
@@ -77440,9 +77457,9 @@ async function scanHaproxyLog(lines, isAudit) {
 }
 //#endregion
 //#region src/core/lib/report/build/universal.ts
-async function buildUniversalReportData(proxyLines, dnsLines, parameters, droppedLogs) {
+async function buildUniversalReportData(proxyLines, dnsLines, parameters, health) {
 	let isAudit = parameters.mode === "audit";
-	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, droppedLogs);
+	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, health);
 }
 //#endregion
 //#region src/lib/report-fetch.ts
@@ -77467,8 +77484,11 @@ function createHostDocker() {
 	}));
 }
 function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createHostDocker();
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName)) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, readProxyDroppedLogs(docker, containerName));
+	let docker = createHostDocker(), health = {
+		droppedLogs: readProxyDroppedLogs(docker, containerName),
+		resolverAnswered: readResolverAnswered(docker, containerName)
+	};
+	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, health) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, health);
 }
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
