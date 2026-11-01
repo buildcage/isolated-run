@@ -22,11 +22,11 @@ blocks an access: [`filesystem-mode` and `write-through`](../README.md#filesyste
 what the step may write.
 
 - [What it is for](#what-it-is-for)
-- [Before you turn it on](#before-you-turn-it-on)
 - [Getting started](#getting-started)
 - [Reading the summary](#reading-the-summary)
 - [Choosing `write-through`](#choosing-write-through)
 - [Expected accesses](#expected-accesses)
+- [Requirements](#requirements)
 - [Troubleshooting](#troubleshooting)
 - [What it does not record](#what-it-does-not-record)
 - [What the step can do to the record](#what-the-step-can-do-to-the-record)
@@ -46,38 +46,11 @@ what the step may write.
 It suits a step's first runs, a dependency update, or an investigation. It can also stay on, since a
 typical build barely slows down, and then each run leaves a record to compare against.
 
-## Before you turn it on
-
-### What it needs
-
-A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with the kernel's type information
-(BTF). GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-26.04`,
-`ubuntu-22.04-arm`, `ubuntu-24.04-arm` and `ubuntu-26.04-arm` meet all of it: their kernels are
-Linux 6.8 or newer. On a self-hosted runner, check the host before turning it on:
-
-```sh
-uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
-stat -fc %T /sys/fs/cgroup        # cgroup2fs
-ls -l /sys/kernel/btf/vmlinux     # the kernel's type information (BTF), not empty
-```
-
-A host that falls short fails the step before the command runs, with the reason; see
-[Troubleshooting](#troubleshooting).
-
-### What changes in the step
-
-- **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
-  the sandbox refuses a 32-bit one, from an i386 or ARM32 program or `int 0x80`, by killing the
-  thread that made it with `SIGSYS`. A single-threaded program dies, which a shell reports as
-  `Bad system call`, and the summary notes `Killed for a 32-bit system call: <command>`. Run such a
-  program in a step without the audit.
-- **A small cost to the whole host.** A typical build, which spends little of its time in system
-  calls, barely slows down. While the step runs, though, the tracer's hooks run on every system call
-  on the runner host, since a hook has to run to tell whose call it is. Each call takes roughly 60
-  to 250 nanoseconds longer, opening and closing a file the most. A GitHub-hosted runner runs one
-  job, so only that job pays. On a self-hosted runner shared by several jobs, they all do.
-
 ## Getting started
+
+It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with the kernel's type information,
+which every GitHub-hosted Ubuntu runner has, and it makes the sandbox kill a program that makes a
+32-bit system call. [Requirements](#requirements) has the details and how to check a self-hosted runner.
 
 With `filesystem-audit: record` alone, as above, the step's Job Summary gets a **Filesystem Activity
 Report** section after the traffic report. The full record, with every access in order, is uploaded
@@ -114,6 +87,10 @@ including the names of files it only tried to open, so treat it as sensitive, li
 artifact.
 
 ## Reading the summary
+
+The report for an `npm ci` run, with **File access details** open:
+
+<img src="../assets/report-filesystem-audit.png" alt="Filesystem Activity Report listing the time, access flags, command and path of each file npm ci touched" width="557">
 
 A shortened example:
 
@@ -573,6 +550,37 @@ is written `/missing/`.
   unexpected unless a rule names the refusal.
 - Rules match the accesses the accessed paths table counts: a library a program loads, the step's
   shell reading its script, a pipe or a socket, and a refused system call are left out.
+
+## Requirements
+
+### What it needs
+
+A cgroup v2 host on Linux 6.1 or newer, 6.4 or newer on arm64, with the kernel's type information
+(BTF). GitHub-hosted `ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04`, `ubuntu-26.04`,
+`ubuntu-22.04-arm`, `ubuntu-24.04-arm` and `ubuntu-26.04-arm` meet all of it: their kernels are
+Linux 6.8 or newer. On a self-hosted runner, check the host before turning it on:
+
+```sh
+uname -rm                         # Linux 6.1 or newer; 6.4 or newer on aarch64
+stat -fc %T /sys/fs/cgroup        # cgroup2fs
+ls -l /sys/kernel/btf/vmlinux     # the kernel's type information (BTF), not empty
+```
+
+A host that falls short fails the step before the command runs, with the reason; see
+[Troubleshooting](#troubleshooting).
+
+### What changes in the step
+
+- **No 32-bit programs.** The tracer reads only the native 64-bit system calls, so with the audit on
+  the sandbox refuses a 32-bit one, from an i386 or ARM32 program or `int 0x80`, by killing the
+  thread that made it with `SIGSYS`. A single-threaded program dies, which a shell reports as
+  `Bad system call`, and the summary notes `Killed for a 32-bit system call: <command>`. Run such a
+  program in a step without the audit.
+- **A small cost to the whole host.** A typical build, which spends little of its time in system
+  calls, barely slows down. While the step runs, though, the tracer's hooks run on every system call
+  on the runner host, since a hook has to run to tell whose call it is. Each call takes roughly 60
+  to 250 nanoseconds longer, opening and closing a file the most. A GitHub-hosted runner runs one
+  job, so only that job pays. On a self-hosted runner shared by several jobs, they all do.
 
 ## Troubleshooting
 
