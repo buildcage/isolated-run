@@ -11,6 +11,7 @@ import * as core from "@actions/core";
 import { isKnownBlockedUrlRule } from "#core/lib/acl/wildcard-rules.ts";
 import { annotate, createAnnotation, type Annotation } from "#core/lib/actions/annotation.ts";
 import { applyConfigFile } from "#core/lib/actions/config-file.ts";
+import { describeDockerFailure } from "#core/lib/actions/docker-error.ts";
 import {
   checkKnownBlockedUrlRuleSupport,
   checkUrlAndTlsRuleSupport,
@@ -22,8 +23,7 @@ import { logRules, withLogGroup } from "#core/lib/actions/log.ts";
 import { checkRuleListSizesOrThrow, readRuleInputs } from "#core/lib/actions/rule-inputs.ts";
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { errorMessage } from "#core/lib/errors.ts";
-import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
-import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
+import { verifyImageDigestOrThrow, verifyWhilePulling } from "#core/lib/provenance/verify-image.ts";
 import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
@@ -54,7 +54,7 @@ import {
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
 import { saveWriteThroughForPost } from "./post-write-through.ts";
-import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
+import { startProxyImagePull, startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { commandSummaryDroppedMessage, commandSummaryDroppedNote } from "./report.ts";
 import { ACTION_INPUT_ENV_KEYS } from "./sandbox/env-loader.ts";
 import { formatFilesystemPlanLog } from "./sandbox/ephemeral-fs.ts";
@@ -159,6 +159,7 @@ const realDeps = {
   getuid: process.getuid,
   readLocalImageOverride,
   verifyImageDigestOrThrow,
+  startImagePull: startProxyImagePull,
   checkUrlAndTlsRuleSupport,
   checkKnownBlockedUrlRuleSupport,
   logRules,
@@ -194,16 +195,29 @@ const realDeps = {
 
 export type SandboxStepDeps = typeof realDeps;
 
+/** Verifies the image and waits for its pull, which runs alongside verification. */
 async function resolveVerifiedImage(
   { actionRef, actionRepo, proxyEngine }: VerifyImageIdentity & { proxyEngine: ProxyEngine },
-  { verifyImageDigestOrThrow, log }: Pick<SandboxStepDeps, "verifyImageDigestOrThrow" | "log">,
-): Promise<ResolvedImage> {
-  const digest = await verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine });
+  {
+    verifyImageDigestOrThrow,
+    startImagePull,
+    log,
+  }: Pick<SandboxStepDeps, "verifyImageDigestOrThrow" | "startImagePull" | "log">,
+): Promise<{ imageRef: string }> {
+  const { digest, imageRef, pull } = await verifyWhilePulling(
+    { actionRef, actionRepo, proxyEngine },
+    { verifyImageDigestOrThrow, startImagePull },
+  );
   log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`);
-  return {
-    imageRef: resolveBuildcageImageRef({ imageDigest: digest, actionRepository: actionRepo }),
-    pullPolicy: "always",
-  };
+  try {
+    await pull.finished;
+  } catch (e) {
+    throw new SandboxError(
+      describeDockerFailure(e, { operation: "docker pull" }),
+      "DOCKER_UNAVAILABLE",
+    );
+  }
+  return { imageRef };
 }
 
 /**
@@ -457,14 +471,13 @@ async function resolveProxyImage(
   deps: SandboxStepDeps,
 ): Promise<{
   imageRef: string;
-  pullPolicy: "always" | "never";
   composeFiles: readonly string[];
 }> {
   const localOverride = await deps.readLocalImageOverride(env);
-  const { imageRef, pullPolicy } =
+  const { imageRef } =
     localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
   deps.log(`buildcage: proxy image: ${imageRef}`);
-  return { imageRef, pullPolicy, composeFiles: resolveComposeFiles(localOverride) };
+  return { imageRef, composeFiles: resolveComposeFiles(localOverride) };
 }
 
 function logConfiguredRules({ rules, aws }: StepInputs, deps: SandboxStepDeps): void {
@@ -600,7 +613,7 @@ export async function runSandboxStep(
   // which fails every exec that inherits it with E2BIG.
   for (const key of ACTION_INPUT_ENV_KEYS) delete env[key];
   const { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps);
-  const { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
+  const { imageRef, composeFiles } = await resolveProxyImage(inputs, env, deps);
   logConfiguredRules(inputs, deps);
 
   const { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } =
@@ -638,7 +651,6 @@ export async function runSandboxStep(
       composeFiles,
       projectName,
       containerName,
-      pullPolicy,
       composeEnv,
     });
   } catch (e) {

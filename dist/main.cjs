@@ -15573,6 +15573,25 @@ function applyConfigFile(env, { known, lists }, baseDir) {
 	};
 }
 //#endregion
+//#region src/core/lib/actions/docker-error.ts
+const SLIM_RUNNER_DETECTED_PREFIX = " Detected a container-based GitHub-hosted runner image (e.g. \"ubuntu-slim\")", SLIM_RUNNER_NOTE$1 = `${SLIM_RUNNER_DETECTED_PREFIX}: these ship a Docker client with no daemon and are not supported for this action.`;
+function capturedStderr(e) {
+	let err = e && typeof e == "object" ? e : {};
+	return typeof err.stderr == "string" ? err.stderr.trim() : "";
+}
+function describeDockerFailure(e, { operation = "docker", env = process.env, exists = node_fs.existsSync } = {}) {
+	let err = e && typeof e == "object" ? e : {}, slimNote = isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE$1 : "", whatHappened;
+	if (err.code === "ENOENT") whatHappened = `The "docker" command was not found on this runner's PATH while running ${operation}.`;
+	else {
+		let captured = capturedStderr(e);
+		whatHappened = `${operation} failed${captured ? `: ${captured}` : " (see the Docker output above for the underlying error)"}.`;
+	}
+	return `${whatHappened}${slimNote} Buildcage requires a working Docker installation (client and daemon) on the runner, on Docker Engine 25.0 or later with Compose v2.20.2 or later. Lightweight runner images such as GitHub-hosted "ubuntu-slim" ship a Docker client but no daemon and are not supported for this action. Use "ubuntu-latest", or another runner with a full Docker install, instead. See README.md and docs/security.md for details.`;
+}
+function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
+	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
+}
+//#endregion
 //#region src/core/lib/actions/inputs.ts
 init_core();
 var InvalidInputError = class extends ActionError {
@@ -16470,11 +16489,6 @@ function deriveProjectName(containerName) {
 	return `buildcage-${(0, node_crypto.createHash)("sha256").update(containerName).digest("hex").slice(0, 12)}`;
 }
 //#endregion
-//#region src/core/lib/provenance/image-ref.ts
-function resolveBuildcageImageRef({ imageDigest, actionRepository }) {
-	return `${`ghcr.io/${actionRepository}`.toLowerCase()}@${imageDigest}`;
-}
-//#endregion
 //#region src/core/lib/provenance/docker-credentials.ts
 function readGhcrBasicAuth(_env = process.env, _readFileSync = node_fs.readFileSync) {
 	try {
@@ -16504,6 +16518,11 @@ function checkImageEngine({ labels, proxyEngine, imageTag }) {
 	if (!label) throw new VerifyImageError(`Image ${imageTag} carries no ${IMAGE_VERSION_LABEL} label, so the proxy engine it was published for cannot be confirmed.`, "VERIFY_FAILED");
 	let suffix = engineTagSuffix(proxyEngine);
 	if (!(label.endsWith(suffix) && RELEASE_VERSION.test(label.slice(0, label.length - suffix.length)))) throw new VerifyImageError(`Image ${imageTag} was not published for proxy engine ${proxyEngine} (${IMAGE_VERSION_LABEL}: ${label}), so the rules this run was given would not be enforced.`, "VERIFY_FAILED");
+}
+//#endregion
+//#region src/core/lib/provenance/image-ref.ts
+function resolveBuildcageImageRef({ imageDigest, actionRepository }) {
+	return `${`ghcr.io/${actionRepository}`.toLowerCase()}@${imageDigest}`;
 }
 //#endregion
 //#region src/core/lib/provenance/oci-registry.ts
@@ -23096,13 +23115,15 @@ function buildVerifyOptions({ actionRef, actionRepo }) {
 //#endregion
 //#region src/core/lib/provenance/verify-image.ts
 const REGISTRY = "ghcr.io";
-async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "inspect" }) {
+async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "inspect", onDigest }) {
 	let repoPath = actionRepo.toLowerCase(), verifyOptions = buildVerifyOptions({
 		actionRef,
 		actionRepo
 	});
 	if (!verifyOptions) return null;
-	let tag = imageTagFromRef(actionRef, proxyEngine), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken), bundle = await fetchBundle(REGISTRY, repoPath, digest, regToken), labels = await fetchImageConfigLabels(REGISTRY, repoPath, digest, regToken);
+	let tag = imageTagFromRef(actionRef, proxyEngine), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken);
+	onDigest?.(digest);
+	let bundle = await fetchBundle(REGISTRY, repoPath, digest, regToken), labels = await fetchImageConfigLabels(REGISTRY, repoPath, digest, regToken);
 	return await verifyBundle(bundle, verifyOptions, digest), checkImageEngine({
 		labels,
 		proxyEngine,
@@ -23116,18 +23137,43 @@ function requireDigest(digest, actionRef) {
 	if (digest === null) throw new ProvenanceError(`Cannot verify image provenance for ref: ${JSON.stringify(actionRef)}. Pin the action to a version tag (e.g. @v2.1.0) or a commit SHA.`, "UNVERIFIABLE_REF");
 	return digest;
 }
-async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) {
+async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine, onDigest }) {
 	let digest;
 	try {
 		digest = await verifyImageDigest({
 			actionRef,
 			actionRepo,
-			proxyEngine
+			proxyEngine,
+			onDigest
 		});
 	} catch (e) {
 		throw toProvenanceError(e);
 	}
 	return requireDigest(digest, actionRef);
+}
+async function verifyWhilePulling({ actionRef, actionRepo, proxyEngine }, { verifyImageDigestOrThrow, startImagePull }) {
+	let imageRefFor = (digest) => resolveBuildcageImageRef({
+		imageDigest: digest,
+		actionRepository: actionRepo
+	}), pull, digest;
+	try {
+		digest = await verifyImageDigestOrThrow({
+			actionRef,
+			actionRepo,
+			proxyEngine,
+			onDigest: (early) => {
+				pull = startImagePull(imageRefFor(early));
+			}
+		});
+	} catch (e) {
+		throw pull?.cancel(), e;
+	}
+	let imageRef = imageRefFor(digest);
+	return {
+		digest,
+		imageRef,
+		pull: pull ?? startImagePull(imageRef)
+	};
 }
 //#endregion
 //#region src/core/lib/report/render/fit-step-summary.ts
@@ -23166,25 +23212,6 @@ function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterf
 	let found = new Set();
 	for (let infos of Object.values(list())) for (let info of infos ?? []) (info.family === "IPv4" || info.family === 4) && (info.internal || found.add(info.address));
 	return [...found].sort();
-}
-//#endregion
-//#region src/core/lib/actions/docker-error.ts
-const SLIM_RUNNER_DETECTED_PREFIX = " Detected a container-based GitHub-hosted runner image (e.g. \"ubuntu-slim\")", SLIM_RUNNER_NOTE$1 = `${SLIM_RUNNER_DETECTED_PREFIX}: these ship a Docker client with no daemon and are not supported for this action.`;
-function capturedStderr(e) {
-	let err = e && typeof e == "object" ? e : {};
-	return typeof err.stderr == "string" ? err.stderr.trim() : "";
-}
-function describeDockerFailure(e, { operation = "docker", env = process.env, exists = node_fs.existsSync } = {}) {
-	let err = e && typeof e == "object" ? e : {}, slimNote = isLikelySlimRunner(env, exists) ? SLIM_RUNNER_NOTE$1 : "", whatHappened;
-	if (err.code === "ENOENT") whatHappened = `The "docker" command was not found on this runner's PATH while running ${operation}.`;
-	else {
-		let captured = capturedStderr(e);
-		whatHappened = `${operation} failed${captured ? `: ${captured}` : " (see the Docker output above for the underlying error)"}.`;
-	}
-	return `${whatHappened}${slimNote} Buildcage requires a working Docker installation (client and daemon) on the runner, on Docker Engine 25.0 or later with Compose v2.20.2 or later. Lightweight runner images such as GitHub-hosted "ubuntu-slim" ship a Docker client but no daemon and are not supported for this action. Use "ubuntu-latest", or another runner with a full Docker install, instead. See README.md and docs/security.md for details.`;
-}
-function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
-	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
 }
 //#endregion
 //#region src/lib/errors.ts
@@ -74726,7 +74753,7 @@ function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 function fileArgs(composeFiles) {
 	return composeFiles.flatMap((file) => ["-f", file]);
 }
-function buildComposeUpArgs({ composeFiles, projectName, pullPolicy }) {
+function buildComposeUpArgs({ composeFiles, projectName }) {
 	return [
 		"compose",
 		...fileArgs(composeFiles),
@@ -74735,12 +74762,11 @@ function buildComposeUpArgs({ composeFiles, projectName, pullPolicy }) {
 		"up",
 		"-d",
 		"--pull",
-		pullPolicy,
+		"never",
 		"--no-build",
 		"--wait",
 		"--wait-timeout",
-		"180",
-		"--quiet-pull"
+		"180"
 	];
 }
 function buildComposeLogsArgs({ composeFiles, projectName, tail }) {
@@ -74799,6 +74825,32 @@ function describeContainerStartFailure(state, { role, containerName }) {
 	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
 }
 //#endregion
+//#region src/core/lib/docker/image-pull.ts
+function startImagePull(imageRef, spawnDocker) {
+	let child = spawnDocker([
+		"pull",
+		"--quiet",
+		imageRef
+	]), stderr = "";
+	child.stderr?.setEncoding("utf8"), child.stderr?.on("data", (chunk) => {
+		stderr += chunk;
+	}), child.stdout?.resume();
+	let finished = new Promise((resolve, reject) => {
+		child.on("error", reject), child.on("close", (code, signal) => {
+			code === 0 ? resolve() : reject(Object.assign(Error(`docker pull exited with code ${code}${signal ? ` (signal ${signal})` : ""}: ${stderr.trim()}`), {
+				status: code ?? void 0,
+				stderr
+			}));
+		});
+	});
+	return finished.catch(() => {}), {
+		finished,
+		cancel: () => {
+			child.exitCode === null && child.signalCode === null && child.kill();
+		}
+	};
+}
+//#endregion
 //#region src/lib/proxy-lifecycle.ts
 const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
@@ -74814,14 +74866,23 @@ const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)
 		env: hostCommandEnv("docker", env)
 	});
 };
-async function startSandboxProxy({ composeFiles, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
+function startProxyImagePull(imageRef) {
+	return startImagePull(imageRef, (args) => (0, node_child_process.spawn)(hostCommand("docker"), args, {
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		],
+		env: hostCommandEnv("docker")
+	}));
+}
+async function startSandboxProxy({ composeFiles, projectName, containerName, composeEnv }, deps = {}) {
 	let { printDocker = printDockerViaExec } = deps;
 	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
 		try {
 			printDocker(buildComposeUpArgs({
 				composeFiles,
-				projectName,
-				pullPolicy
+				projectName
 			}), composeEnv);
 		} catch (e) {
 			throw proxyStartError(e, {
@@ -77674,6 +77735,7 @@ const realDeps = {
 	getuid: process.getuid,
 	readLocalImageOverride,
 	verifyImageDigestOrThrow,
+	startImagePull: startProxyImagePull,
 	checkUrlAndTlsRuleSupport,
 	checkKnownBlockedUrlRuleSupport,
 	logRules,
@@ -77699,19 +77761,22 @@ const realDeps = {
 	notice: annotate.notice,
 	warn: annotate.warning
 };
-async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { verifyImageDigestOrThrow, log }) {
-	let digest = await verifyImageDigestOrThrow({
+async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { verifyImageDigestOrThrow, startImagePull, log }) {
+	let { digest, imageRef, pull } = await verifyWhilePulling({
 		actionRef,
 		actionRepo,
 		proxyEngine
+	}, {
+		verifyImageDigestOrThrow,
+		startImagePull
 	});
-	return log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`), {
-		imageRef: resolveBuildcageImageRef({
-			imageDigest: digest,
-			actionRepository: actionRepo
-		}),
-		pullPolicy: "always"
-	};
+	log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`);
+	try {
+		await pull.finished;
+	} catch (e) {
+		throw new SandboxError(describeDockerFailure(e, { operation: "docker pull" }), "DOCKER_UNAVAILABLE");
+	}
+	return { imageRef };
 }
 function saveCleanupState(env, { containerName, filesystemMode, overlayRoots }, saveState) {
 	env.GITHUB_STATE && (saveState("container_name", containerName), filesystemMode === "ephemeral" && saveState("ephemeral_overlay_roots", JSON.stringify(overlayRoots)));
@@ -77795,14 +77860,13 @@ function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDi
 	return plan;
 }
 async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {
-	let localOverride = await deps.readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
+	let localOverride = await deps.readLocalImageOverride(env), { imageRef } = localOverride ?? await resolveVerifiedImage({
 		actionRef,
 		actionRepo,
 		proxyEngine
 	}, deps);
 	return deps.log(`buildcage: proxy image: ${imageRef}`), {
 		imageRef,
-		pullPolicy,
 		composeFiles: resolveComposeFiles(localOverride)
 	};
 }
@@ -77876,7 +77940,7 @@ async function runSandboxStep(env, overrides = {}) {
 		...overrides
 	}, inputs = readStepInputs(env, deps);
 	for (let key of ACTION_INPUT_ENV_KEYS) delete env[key];
-	let { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, pullPolicy, composeFiles } = await resolveProxyImage(inputs, env, deps);
+	let { overlayRoots, writeThroughPaths, mediatedVariables } = preflight(inputs, env, deps), { imageRef, composeFiles } = await resolveProxyImage(inputs, env, deps);
 	logConfiguredRules(inputs, deps);
 	let { runInput, proxyEngine, proxyMode, filesystemMode, filesystemAudit, failOnCaResidue } = inputs, { rules, aws, annotation } = inputs, containerName = deps.generateContainerName(), projectName = deriveProjectName(containerName), audit = filesystemAudit === "record" ? filesystemAuditPaths(containerName, SANDBOX_SCRATCH_BASE) : void 0;
 	saveCleanupState(env, {
@@ -77907,7 +77971,6 @@ async function runSandboxStep(env, overrides = {}) {
 			composeFiles,
 			projectName,
 			containerName,
-			pullPolicy,
 			composeEnv
 		});
 	} catch (e) {

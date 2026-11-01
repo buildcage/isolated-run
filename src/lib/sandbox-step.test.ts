@@ -57,6 +57,7 @@ const mocks = {
   getuid: vi.fn(),
   readLocalImageOverride: vi.fn(),
   verifyImageDigestOrThrow: vi.fn(),
+  startImagePull: vi.fn(),
   checkUrlAndTlsRuleSupport: vi.fn(),
   checkKnownBlockedUrlRuleSupport: vi.fn(),
   logRules: vi.fn(),
@@ -154,6 +155,7 @@ beforeEach(() => {
   });
   mocks.readLocalImageOverride.mockResolvedValue(null);
   mocks.verifyImageDigestOrThrow.mockResolvedValue(DIGEST);
+  mocks.startImagePull.mockReturnValue({ finished: Promise.resolve(), cancel: vi.fn() });
   // The real one runs the callback; a test that cares asserts on logRules.
   mocks.withLogGroup.mockImplementation((_title: string, fn: () => void) => fn());
   mocks.generateContainerName.mockReturnValue("buildcage-proxy-deadbeef");
@@ -710,18 +712,53 @@ describe("runSandboxStep", () => {
   it("pulls the image by verified digest, under the action's own repository", async () => {
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.verifyImageDigestOrThrow).toHaveBeenCalledWith({
-      actionRef: "v1.2.3",
-      actionRepo: "buildcage/isolated-run",
-      proxyEngine: "universal",
-    });
+    expect(mocks.verifyImageDigestOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionRef: "v1.2.3",
+        actionRepo: "buildcage/isolated-run",
+        proxyEngine: "universal",
+      }),
+    );
+    expect(mocks.startImagePull).toHaveBeenCalledExactlyOnceWith(
+      `ghcr.io/buildcage/isolated-run@${DIGEST}`,
+    );
     expect(mocks.startSandboxProxy.mock.calls[0][0]).toMatchObject({
-      pullPolicy: "always",
       composeFiles: [expect.stringContaining("compose.action.yaml")],
     });
     expect(mocks.startSandboxProxy.mock.calls[0][0].composeEnv).toMatchObject({
       BUILDCAGE_PROXY_IMAGE_REF: `ghcr.io/buildcage/isolated-run@${DIGEST}`,
     });
+  });
+
+  it("starts the proxy only once the image pull has finished", async () => {
+    let finishPull!: () => void;
+    mocks.startImagePull.mockReturnValue({
+      finished: new Promise<void>((resolve) => (finishPull = resolve)),
+      cancel: vi.fn(),
+    });
+
+    const step = runSandboxStep(ENV, deps);
+    await vi.waitFor(() => expect(mocks.startImagePull).toHaveBeenCalled());
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+    finishPull();
+    await step;
+
+    expect(mocks.startSandboxProxy).toHaveBeenCalledOnce();
+  });
+
+  it("fails with the pull's own error, and starts no proxy, when the image pull fails", async () => {
+    const finished = Promise.reject(
+      Object.assign(new Error("pull failed"), { status: 1, stderr: "manifest unknown\n" }),
+    );
+    // As the real one does, so the rejection is not reported before the step awaits it.
+    finished.catch(() => {});
+    mocks.startImagePull.mockReturnValue({ finished, cancel: vi.fn() });
+
+    await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
+      code: "DOCKER_UNAVAILABLE",
+      message: expect.stringMatching(/^docker pull failed: manifest unknown\./),
+    });
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
   // A local-path `uses: ./` names no ref: verification takes it empty (and
@@ -745,15 +782,14 @@ describe("runSandboxStep", () => {
   it("skips provenance verification and layers a local override's compose file on the shipped one", async () => {
     mocks.readLocalImageOverride.mockResolvedValue({
       imageRef: "local:dev",
-      pullPolicy: "never",
       composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
     });
 
     await runSandboxStep(ENV, deps);
 
     expect(mocks.verifyImageDigestOrThrow).not.toHaveBeenCalled();
+    expect(mocks.startImagePull).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy.mock.calls[0][0]).toMatchObject({
-      pullPolicy: "never",
       composeFiles: [
         expect.stringMatching(/\/compose\.action\.yaml$/),
         "/repo/docker/compose.action.test-inspect.yaml",

@@ -17,7 +17,6 @@ describe("resolveComposeFiles", () => {
     expect(
       resolveComposeFiles({
         imageRef: "local:dev",
-        pullPolicy: "never",
         composeOverlay: undefined,
       }),
     ).toStrictEqual([DEFAULT_COMPOSE_FILE]);
@@ -28,7 +27,6 @@ describe("resolveComposeFiles", () => {
     expect(
       resolveComposeFiles({
         imageRef: "local:dev",
-        pullPolicy: "never",
         composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
       }),
     ).toStrictEqual([DEFAULT_COMPOSE_FILE, "/repo/docker/compose.action.test-inspect.yaml"]);
@@ -69,7 +67,6 @@ describe("readLocalImageOverride", () => {
       ),
     ).toStrictEqual({
       imageRef: "local:dev",
-      pullPolicy: "never",
       composeOverlay: "/repo/docker/compose.action.test-inspect.yaml",
     });
     // Skipping provenance verification is the one thing a reader of the log

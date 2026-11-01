@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { capturedStderr, describeDockerFailure } from "#core/lib/actions/docker-error.ts";
@@ -15,6 +15,7 @@ import {
   describeContainerStartFailure,
   type ContainerState,
 } from "#core/lib/docker/health.ts";
+import { startImagePull, type ImagePull } from "#core/lib/docker/image-pull.ts";
 
 import { SandboxError } from "./errors.ts";
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
@@ -49,25 +50,34 @@ const printDockerViaExec = (args: string[], env: NodeJS.ProcessEnv): void => {
     env: hostCommandEnv("docker", env),
   });
 };
+
+/** Pulls the proxy image with the pinned docker. */
+export function startProxyImagePull(imageRef: string): ImagePull {
+  return startImagePull(imageRef, (args) =>
+    spawn(hostCommand("docker"), args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: hostCommandEnv("docker"),
+    }),
+  );
+}
 /* v8 ignore stop */
 
 export interface StartSandboxProxyOptions {
   composeFiles: readonly string[];
   projectName: string;
   containerName: string;
-  pullPolicy: string;
   composeEnv: NodeJS.ProcessEnv;
 }
 
 /** Starts this step's own throwaway proxy container via `docker compose up`. */
 export async function startSandboxProxy(
-  { composeFiles, projectName, containerName, pullPolicy, composeEnv }: StartSandboxProxyOptions,
+  { composeFiles, projectName, containerName, composeEnv }: StartSandboxProxyOptions,
   deps: ProxyLifecycleDeps = {},
 ): Promise<void> {
   const { printDocker = printDockerViaExec } = deps;
   await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
     try {
-      printDocker(buildComposeUpArgs({ composeFiles, projectName, pullPolicy }), composeEnv);
+      printDocker(buildComposeUpArgs({ composeFiles, projectName }), composeEnv);
     } catch (e) {
       throw proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps);
     }
@@ -79,12 +89,7 @@ export async function startSandboxProxy(
  *  group of its own: the caller is already inside one. */
 function proxyStartError(
   e: unknown,
-  {
-    composeFiles,
-    projectName,
-    containerName,
-    composeEnv,
-  }: Omit<StartSandboxProxyOptions, "pullPolicy">,
+  { composeFiles, projectName, containerName, composeEnv }: StartSandboxProxyOptions,
   deps: ProxyLifecycleDeps,
 ): SandboxError {
   const state = readProxyState(containerName, composeEnv, deps);
@@ -128,11 +133,7 @@ function reportInspectFailure(e: unknown): void {
 
 /** Best effort: the message that follows still stands without the log. */
 function printProxyLog(
-  {
-    composeFiles,
-    projectName,
-    composeEnv,
-  }: Omit<StartSandboxProxyOptions, "pullPolicy" | "containerName">,
+  { composeFiles, projectName, composeEnv }: Omit<StartSandboxProxyOptions, "containerName">,
   { printDocker = printDockerViaExec }: ProxyLifecycleDeps,
 ): void {
   try {

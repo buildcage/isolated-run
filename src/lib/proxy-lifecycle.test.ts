@@ -16,7 +16,6 @@ const OPTIONS = {
   composeFiles: ["/action/docker/compose.action.yaml"],
   projectName: "buildcage-deadbeef",
   containerName: CONTAINER,
-  pullPolicy: "always",
   composeEnv: { PROXY_CONTAINER_NAME: CONTAINER },
 };
 
