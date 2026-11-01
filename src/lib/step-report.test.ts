@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
+import { ProxyStoppedError } from "./report-fetch.ts";
 import { COMMAND_SUMMARY_CUT_MESSAGE, missingReportFrame, summaryFooter } from "./report.ts";
 import {
   reportStepTraffic,
@@ -299,6 +300,26 @@ describe("reportStepTraffic", () => {
         );
         expect(process.exitCode).toBe(exitCode);
       }
+    },
+  );
+
+  it.each([
+    { mode: "restrict", failOnBlocked: false },
+    { mode: "audit", failOnBlocked: true },
+  ])(
+    "fails the step when the report was lost to a stopped proxy ($mode, fail-on-blocked=$failOnBlocked)",
+    async ({ mode, failOnBlocked }) => {
+      mocks.fetchReport.mockRejectedValue(new ProxyStoppedError("container is gone"));
+
+      await expect(
+        reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
+      ).resolves.toBeUndefined();
+
+      expect(annotation.error).toHaveBeenCalledWith(
+        "Failed to fetch sandbox report: container is gone; failing the step whatever the mode",
+      );
+      expect(annotation.warning).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
     },
   );
 
