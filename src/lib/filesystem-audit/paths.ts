@@ -117,11 +117,18 @@ export function relativize(path: string, prefixes: Prefixes): string {
 const under = (path: string, prefix: string): boolean =>
   path === prefix || path.startsWith(`${prefix}/`);
 
-/** The path as relativize shows it and, in the working directory, as it
- *  would show without one: a rule may name it either way. */
-export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
+/** The path as relativize shows it under `prefixes` and, in the working
+ *  directory, as it would show without one through each of `spellings`'
+ *  spellings of that directory: a rule may name it any of these ways. */
+export function ruleSpellings(path: string, prefixes: Prefixes, spellings: Prefixes): string[] {
   const shown = relativize(path, prefixes);
-  return under(shown, ".") ? [shown, relativize(path, { ...prefixes, cwd: [] })] : [shown];
+  if (!under(shown, ".")) return [shown];
+  const tail = shown.slice(1);
+  const bare = { ...spellings, cwd: [] };
+  const others = (spellings.cwd ?? spellings.workspace).map((dir) =>
+    relativize(dir === "/" ? tail || "/" : dir + tail, bare),
+  );
+  return [...new Set([shown, ...others])];
 }
 
 // Each prefix may be reached by two spellings (as given and with symlinks
