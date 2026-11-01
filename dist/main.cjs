@@ -72627,13 +72627,13 @@ function relativize(path, prefixes) {
 	return path;
 }
 const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
-function ruleSpellings(path, prefixes) {
+function ruleSpellings(path, prefixes, spellings) {
 	let shown = relativize(path, prefixes);
 	if (!under(shown, ".")) return [shown];
 	let tail = shown.slice(1), bare = {
-		...prefixes,
+		...spellings,
 		cwd: []
-	}, others = (prefixes.cwd ?? prefixes.workspace).map((dir) => relativize(dir === "/" ? tail || "/" : dir + tail, bare));
+	}, others = (spellings.cwd ?? spellings.workspace).map((dir) => relativize(dir === "/" ? tail || "/" : dir + tail, bare));
 	return [...new Set([shown, ...others])];
 }
 function canonical(path, prefixes) {
@@ -73305,14 +73305,14 @@ function createAuditSummary(prefixes) {
 			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)));
 			images.delete(proc);
 		}
-	}, shownPrefixes = {
-		...prefixes.cwd && { cwd: prefixes.cwd.slice(0, 1).map(escapePath) },
-		workspace: prefixes.workspace.slice(0, 1).map(escapePath),
-		home: prefixes.home.slice(0, 1).map(escapePath)
 	}, spelledPrefixes = {
 		...prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) },
 		workspace: prefixes.workspace.map(escapePath),
 		home: prefixes.home.map(escapePath)
+	}, shownPrefixes = {
+		...spelledPrefixes.cwd && { cwd: spelledPrefixes.cwd.slice(0, 1) },
+		workspace: spelledPrefixes.workspace.slice(0, 1),
+		home: spelledPrefixes.home.slice(0, 1)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
@@ -73482,7 +73482,7 @@ function createAuditSummary(prefixes) {
 		return ruleNames(path)[0];
 	}
 	function ruleNames(path) {
-		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), spelledPrefixes);
+		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), shownPrefixes, spelledPrefixes);
 	}
 	function ruleRowsOf(tally) {
 		return tally.finish()?.map(({ rank, path, agg }) => {

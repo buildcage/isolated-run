@@ -213,18 +213,17 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
-  // The working directory, the workspace and $HOME as the paths spell them
-  // once escaped: canonical gives each path the first spelling.
-  const shownPrefixes = {
-    ...(prefixes.cwd && { cwd: prefixes.cwd.slice(0, 1).map(escapePath) }),
-    workspace: prefixes.workspace.slice(0, 1).map(escapePath),
-    home: prefixes.home.slice(0, 1).map(escapePath),
-  };
-  // Every spelling, for a rule naming the working directory's real path.
+  // The working directory, the workspace and $HOME, each spelling escaped.
+  // Every one names a path for a rule; canonical gives each path the first.
   const spelledPrefixes = {
     ...(prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) }),
     workspace: prefixes.workspace.map(escapePath),
     home: prefixes.home.map(escapePath),
+  };
+  const shownPrefixes = {
+    ...(spelledPrefixes.cwd && { cwd: spelledPrefixes.cwd.slice(0, 1) }),
+    workspace: spelledPrefixes.workspace.slice(0, 1),
+    home: spelledPrefixes.home.slice(0, 1),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   // "…" stands for the unknown start of a cut or relative name, so it folds
@@ -537,10 +536,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return ruleNames(path)[0];
   }
 
-  // That name, and the one without the working directory where that differs.
+  // That name, and in the working directory each it would have without one.
   function ruleNames(path: string): string[] {
     if (path.startsWith(MEMFD)) return [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`];
-    return ruleSpellings(unmarked(path), spelledPrefixes);
+    return ruleSpellings(unmarked(path), shownPrefixes, spelledPrefixes);
   }
 
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {

@@ -100,12 +100,14 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
   ])(
     "matches a path under a working directory reached through a symlink %s by its real path",
     (_, cwd, path) => {
-      const real = cwd[1] === "/work" ? "$GITHUB_WORKSPACE/a" : "$GITHUB_WORKSPACE/app/**";
+      const real = cwd[1] === "/work" ? "$GITHUB_WORKSPACE/a" : "$GITHUB_WORKSPACE/app/a";
       const { summary } = marked(
         { cwd, rules: rulesOf(`node R ${real}`) },
         { kind: "read", pid: 3, comm: "node", path },
+        { kind: "read", pid: 3, comm: "node", path: `${path}b` },
       );
-      expect(summary).toMatchObject({ matched: 1, unexpected: 0 });
+      expect(summary).toMatchObject({ matched: 1, unexpected: 1 });
+      expect(rows(summary)).toStrictEqual(["node R ./ab"]);
     },
   );
 

@@ -7,7 +7,8 @@
  * escapes included (see reduce.ts's ruleNames): `./` the working directory,
  * `$GITHUB_WORKSPACE/` the workspace outside it, `~/` $HOME, `$GITHUB_OUTPUT`
  * the runner file, `memfd:"name"` a file in memory. A path in the working
- * directory also matches as it would be shown without one.
+ * directory also matches as it would be shown without one, from the
+ * directory as written or its real path.
  * `*` matches within one path component and `**` across components. A `**`
  * that is a whole component also matches no component, so `./x/**` takes
  * `./x` itself. `*` as the whole program matches any program, and `\*` is a
