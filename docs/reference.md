@@ -964,7 +964,8 @@ use an expression such as `${{ runner.temp }}` instead.
   `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
-  a path in the working directory either way, with or without `working-directory`.
+  a path in the working directory either way, with or without `working-directory`, and through the
+  directory's real path when it is reached through a symlink.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.

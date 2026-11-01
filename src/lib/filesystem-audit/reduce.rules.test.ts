@@ -93,6 +93,31 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     ]);
   });
 
+  it.each([
+    ["outside the workspace, into it", ["/tmp/link", "/work/app"], "/tmp/link/a"],
+    ["outside the workspace, to the workspace itself", ["/tmp/link", "/work"], "/tmp/link/a"],
+    ["inside the workspace", ["/work/link", "/work/app"], "/work/app/a"],
+  ])(
+    "matches a path under a working directory reached through a symlink %s by its real path",
+    (_, cwd, path) => {
+      const real = cwd[1] === "/work" ? "$GITHUB_WORKSPACE/a" : "$GITHUB_WORKSPACE/app/**";
+      const { summary } = marked(
+        { cwd, rules: rulesOf(`node R ${real}`) },
+        { kind: "read", pid: 3, comm: "node", path },
+      );
+      expect(summary).toMatchObject({ matched: 1, unexpected: 0 });
+    },
+  );
+
+  it("matches a path under / as the working directory by its absolute path", () => {
+    const { summary } = marked(
+      { cwd: ["/"], rules: rulesOf("node R /etc/hosts\nnode R /") },
+      { kind: "read", pid: 3, comm: "node", path: "/etc/hosts" },
+      { kind: "read", pid: 3, comm: "node", path: "/" },
+    );
+    expect(summary).toMatchObject({ matched: 2, unexpected: 0 });
+  });
+
   it("matches a working directory outside the workspace by its absolute path too", () => {
     const { summary } = marked(
       { cwd: ["/opt/app"], rules: rulesOf("node R /opt/app/**") },

@@ -220,6 +220,12 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     workspace: prefixes.workspace.slice(0, 1).map(escapePath),
     home: prefixes.home.slice(0, 1).map(escapePath),
   };
+  // Every spelling, for a rule naming the working directory's real path.
+  const spelledPrefixes = {
+    ...(prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) }),
+    workspace: prefixes.workspace.map(escapePath),
+    home: prefixes.home.map(escapePath),
+  };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   // "…" stands for the unknown start of a cut or relative name, so it folds
   // only as the kept directories do, not for having three such names under it.
@@ -534,7 +540,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // That name, and the one without the working directory where that differs.
   function ruleNames(path: string): string[] {
     if (path.startsWith(MEMFD)) return [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`];
-    return ruleSpellings(unmarked(path), shownPrefixes);
+    return ruleSpellings(unmarked(path), spelledPrefixes);
   }
 
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {

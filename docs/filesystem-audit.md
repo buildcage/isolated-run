@@ -509,8 +509,9 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
 - **Path**: as the table shows it, `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest
   of the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without
-  its ` (deleted)`. A path in the working directory also matches as `$GITHUB_WORKSPACE/` names it,
-  with or without `working-directory`, so steps in different directories can share a rule: under
+  its ` (deleted)`. A path in the working directory also matches as it shows without
+  `working-directory` (under `$GITHUB_WORKSPACE/`, `~/` or in full), through the directory as
+  written or with its symlinks resolved, so steps in different directories can share a rule: under
   `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` takes `./dist/x`. A name a command
   passed keeps its trailing `/` or `/.`, as `/missing/` for a failed `rmdir /missing/`. `*` matches
   within one component of a path, and `**` across them, as a whole component any number of them:

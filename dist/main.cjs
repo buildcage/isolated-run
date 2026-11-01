@@ -72629,10 +72629,12 @@ function relativize(path, prefixes) {
 const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 function ruleSpellings(path, prefixes) {
 	let shown = relativize(path, prefixes);
-	return under(shown, ".") ? [shown, relativize(path, {
+	if (!under(shown, ".")) return [shown];
+	let tail = shown.slice(1), bare = {
 		...prefixes,
 		cwd: []
-	})] : [shown];
+	}, others = (prefixes.cwd ?? prefixes.workspace).map((dir) => relativize(dir === "/" ? tail || "/" : dir + tail, bare));
+	return [...new Set([shown, ...others])];
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
@@ -73307,6 +73309,10 @@ function createAuditSummary(prefixes) {
 		...prefixes.cwd && { cwd: prefixes.cwd.slice(0, 1).map(escapePath) },
 		workspace: prefixes.workspace.slice(0, 1).map(escapePath),
 		home: prefixes.home.slice(0, 1).map(escapePath)
+	}, spelledPrefixes = {
+		...prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) },
+		workspace: prefixes.workspace.map(escapePath),
+		home: prefixes.home.map(escapePath)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
@@ -73476,7 +73482,7 @@ function createAuditSummary(prefixes) {
 		return ruleNames(path)[0];
 	}
 	function ruleNames(path) {
-		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), shownPrefixes);
+		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), spelledPrefixes);
 	}
 	function ruleRowsOf(tally) {
 		return tally.finish()?.map(({ rank, path, agg }) => {
