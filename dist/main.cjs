@@ -73344,7 +73344,8 @@ function createAuditSummary(prefixes) {
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3
+		rowBytes: (p, key) => relLength(p) + commands.get(key).field.length + 3,
+		showWalked: !!prefixes.rules
 	}), programs = new Map(), ranks = [], ruleIds = new Map(), rankOf = new Map(), rank = (key, name) => {
 		let id = `${name ? "n" : "p"}${key}`, r = rankOf.get(id);
 		if (r === void 0) {

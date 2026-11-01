@@ -247,8 +247,8 @@ each has rows of its own.
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
   it was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows. Such
-  a row does not count toward a fold either. **Unexpected Accesses** and the proposed rules keep it,
-  as a rule has to name it to take that access.
+  a row does not count toward a fold either. **Unexpected Accesses**, its details and the proposed
+  rules keep it, as a rule has to name it to take that access.
 
 **Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
 command's paths on their own, so they often name it; the artifact always does.
