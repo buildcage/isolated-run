@@ -77486,15 +77486,21 @@ function fetchReport(containerName, parameters, proxyEngine) {
 	return readReport(createHostDocker(), containerName, parameters, proxyEngine);
 }
 var ProxyStoppedError = class extends Error {};
-async function readReport(docker, containerName, parameters, proxyEngine) {
-	let health = {
+function readHealth(docker, containerName) {
+	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
 		resolverAnswered: readResolverAnswered(docker, containerName)
-	}, build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
+	};
+}
+function servicesAnswered(health) {
+	return health.droppedLogs.answered && health.resolverAnswered;
+}
+async function readReport(docker, containerName, parameters, proxyEngine) {
+	let health = readHealth(docker, containerName), build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
 	try {
 		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw health.droppedLogs.answered && health.resolverAnswered ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+		throw servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName)) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {

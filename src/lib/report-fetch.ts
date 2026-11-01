@@ -48,10 +48,21 @@ export function fetchReport(
 
 /**
  * The logs could not be read and the proxy or the resolver did not answer
- * either, as when the whole container stopped: a service that stopped fails
- * the step whatever the mode.
+ * either, as when the whole container stopped. The step fails for it whatever
+ * the mode.
  */
 export class ProxyStoppedError extends Error {}
+
+function readHealth(docker: Docker, containerName: string): ServiceHealth {
+  return {
+    droppedLogs: readProxyDroppedLogs(docker, containerName),
+    resolverAnswered: readResolverAnswered(docker, containerName),
+  };
+}
+
+function servicesAnswered(health: ServiceHealth): boolean {
+  return health.droppedLogs.answered && health.resolverAnswered;
+}
 
 export async function readReport(
   docker: Docker,
@@ -59,10 +70,7 @@ export async function readReport(
   parameters: GenReportParameters,
   proxyEngine: ProxyEngine,
 ): Promise<ReportData> {
-  const health: ServiceHealth = {
-    droppedLogs: readProxyDroppedLogs(docker, containerName),
-    resolverAnswered: readResolverAnswered(docker, containerName),
-  };
+  const health = readHealth(docker, containerName);
   const build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
   try {
     return await build(
@@ -72,7 +80,8 @@ export async function readReport(
       health,
     );
   } catch (e) {
-    if (health.droppedLogs.answered && health.resolverAnswered) throw e;
+    // Asked again, as the container can stop after the first answer.
+    if (servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName))) throw e;
     throw new ProxyStoppedError(
       `the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`,
     );

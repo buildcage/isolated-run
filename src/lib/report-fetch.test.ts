@@ -62,6 +62,19 @@ describe("readReport", () => {
     ).rejects.toThrow(ProxyStoppedError);
   });
 
+  it("names a stopped container when it stops after answering its health checks", async () => {
+    let healthChecks = 0;
+    const exec = vi.fn((_id: string, args: string[]) => {
+      if (args[0] === "curl" && ++healthChecks <= 2)
+        return "haproxy_process_dropped_logs_total 0\n";
+      return gone();
+    });
+
+    await expect(
+      readReport({ exec } as unknown as Docker, containerName, reportParams(), "inspect"),
+    ).rejects.toThrow(ProxyStoppedError);
+  });
+
   it("passes the read error on as it is while both services answer", async () => {
     const exec = vi.fn((_id: string, args: string[]) => {
       if (args[0] === "curl") return "haproxy_process_dropped_logs_total 0\n";
