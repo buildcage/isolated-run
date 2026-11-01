@@ -274,6 +274,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     loose,
     nodes: limits.nodes,
     rowBytes: (p, key) => relLength(p) + commands.get(key)!.field.length + 3,
+    // Under rules these are the unexpected accesses, listed as their table is.
+    showWalked: Boolean(prefixes.rules),
   });
   // Each pid's program, by its rank in the order programs first ran. An exec
   // sets it, naming a script rather than its interpreter, and a fork hands

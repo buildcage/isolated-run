@@ -270,7 +270,23 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/x/**", "ls R ./d/y"]);
   });
 
-  it("lists a walked directory beside the rows that remain unexpected", () => {
+  it("lists a walked directory beside a folded one below it in the unexpected access details", () => {
+    const { summary } = marked(
+      { rules: rulesOf("ls R ./z") },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/b" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/x/c" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/y" },
+    );
+    expect(summary.details?.map((r) => `${r.flags} ${r.comm} ${r.path}`)).toStrictEqual([
+      "R ls ./d",
+      "R ls ./d/x/**",
+      "R ls ./d/y",
+    ]);
+  });
+
+  it("lists a walked directory beside the rows that remain unexpected, in the details too", () => {
     const { summary } = marked(
       { rules: rulesOf("ls R ./d/a") },
       { kind: "read", pid: 3, comm: "ls", path: "/work/d" },
@@ -278,6 +294,10 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
       { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
     );
     expect(rows(summary)).toStrictEqual(["ls R ./d", "ls R ./d/b"]);
+    expect(summary.details?.map((r) => `${r.flags} ${r.comm} ${r.path}`)).toStrictEqual([
+      "R ls ./d",
+      "R ls ./d/b",
+    ]);
   });
 
   it("shows the directory of the process that made the access as /proc/self", () => {
