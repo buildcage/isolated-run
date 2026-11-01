@@ -481,7 +481,8 @@ comment says to add them back, under `with:` or in a config file. It also leaves
 - **Unexpected Accesses** takes the place of Accessed Paths, with the same columns, and is not
   folded; the artifact still has every access. Each row is one rule the proposed file adds.
 - **Unexpected access details**, folded after the table, lists the File access details rows of
-  those accesses, each with only the actions no rule took.
+  those accesses, each with only the actions no rule took, and a directory row wherever the table
+  keeps one.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
 - `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too, with the
