@@ -175,6 +175,8 @@ Then, with the report described in [Reading the report](#reading-the-report):
 
 The report is the step's section in the workflow run's Job Summary.
 
+<img src="../assets/report-aws-key-check.png" alt="Report blocking an STS call signed with an unknown key, with a table of each AWS key and where it came from" width="557">
+
 ### 🔑 AWS Keys
 
 This table follows the allowed hosts and has one row per access key that signed a request or that an

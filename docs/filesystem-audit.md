@@ -115,6 +115,10 @@ artifact.
 
 ## Reading the summary
 
+The report for an `npm ci` run, with **File access details** open:
+
+<img src="../assets/report-filesystem-audit.png" alt="Filesystem Activity Report listing the time, access flags, command and path of each file npm ci touched" width="557">
+
 A shortened example:
 
 ```
