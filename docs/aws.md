@@ -48,77 +48,14 @@ It does not stop a request signed with your own key from reaching another accoun
 as its SNS topic; IAM closes those, see
 [What it does not protect against](#what-it-does-not-protect-against).
 
-## Before you start
-
-### What it needs
-
-- The default `proxy-engine: inspect`. `universal` never sees a request's headers, so the check
-  fails the step there, in `audit` too.
-- An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. Without one, or with a value that is
-  not an access key ID, the step fails before the proxy starts, in `audit` too.
-
-A deploy step often needs Docker too, which no isolated command can use, with the check or without
-([Inside the sandbox](../README.md#inside-the-sandbox)). `docker push` to ECR and
-`sam build --use-container` fail there; build and push images in a step of their own, or with
-[Buildcage for Docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
-and Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
-
-Run `aws-actions/configure-aws-credentials` as an ordinary step before this one. Its own STS call
-does not pass through the proxy, and the temporary credentials it exports, an `ASIA…` key, are the
-key the step starts with.
-
-Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:
-
-- **A profile, `~/.aws/credentials` or `credential_process`.** A step that signs with a profile's
-  key, or alternates between two static keys, cannot use the check. Put the key to check in
-  `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check.
-- **An EC2 instance profile or a container credentials endpoint**, as on a self-hosted runner on EC2
-  or ECS. Run `configure-aws-credentials` in an earlier step with `role-to-assume`: it assumes that
-  role from the instance's credentials and exports the role's keys in `AWS_ACCESS_KEY_ID`. Add
-  `role-chaining: true` if it fails with
-  `Credentials loaded by the SDK do not match the expected access key ID configured by the action`.
-- **A web identity token**, in `AWS_WEB_IDENTITY_TOKEN_FILE`. With only the token, the step has no
-  key to start with and fails. With `AWS_ACCESS_KEY_ID` set too, the SDKs use the key and ignore
-  the token. Exchange the token before the step instead, as `configure-aws-credentials` does with
-  GitHub's OIDC token.
-
-### What works unchanged
-
-A step passes the check when:
-
-- It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
-  and Terraform.
-- It assumes roles only in accounts in `allowed-aws-role-accounts`, through STS `AssumeRole`, or
-  `AssumeRoleWithWebIdentity` sent as a form (the Query protocol,
-  `application/x-www-form-urlencoded`) as an AWS SDK sends it: the CDK's deploy roles, Terraform's
-  `assume_role`, or a CLI profile whose `role_arn` starts from `credential_source = Environment` or
-  a `web_identity_token_file`.
-- It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
-  credential of an account in `allowed-aws-role-accounts`.
-- It pulls from or pushes to ECR through the registry API, with a client such as `crane`, `skopeo`
-  or Jib.
-- It sends unsigned requests, or a token such as CodeArtifact's or an API Gateway authorizer's, to a
-  host that names its resource, such as a public S3 bucket, or to a public host such as
-  `checkip.amazonaws.com`. Only the URL rules decide those.
-
-### What it does not support
-
-The ones that come up most in CI are Bedrock API keys and presigned URLs someone else signed;
-[Common setups](#common-setups) shows how to arrange each. The rest are rarer:
-
-- S3 Express One Zone directory buckets, and S3 uploads from an HTML form (a POST policy).
-- Calls to APIs that take a form, such as STS, IAM, CloudFormation, SNS, EC2 and SES v1, over about
-  4 MiB or compressed: SES v1 `SendRawEmail` with large attachments, or CloudWatch `PutMetricData`
-  from an older SDK.
-- Old SDKs and hand-written clients signing with Signature Version 2 or 3, and the services that
-  take only those, such as Amazon SimpleDB.
-- Unsigned calls to a host that serves every account, such as a Cognito user pool sign-in or the
-  IAM Identity Center portal.
-- Keys from `GetSessionToken`, SAML or IAM Identity Center.
-
-[Troubleshooting](#troubleshooting) says what to do for each, under the reason the report gives.
-
 ## Getting started
+
+The check needs the default `proxy-engine: inspect` and an access key ID in `AWS_ACCESS_KEY_ID`
+when the step starts; without either, the step fails, in `audit` too. Run
+`aws-actions/configure-aws-credentials` as an ordinary step before this one. Its own STS call does
+not pass through the proxy, and the temporary credentials it exports, an `ASIA…` key, are the key
+the step starts with. [Compatibility](#compatibility) covers other sources of credentials and what
+the check does not support.
 
 Turn the check on in `audit` mode first: nothing is blocked, and the report shows what `restrict`
 would block. A step that uses only the credentials it is given needs `aws-key-check` alone:
@@ -290,6 +227,72 @@ does from a registry that keeps its layers in S3 into ECR. Such a command has to
 without the check; if a tool you need does this,
 [open an issue](https://github.com/buildcage/isolated-run/issues). ECR's own redirects are not
 affected: the proxy learns the key ECR signs them with (see [Which keys pass](#which-keys-pass)).
+
+## Compatibility
+
+### What it needs
+
+- The default `proxy-engine: inspect`. `universal` never sees a request's headers, so the check
+  fails the step there, in `audit` too.
+- An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. Without one, or with a value that is
+  not an access key ID, the step fails before the proxy starts, in `audit` too.
+
+A deploy step often needs Docker too, which no isolated command can use, with the check or without
+([Inside the sandbox](../README.md#inside-the-sandbox)). `docker push` to ECR and
+`sam build --use-container` fail there; build and push images in a step of their own, or with
+[Buildcage for Docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
+and Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
+
+Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:
+
+- **A profile, `~/.aws/credentials` or `credential_process`.** A step that signs with a profile's
+  key, or alternates between two static keys, cannot use the check. Put the key to check in
+  `AWS_ACCESS_KEY_ID`, or run those commands in a step without the check.
+- **An EC2 instance profile or a container credentials endpoint**, as on a self-hosted runner on EC2
+  or ECS. Run `configure-aws-credentials` in an earlier step with `role-to-assume`: it assumes that
+  role from the instance's credentials and exports the role's keys in `AWS_ACCESS_KEY_ID`. Add
+  `role-chaining: true` if it fails with
+  `Credentials loaded by the SDK do not match the expected access key ID configured by the action`.
+- **A web identity token**, in `AWS_WEB_IDENTITY_TOKEN_FILE`. With only the token, the step has no
+  key to start with and fails. With `AWS_ACCESS_KEY_ID` set too, the SDKs use the key and ignore
+  the token. Exchange the token before the step instead, as `configure-aws-credentials` does with
+  GitHub's OIDC token.
+
+### What works unchanged
+
+A step passes the check when:
+
+- It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
+  and Terraform.
+- It assumes roles only in accounts in `allowed-aws-role-accounts`, through STS `AssumeRole`, or
+  `AssumeRoleWithWebIdentity` sent as a form (the Query protocol,
+  `application/x-www-form-urlencoded`) as an AWS SDK sends it: the CDK's deploy roles, Terraform's
+  `assume_role`, or a CLI profile whose `role_arn` starts from `credential_source = Environment` or
+  a `web_identity_token_file`.
+- It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
+  credential of an account in `allowed-aws-role-accounts`.
+- It pulls from or pushes to ECR through the registry API, with a client such as `crane`, `skopeo`
+  or Jib.
+- It sends unsigned requests, or a token such as CodeArtifact's or an API Gateway authorizer's, to a
+  host that names its resource, such as a public S3 bucket, or to a public host such as
+  `checkip.amazonaws.com`. Only the URL rules decide those.
+
+### What it does not support
+
+The ones that come up most in CI are Bedrock API keys and presigned URLs someone else signed;
+[Common setups](#common-setups) shows how to arrange each. The rest are rarer:
+
+- S3 Express One Zone directory buckets, and S3 uploads from an HTML form (a POST policy).
+- Calls to APIs that take a form, such as STS, IAM, CloudFormation, SNS, EC2 and SES v1, over about
+  4 MiB or compressed: SES v1 `SendRawEmail` with large attachments, or CloudWatch `PutMetricData`
+  from an older SDK.
+- Old SDKs and hand-written clients signing with Signature Version 2 or 3, and the services that
+  take only those, such as Amazon SimpleDB.
+- Unsigned calls to a host that serves every account, such as a Cognito user pool sign-in or the
+  IAM Identity Center portal.
+- Keys from `GetSessionToken`, SAML or IAM Identity Center.
+
+[Troubleshooting](#troubleshooting) says what to do for each, under the reason the report gives.
 
 ## Troubleshooting
 
