@@ -26,7 +26,7 @@ ARG RUNC_SHA256_ARM64
 ARG COREDNS_VERSION
 ARG COREDNS_SHA256_AMD64
 ARG COREDNS_SHA256_ARM64
-RUN apk add --no-cache curl util-linux-misc && \
+RUN apk add --no-cache curl libcap-utils util-linux-misc && \
     mkdir -p /opt/buildcage/bin && \
     ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') && \
     EXPECTED_SHA256=$([ "$ARCH" = "amd64" ] && echo "$RUNC_SHA256_AMD64" || echo "$RUNC_SHA256_ARM64") && \
@@ -38,7 +38,8 @@ RUN apk add --no-cache curl util-linux-misc && \
     curl -fsSL "https://github.com/coredns/coredns/releases/download/${COREDNS_VERSION}/coredns_${COREDNS_VERSION#v}_linux_${ARCH}.tgz" \
       -o /tmp/coredns.tgz && \
     echo "${COREDNS_SHA}  /tmp/coredns.tgz" | sha256sum -c && \
-    tar -C /usr/local/bin -xz -f /tmp/coredns.tgz coredns
+    tar -C /usr/local/bin -xz -f /tmp/coredns.tgz coredns && \
+    setcap cap_net_bind_service=+ep /usr/local/bin/coredns
 
 # Building gen-seccomp-profile here only compiles the binary: it's
 # extracted onto the runner host and run natively there, not at image
@@ -136,12 +137,10 @@ RUN mkdir -p /etc/haproxy/rules /var/log/haproxy /etc/coredns /var/log/coredns
 COPY --from=deps /bin/pipesz /usr/bin/pipesz
 
 # CoreDNS answers queries the step controls, so it must not run as root.
-# setcap keeps :53 bindable once it has dropped privileges.
+# deps sets cap_net_bind_service to keep :53 bindable; a setcap here would
+# copy the whole binary into another layer.
 COPY --from=deps /usr/local/bin/coredns /usr/local/bin/coredns
-RUN apk add --no-cache --virtual .setcap libcap-utils && \
-    addgroup -S coredns && adduser -S -D -H -G coredns coredns && \
-    setcap cap_net_bind_service=+ep /usr/local/bin/coredns && \
-    apk del .setcap
+RUN addgroup -S coredns && adduser -S -D -H -G coredns coredns
 
 # Writes haproxy.cfg and the Corefile at startup (see init-cfg).
 COPY --from=qjs-build /build/dist/qjs/src/core/scripts/gen-configs-universal.js /opt/buildcage/scripts/gen-configs.js
