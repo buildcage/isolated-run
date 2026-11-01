@@ -5,6 +5,7 @@ import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readResolverAnswered } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
+import { errorMessage } from "#core/lib/errors.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
@@ -41,27 +42,51 @@ export function fetchReport(
   parameters: GenReportParameters,
   proxyEngine: ProxyEngine,
 ): Promise<ReportData> {
-  const docker = createHostDocker();
-  const health: ServiceHealth = {
+  return readReport(createHostDocker(), containerName, parameters, proxyEngine);
+}
+/* v8 ignore stop */
+
+/**
+ * The logs could not be read and the proxy or the resolver did not answer
+ * either, as when the whole container stopped. The step fails for it whatever
+ * the mode.
+ */
+export class ProxyStoppedError extends Error {}
+
+function readHealth(docker: Docker, containerName: string): ServiceHealth {
+  return {
     droppedLogs: readProxyDroppedLogs(docker, containerName),
     resolverAnswered: readResolverAnswered(docker, containerName),
   };
-  if (proxyEngine === "inspect") {
-    return buildInspectReportData(
+}
+
+function servicesAnswered(health: ServiceHealth): boolean {
+  return health.droppedLogs.answered && health.resolverAnswered;
+}
+
+export async function readReport(
+  docker: Docker,
+  containerName: string,
+  parameters: GenReportParameters,
+  proxyEngine: ProxyEngine,
+): Promise<ReportData> {
+  const health = readHealth(docker, containerName);
+  const build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
+  try {
+    return await build(
       readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
       readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
       parameters,
       health,
     );
+  } catch (e) {
+    // Asked again, as the container can stop after the first answer.
+    if (servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName))) throw e;
+    throw new ProxyStoppedError(
+      `the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`,
+    );
   }
-  return buildUniversalReportData(
-    readRotatedLog(docker, containerName, HAPROXY_LOG_DIR),
-    readRotatedLog(docker, containerName, COREDNS_LOG_DIR),
-    parameters,
-    health,
-  );
 }
-/* v8 ignore stop */
 
 export function readActionVersion(
   containerName: string,

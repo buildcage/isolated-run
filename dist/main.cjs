@@ -77470,9 +77470,6 @@ async function buildUniversalReportData(proxyLines, dnsLines, parameters, health
 	let isAudit = parameters.mode === "audit";
 	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, health);
 }
-//#endregion
-//#region src/lib/report-fetch.ts
-const HAPROXY_LOG_DIR = "/var/log/haproxy", COREDNS_LOG_DIR = "/var/log/coredns";
 function createHostDocker() {
 	return createDocker((args) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 		encoding: "utf8",
@@ -77493,11 +77490,25 @@ function createHostDocker() {
 	}));
 }
 function fetchReport(containerName, parameters, proxyEngine) {
-	let docker = createHostDocker(), health = {
+	return readReport(createHostDocker(), containerName, parameters, proxyEngine);
+}
+var ProxyStoppedError = class extends Error {};
+function readHealth(docker, containerName) {
+	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
 		resolverAnswered: readResolverAnswered(docker, containerName)
 	};
-	return proxyEngine === "inspect" ? buildInspectReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, health) : buildUniversalReportData(readRotatedLog(docker, containerName, HAPROXY_LOG_DIR), readRotatedLog(docker, containerName, COREDNS_LOG_DIR), parameters, health);
+}
+function servicesAnswered(health) {
+	return health.droppedLogs.answered && health.resolverAnswered;
+}
+async function readReport(docker, containerName, parameters, proxyEngine) {
+	let health = readHealth(docker, containerName), build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
+	try {
+		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
+	} catch (e) {
+		throw servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName)) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
@@ -77578,7 +77589,8 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	try {
 		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
-		fail(`Failed to fetch sandbox report: ${errorMessage(e)}`);
+		let message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
+		e instanceof ProxyStoppedError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
 	}
 	let rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
