@@ -272,7 +272,8 @@ docker compose exec proxy cat /var/log/coredns/current
 ```
 
 The proxy's line formats are the `log-format` lines the generators in `src/core/lib/acl/` write,
-and `src/core/lib/log/` parses them back. A line from each engine looks like this:
+and `src/core/lib/log/` parses them back. HAProxy's own alerts and warnings go to the container's
+output, not to this log. A line from each engine looks like this:
 
 ```
 buildcage 1787471970500 [ALLOWED] (HTTPS) "github.com:443" - 1024
@@ -284,7 +285,7 @@ archives kept. The report reads every archive, so `current` alone shows only wha
 last rotation.
 
 HAProxy writes each line into an in-memory ring without waiting, and the `haproxy-log` service
-reads the ring through `/var/run/haproxy-log.sock` into s6-log. A line the full ring cannot take
+reads the ring through `/var/run/haproxy-log/socket` into s6-log. A line the full ring cannot take
 is dropped, and the next one that fits is preceded by an `N events dropped` line. Before reading
 the log, the report asks HAProxy to log one more line (`buildcage log barrier ?<token>`) and waits
 for it to arrive, which also brings in any such notice. The report then marks itself incomplete for

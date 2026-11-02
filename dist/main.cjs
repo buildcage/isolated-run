@@ -16048,7 +16048,7 @@ function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
 }
 //#endregion
 //#region src/core/lib/log/proxy-notices.ts
-const PROXY_LOG_BARRIER = "buildcage log barrier", RING_DROPPED = /^(\d+) events? dropped$/;
+const PROXY_LOG_BARRIER = "buildcage log barrier", RING_DROPPED = /^(\d+) events? dropped\0?$/;
 function ringDropped(trimmed) {
 	let match = RING_DROPPED.exec(trimmed);
 	return match ? Number(match[1]) : void 0;
@@ -16098,7 +16098,7 @@ function preamble(spec) {
 		"    maxlen 16384",
 		"    timeout connect 5s",
 		"    timeout server 1h",
-		"    server log unix@/var/run/haproxy-log.sock",
+		"    server log unix@/var/run/haproxy-log/socket",
 		""
 	];
 }
