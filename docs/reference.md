@@ -961,11 +961,14 @@ use an expression such as `${{ runner.temp }}` instead.
 - Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
-  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
+  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`. When a symlink is
+  anywhere along the directory as written, a relative `write-through` path goes through it, which
+  [`write-through`](#write-through-paths) refuses; name the path it leads to instead.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
   a path in the working directory either way, with or without `working-directory`, and by the
-  directory's real path when a symlink leads to it.
+  directory's real path when a symlink leads to it. `./` itself always starts at the working
+  directory: under `working-directory: app`, `./app/dist/**` names `app/app/dist`.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.
