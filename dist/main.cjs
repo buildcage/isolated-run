@@ -77161,6 +77161,15 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 //#endregion
 //#region src/core/lib/docker/proxy-dropped-logs.ts
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
+	"i=0",
+	"still=0",
+	"last=",
+	"while [ $i -lt 100 ] && [ $still -lt 5 ]; do",
+	`  size=$(stat -c %s ${LOG_DIR}/current 2>/dev/null)`,
+	"  if [ \"$size\" = \"$last\" ]; then still=$((still + 1)); else still=0; last=$size; fi",
+	"  sleep 0.1",
+	"  i=$((i + 1))",
+	"done",
 	"curl -sf --max-time 10 --unix-socket /var/run/haproxy-barrier.sock \"http://localhost/?$1\" >/dev/null || exit 1",
 	"i=0",
 	"while [ $i -lt 100 ]; do",
