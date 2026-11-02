@@ -77160,13 +77160,16 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 }
 //#endregion
 //#region src/core/lib/docker/proxy-dropped-logs.ts
-const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
-	"curl -sf --max-time 10 --unix-socket /var/run/haproxy-barrier.sock \"http://localhost/?$1\" >/dev/null || exit 1",
+const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, BARRIER_SOCKET = "/var/run/haproxy-barrier.sock", LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
+	`curl -sf --max-time 10 --unix-socket ${BARRIER_SOCKET} "http://localhost/?$1" >/dev/null || exit 1`,
 	"i=0",
 	"while [ $i -lt 100 ]; do",
 	`  grep -qsF "$2" ${LOG_DIR}/current && exit 0`,
 	"  sleep 0.1",
 	"  i=$((i + 1))",
+	"  if [ $((i % 10)) -eq 0 ]; then",
+	`    curl -sf --max-time 1 --unix-socket ${BARRIER_SOCKET} "http://localhost/?$1" >/dev/null`,
+	"  fi",
 	"done",
 	`grep -rqsF "$2" ${LOG_DIR}`
 ].join("\n");
