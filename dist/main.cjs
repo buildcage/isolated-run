@@ -16047,14 +16047,23 @@ function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
 	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Blocked in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Blocked in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is blocked. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (extension && (l.push(...extension.requestRules(mode)), scheme === "https" && l.push(...extension.responseRules())), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a blocked request must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
 }
 //#endregion
+//#region src/core/lib/log/proxy-notices.ts
+const PROXY_LOG_BARRIER = "buildcage log barrier", RING_DROPPED = /^(\d+) events? dropped\0?$/;
+function ringDropped(trimmed) {
+	let match = RING_DROPPED.exec(trimmed);
+	return match ? Number(match[1]) : void 0;
+}
+//#endregion
 //#region src/core/lib/acl/haproxy-sections.ts
+const LOG_RING = "buildcage";
 function preamble(spec) {
 	return [
 		"# Generated by buildcage. Do not edit.",
 		"",
 		"global",
-		"    log stdout len 16384 format raw local0",
-		"    nbthread 1",
+		`    log ring@${LOG_RING} len 16384 format raw local0`,
+		"    tune.lua.bool-sample-conversion normal",
+		"    lua-load /etc/s6-overlay/s6-rc.d/haproxy/data/start-marker.lua",
 		"    user haproxy",
 		"    group haproxy",
 		"    dns-accept-family ipv4",
@@ -16074,6 +16083,22 @@ function preamble(spec) {
 		"    no log",
 		"    monitor-uri /health",
 		"    http-request use-service prometheus-exporter if { path /metrics }",
+		"",
+		"# Logs the query of each request, which the report waits to see in the log",
+		"# before reading it. Not reachable from the network.",
+		"frontend log_barrier",
+		"    bind /var/run/haproxy-barrier.sock mode 600",
+		"    mode http",
+		`    log-format "${PROXY_LOG_BARRIER} %HQ"`,
+		"    http-request return status 204",
+		"",
+		`ring ${LOG_RING}`,
+		"    format raw",
+		"    size 1048576",
+		"    maxlen 16384",
+		"    timeout connect 5s",
+		"    timeout server 1h",
+		"    server log unix@/var/run/haproxy-log/socket",
 		""
 	];
 }
@@ -71921,12 +71946,12 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && resolverAnswered && proxy === 0 && resolver === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0,
 		proxyAnswered: droppedLogs.answered,
 		resolverAnswered,
 		restarts: {
@@ -77135,13 +77160,36 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 }
 //#endregion
 //#region src/core/lib/docker/proxy-dropped-logs.ts
-const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m;
+const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
+	"curl -sf --max-time 10 --unix-socket /var/run/haproxy-barrier.sock \"http://localhost/?$1\" >/dev/null || exit 1",
+	"i=0",
+	"while [ $i -lt 100 ]; do",
+	`  grep -qsF "$2" ${LOG_DIR}/current && exit 0`,
+	"  sleep 0.1",
+	"  i=$((i + 1))",
+	"done",
+	`grep -rqsF "$2" ${LOG_DIR}`
+].join("\n");
 function parseDroppedLogs(metrics) {
 	let match = COUNTER.exec(metrics);
 	return match ? Number(match[1]) : void 0;
 }
-function readProxyDroppedLogs(docker, containerId) {
-	let metrics;
+function awaitProxyLog(docker, containerId, token) {
+	try {
+		return docker.exec(containerId, [
+			"sh",
+			"-c",
+			BARRIER_SCRIPT,
+			"sh",
+			token,
+			`${PROXY_LOG_BARRIER} ?${token}`
+		]), !0;
+	} catch {
+		return !1;
+	}
+}
+function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.randomBytes)(16).toString("hex")) {
+	let caughtUp = awaitProxyLog(docker, containerId, token), metrics;
 	try {
 		metrics = docker.exec(containerId, [
 			"curl",
@@ -77160,7 +77208,7 @@ function readProxyDroppedLogs(docker, containerId) {
 	}
 	return {
 		answered: !0,
-		count: parseDroppedLogs(metrics)
+		count: caughtUp ? parseDroppedLogs(metrics) : void 0
 	};
 }
 function readResolverAnswered(docker, containerId) {
@@ -77277,14 +77325,45 @@ async function scanDnsLog(lines, isAudit = !1) {
 }
 //#endregion
 //#region src/core/lib/log/start-marker.ts
-const PROXY_START_MARKER = "buildcage haproxy starting", BAD_REQUEST_METHOD = "<BADREQ>";
+const START = RegExp("^buildcage haproxy starting (\\d+)$");
+function createProxyLogTally() {
+	let startedAt, headIntact, unparsed = 0, restarts = 0, dropped = 0;
+	return {
+		event() {
+			headIntact ??= !1;
+		},
+		other(line) {
+			let trimmed = line.trim();
+			if (trimmed === "") return;
+			let lost = ringDropped(trimmed);
+			if (lost !== void 0) {
+				headIntact ??= !1, dropped += lost;
+				return;
+			}
+			let start = START.exec(trimmed);
+			start && headIntact !== void 0 && restarts++, headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && !trimmed.startsWith("buildcage log barrier") && unparsed++;
+		},
+		result() {
+			return {
+				startedAt,
+				headIntact: headIntact ?? !1,
+				unparsed,
+				restarts,
+				dropped
+			};
+		}
+	};
+}
+//#endregion
+//#region src/core/lib/log/termination.ts
+const BAD_REQUEST_METHOD = "<BADREQ>";
 function incompleteReason(terminationState, method) {
 	let cause = terminationState[0];
 	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
 }
 //#endregion
 //#region src/core/lib/log/inspect.ts
-const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/, START$1 = RegExp(`^${PROXY_START_MARKER} (\\d+)$`);
+const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/;
 function isBlock(terminationState) {
 	let cause = terminationState[0];
 	if (cause === "P" || cause === "S") return !0;
@@ -77367,24 +77446,14 @@ function parseProxyLine(line, isAudit) {
 	return null;
 }
 async function scanInspectLog(lines, isAudit = !1, allowsName) {
-	let events = [], startedAt, headIntact, unparsed = 0, restarts = 0;
+	let events = [], tally = createProxyLogTally();
 	for await (let line of lines) {
 		let event = parseProxyLine(line, isAudit);
-		if (event) {
-			headIntact ??= !1, events.push(event);
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let match = START$1.exec(trimmed);
-		match && headIntact !== void 0 && restarts++, headIntact ??= match !== null, match && startedAt === void 0 && (startedAt = Number(match[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+		event ? (tally.event(), events.push(event)) : tally.other(line);
 	}
 	return blockUnpassedAddresses(events), allowsName && blockUnallowedNames(events, allowsName), {
 		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed,
-		restarts
+		...tally.result()
 	};
 }
 function blockUnpassedAddresses(events) {
@@ -77412,7 +77481,7 @@ async function buildInspectReportData(proxyLines, dnsLines, parameters, health) 
 }
 //#endregion
 //#region src/core/lib/log/haproxy.ts
-const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, START = RegExp(`^${PROXY_START_MARKER} (\\d+)$`), PROTOCOL = {
+const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, PROTOCOL = {
 	HTTPS: "https",
 	HTTP: "http",
 	IP: "tcp"
@@ -77421,11 +77490,11 @@ function hostOf(address, ruleType) {
 	return address === "198.19.255.1" ? UNKNOWN_HOST : ruleType === "HTTPS" ? sniHost(address) : ruleHost(address);
 }
 async function scanHaproxyLog(lines, isAudit) {
-	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", startedAt, headIntact, unparsed = 0, restarts = 0;
+	let events = [], passedDecision = isAudit ? "AUDIT" : "ALLOWED", tally = createProxyLogTally();
 	for await (let line of lines) {
 		let m = DECISION.exec(line);
 		if (m) {
-			headIntact ??= !1;
+			tally.event();
 			let [, ms, decision, ruleType, target, reason, bytes] = m;
 			if (decision !== passedDecision && decision !== "BLOCKED") continue;
 			let { host: address, port } = splitHostPort(target), host = hostOf(address, ruleType), failed = decision === "BLOCKED" && FAILURE_REASONS.has(reason), blocked = decision === "BLOCKED" && !failed, event = {
@@ -77439,7 +77508,7 @@ async function scanHaproxyLog(lines, isAudit) {
 		}
 		let none = NO_REQUEST.exec(line);
 		if (none) {
-			headIntact ??= !1;
+			tally.event();
 			let [, ms, terminationState, address, port] = none, ended = incompleteReason(terminationState, BAD_REQUEST_METHOD);
 			events.push({
 				time: Number(ms) / 1e3,
@@ -77449,19 +77518,11 @@ async function scanHaproxyLog(lines, isAudit) {
 				port: Number(port),
 				reason: ended ?? "bad-request"
 			});
-			continue;
-		}
-		let trimmed = line.trim();
-		if (trimmed === "") continue;
-		let start = START.exec(trimmed);
-		start && headIntact !== void 0 && restarts++, headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && unparsed++;
+		} else tally.other(line);
 	}
 	return {
 		events,
-		startedAt,
-		headIntact: headIntact ?? !1,
-		unparsed,
-		restarts
+		...tally.result()
 	};
 }
 //#endregion

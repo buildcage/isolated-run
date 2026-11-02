@@ -26,7 +26,7 @@ ARG RUNC_SHA256_ARM64
 ARG COREDNS_VERSION
 ARG COREDNS_SHA256_AMD64
 ARG COREDNS_SHA256_ARM64
-RUN apk add --no-cache curl libcap-utils util-linux-misc && \
+RUN apk add --no-cache curl libcap-utils && \
     mkdir -p /opt/buildcage/bin && \
     ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') && \
     EXPECTED_SHA256=$([ "$ARCH" = "amd64" ] && echo "$RUNC_SHA256_AMD64" || echo "$RUNC_SHA256_ARM64") && \
@@ -131,10 +131,6 @@ ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 ENV S6_KILL_GRACETIME=500
 
 RUN mkdir -p /etc/haproxy/rules /var/log/haproxy /etc/coredns /var/log/coredns
-
-# For s6-rc.d/haproxy/run. The binary alone needs only musl; the package
-# would pull in ~6MB.
-COPY --from=deps /bin/pipesz /usr/bin/pipesz
 
 # CoreDNS answers queries the step controls, so it must not run as root.
 # deps sets cap_net_bind_service to keep :53 bindable; a setcap here would

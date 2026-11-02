@@ -47,16 +47,6 @@ NSS tools (certutil, via Alpine Linux's nss-tools package)
 
 ------------------------------------------------------------------------------
 
-util-linux (pipesz only, at /usr/bin/pipesz)
-  Website : https://github.com/util-linux/util-linux
-  License : GNU General Public License (GPL); pipesz.c names no version
-  Source  : https://git.kernel.org/pub/scm/utils/util-linux/util-linux.git or
-            via Alpine Linux source packages
-  Note    : Only this binary, copied from Alpine Linux's util-linux-misc
-            package.
-
-------------------------------------------------------------------------------
-
 curl
   Website : https://curl.se/
   License : curl License (curl)
@@ -197,11 +187,10 @@ own source names.
 
 ------------------------------------------------------------------------------
 
-Note on GPL components (HAProxy, iptables, util-linux):
+Note on GPL components (HAProxy, iptables):
 
-These components come from the Alpine Linux official package repository;
-pipesz is copied out of the util-linux-misc package. Their source code is
-available through:
+These components come from the Alpine Linux official package repository.
+Their source code is available through:
 
   1. The upstream project repositories listed above
   2. Alpine Linux source packages:
