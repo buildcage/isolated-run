@@ -46,9 +46,10 @@ Four things sit outside the model by design.
   default, to tamper with the proxy container's state, its traffic log above all. Sigstore proves
   the image was genuine at startup, not afterwards. The report marks a log that doesn't start where
   a real proxy run would as incomplete, and fails the step for it under `restrict` with
-  `fail-on-blocked`, which catches wholesale erasure but not a format-aware forgery. Stopping the
-  proxy fails the step whatever the mode, and restarting it marks the report incomplete. The defense
-  here is procedural: don't place an untrusted step immediately around this action.
+  `fail-on-blocked`, which catches wholesale erasure but not a format-aware forgery. A proxy or
+  resolver kept down, or hung, fails the step whatever the mode, and one that restarts, as after a
+  plain kill, marks the report incomplete. The defense here is procedural: don't place an untrusted
+  step immediately around this action.
 - **What the command reads.** It restricts where the command can send data, not what it can open, so
   a compromised dependency can still read `~/.aws/credentials` or `~/.docker/config.json`; it just
   cannot send them anywhere outside the allowlist. See

@@ -341,8 +341,9 @@ URL](docs/security.md#credentials-in-a-url).
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
 or written, since it can't show that nothing was blocked. Set `fail-on-blocked: false` to report
 without failing, or list what you expect to stay blocked in `known-blocked-rules`. In `audit` mode
-nothing fails the step. How the alert and the tables are made up, and what a
-`dns-service-not-allowed` row means, is in [Report details](./docs/reference.md#report-details).
+a blocked connection or an incomplete report does not fail the step. How the alert and the tables
+are made up, and what a `dns-service-not-allowed` row means, is in
+[Report details](./docs/reference.md#report-details).
 
 `upload-traffic-artifact: true` uploads the whole timeline as a `traffic.json`, one row per request
 and per name lookup, with the method, URL, status, size and the address it resolved to. It is
