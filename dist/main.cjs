@@ -71946,12 +71946,12 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDropped }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDropped === 0 && resolverAnswered && proxy === 0 && resolver === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0,
 		proxyAnswered: droppedLogs.answered,
 		resolverAnswered,
 		restarts: {
@@ -77337,7 +77337,7 @@ function createProxyLogTally() {
 			if (trimmed === "") return;
 			let lost = ringDropped(trimmed);
 			if (lost !== void 0) {
-				dropped += lost;
+				headIntact ??= !1, dropped += lost;
 				return;
 			}
 			let start = START.exec(trimmed);
