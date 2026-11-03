@@ -311,14 +311,14 @@ describe("reportStepTraffic", () => {
   ])(
     "fails the step when the logs could not be read ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
     async ({ mode, failOnBlocked, error }) => {
-      mocks.fetchReport.mockRejectedValue(new error("container is gone"));
+      mocks.fetchReport.mockRejectedValue(new error("no logs"));
 
       await expect(
         reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
       ).resolves.toBeUndefined();
 
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to fetch sandbox report: container is gone; failing the step whatever the mode",
+        "Failed to fetch sandbox report: no logs; failing the step whatever the mode",
       );
       expect(annotation.warning).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);

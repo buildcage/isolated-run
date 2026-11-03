@@ -547,7 +547,7 @@ record when:
 - the proxy or the resolver restarted during the step, since a connection still open when the proxy
   stopped never gets its line
 - the proxy's log writer restarted during the step, losing the lines it had not yet written
-- the report could not confirm that the proxy lost no lines and that its log writer did not restart
+- the report could not confirm that the proxy lost no lines, or that its log writer did not restart
 
 In `audit` mode, or with `fail-on-blocked: false`, an incomplete report is a notice instead.
 
@@ -555,8 +555,8 @@ A proxy or resolver that does not answer the report, because it stopped during t
 down or because it hung, fails the step in both modes, regardless of `fail-on-blocked`. Requests and
 lookups made while it was down failed instead of going around it, but nothing recorded them.
 
-Logs the report cannot read fail the step in both modes too, even while the proxy and the resolver
-answer, since there is then no report at all.
+A log the report cannot fetch at all fails the step in both modes too, even while the proxy and the
+resolver answer, since there is then no report.
 
 Matching is per request, so a row that counts several requests to one host counts as expected only
 when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's

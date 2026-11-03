@@ -351,12 +351,12 @@ URL, status and size, so a blocked entry names the URL that was attempted rather
 A query parameter that names a credential has its value replaced, see [Credentials in a
 URL](docs/security.md#credentials-in-a-url).
 
-In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
-or written, since it can't show that nothing was blocked. Set `fail-on-blocked: false` to report
+In `restrict` mode a blocked connection fails the step, and so does a report that could not be
+written, since it can't show that nothing was blocked. Set `fail-on-blocked: false` to report
 without failing, or list what you expect to stay blocked in `known-blocked-rules`. In `audit` mode
 a blocked connection or an incomplete report does not fail the step. A proxy or resolver that
-stopped answering fails it in either mode. How the alert and the tables
-are made up, and what a `dns-service-not-allowed` row means, is in
+stopped answering, or a log the report could not fetch, fails it in either mode. How the alert and
+the tables are made up, and what a `dns-service-not-allowed` row means, is in
 [Report details](./docs/reference.md#report-details).
 
 `upload-traffic-artifact: true` uploads the whole timeline as a `traffic.json`, one row per request

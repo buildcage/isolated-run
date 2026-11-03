@@ -77609,12 +77609,20 @@ function servicesAnswered(health) {
 function servicesAnswer(docker, containerName) {
 	return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
 }
+var LogReadError = class extends Error {};
+async function* readLog(docker, containerName, dir) {
+	try {
+		yield* readRotatedLog(docker, containerName, dir);
+	} catch (e) {
+		throw new LogReadError(errorMessage(e));
+	}
+}
 async function readReport(docker, containerName, parameters, proxyEngine) {
 	let health = readHealth(docker, containerName), build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
 	try {
-		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
+		return await build(readLog(docker, containerName, "/var/log/haproxy"), readLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw servicesAnswered(health) && servicesAnswer(docker, containerName) ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${errorMessage(e)}`) : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+		throw !servicesAnswered(health) || !servicesAnswer(docker, containerName) ? new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`) : e instanceof LogReadError ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${e.message}`) : e;
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {

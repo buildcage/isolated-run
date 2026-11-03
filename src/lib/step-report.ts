@@ -94,8 +94,8 @@ export interface ReportStepOptions {
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail-on-blocked it also fails the step: a report that
- * could not be read or recorded cannot vouch that nothing was blocked. Logs
- * the report could not read fail it in any mode.
+ * could not be read or recorded cannot vouch that nothing was blocked. A log
+ * it could not fetch fails it in any mode.
  */
 export async function reportStepTraffic(
   {
