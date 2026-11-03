@@ -231,9 +231,9 @@ function detailsBlock(
 // why there is no table.
 function unexpectedBlock(
   summary: AuditSummary,
-  { priorities, expected }: RenderOptions,
+  { priorities, expected, cutNote }: RenderOptions,
 ): SummaryBlock {
-  const { proposed, matched } = summary;
+  const { proposed, proposedCut, matched } = summary;
   const block = {
     id: FILESYSTEM_BLOCK.unexpected,
     priority: priorities[FILESYSTEM_BLOCK.unexpected],
@@ -248,7 +248,7 @@ function unexpectedBlock(
     return {
       ...block,
       cut: "atomic",
-      text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took,
+      text: cutNote(proposedCut) + took,
     };
   if (proposed.length === 0)
     return {
@@ -262,7 +262,9 @@ function unexpectedBlock(
     cut: "lines",
     // The count of what matched stays when the table is cut.
     head: 8,
-    text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`,
+    text:
+      `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` +
+      (proposedCut ? cutNote(proposedCut) : ""),
   };
 }
 
@@ -303,15 +305,15 @@ export function renderAuditSummaryBlocks(
   const blocks: SummaryBlock[] = [frame(`${top}\n\n`)];
   if (opts.expected) {
     blocks.push(unexpectedBlock(summary, opts));
-    // A note in place of the table stands for the details too.
-    if (summary.proposed && (summary.proposed.length || killed.length))
+    // The details stay where the table was given up, if they were not too.
+    if (summary.proposed ? summary.proposed.length || killed.length : summary.details?.length)
       blocks.push(detailsBlock(summary, opts));
   } else {
     const rows = paths && byProgramAndPath(paths);
     // Empty when the step was only killed for a syscall, which the details list.
     if (rows?.length !== 0) blocks.push(pathsBlock(rows, pathsCut, opts));
-    // The table's note stands for the details too.
-    if (rows) blocks.push(detailsBlock(summary, opts));
+    // The details stay where the table was given up, if they were not too.
+    if (rows || summary.details?.length) blocks.push(detailsBlock(summary, opts));
   }
   if (opts.rulesNote) blocks.push(frame(`\n${opts.rulesNote}`));
   // The blank line ends a </details> above, which would otherwise swallow it.
@@ -364,9 +366,12 @@ export function rulesNote(
     fileName,
     guideUrl,
     hasRules,
+    cut,
   }: {
     fileName: string;
     guideUrl: string;
+    /** Whether the rules were cut short for size. */
+    cut?: boolean;
     /** Whether expected-filesystem-rules were given: false for the empty
      *  rules fail-on-unexpected-file-access checks against. */
     hasRules: boolean;
@@ -390,7 +395,9 @@ export function rulesNote(
     where = "The proposed rules could not be saved.";
   else {
     const holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
-    where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
+    where = cut
+      ? `${file} in this run's ${artifactLink(proposal)} has ${holds}, up to the Job Summary's size limit; the recording beside it has every access.`
+      : `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
     steps = true;
   }
   return (

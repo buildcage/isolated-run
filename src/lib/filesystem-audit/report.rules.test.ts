@@ -10,7 +10,7 @@ import {
   reportStepFilesystemAudit,
   RULES,
 } from "../test/filesystem-audit-report.ts";
-import { RULES_TO_ADD_HEADER } from "./proposed-rules.ts";
+import { RULES_CUT_NOTE, RULES_TO_ADD_HEADER } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { readStepFilesystemAudit } from "./report.ts";
 import { parseExpectedRules } from "./rules.ts";
@@ -288,6 +288,37 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     ]);
   });
 
+  it("says where the unexpected accesses were cut short for size, in the warning and the rules file", async () => {
+    const note = annotation();
+    const {
+      deps: d,
+      ruleFiles,
+      summaries,
+    } = deps({
+      raw,
+      createSummary: (options) => createAuditSummary({ ...options, limits: { bytes: 40 } }),
+    });
+
+    const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
+    summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
+
+    expect(read.verdictItems).toStrictEqual({
+      warning: ["unexpected file accesses (too many to list)"],
+    });
+    expect(note.warning).toHaveBeenCalledWith(
+      "File accesses fell outside expected-filesystem-rules on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first 1.",
+    );
+    expect(summaries[0]).toContain(
+      "has a rule for each access no rule matches, up to the Job Summary's size limit; the recording beside it has every access.",
+    );
+    expect(ruleFiles).toStrictEqual([
+      {
+        path: RULES,
+        content: [...RULES_TO_ADD_HEADER, "", "node  R  ./a", "", RULES_CUT_NOTE, ""].join("\n"),
+      },
+    ]);
+  });
+
   it("counts no unexpected access when their paths were too many to list", async () => {
     const note = annotation();
     const {
@@ -312,7 +343,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       "File accesses fell outside expected-filesystem-rules on too many distinct paths to list.",
     );
     expect(summaries[0]).toContain(
-      "_The accesses outside the rules touched too many distinct paths to list._",
+      "_…truncated: the filesystem audit touched too many distinct paths to summarize; the filesystem audit artifact (`buildcage-filesystem-audit-deadbeef`) uploaded for this run has every access._",
     );
     expect(summaries[0]).toContain(
       "No rules were proposed: the accesses touched too many distinct paths.",

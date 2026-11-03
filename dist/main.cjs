@@ -72942,8 +72942,8 @@ const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || 
 	"# A dir/** rule stands for everything the run touched under one directory; check what",
 	"# it covers before adding it. Where the files under it matter, find them in",
 	`# ${RECORD_FILE} in this artifact and list them instead.`
-];
-function rulesToAdd(proposed) {
+], RULES_CUT_NOTE = `# Cut short at the Job Summary's size limit. ${RECORD_FILE} in this artifact has every access.`;
+function rulesToAdd(proposed, cut = !1) {
 	let blocks = [];
 	for (let r of proposed) {
 		let row = [
@@ -72961,14 +72961,15 @@ function rulesToAdd(proposed) {
 		...RULES_TO_ADD_HEADER,
 		"",
 		lines.join("\n\n"),
+		...cut ? ["", RULES_CUT_NOTE] : [],
 		""
 	].join("\n");
 }
 function writeProposedRules(summary, path, annotation, writeFile) {
 	if (!summary) return "write-failed";
-	if (summary.proposedCut) return "too-many-paths";
+	if (!summary.proposed) return "too-many-paths";
 	try {
-		return writeFile(path, rulesToAdd(summary.proposed)), "written";
+		return writeFile(path, rulesToAdd(summary.proposed, summary.proposedCut === "size")), "written";
 	} catch (e) {
 		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
 	}
@@ -73146,7 +73147,7 @@ var Lines = class {
 	foldsInto(parent, kids, parts, i) {
 		if (!parent) return !1;
 		let added = +!!another(kids, parts[i]);
-		return parent.kept ? !this.isKept(parts, i + 1) && looseKids(parent) + added >= 5 : childCount(kids) + added >= this.opts.fanout;
+		return parent.kept ? this.loose && !this.isKept(parts, i + 1) && looseKids(parent) + added >= 5 : childCount(kids) + added >= this.opts.fanout;
 	}
 	isKept(parts, depth) {
 		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
@@ -73209,7 +73210,7 @@ var Lines = class {
 	finish() {
 		if (this.stopped) return;
 		let out = this.within();
-		return !this.loose && (out.cut || out.bytes > this.opts.loose) && (this.loosen(), out = this.within()), this.truncated = this.dropped || out.cut, out.lines;
+		return !this.loose && this.opts.loose !== Infinity && (out.cut || out.bytes > this.opts.loose) && (this.loosen(), out = this.within()), this.truncated = this.dropped || out.cut, out.lines;
 	}
 	within() {
 		let lines = [], bytes = 0;
@@ -73279,6 +73280,12 @@ var Lines = class {
 			path,
 			agg
 		}));
+	}
+	get cut() {
+		return this.lines.cut;
+	}
+	get full() {
+		return this.lines.full;
 	}
 	get givenUp() {
 		return this.lines.stopped !== void 0;
@@ -73379,13 +73386,13 @@ function createAuditSummary(prefixes) {
 		...shownPrefixes.workspace,
 		...shownPrefixes.home,
 		...[...shownPrefixes.home, "/root"].flatMap((home) => SENSITIVE_IN_HOME.map((dir) => `${home}/${dir}`))
-	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, paths = new Lines({
+	].map(components), relLength = (path) => relativize(path, shownPrefixes).length, tableRowBytes = (p, rank, agg) => relLength(p) + ranks[Number(rank)].bytes + 16 + (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5), paths = new Lines({
 		fanout,
 		keep,
 		limit,
 		loose,
 		nodes: limits.nodes,
-		rowBytes: (p, rank, agg) => relLength(p) + ranks[Number(rank)].bytes + 16 + (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5)
+		rowBytes: tableRowBytes
 	}), details = new Lines({
 		fanout,
 		keep,
@@ -73422,19 +73429,19 @@ function createAuditSummary(prefixes) {
 	}, tally = prefixes.propose || prefixes.rules ? new RuleTally(prefixes.rules, new Lines({
 		fanout,
 		keep,
-		limit: Infinity,
+		limit,
 		loose: Infinity,
 		nodes: limits.nodes,
-		rowBytes: () => 0,
+		rowBytes: tableRowBytes,
 		showWalked: !0
 	}), {
 		program: (rank) => ranks[rank].ruleNames,
 		path: ruleNames
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
-		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith("\0memfd:") && x.path.endsWith("\0 (deleted)"), path = deletedPath ? unmarked(x.path) : x.path, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
+		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith("\0memfd:") && x.path.endsWith("\0 (deleted)"), path = deletedPath ? unmarked(x.path) : x.path, full = tally.full, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
 		if (!left || tally.givenUp) return left;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
-		return deletedOnly.set(key, {
+		return (was || !full) && deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
 		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program), left;
@@ -73578,7 +73585,7 @@ function createAuditSummary(prefixes) {
 					rank: Number(comm)
 				},
 				commands: commandsOf(agg)
-			})), log = (byPath || prefixes.rules) && rows(kept(details)), ruleRows = tally && ruleRowsOf(tally);
+			})), log = rows(kept(details)), ruleRows = tally && ruleRowsOf(tally), proposed = ruleRows?.length || !tally?.cut ? ruleRows : void 0;
 			return {
 				ended,
 				lost,
@@ -73588,8 +73595,8 @@ function createAuditSummary(prefixes) {
 				killed: [...killed.values()],
 				pathsCut: paths.cut,
 				detailsCut: details.cut,
-				...ruleRows && { proposed: byProgramThenPath(ruleRows) },
-				...tally?.givenUp && { proposedCut: !0 },
+				...proposed && { proposed: byProgramThenPath(proposed) },
+				...tally?.cut && { proposedCut: tally.cut },
 				matched: tally?.matched ?? 0,
 				unexpected: tally?.unexpected ?? 0
 			};
@@ -73736,8 +73743,8 @@ function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, 
 		text: `<sub>${LEGEND}</sub>\n\n<sub>${columns.filter(Boolean).join(" · ")}</sub>\n\n\`\`\`\n${body}\n\`\`\`\n\n` + (detailsCut ? cutNote(detailsCut) : "")
 	};
 }
-function unexpectedBlock(summary, { priorities, expected }) {
-	let { proposed, matched } = summary, block = {
+function unexpectedBlock(summary, { priorities, expected, cutNote }) {
+	let { proposed, proposedCut, matched } = summary, block = {
 		id: FILESYSTEM_BLOCK.unexpected,
 		priority: priorities[FILESYSTEM_BLOCK.unexpected],
 		level: 2,
@@ -73746,7 +73753,7 @@ function unexpectedBlock(summary, { priorities, expected }) {
 	if (!proposed) return {
 		...block,
 		cut: "atomic",
-		text: "_The accesses outside the rules touched too many distinct paths to list._\n\n" + took
+		text: cutNote(proposedCut) + took
 	};
 	if (proposed.length === 0) return {
 		...block,
@@ -73758,7 +73765,7 @@ function unexpectedBlock(summary, { priorities, expected }) {
 		...block,
 		cut: "lines",
 		head: 8,
-		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n`
+		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` + (proposedCut ? cutNote(proposedCut) : "")
 	};
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
@@ -73777,10 +73784,10 @@ function renderAuditSummaryBlocks(summary, opts) {
 	});
 	if (recordedNoFileAccess(summary) && !killed.length) return [frame(`${top}\n\nNo file access was recorded.\n`)];
 	let blocks = [frame(`${top}\n\n`)];
-	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), summary.proposed && (summary.proposed.length || killed.length) && blocks.push(detailsBlock(summary, opts));
+	if (opts.expected) blocks.push(unexpectedBlock(summary, opts)), (summary.proposed ? summary.proposed.length || killed.length : summary.details?.length) && blocks.push(detailsBlock(summary, opts));
 	else {
 		let rows = paths && byProgramAndPath(paths);
-		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), rows && blocks.push(detailsBlock(summary, opts));
+		rows?.length !== 0 && blocks.push(pathsBlock(rows, pathsCut, opts)), (rows || summary.details?.length) && blocks.push(detailsBlock(summary, opts));
 	}
 	return opts.rulesNote && blocks.push(frame(`\n${opts.rulesNote}`)), opts.legendNote && blocks.push(frame(`\n<sub>${opts.legendNote}</sub>\n\n`)), blocks;
 }
@@ -73798,7 +73805,7 @@ const artifactLink = ({ name, url }) => url ? `[filesystem audit artifact](${url
 function proposalOf(state, artifact) {
 	return state === "written" ? typeof artifact == "object" ? artifact : "lost" : state;
 }
-function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
+function rulesNote(proposal, { fileName, guideUrl, hasRules, cut }) {
 	if (proposal === "nothing-to-add") return;
 	let file = `\`${fileName}\``, intro = hasRules ? `\`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, and the summary above shows only the accesses no rule matches.` : `Once \`${EXPECTED_RULES_INPUT}\` lists the file accesses this step is expected to make, the summary shows only the accesses no rule matches.`, where, steps = !1;
 	if (proposal === "not-requested") where = `Set \`upload-filesystem-audit-artifact: true\` to get ${file} in the next run's filesystem audit artifact.`, steps = !0;
@@ -73806,7 +73813,7 @@ function rulesNote(proposal, { fileName, guideUrl, hasRules }) {
 	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";
 	else {
 		let holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
-		where = `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
+		where = cut ? `${file} in this run's ${artifactLink(proposal)} has ${holds}, up to the Job Summary's size limit; the recording beside it has every access.` : `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
 	}
 	return `<details>
 <summary>📝 Expected filesystem rules</summary>
@@ -74352,7 +74359,8 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 					rulesNote: rulesNote(proposalOf(proposed, artifact), {
 						fileName: (0, node_path.basename)(audit.rulesPath),
 						guideUrl: `${guide}#expected-accesses`,
-						hasRules
+						hasRules,
+						cut: summary?.proposedCut === "size"
 					})
 				});
 			} catch (e) {
@@ -74366,7 +74374,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 }
 function reportUnexpected(summary, failOnUnexpected, annotation, empty) {
 	if (!summary?.unexpected) return {};
-	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, message = n === void 0 ? `File accesses fell outside ${outside}${empty ? "," : ""} on too many distinct paths to list.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 || summary.proposedCut ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, fellOutside = `File accesses fell outside ${outside}${empty ? "," : ""}`, message = n === void 0 ? `${fellOutside} on too many distinct paths to list.` : summary.proposedCut ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first ${n}.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
 	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
 }
 function reduce(outPath, cleanPath, options, annotation, deps) {

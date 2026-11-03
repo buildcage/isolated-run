@@ -1,5 +1,5 @@
 import type { Access, Agg } from "./agg.ts";
-import type { Lines } from "./fold-tree.ts";
+import type { CutCause, Lines } from "./fold-tree.ts";
 import type { RuleMatcher } from "./rules.ts";
 
 /** Where a line of the recording stands against expected-filesystem-rules. */
@@ -60,6 +60,16 @@ export class RuleTally {
   /** What no rule took, by program rank and path, or undefined once given up. */
   finish(): { rank: number; path: string; agg: Agg }[] | undefined {
     return this.lines.finish()?.map(({ comm, path, agg }) => ({ rank: Number(comm), path, agg }));
+  }
+
+  /** Why what no rule took is not all there, as Lines.cut. */
+  get cut(): CutCause | undefined {
+    return this.lines.cut;
+  }
+
+  /** Whether it takes no new line, past its size limit. */
+  get full(): boolean {
+    return this.lines.full;
   }
 
   get givenUp(): boolean {

@@ -186,7 +186,8 @@ interface LinesOptions {
   /** The directories never folded, as components. */
   keep: string[][];
   limit: number;
-  /** The size past which it folds what it otherwise keeps whole; at most `limit`. */
+  /** The size past which it folds what it otherwise keeps whole; at most
+   *  `limit`, or Infinity never to fold it, even once cut for size. */
   loose: number;
   nodes: number;
   /** The fewest bytes the line of a path prints in, closer once its accesses
@@ -230,7 +231,7 @@ export class Lines {
    * Whether it is past `limit`, loose by then: it takes no new line, but one
    * that folds into a line it has.
    */
-  private get full(): boolean {
+  get full(): boolean {
     return this.bytes > this.opts.limit;
   }
 
@@ -345,7 +346,7 @@ export class Lines {
     if (!parent) return false;
     const added = another(kids, parts[i]) ? 1 : 0;
     if (!parent.kept) return childCount(kids) + added >= this.opts.fanout;
-    return !this.isKept(parts, i + 1) && looseKids(parent) + added >= LOOSE_FANOUT;
+    return this.loose && !this.isKept(parts, i + 1) && looseKids(parent) + added >= LOOSE_FANOUT;
   }
 
   // A kept directory's ancestors are kept too, or folding one would hide it.
@@ -468,12 +469,13 @@ export class Lines {
 
   /**
    * Every line with its command, up to `limit`, or undefined once it stopped.
-   * Lines past `loose` are loosened first.
+   * Lines past `loose`, or past `limit` with a finite `loose`, are loosened
+   * first.
    */
   finish(): { comm: string; path: string; agg: Agg }[] | undefined {
     if (this.stopped) return undefined;
     let out = this.within();
-    if (!this.loose && (out.cut || out.bytes > this.opts.loose)) {
+    if (!this.loose && this.opts.loose !== Infinity && (out.cut || out.bytes > this.opts.loose)) {
       this.loosen();
       out = this.within();
     }

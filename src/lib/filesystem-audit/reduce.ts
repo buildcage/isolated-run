@@ -136,11 +136,11 @@ export interface AuditSummary {
   /**
    * The accesses no rule takes, every access without rules, as rules folded
    * like the accessed paths, by program and then path. Undefined when not
-   * gathered, or given up for holding too many paths.
+   * gathered, or given up (see proposedCut).
    */
   proposed?: RuleRow[];
-  /** Whether the proposed rules were given up. */
-  proposedCut?: boolean;
+  /** Why the proposed rules were given up, or cut short for size. */
+  proposedCut?: CutCause;
   /** How many lines of the recording the rules took, and how many they did not. */
   matched: number;
   unexpected: number;
@@ -246,19 +246,20 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     ),
   ].map(components);
   const relLength = (path: string): number => relativize(path, shownPrefixes).length;
-  // The fewest bytes a row of each part prints in.
+  // The fewest bytes a row of each part prints in. A table's row is keyed by
+  // the program's rank, and names a command at least by its file name.
+  const tableRowBytes = (p: string, rank: string, agg?: Agg): number =>
+    relLength(p) +
+    ranks[Number(rank)].bytes +
+    16 +
+    (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5);
   const paths = new Lines({
     fanout,
     keep,
     limit,
     loose,
     nodes: limits.nodes,
-    // A command is named at least by its program's file name.
-    rowBytes: (p, rank, agg) =>
-      relLength(p) +
-      ranks[Number(rank)].bytes +
-      16 +
-      (agg?.cmds ? commandsBytes(agg) : ranks[Number(rank)].leaf + 5),
+    rowBytes: tableRowBytes,
   });
   const details = new Lines({
     fanout,
@@ -337,7 +338,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     return key;
   };
   // What no rule takes, by program and path, folded as the accessed paths
-  // are but never loosened nor cut for size.
+  // are but never loosened, as a rule proposed from a loose fold would take
+  // far more than the step touched.
   const tally =
     prefixes.propose || prefixes.rules
       ? new RuleTally(
@@ -345,10 +347,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
           new Lines({
             fanout,
             keep,
-            limit: Infinity,
+            limit,
             loose: Infinity,
             nodes: limits.nodes,
-            rowBytes: () => 0,
+            rowBytes: tableRowBytes,
             showWalked: true,
           }),
           { program: (rank) => ranks[rank].ruleNames, path: ruleNames },
@@ -365,16 +367,19 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     const path = deletedPath ? unmarked(x.path) : x.path;
+    const full = tally!.full;
     const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
-    // Past the tally's limit, only the matching is left to do.
+    // Once the tally gives up, only the matching is left to do.
     if (!left || tally!.givenUp) return left;
     const program = Boolean(ranks[by].shown.deleted);
     const key = keyOf(String(id), path);
     const was = deletedOnly.get(key);
-    deletedOnly.set(key, {
-      program: (was?.program ?? true) && program,
-      path: (was?.path ?? true) && deletedPath,
-    });
+    // Once full, the tally takes no new path, so only the paths it has count.
+    if (was || !full)
+      deletedOnly.set(key, {
+        program: (was?.program ?? true) && program,
+        path: (was?.path ?? true) && deletedPath,
+      });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
     return left;
   };
@@ -591,10 +596,10 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       program: { ...ranks[Number(comm)].shown, rank: Number(comm) },
       commands: commandsOf(agg),
     }));
-    // A table given up leaves no room for the details either, unless rules
-    // replace the table.
-    const log = (byPath || prefixes.rules) && rows(kept(details));
+    const log = rows(kept(details));
     const ruleRows = tally && ruleRowsOf(tally);
+    // As kept(): rules cut short with none left are given up.
+    const proposed = ruleRows?.length || !tally?.cut ? ruleRows : undefined;
     return {
       ended,
       lost,
@@ -604,8 +609,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       killed: [...killed.values()],
       pathsCut: paths.cut,
       detailsCut: details.cut,
-      ...(ruleRows && { proposed: byProgramThenPath(ruleRows) }),
-      ...(tally?.givenUp && { proposedCut: true }),
+      ...(proposed && { proposed: byProgramThenPath(proposed) }),
+      ...(tally?.cut && { proposedCut: tally.cut }),
       matched: tally?.matched ?? 0,
       unexpected: tally?.unexpected ?? 0,
     };
