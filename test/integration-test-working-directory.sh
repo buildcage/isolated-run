@@ -1,9 +1,9 @@
 #!/bin/bash
 # Verifies working-directory: by driving dist/main.cjs directly. The command
 # starts there with PWD set to it, a relative write-through path and config-file
-# resolve against it, and a directory that is missing or that the sandbox
-# mounts over fails the step, the missing one left uncreated, as does a
-# write-through `..` out of a symlinked one.
+# resolve against its real path, and a directory that is missing or that the
+# sandbox mounts over fails the step, the missing one left uncreated, as does a
+# `..` after the input's start.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -89,19 +89,36 @@ else
   cat "$WORKDIR/missing.log"
 fi
 
-mkdir -p "$WORKDIR/releases/v2"
-ln -s releases/v2 "$WORKDIR/current"
-step linked INPUT_WORKING_DIRECTORY="current" INPUT_WRITE_THROUGH="../out" \
-  INPUT_RUN="touch \"$WORKDIR/linked-ran\""
+# Under $OUTSIDE, so only write-through makes the two directories writable.
+mkdir -p "$OUTSIDE/releases/v2"
+ln -s releases/v2 "$OUTSIDE/current"
+REAL_OUTSIDE=$(cd "$OUTSIDE" && pwd -P)
+step linked INPUT_WORKING_DIRECTORY="$OUTSIDE/current" INPUT_WRITE_THROUGH="../out
+dist" \
+  INPUT_RUN="printf '%s\n' \"\$PWD\" >../out/pwd-env
+cd .. && echo built >out/marker && echo built >v2/dist/marker"
 CODE=$?
-REAL_WORKDIR=$(cd "$WORKDIR" && pwd -P)
-if [ -e "$WORKDIR/linked-ran" ]; then
-  fail "expected write-through: ../out through the symlinked working-directory to stop the command"
-elif [ "$CODE" != "0" ] && grep -q "instead: \"$REAL_WORKDIR/releases/out\"" "$WORKDIR/linked.log"; then
-  pass "a write-through .. out of a symlinked working-directory fails the step, naming where it leads"
+if [ "$CODE" = "0" ] && [ -f "$OUTSIDE/releases/out/marker" ] && [ -f "$OUTSIDE/releases/v2/dist/marker" ]; then
+  pass "relative write-through paths, a leading .. included, resolve against a symlinked working-directory's real path"
 else
-  fail "expected write-through: ../out to be refused with a hint at $REAL_WORKDIR/releases/out (exit $CODE)"
+  fail "expected ../out and dist to land under $OUTSIDE/releases (exit $CODE)"
   cat "$WORKDIR/linked.log"
+fi
+if [ "$(cat "$OUTSIDE/releases/out/pwd-env" 2>/dev/null)" = "$REAL_OUTSIDE/releases/v2" ]; then
+  pass "PWD names a symlinked working-directory by its real path"
+else
+  fail "expected PWD $REAL_OUTSIDE/releases/v2, got $(cat "$OUTSIDE/releases/out/pwd-env" 2>/dev/null)"
+fi
+
+ln -s releases/v2 "$WORKDIR/current"
+step dotdot INPUT_WORKING_DIRECTORY="current/.." INPUT_RUN="touch \"$WORKDIR/dotdot-ran\""
+CODE=$?
+if [ "$CODE" != "0" ] && [ ! -e "$WORKDIR/dotdot-ran" ] &&
+  grep -q 'working-directory "current/.." has a ".." after its start' "$WORKDIR/dotdot.log"; then
+  pass "a .. after the start of working-directory fails the step"
+else
+  fail "expected working-directory: current/.. to be refused (exit $CODE)"
+  cat "$WORKDIR/dotdot.log"
 fi
 
 step shm INPUT_WORKING_DIRECTORY="$SHM" INPUT_RUN="true"

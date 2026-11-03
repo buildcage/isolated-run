@@ -40,7 +40,7 @@ details.
 | ------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `run`               | required  | Command(s) to run inside the isolated sandbox under `bash -e`. See [How `run` is executed](../README.md#how-run-is-executed).                                               |
 | `working-directory` | workspace | The directory `run` starts in, relative to the workspace. Relative `write-through` paths and `config-file` resolve against it. See [Working directory](#working-directory). |
-| `config-file`       | empty     | A YAML file, relative to the working directory, that sets the other inputs. See [Config file](#config-file).                                                                |
+| `config-file`       | empty     | A YAML file in the workspace, relative to the working directory or absolute, that sets the other inputs. See [Config file](#config-file).                                   |
 | `label`             | empty     | Label appended to this step's Job Summary heading, e.g. `npm ci`, to tell repeated steps apart.                                                                             |
 
 ### Network inputs
@@ -164,9 +164,11 @@ known-blocked-rules: |
   wins.
 - An input the workflow sets wins over the file. The rule inputs, `expected-filesystem-rules`
   among them, and `write-through` are the exception: the file's lines are added to the workflow's.
-- The path is relative to the [working directory](#working-directory), `$GITHUB_WORKSPACE` unless
-  `working-directory` is set, and must stay inside `$GITHUB_WORKSPACE`, through symlinks too. The
-  repository has to be checked out by an earlier step.
+- A relative path is relative to the [working directory](#working-directory), `$GITHUB_WORKSPACE`
+  unless `working-directory` is set. An absolute path, such as
+  `${{ github.workspace }}/buildcage.yml`, is taken as it is. Either way the file, with its
+  symlinks resolved, must be inside `$GITHUB_WORKSPACE`, and a `..` may only start a relative
+  path. The repository has to be checked out by an earlier step.
 - `config-file` fails the step on `pull_request_target`, and on `workflow_run` triggered by a pull
   request event: the workspace there can hold the pull request's own code, which could rewrite the
   file. Set the inputs in the workflow on those events.
@@ -986,7 +988,8 @@ the short form.
 `working-directory` sets the directory `run` starts in, as the workflow's own `working-directory:`
 does for a `run:` step, which does not apply to a `uses:` step. A relative path resolves against
 `$GITHUB_WORKSPACE`, and an absolute one is taken as it is. Neither `~` nor a `$NAME` is expanded;
-use an expression such as `${{ runner.temp }}` instead.
+use an expression such as `${{ runner.temp }}` instead. A `..` may only start the path:
+`../shared` works, and `current/..` fails the step.
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -1003,24 +1006,21 @@ use an expression such as `${{ runner.temp }}` instead.
 - Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
-  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`. When the directory
-  as written goes through a symlink, other than in the `$GITHUB_WORKSPACE`, `$HOME` or
-  `$RUNNER_TEMP` path itself, every relative `write-through` path goes through it too, `../out`
-  included, and [`write-through`](#write-through-paths) refuses it; name the path it leads to
-  instead.
-- A `..` in `working-directory` itself, or in a relative `config-file` path, climbs the path as
-  written rather than out of where a symlink leads: with `current` linking to `releases/v2`,
-  `config-file: ../x.yml` under `working-directory: current` reads `$GITHUB_WORKSPACE/x.yml`, and
-  `working-directory: current/..` is `$GITHUB_WORKSPACE`.
+  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
+- The directory's symlinks are resolved once, before the step does anything else, and the command
+  and every relative path start from where they lead, as after `cd -P`. With `current` linking to
+  `releases/v2`, `working-directory: current` starts the command in `releases/v2`,
+  `write-through: dist` is `releases/v2/dist`, and `write-through: ../out` and
+  `config-file: ../x.yml` are in `releases`, where the command's own `cd ..` goes.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
-  a path in the working directory either way, with or without `working-directory`, and by the
-  directory's real path when a symlink leads to it. `./` itself always starts at the working
-  directory: under `working-directory: app`, `./app/dist/**` names `app/app/dist`.
+  a path in the working directory either way, with or without `working-directory`. `./` itself
+  always starts at the working directory: under `working-directory: app`, `./app/dist/**` names
+  `app/app/dist`.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.
-- `PWD` is set to the directory as written, before symlinks are resolved, as a shell sets it.
+- `PWD` is set to the directory's real path, symlinks resolved.
 
 ## CA trust variables
 
@@ -1145,18 +1145,18 @@ this:
   through the step's own `env:` block can't redirect where a listed path resolves. Any other `$NAME`
   is refused.
 - A leading `~/` expands to `$HOME`.
-- A relative path (`./dist`) resolves against the [working directory](#working-directory),
-  `$GITHUB_WORKSPACE` unless `working-directory` is set.
+- A relative path (`./dist`) resolves against the [working directory](#working-directory)'s real
+  path, `$GITHUB_WORKSPACE` unless `working-directory` is set.
+- A `..` may only start a relative path: `../out` climbs from the working directory, as the
+  command's own `..` does. A `..` anywhere else, as in `a/../b`, `~/../x` or
+  `$GITHUB_WORKSPACE/..`, fails the step.
 - Symlinks are not followed. A path that is a symlink, or goes through one anywhere along it, fails
-  the step, and the error names the path it leads to, which you can write instead. A `..` that
-  climbs back out of a symlink counts as going through it, so `link/../out` fails too. Following one
+  the step, and the error names the path it leads to, which you can write instead. Following one
   would make the place it leads to writable, and an earlier step could have pointed it at a path the
   sandbox keeps read-only, such as a tool installed under `/opt/hostedtoolcache`. The part of a path
   that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real path, as persistent
   mode does, so only what the entry adds below one is checked: `~/.cache` works where `/home` links
-  to `/var/home`. A `..` that climbs above one of them is resolved from its real path, as the
-  command's own `..` is. If that lands somewhere other than the path as written, the step fails and
-  names where it lands.
+  to `/var/home`.
 - A path that doesn't already exist is created before the step runs, always as a directory, the same
   convention Docker itself uses for a bind mount whose host source doesn't exist yet
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and

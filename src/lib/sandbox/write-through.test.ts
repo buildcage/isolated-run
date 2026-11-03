@@ -17,7 +17,6 @@ import { RUNNER_ENV, withLinks } from "../test/runner-host.ts";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
-  spellWriteThroughEntry,
   assertKnownFilesExist,
   assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
@@ -61,9 +60,26 @@ describe("resolveWriteThroughEntry", () => {
     expect(resolveWriteThroughEntry("/usr/local/bin", ENV)).toBe("/usr/local/bin");
   });
 
-  it("normalizes .. segments", () => {
-    expect(resolveWriteThroughEntry("/usr/local/bin/../lib", ENV)).toBe("/usr/local/lib");
+  it("climbs a leading .. from the base", () => {
+    expect(resolveWriteThroughEntry("../../out", ENV, "/opt/app/web")).toBe("/opt/out");
+    expect(resolveWriteThroughEntry("./../out", ENV, "/opt/app")).toBe("/opt/out");
   });
+
+  it.each([
+    "/usr/local/bin/../lib",
+    "a/../b",
+    "../a/../b",
+    "~/../x",
+    "$GITHUB_WORKSPACE/..",
+    "/opt/..",
+  ])(
+    "refuses a .. after the start, which the spelling and a symlink would take apart: %j",
+    (line) => {
+      expect(() => resolveWriteThroughEntry(line, ENV)).toThrow(
+        `write-through entry ${JSON.stringify(line)} has a ".." after its start; only a leading "../" may climb.`,
+      );
+    },
+  );
 
   it("rejects an unlisted variable name", () => {
     expect(() => resolveWriteThroughEntry("$SECRET_TOKEN/x", ENV)).toThrow(
@@ -92,20 +108,13 @@ describe("resolveWriteThroughEntry", () => {
   });
 
   it("rejects an entry that only resolves to '/', so the full opt-out has to be spelled out", () => {
-    for (const spelling of [
-      "/.",
-      "//",
-      "/opt/..",
-      "../../../../..",
-      "$GITHUB_WORKSPACE/../../../../..",
-    ]) {
+    for (const spelling of ["/.", "//", "../../../../..", "../../../../../../.."]) {
       expect(() => resolveWriteThroughEntry(spelling, ENV)).toThrow(/resolves to "\/"/);
     }
   });
 
-  it("still allows '..' that lands anywhere other than '/'", () => {
-    expect(resolveWriteThroughEntry("/opt/x/..", ENV)).toBe("/opt");
-    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE/../..", ENV)).toBe("/home/runner/work");
+  it("still allows a leading '..' that lands anywhere other than '/'", () => {
+    expect(resolveWriteThroughEntry("../..", ENV)).toBe("/home/runner/work");
   });
 
   it("does not swallow a stray closing brace from a malformed reference", () => {
@@ -169,14 +178,6 @@ describe("resolveWriteThroughEntry: a tilde with no HOME to expand to", () => {
     const resolved = resolveWriteThroughEntry("~/cache", { ...ENV, HOME: undefined });
     expect(resolved).not.toContain("undefined");
     expect(resolved.endsWith("/cache")).toBe(true);
-  });
-});
-
-describe("spellWriteThroughEntry", () => {
-  it("keeps the entry's `..` for the symlink check, which resolveWriteThroughEntry normalizes away", () => {
-    expect(spellWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/current/../out");
-    expect(spellWriteThroughEntry("~/a/../b", ENV)).toBe(`${ENV.HOME}/a/../b`);
-    expect(resolveWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/out");
   });
 });
 

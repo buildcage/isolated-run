@@ -545,7 +545,7 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
   - `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest of the workspace, `~/` for
     `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without its ` (deleted)`.
   - A path in the working directory also matches when written under `$GITHUB_WORKSPACE/` or `~/`,
-    or in full, from the directory as written or from its real path. Steps in different working
+    or in full. Steps in different working
     directories can then share a rule. Under `working-directory: web`,
     `$GITHUB_WORKSPACE/web/dist/**` matches `./dist/x`, but `./web/dist/**` names `web/web/dist`,
     since `./` always starts at the working directory.

@@ -11,8 +11,8 @@ import { buildComposeDownArgs } from "#core/lib/docker/args.ts";
 import { readLocalImageOverride, resolveComposeFiles } from "./lib/compose-file.ts";
 import { ACTION_INPUTS, CONFIG_FILE_INPUTS, readFilesystemInputs } from "./lib/inputs.ts";
 import { planPostCleanup } from "./lib/post-cleanup.ts";
+import { takePinningForPost } from "./lib/post-pinning.ts";
 import type { PostCleanupTargets } from "./lib/post-state.ts";
-import { takeWriteThroughForPost } from "./lib/post-write-through.ts";
 import { pinHostCommands, pinningPaths } from "./lib/sandbox/host-commands.ts";
 import { hostCommand, hostCommandEnv } from "./lib/sandbox/pinned-commands.ts";
 import { workingDirectoryOf } from "./lib/sandbox/working-directory.ts";
@@ -43,17 +43,16 @@ async function stopProxyContainer({ containerName, projectName }: PostCleanupTar
 function main(): void {
   // The main step has warned of any underscore spelling it ignored.
   normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
-  // The write-through the main step saved when it read config-file, which
-  // this step must not read again; the workflow's own input otherwise.
-  const savedWriteThrough = takeWriteThroughForPost(process.env);
+  // What the main step saved; see post-pinning.ts. Without it, the
+  // workflow's own inputs, as a step that failed before saving had them.
+  const saved = takePinningForPost(process.env);
   // Before planPostCleanup, which already runs docker and sudo. The main step
   // already reported any renamed input, hence the no-op notice.
   pinHostCommands(
     pinningPaths(
-      () => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput,
+      () => saved?.writeThrough ?? readFilesystemInputs(() => {}).writeThroughInput,
       process.env,
-      // config-file cannot set it, so the workflow's input is the main step's.
-      workingDirectoryOf(process.env),
+      saved?.baseDir ?? workingDirectoryOf(process.env),
     ),
     process.env,
   );

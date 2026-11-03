@@ -44,7 +44,7 @@ const mocks = {
   readStepLabel: vi.fn(),
   readWorkingDirectory: vi.fn(),
   assertSandboxUserCanSearch: vi.fn(),
-  saveWriteThroughForPost: vi.fn(),
+  savePinningForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
@@ -256,7 +256,7 @@ describe("runSandboxStep", () => {
     expect(env).not.toHaveProperty("INPUT_FAIL-ON-BLOCKED");
   });
 
-  it("saves the merged write-through for the post step when config-file was read", async () => {
+  it("saves the base and the merged write-through for the post step when config-file was read", async () => {
     mocks.applyConfigFile.mockReturnValue({ path: "/w/c.yml", origins: new Map() });
     mocks.readFilesystemInputs.mockReturnValue({
       filesystemMode: "persistent",
@@ -265,14 +265,17 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.saveWriteThroughForPost).toHaveBeenCalledWith(ENV, "/opt/cache");
-    expect(orderOf(mocks.saveWriteThroughForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
+    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, {
+      baseDir: ENV.GITHUB_WORKSPACE,
+      writeThrough: "/opt/cache",
+    });
+    expect(orderOf(mocks.savePinningForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
   });
 
-  it("saves nothing without config-file, leaving post the workflow's own input", async () => {
+  it("saves only the base without config-file, leaving post the workflow's own write-through", async () => {
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
+    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, { baseDir: ENV.GITHUB_WORKSPACE });
   });
 
   it("returns the isolated command's own exit code", async () => {
@@ -552,7 +555,7 @@ describe("runSandboxStep", () => {
     await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
       code: "SCRATCH_BASE_SYMLINKED",
     });
-    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
+    expect(mocks.savePinningForPost).not.toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
@@ -785,8 +788,7 @@ describe("runSandboxStep", () => {
   it("starts the command in working-directory and joins relative paths to it", async () => {
     const workingDirectory = {
       input: "app",
-      dir: `${ENV.GITHUB_WORKSPACE}/app`,
-      real: `${ENV.GITHUB_WORKSPACE}/packages/app`,
+      path: `${ENV.GITHUB_WORKSPACE}/packages/app`,
       isWorkspace: false,
     };
     mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
@@ -799,20 +801,23 @@ describe("runSandboxStep", () => {
     await runSandboxStep({ ...ENV }, deps);
 
     expect(orderOf(mocks.readWorkingDirectory)).toBeLessThan(orderOf(mocks.applyConfigFile));
-    expect(mocks.applyConfigFile.mock.calls[0][2]).toBe(workingDirectory.dir);
-    expect(mocks.resolveFilesystemPlan.mock.calls[0][3].baseDir).toBe(workingDirectory.dir);
-    expect(mocks.pinHostCommands.mock.calls[0][0]).toContain(`${workingDirectory.dir}/bin`);
+    expect(mocks.applyConfigFile.mock.calls[0][2]).toBe(workingDirectory.path);
+    expect(mocks.resolveFilesystemPlan.mock.calls[0][3].baseDir).toBe(workingDirectory.path);
+    expect(mocks.pinHostCommands.mock.calls[0][0]).toContain(`${workingDirectory.path}/bin`);
+    expect(mocks.savePinningForPost.mock.calls[0][1]).toStrictEqual({
+      baseDir: workingDirectory.path,
+    });
     expect(mocks.runSandboxedCommand.mock.calls[0][0]).toMatchObject({
       workingDirectory,
-      envOverrides: { PWD: workingDirectory.dir },
+      envOverrides: { PWD: workingDirectory.path },
     });
     expect(mocks.readStepFilesystemAudit.mock.calls[0][0].workingDirectory).toBe(
-      workingDirectory.dir,
+      workingDirectory.path,
     );
   });
 
   it("checks the sandbox's user can enter working-directory before the proxy starts", async () => {
-    const workingDirectory = { input: "app", dir: "/w/app", real: "/w/app", isWorkspace: false };
+    const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
     mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
     mocks.assertSandboxUserCanSearch.mockImplementation(() => {
       throw new SandboxError("cannot search", "INVALID_WORKING_DIRECTORY");

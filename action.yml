@@ -13,7 +13,7 @@ inputs:
     required: false
     default: ""
   config-file:
-    description: "YAML file, relative to working-directory, setting any input but run, working-directory and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
+    description: "YAML file in the workspace, relative to working-directory or absolute, setting any input but run, working-directory and the deprecated writable. An input the workflow sets wins; rule lists and write-through are combined. See docs/reference.md#config-file."
     required: false
     default: ""
   label:

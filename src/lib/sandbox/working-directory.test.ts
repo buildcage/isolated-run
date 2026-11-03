@@ -3,6 +3,7 @@ import type { Stats } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import { realPathOf } from "./symlinks.ts";
 import {
   assertSandboxShows,
   assertSandboxUserCanSearch,
@@ -23,32 +24,52 @@ const envWith = (input?: string, workspace: string | null = WS): NodeJS.ProcessE
 const stats = (over: Partial<Stats> = {}): Stats =>
   ({ isDirectory: () => true, uid: 0, gid: 0, mode: 0o40755, ...over }) as Stats;
 
+// A host whose only symlinks are `links`, each path to its target.
+const resolving =
+  (links: Record<string, string> = {}) =>
+  (path: string) =>
+    realPathOf(path, {
+      lstat: (p) => (p in links ? { isSymbolicLink: () => true } : undefined),
+      readlink: (p) => links[p]!,
+    });
+const LINKED = resolving({ [`${WS}/current`]: "releases/v2" });
+
 describe("workingDirectoryOf", () => {
+  const noLinks = resolving();
+
   it("is the workspace without the input", () => {
-    expect(workingDirectoryOf(envWith())).toBe(WS);
-    expect(workingDirectoryOf(envWith("  "))).toBe(WS);
+    expect(workingDirectoryOf(envWith(), noLinks)).toBe(WS);
+    expect(workingDirectoryOf(envWith("  "), noLinks)).toBe(WS);
   });
 
   it("joins a relative input to the workspace, normalized", () => {
-    expect(workingDirectoryOf(envWith("app/"))).toBe(`${WS}/app`);
-    expect(workingDirectoryOf(envWith("./a//b/../c"))).toBe(`${WS}/a/c`);
-    expect(workingDirectoryOf(envWith(".."))).toBe("/home/runner/work/repo");
+    expect(workingDirectoryOf(envWith("app/"), noLinks)).toBe(`${WS}/app`);
+    expect(workingDirectoryOf(envWith("./a//b"), noLinks)).toBe(`${WS}/a/b`);
+    expect(workingDirectoryOf(envWith(".."), noLinks)).toBe("/home/runner/work/repo");
   });
 
   it("takes an absolute input as it is, normalized", () => {
-    expect(workingDirectoryOf(envWith("/opt/app/"))).toBe("/opt/app");
-    expect(workingDirectoryOf(envWith("/opt/app", null))).toBe("/opt/app");
-    expect(workingDirectoryOf(envWith("/"))).toBe("/");
+    expect(workingDirectoryOf(envWith("/opt/app/"), noLinks)).toBe("/opt/app");
+    expect(workingDirectoryOf(envWith("/opt/app", null), noLinks)).toBe("/opt/app");
+    expect(workingDirectoryOf(envWith("/"), noLinks)).toBe("/");
+  });
+
+  it("resolves symlinks, a leading .. climbing from where they lead", () => {
+    expect(workingDirectoryOf(envWith("current"), LINKED)).toBe(`${WS}/releases/v2`);
+    const linkedWorkspace = resolving({ "/ws": WS });
+    expect(workingDirectoryOf(envWith("../other", "/ws"), linkedWorkspace)).toBe(
+      "/home/runner/work/repo/other",
+    );
   });
 
   it("is undefined when nothing makes it absolute", () => {
-    expect(workingDirectoryOf(envWith(undefined, null))).toBeUndefined();
-    expect(workingDirectoryOf(envWith("app", null))).toBeUndefined();
+    expect(workingDirectoryOf(envWith(undefined, null), noLinks)).toBeUndefined();
+    expect(workingDirectoryOf(envWith("app", null), noLinks)).toBeUndefined();
   });
 
   it("expands nothing, as the workflow's own working-directory does not", () => {
-    expect(workingDirectoryOf(envWith("~/x"))).toBe(`${WS}/~/x`);
-    expect(workingDirectoryOf(envWith("$RUNNER_TEMP"))).toBe(`${WS}/$RUNNER_TEMP`);
+    expect(workingDirectoryOf(envWith("~/x"), noLinks)).toBe(`${WS}/~/x`);
+    expect(workingDirectoryOf(envWith("$RUNNER_TEMP"), noLinks)).toBe(`${WS}/$RUNNER_TEMP`);
   });
 });
 
@@ -57,43 +78,40 @@ describe("isWorkspace", () => {
     throw new Error("ENOENT");
   };
 
-  it("compares as normalized paths", () => {
-    expect(isWorkspace(WS, envWith(undefined, `${WS}/`), missing)).toBe(true);
-    expect(isWorkspace(`${WS}/app/..`, envWith(), missing)).toBe(true);
-    expect(isWorkspace(`${WS}/app`, envWith(), missing)).toBe(false);
-    expect(isWorkspace(WS, envWith(undefined, null), missing)).toBe(false);
+  it("compares real paths", () => {
+    expect(isWorkspace(WS, envWith(undefined, `${WS}/`), resolving())).toBe(true);
+    expect(isWorkspace(`${WS}/app`, envWith(), resolving())).toBe(false);
+    expect(isWorkspace(WS, envWith(undefined, "/ws"), resolving({ "/ws": WS }))).toBe(true);
   });
 
-  it("compares the real paths of other spellings", () => {
-    const realpath = (path: string) => path.replace("/link", WS);
-    expect(isWorkspace("/link", envWith(), realpath)).toBe(true);
-    expect(isWorkspace("/link/app", envWith(), realpath)).toBe(false);
+  it("goes by spelling alone when a path cannot be resolved, and is false without the workspace", () => {
+    expect(isWorkspace(WS, envWith(undefined, null), resolving())).toBe(false);
+    expect(isWorkspace(`${WS}/app`, envWith(), missing)).toBe(false);
+    expect(isWorkspace(`${WS}/`, envWith(), missing)).toBe(true);
   });
 });
 
 describe("readWorkingDirectory", () => {
-  const realpath = (path: string) => path.replace("/link", "/real");
-
   it("is undefined without the input", () => {
-    expect(readWorkingDirectory(envWith(), { realpath, stat: () => stats() })).toBeUndefined();
+    expect(
+      readWorkingDirectory(envWith(), { realpath: LINKED, stat: () => stats() }),
+    ).toBeUndefined();
   });
 
-  it("keeps the spelling relative paths join to, and the real path the command starts in", () => {
+  it("holds the real path, which the command starts in and relative paths join to", () => {
     expect(
-      readWorkingDirectory(envWith(" link/app "), { realpath, stat: () => stats() }),
+      readWorkingDirectory(envWith(" current/app "), { realpath: LINKED, stat: () => stats() }),
     ).toStrictEqual({
-      input: "link/app",
-      dir: `${WS}/link/app`,
-      real: `${WS}/real/app`,
+      input: "current/app",
+      path: `${WS}/releases/v2/app`,
       isWorkspace: false,
     });
   });
 
   it("says when it names the workspace anyway", () => {
-    expect(readWorkingDirectory(envWith("."), { realpath, stat: () => stats() })).toMatchObject({
-      dir: WS,
-      isWorkspace: true,
-    });
+    expect(
+      readWorkingDirectory(envWith("."), { realpath: LINKED, stat: () => stats() }),
+    ).toMatchObject({ path: WS, isWorkspace: true });
   });
 
   const refused = (env: NodeJS.ProcessEnv, deps: Parameters<typeof readWorkingDirectory>[1]) => {
@@ -117,34 +135,43 @@ describe("readWorkingDirectory", () => {
     );
   });
 
+  it.each(["current/..", "a/../b", "/opt/../srv"])("refuses a .. after the start: %j", (input) => {
+    expect(refused(envWith(input), { realpath: LINKED, stat: () => stats() })).toBe(
+      `working-directory ${JSON.stringify(input)} has a ".." after its start; only a leading "../" may climb.`,
+    );
+  });
+
   it("refuses a directory that does not exist, which runc would create as root", () => {
-    expect(refused(envWith("app"), { realpath: missing })).toBe(
-      `working-directory "app" (${WS}/app) does not exist.`,
+    expect(refused(envWith("current/app"), { realpath: LINKED, stat: missing })).toBe(
+      `working-directory "current/app" (${WS}/releases/v2/app) does not exist.`,
     );
   });
 
   it("takes a file on the way as a directory that does not exist", () => {
-    expect(refused(envWith("a.txt/b"), { realpath: failing("ENOTDIR") })).toBe(
+    expect(refused(envWith("a.txt/b"), { realpath: LINKED, stat: failing("ENOTDIR") })).toBe(
       `working-directory "a.txt/b" (${WS}/a.txt/b) does not exist.`,
     );
   });
 
   it("passes on any other failure as it is", () => {
-    expect(refused(envWith("app"), { realpath, stat: failing("EACCES") })).toBe(
+    expect(refused(envWith("app"), { realpath: LINKED, stat: failing("EACCES") })).toBe(
       `working-directory "app" (${WS}/app) could not be read: EACCES: failed`,
     );
   });
 
   it("says a variable or ~ is not expanded", () => {
     for (const input of ["~/build", "$RUNNER_TEMP/build"])
-      expect(refused(envWith(input), { realpath: missing })).toMatch(
+      expect(refused(envWith(input), { realpath: LINKED, stat: missing })).toMatch(
         /does not exist\. Variables and ~ are not expanded; use an expression such as \$\{\{ runner\.temp \}\}\.$/,
       );
   });
 
   it("refuses a file", () => {
     expect(
-      refused(envWith("a.txt"), { realpath, stat: () => stats({ isDirectory: () => false }) }),
+      refused(envWith("a.txt"), {
+        realpath: LINKED,
+        stat: () => stats({ isDirectory: () => false }),
+      }),
     ).toBe(`working-directory "a.txt" (${WS}/a.txt) is not a directory.`);
   });
 });
@@ -218,7 +245,7 @@ describe("unsearchableAncestor", () => {
 });
 
 describe("assertSandboxShows", () => {
-  const wd = { input: "app", dir: `${WS}/app`, real: `${WS}/app`, isWorkspace: false };
+  const wd = { input: "app", path: `${WS}/app`, isWorkspace: false };
 
   it("passes a directory the sandbox shows", () => {
     expect(() => assertSandboxShows(wd, { mounts: [], maskedPaths: [] })).not.toThrow();
@@ -232,7 +259,7 @@ describe("assertSandboxShows", () => {
 });
 
 describe("assertSandboxUserCanSearch", () => {
-  const wd = { input: "app", dir: `${WS}/app`, real: `${WS}/app`, isWorkspace: false };
+  const wd = { input: "app", path: `${WS}/app`, isWorkspace: false };
   const user = { uid: 1001, gid: 1001 };
 
   it("passes a searchable directory", () => {
