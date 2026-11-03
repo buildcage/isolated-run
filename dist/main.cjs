@@ -77227,9 +77227,23 @@ function awaitProxyLog(docker, containerId, token) {
 	}
 }
 function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.randomBytes)(16).toString("hex")) {
-	let caughtUp = awaitProxyLog(docker, containerId, token), metrics;
+	let caughtUp = awaitProxyLog(docker, containerId, token), metrics = readMetrics(docker, containerId);
+	return metrics === void 0 ? {
+		answered: !1,
+		count: void 0,
+		logConnections: void 0
+	} : {
+		answered: !0,
+		count: caughtUp ? parseDroppedLogs(metrics) : void 0,
+		logConnections: readLogConnections(docker, containerId)
+	};
+}
+function readProxyAnswered(docker, containerId) {
+	return readMetrics(docker, containerId) !== void 0;
+}
+function readMetrics(docker, containerId) {
 	try {
-		metrics = docker.exec(containerId, [
+		return docker.exec(containerId, [
 			"curl",
 			"-sf",
 			"--max-time",
@@ -77239,17 +77253,8 @@ function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.rando
 			"http://localhost/metrics?scope=global"
 		]);
 	} catch {
-		return {
-			answered: !1,
-			count: void 0,
-			logConnections: void 0
-		};
+		return;
 	}
-	return {
-		answered: !0,
-		count: caughtUp ? parseDroppedLogs(metrics) : void 0,
-		logConnections: readLogConnections(docker, containerId)
-	};
 }
 function readLogConnections(docker, containerId) {
 	try {
@@ -77607,12 +77612,15 @@ function readHealth(docker, containerName) {
 function servicesAnswered(health) {
 	return health.droppedLogs.answered && health.resolverAnswered;
 }
+function servicesAnswer(docker, containerName) {
+	return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
+}
 async function readReport(docker, containerName, parameters, proxyEngine) {
 	let health = readHealth(docker, containerName), build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
 	try {
 		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName)) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+		throw servicesAnswered(health) && servicesAnswer(docker, containerName) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {

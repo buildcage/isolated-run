@@ -89,6 +89,8 @@ describe("readReport", () => {
         "inspect",
       ),
     ).rejects.toThrow(ProxyStoppedError);
+    // Asked again without a second barrier, which a hung proxy would sit out.
+    expect(exec.mock.calls.filter(([, args]) => args[0] === "sh").length).toBe(1);
   });
 
   it("passes the read error on as it is while both services answer", async () => {
