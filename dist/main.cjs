@@ -15465,15 +15465,16 @@ function isOutside(root, path) {
 function resolveConfigPath(path, env, baseDir) {
 	let pathError = (reason) => new ConfigFileError(`config-file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
 	if ((0, node_path.isAbsolute)(path)) throw pathError("must be a relative path.");
-	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(baseDir ?? workspace, path);
-	if (isOutside(workspace, full)) throw pathError("leads outside the workspace.");
+	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(baseDir ?? workspace, path), outside = (to, root) => pathError(`(${to}) leads outside the workspace (${root}).`);
+	if (isOutside(workspace, full)) throw outside(full, workspace);
 	let real;
 	try {
 		real = (0, node_fs.realpathSync)(full);
 	} catch {
 		throw pathError(`(${full}) was not found. Check out the repository in an earlier step.`);
 	}
-	if (isOutside((0, node_fs.realpathSync)(workspace), real)) throw pathError("leads outside the workspace.");
+	let realWorkspace = (0, node_fs.realpathSync)(workspace);
+	if (isOutside(realWorkspace, real)) throw outside(real, realWorkspace);
 	return real;
 }
 const resolved = (node, doc) => (0, import_dist$5.isAlias)(node) ? node.resolve(doc) : node;
@@ -74429,14 +74430,18 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
+function spellWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(baseDir || "", tildeExpanded);
+	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded;
+	return (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
+}
+function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
+	let resolved = spellWriteThroughEntry(rawLine, env, baseDir);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
 	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
@@ -76256,6 +76261,10 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 	try {
 		for (let path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
+		for (let line of splitWriteThroughInput(writeThroughInput)) {
+			let spelled = spellWriteThroughEntry(line, env, deps.baseDir);
+			spelled.split("/").includes("..") && assertNoSymlinkInWriteThrough(onRealRunnerPrefix(spelled, env, realpath), deps);
+		}
 	} catch (e) {
 		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "INVALID_WRITE_THROUGH_PATH");
 	}
@@ -76304,6 +76313,14 @@ function onRealRunnerDir(path, env, realpath) {
 		env.RUNNER_TEMP
 	].flatMap((d) => d ? [(0, node_path.normalize)(d)] : []).filter((d) => isAtOrUnder(path, d)).sort((a, b) => b.length - a.length)[0];
 	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
+}
+function onRealRunnerPrefix(spelled, env, realpath) {
+	let dir = [
+		env.GITHUB_WORKSPACE,
+		env.HOME,
+		env.RUNNER_TEMP
+	].flatMap((d) => d ? [(0, node_path.normalize)(d).replace(/(.)\/$/, "$1")] : []).filter((d) => spelled === d || spelled.startsWith(`${d}/`)).sort((a, b) => b.length - a.length)[0];
+	return dir === void 0 ? spelled : realpath(dir) + spelled.slice(dir.length);
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-audit-tracer.ts

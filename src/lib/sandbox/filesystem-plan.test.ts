@@ -205,6 +205,58 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
+  describe("an entry whose `..` climbs past a symlink", () => {
+    const WS = ENV.GITHUB_WORKSPACE;
+    const linked = (links: Record<string, string>) => ({
+      exists: alwaysExists,
+      lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
+      readlink: (p: string) => links[p],
+      realpath: (p: string) => p,
+      mkdir: () => {},
+    });
+
+    it("refuses it, naming where the command's own `..` leads", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "../out", ENV, {
+          ...linked({ [`${WS}/current`]: "releases/v2" }),
+          baseDir: `${WS}/current`,
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "INVALID_WRITE_THROUGH_PATH",
+          message: expect.stringContaining(`instead: "${WS}/releases/out"`),
+        }),
+      );
+    });
+
+    it("refuses it without a working directory too", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "link/../out", ENV, linked({ [`${WS}/link`]: "/opt" })),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+    });
+
+    it("checks a path under no runner directory as written", () => {
+      const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: WS };
+      expect(() =>
+        resolveFilesystemPlan("persistent", "/opt/link/../out", env, linked({ "/opt/link": "x" })),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+    });
+
+    it("takes a `..` that passes no symlink", () => {
+      expect(
+        resolveFilesystemPlan("persistent", "a/../b", ENV, linked({})).writeThroughPaths,
+      ).toStrictEqual([`${WS}/b`]);
+    });
+
+    it("takes a symlinked runner directory at its real path first", () => {
+      const plan = resolveFilesystemPlan("persistent", "./a/../dist", ENV, {
+        ...linked({ "/home": "var/home" }),
+        realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      });
+      expect(plan.writeThroughPaths).toStrictEqual([`/var${WS}/dist`]);
+    });
+  });
+
   it("catches an overlap that only normalization reveals", () => {
     expect(() =>
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/./x`, ENV, {

@@ -961,9 +961,15 @@ use an expression such as `${{ runner.temp }}` instead.
 - Relative `write-through` paths and the `config-file` path resolve against it. `config-file` cannot
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
-  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`. When a symlink is
-  anywhere along the directory as written, a relative `write-through` path goes through it, which
-  [`write-through`](#write-through-paths) refuses; name the path it leads to instead.
+  `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`. When the directory
+  as written goes through a symlink, outside the `$GITHUB_WORKSPACE`, `$HOME` or `$RUNNER_TEMP`
+  path itself, a relative `write-through` path goes through it too, even one that climbs back out
+  with `..`, and [`write-through`](#write-through-paths) refuses it; name the path it leads to
+  instead.
+- A `..` in `working-directory` itself, or in a relative `config-file` path, climbs the path as
+  written rather than out of where a symlink leads: with `current` linking to `releases/v2`,
+  `config-file: ../x.yml` under `working-directory: current` reads `$GITHUB_WORKSPACE/x.yml`, and
+  `working-directory: current/..` is `$GITHUB_WORKSPACE`.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
   a path in the working directory either way, with or without `working-directory`, and by the
@@ -1100,7 +1106,8 @@ this:
 - A relative path (`./dist`) resolves against the [working directory](#working-directory),
   `$GITHUB_WORKSPACE` unless `working-directory` is set.
 - Symlinks are not followed. A path that is a symlink, or goes through one anywhere along it, fails
-  the step, and the error names the path it leads to, which you can write instead. Following one
+  the step, and the error names the path it leads to, which you can write instead. A `..` that
+  climbs back out of a symlink counts as going through it, so `link/../out` fails too. Following one
   would make writable wherever it leads, and an earlier step could have pointed it at a path the
   sandbox keeps read-only, such as a tool installed under `/opt/hostedtoolcache`. The part of a path
   that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real path, as persistent

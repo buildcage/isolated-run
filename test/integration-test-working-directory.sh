@@ -2,7 +2,8 @@
 # Verifies working-directory: by driving dist/main.cjs directly. The command
 # starts there with PWD set to it, a relative write-through path and config-file
 # resolve against it, and a directory that is missing or that the sandbox
-# mounts over fails the step, the missing one left uncreated.
+# mounts over fails the step, the missing one left uncreated, as does a
+# write-through `..` out of a symlinked one.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -86,6 +87,20 @@ if [ "$CODE" != "0" ] && grep -q 'working-directory "missing" .* does not exist'
 else
   fail "expected a missing working-directory to fail and stay missing (exit $CODE)"
   cat "$WORKDIR/missing.log"
+fi
+
+mkdir -p "$WORKDIR/releases/v2"
+ln -s releases/v2 "$WORKDIR/current"
+step linked INPUT_WORKING_DIRECTORY="current" INPUT_WRITE_THROUGH="../out" \
+  INPUT_RUN="pwd >\"$WORKDIR/linked-pwd\""
+CODE=$?
+if [ "$(cat "$WORKDIR/linked-pwd" 2>/dev/null)" = "$WORKDIR/releases/v2" ]; then
+  fail "expected write-through: ../out through the symlinked working-directory to stop the command"
+elif [ "$CODE" != "0" ] && grep -q "instead: \"$WORKDIR/releases/out\"" "$WORKDIR/linked.log"; then
+  pass "a write-through .. out of a symlinked working-directory fails the step, naming where it leads"
+else
+  fail "expected write-through: ../out to be refused with a hint at $WORKDIR/releases/out (exit $CODE)"
+  cat "$WORKDIR/linked.log"
 fi
 
 step shm INPUT_WORKING_DIRECTORY="$SHM" INPUT_RUN="true"

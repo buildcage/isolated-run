@@ -25,6 +25,8 @@ import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { MountinfoEntry } from "./types.ts";
 import {
   resolveWriteThroughPaths,
+  spellWriteThroughEntry,
+  splitWriteThroughInput,
   assertNoSymlinkInWriteThrough,
   assertKnownFilesExist,
   ensureWriteThroughTargetsExist,
@@ -181,6 +183,13 @@ export function resolveFilesystemPlan(
   // From here each entry is the real path the checks below and the mount act on.
   try {
     for (const path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
+    // A `..` past a symlink leads the command elsewhere than the normalized entry.
+    for (const line of splitWriteThroughInput(writeThroughInput)) {
+      const spelled = spellWriteThroughEntry(line, env, deps.baseDir);
+      if (spelled.split("/").includes("..")) {
+        assertNoSymlinkInWriteThrough(onRealRunnerPrefix(spelled, env, realpath), deps);
+      }
+    }
   } catch (e) {
     throw new SandboxError(
       `Invalid write-through: ${errorMessage(e)}`,
@@ -252,4 +261,17 @@ function onRealRunnerDir(
     .filter((d) => isAtOrUnder(path, d))
     .sort((a, b) => b.length - a.length)[0];
   return dir === undefined ? path : join(realpath(dir), relative(dir, path));
+}
+
+/** onRealRunnerDir for a path still spelled as written, its `..` kept. */
+function onRealRunnerPrefix(
+  spelled: string,
+  env: NodeJS.ProcessEnv,
+  realpath: (path: string) => string,
+): string {
+  const dir = [env.GITHUB_WORKSPACE, env.HOME, env.RUNNER_TEMP]
+    .flatMap((d) => (d ? [normalize(d).replace(/(.)\/$/, "$1")] : []))
+    .filter((d) => spelled === d || spelled.startsWith(`${d}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  return dir === undefined ? spelled : realpath(dir) + spelled.slice(dir.length);
 }
