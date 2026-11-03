@@ -198,12 +198,12 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Paths
 
-| Shown as              | Means                                                                                                   |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `./…`                 | Under the [working directory](./reference.md#working-directory), `$GITHUB_WORKSPACE` unless set         |
-| `$GITHUB_WORKSPACE/…` | Under `$GITHUB_WORKSPACE` but outside the working directory                                             |
-| `~/…`                 | Under `$HOME`                                                                                           |
-| `dir/**`              | `dir` and everything touched below it, at any depth, folded into one row, which carries all their flags |
+| Shown as              | Means                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `./…`                 | Under the [working directory](./reference.md#working-directory), `$GITHUB_WORKSPACE` unless set        |
+| `$GITHUB_WORKSPACE/…` | Under `$GITHUB_WORKSPACE` but outside the working directory                                            |
+| `~/…`                 | Under `$HOME`                                                                                          |
+| `dir/**`              | `dir` and what was touched below it, at any depth, with all their flags; some paths keep their own row |
 
 A directory folds into a `dir/**` row once it would otherwise show three entries; see
 [Folding](#how-rows-are-grouped). Some paths never fold, such as the working directory, the
@@ -268,8 +268,8 @@ each has rows of its own.
 **Folding.** A directory folds into one `dir/**` row once it would otherwise show three entries: its
 own row, if it has one, and each file or subdirectory directly under it that was touched or holds
 something touched. The `dir/**` row then covers the directory and everything below it, at any depth,
-with all their flags. A file shown `(deleted)` and the file of the same name count as one entry
-toward a fold, here and past 300 KB.
+with all their flags, except the paths listed below, which keep rows of their own. A file shown
+`(deleted)` and the file of the same name count as one entry toward a fold, here and past 300 KB.
 
 A `dir/**` row does not say which path under it was refused. The details fold each command's paths
 separately, so they often still name it, and the artifact always does.
