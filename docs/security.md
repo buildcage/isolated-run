@@ -29,10 +29,10 @@ leave by other means, whether by escalating privileges, reaching the Docker sock
 another process's memory. See [Isolation mechanisms](#isolation-mechanisms).
 
 The design goal is to bolt egress control onto an existing step without changing how the rest of the
-job works. A step that configures AWS credentials, an npm cache directory, or anything else keeps
-running exactly as it did. That is why UID/GID and `$HOME` are preserved rather than switched to a
-dedicated sandbox account: tools and caches that assume the runner's own identity keep working
-unmodified.
+job works. A step that configures AWS credentials, an npm cache directory, or anything else usually
+keeps running as it did; [What it can write](#what-it-can-write) lists what changes. That is why
+UID/GID and `$HOME` are preserved rather than switched to a dedicated sandbox account: tools and
+caches that assume the runner's own identity keep working.
 
 Four things sit outside the model by design.
 
@@ -122,8 +122,9 @@ reaches a rule, in `audit` too: `universal` blocks such an SNI (`invalid-sni`) o
 (`invalid-host`). A `:` in the name could otherwise let a `~` rule's port pattern match a name the
 proxy then looks up.
 
-That order is an invariant. Reversed, resolution would become the exfiltration channel the resolver
-below exists to prevent, so a name a request would be blocked for never triggers a real DNS query.
+The rules decide before anything is resolved, so a request no rule allows never triggers a real DNS
+query. Resolving first would turn resolution into the exfiltration channel that the resolver below
+exists to prevent.
 
 Where the proxy resolves is the proxy container's own `/etc/resolv.conf`. On a runner that is
 Docker's embedded DNS forwarding to the runner's own resolvers, so a name only an internal resolver
@@ -132,11 +133,12 @@ expansion, so a rule has to name a host in full.
 
 ### A lookup alone never leaves the job
 
-The resolver inside the sandbox's network has no upstream at all, and answers every query, on the
-allowlist or not, with the proxy's own address. A lookup by itself therefore cannot carry anything
-out: `SECRET-DATA.attacker.example` would otherwise reach an attacker's own nameserver the moment it
-was forwarded. Answering a name outside the allowlist the same way as one inside is deliberate too,
-so that the request which follows is recorded with its URL before it is blocked.
+The resolver inside the sandbox's network has no upstream at all, and answers every `A` query, on
+the allowlist or not, with the proxy's own address; any other type gets no records. A lookup by
+itself therefore cannot carry anything out: `SECRET-DATA.attacker.example` would otherwise reach an
+attacker's own nameserver the moment it was forwarded. Answering a name outside the allowlist the
+same way as one inside is deliberate too, so that the request which follows reaches the proxy and is
+recorded, under `inspect` with its URL, before it is blocked.
 
 The proxy's own lookups do reach a nameserver outside the job: once the rules admit a request, the
 proxy resolves the name it carried. Under `*.example.com`, a name like `<data>.example.com` is
@@ -186,7 +188,7 @@ is a literal address, such as `169.254.169.254:80`, exempts the requests it matc
 except in the proxy's own network (`198.19.255.0/24`) and on port `10024` of any internal address: a
 rule naming the proxy's listener would loop it into itself. A wildcard or regex that merely admits
 the address, `**:80` or `~^.*:80$`, is not. Under `universal`, no rule does. Reaching a cloud
-metadata endpoint directly, the way any AWS or GCP SDK does, is not what this is meant to stop, and
+metadata endpoint directly, the way AWS and GCP SDKs do, is not what this is meant to stop, and
 `allowed-ip-rules` is the intended path for it. That path skips this guard except for the listener:
 a connection to port `10024` of an internal address is blocked there too, whatever the IP rules say
 and in `audit` as well.
@@ -209,21 +211,22 @@ under [runc](https://github.com/opencontainers/runc) rather than being wrapped d
 veth pair into the proxy container's own netns, and bind-mounting the host's own `/` for runc's
 rootfs, since `pivot_root` cannot target `/` itself. It re-execs into a fresh, private mount
 namespace before touching either, so that work is invisible to every other `run:` step running
-concurrently. Everything below is declared in an OCI `config.json` and enforced by runc natively.
+concurrently. The namespaces, capability and group drops, seccomp filter and mounts below are
+declared in an OCI `config.json` and enforced by runc natively.
 
 Each step gets a proxy container of its own, named explicitly on every `docker compose` invocation
 rather than through a directory-derived Compose project, so concurrent steps never recreate or tear
 down each other's. Everything the sandbox needs on the host, `runc` and the seccomp generator
 included, is extracted from the proxy image into that step's own scratch directory on each
-invocation, so no step inherits anything another one left behind.
+invocation, so no step runs a `runc` or seccomp generator that another step left behind.
 
 ### Privileges dropped
 
 - **Capability bounding set fully cleared**, all five capability sets emptied before the command
-  executes. This is what makes privilege escalation impossible: even if the command invokes `sudo`
-  or a setuid binary, there is no `CAP_NET_ADMIN` or `CAP_SYS_ADMIN` left to acquire, whatever the
-  resulting effective UID. `no_new_privileges` is set alongside it, so setuid binaries and file
-  capabilities cannot grant anything in an edge case the capability drop misses.
+  executes. This closes escalation through capabilities: even if the command invokes `sudo` or a
+  setuid binary, there is no `CAP_NET_ADMIN` or `CAP_SYS_ADMIN` left to acquire, whatever the
+  resulting effective UID. `no_new_privileges` is set alongside it, so executing a setuid binary or
+  a file with capabilities changes neither the UID nor the capabilities.
 - **Seccomp filter** derived from Docker's own default profile, resolved against an empty capability
   set to match that drop, so any syscall the profile allows only for a _held_ capability is excluded
   outright. This closes the gap historical `io_uring` and unprivileged user-namespace CVEs relied
@@ -390,10 +393,10 @@ payload for a later step. See [Filesystem access](../README.md#filesystem-access
   which would rest on guessing which of them a `run:` step legitimately sees.
 
 What is left is piped to the sandboxed process over stdin as NUL-delimited `KEY=VALUE` records,
-rather than written into `config.json`, so an `env:` secret never reaches the runner's disk. The
-sandbox's PID 1, `buildcage-init`, hands them to the run script through `env -i` instead of
-exporting them itself, so a name bash reserves (`UID`, `SECONDS`) arrives as set, as it does in an
-unwrapped `run:` step.
+rather than written into `config.json`, so this action never writes an `env:` secret to the runner's
+disk. The sandbox's PID 1, `buildcage-init`, hands them to the run script through `env -i` instead
+of exporting them itself, so a name bash reserves (`UID`, `SECONDS`) arrives as set, as it does in
+an unwrapped `run:` step.
 
 ### When the step ends
 
@@ -444,7 +447,7 @@ checks that against the allowlist.
   address is the one the connection goes to; an SNI it carries is ignored, since the client chose it.
 
 Because nothing in the command has to trust an injected CA or be told about a proxy, this engine
-covers any language or package manager, a pinned certificate included.
+also works with a tool that pins its certificate or ignores proxy settings.
 
 A connection to a bare address never reaches the
 [inward-resolution guard](#a-name-may-not-resolve-inward): it skips DNS and `do-resolve` entirely,
@@ -455,9 +458,10 @@ on a separate code path, and `allowed-ip-rules` is what decides it.
 <img src="../assets/diagram-architecture-inspect.png" alt="Inspect proxy engine architecture" width="620" height="850">
 
 The default engine. The same sandbox and the same network boundary, but the proxy terminates TLS
-instead of only reading the SNI, so a rule can check the method and the full URL rather than only the
-destination. One listener takes both TLS and plaintext, told apart by the first bytes of the
-connection, so an audit run records everything without being configured for it first.
+instead of only reading the SNI, so a rule can check the method and the full URL rather than only
+the destination. One listener takes both TLS and plaintext, told apart by the first bytes of the
+connection, so an audit run records every TCP connection, TLS or plaintext, without being configured
+for it first.
 
 | Rule                  | What it permits                            | Decided by           | Decrypted |
 | --------------------- | ------------------------------------------ | -------------------- | --------- |
@@ -540,11 +544,11 @@ pattern that has changed.
 
 ### Passthrough rules are an uninspected pipe
 
-`allowed-tls-rules` and `allowed-ip-rules` are passed through as raw TCP and recorded with a byte
-count and nothing more, since neither carries a name the proxy could re-terminate TLS for. Once an
-`ip:port` pair is allowlisted, any TCP-based protocol can use that path, and its protocol is never
-checked. Prefer domain rules, and keep `allowed-ip-rules` for destinations that genuinely have no
-stable hostname.
+`allowed-tls-rules` and `allowed-ip-rules` are passed through as raw TCP and never decrypted, so a
+connection either one passes is recorded with its destination and a byte count, plus the SNI for a
+TLS rule, and nothing from inside it. Once an `ip:port` pair is allowlisted, any TCP-based protocol
+can use that path, and its protocol is never checked. Prefer domain rules, and keep
+`allowed-ip-rules` for destinations that genuinely have no stable hostname.
 
 `universal` sees nothing inside any tunnel, not only these: a rule reaches as far as a host and a
 port, so the method and the path are neither enforced nor reported.
@@ -581,10 +585,11 @@ the path, and a recorded query is as likely to hold a one-off token as anything 
 ### Filesystem audit
 
 `filesystem-audit: record` records what the step touches; it never blocks an access, so it is a
-visibility aid, not a control. The step cannot alter the record or leave the cgroup it is watched
-through: the tracer runs as root on the runner host, outside the sandbox and its PID namespace,
-writes where no sandbox can, and the report is rendered after the step exits. A tracer that cannot
-start fails the step before the command runs, and one that exits during the step fails it after.
+visibility aid, not a control. The step cannot edit the record once it is written, or leave the
+cgroup it is watched through: the tracer runs as root on the runner host, outside the sandbox and
+its PID namespace, writes where no sandbox can, and the report is rendered after the step exits. A
+tracer that cannot start fails the step before the command runs, and one that exits during the step
+fails it after.
 
 The step can still keep some accesses out of the record, by handing the work to a process outside
 the sandbox or using an operation the tracer does not record, and it can make the name on some
@@ -748,12 +753,11 @@ something an allowlist does not. Buildcage adds a layer to these and replaces no
 
 ## Image provenance verification
 
-isolated-run relies on being verifiable rather than on being trusted. Its source is open to read at
-any time, and what runs is verified to have been built from it. Releases are immutable, and each
-image is built from the release commit by the release workflow and signed by that run, with no step
-where anyone, the maintainers included, can slip in something else. The action verifies that
-signature against the pinned commit before it runs, so changing what isolated-run does means
-changing its public source first.
+isolated-run's source is open to read at any time. Releases are immutable, and each image is built
+from the release commit by the release workflow and signed by that run, so an image built anywhere
+else fails verification. Before it runs, the action verifies that signature against the commit or
+tag the workflow pins, so changing what isolated-run does means publishing a release from its public
+source first.
 
 isolated-run decides what a step can reach, so the action has to establish that the image it runs is
 the one this repository published.
@@ -768,8 +772,8 @@ source commit SHA, so a tampered or substituted image fails verification before 
 OIDC identity issued by GitHub Actions. The signature is stored as a **Sigstore Bundle v0.3**
 attached to the image through the OCI 1.1 Referrers API in GHCR. The bundle holds the signature, a
 Fulcio leaf certificate carrying the workflow identity, and a Rekor transparency log entry. Signing
-waits on a run of the image just pushed, so an image that does not enforce is never signed, and an
-unsigned image is one the action refuses.
+waits on a smoke test of the image just pushed, so an image that fails to enforce on one allowed
+and one blocked host is never signed, and an unsigned image is one the action refuses.
 
 **At action startup** (the `main` phase, so `docker/login-action` has already stored registry
 credentials), the action verifies the image entirely in-process using `@sigstore/verify`,

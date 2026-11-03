@@ -6,9 +6,10 @@
 > nothing on this page applies. Try them in a non-critical workflow first, and pin this action to a
 > commit SHA rather than a version tag if you adopt it.
 
-`aws-key-check: true` blocks a request to an AWS API unless it is signed with the key the step
-was given. `allowed-aws-role-accounts` names the accounts whose roles the step may assume, so the
-keys those roles get pass too. [Getting started](#getting-started) walks through adopting it.
+`aws-key-check: true` blocks a request to an AWS API unless it is signed with the key the step was
+given. `allowed-aws-role-accounts` names accounts whose role keys pass too: when the step assumes a
+role in one of them, the key STS issues for that role is accepted.
+[Getting started](#getting-started) walks through adopting it.
 
 On this page a key means an access key ID: `AKIA…` for a long-term key, `ASIA…` for temporary
 credentials such as a role's. The proxy reads only the ID; the secret access key never reaches it.
@@ -34,8 +35,8 @@ take in the query string or the `User-Agent`. The request goes to a host your ru
 records it in the CloudTrail of the account that owns the key, where the author reads it back.
 
 Nothing in your own account sees this: the call is authorized and logged entirely in the other
-account, so no IAM policy or SCP of yours applies to it. The only place to stop it is the network
-path, before the request leaves the runner.
+account, so no IAM policy or SCP of yours applies to it. This check stops it on the network
+path instead, before the request leaves the runner.
 
 ## What it stops and what it doesn't
 
@@ -392,8 +393,9 @@ current SDK does.
 ## What it does not protect against
 
 The check looks at whose key signed a request, not at whose resource the request is for. A request
-signed with your own key that names a resource in another account passes. The target account is in
-the request body, not in the URL, so the proxy cannot see it. Requests like these remain possible:
+signed with your own key that names a resource in another account passes. The check does not read
+which account that resource belongs to, wherever the request names it. Requests like these remain
+possible:
 
 | Route                                 | Example                                                                                                                                                                                |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -435,7 +437,7 @@ them on those, through a customized bootstrap template:
   `arn:aws:iam::*:role/cdk-*`, common in CDK setups, lets the role assume a role of that name in any
   account, including one someone else creates for the purpose. Write
   `arn:aws:iam::111111111111:role/cdk-*` instead. A denied `AssumeRole` is not recorded in the target
-  account, so this closes the route entirely.
+  account, so this closes that route.
 
 ## Reference
 
@@ -577,11 +579,11 @@ the Price List Bulk API's files on `pricing.us-east-1.amazonaws.com` and
 
 Every other AWS API host names only a service and a region, such as `sts.us-east-1.amazonaws.com`,
 `sqs.us-east-1.amazonaws.com` or `s3-control.us-east-1.amazonaws.com`. The account a request to one
-of those reaches is in its parameters or its body, where the proxy does not look, so an unsigned
-request there is blocked, `GET` included; the exception is `AssumeRoleWithWebIdentity` (see
-[Host and credential](#host-and-credential)). A host missing from the lists above is treated the
-same way; if a legitimate request is blocked for that reason, as `aws-no-credential`, or as
-`aws-unsupported-credential` when it carries a token, report it.
+of those reaches is named in its path, query or body, not its host, and the check does not read an
+account from those, so an unsigned request there is blocked, `GET` included; the exception is
+`AssumeRoleWithWebIdentity` (see [Host and credential](#host-and-credential)). A host missing from
+the lists above is treated the same way; if a legitimate request is blocked for that reason, as
+`aws-no-credential`, or as `aws-unsupported-credential` when it carries a token, report it.
 
 An interface VPC endpoint's own names, such as `vpce-<id>.sts.us-east-1.vpce.amazonaws.com`, are
 hosts of this kind too. The check recognizes STS, EC2 and CodeCommit under them as under their

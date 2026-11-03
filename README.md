@@ -19,7 +19,8 @@ and anything else is blocked and reported.
   paste back into the step.
 - A rule can name an HTTP method and a URL, inside TLS as well, so a step can fetch a package from a
   registry without being able to publish one to it.
-- It all runs inside your GitHub Actions job, with no agent and no external service.
+- It all runs inside your GitHub Actions job, with no agent to install and no hosted service in the
+  step's traffic path.
 
 See [buildcage.github.io](https://buildcage.github.io/) for what it does and why. To isolate a
 Docker build's `RUN` steps rather than a workflow step, use
@@ -77,7 +78,7 @@ A runner that falls short fails while the proxy starts, before the command runs.
 
 Wrap the command you want to isolate with this action instead of a plain `run:` step. Run once in
 [`audit`](#operation-modes) mode to collect what the command reaches, then switch to `restrict`. The
-examples below use the default `inspect` engine; [Engines](#engines) covers the choice between the two.
+examples below use the default `inspect` engine; [Engines](#engines) covers how to choose one.
 
 ### 1. Find out what the command reaches
 
@@ -85,7 +86,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 - name: Discover what the command reaches
   uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
   with:
-    proxy-mode: audit # Log every destination, block nothing
+    proxy-mode: audit # Log every destination, enforce no rules
     run: |
       npm ci
       npm test
@@ -207,8 +208,8 @@ Start with `inspect`, and fall back to `universal` when something the command ru
 mounted CA. `inspect` is the default value of `proxy-engine`, so `universal` has to be set
 explicitly.
 
-Both intercept at the network level, so a tool that ignores `HTTP_PROXY` is covered either way, and
-both use the same sandbox and the same network boundary.
+Each engine intercepts at the network level, so a tool that ignores `HTTP_PROXY` is covered
+whichever one runs, and every engine uses the same sandbox and the same network boundary.
 
 ## Inputs
 
@@ -229,9 +230,11 @@ only whole-line `#` comments, since a path may contain a `#`.
 
 ### Operation modes
 
-`proxy-mode: audit` logs every destination the command reaches and blocks nothing. `restrict`, the
-default, allows only what the rules match and blocks and logs everything else. Start with `audit`
-when you first adopt Buildcage or when a dependency changes, and keep `restrict` for everyday runs.
+`proxy-mode: audit` logs every destination the command reaches and enforces none of the rules. It
+still blocks a malformed request and a name that resolves to cloud metadata or the runner itself.
+`restrict`, the default, allows only what the rules match and blocks and logs everything else. Start
+with `audit` when you first adopt Buildcage or when a dependency changes, and keep `restrict` for
+everyday runs.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named. Run `audit` first to find those domains.
@@ -452,7 +455,8 @@ set through `$GITHUB_OUTPUT` is untrusted as in
 ### What stays read-only
 
 `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
-under `$RUNNER_TEMP`; see [`write-through` paths](./docs/reference.md#write-through-paths).
+under `$RUNNER_TEMP`, unless `write-through:` names `$GITHUB_ENV` or `$GITHUB_PATH` itself; see
+[`write-through` paths](./docs/reference.md#write-through-paths).
 
 The runner's install directory, its `_actions` directory holding every action's checkout, and the
 docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only too, since the
@@ -500,7 +504,7 @@ access falls outside them; see [Expected accesses](./docs/filesystem-audit.md#ex
 > `aws-key-check` and `allowed-aws-role-accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver.
 
-Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
+Many AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
 account signs the request, so a compromised dependency could sign with its own key and send data to
 its author's account. `aws-key-check: true` accepts only the key the step was given in
 `AWS_ACCESS_KEY_ID`, and `allowed-aws-role-accounts` adds the keys of roles in the accounts you
@@ -587,7 +591,9 @@ does stop is traffic to a destination that is not on the list, and infrastructur
 is normally not on it, because the command has no reason to reach it. That is also the hardest kind
 of leak to find afterwards.
 
-An allowlist generated from an audit run already blocks every destination the audit did not record.
+An allowlist generated from an audit run already blocks every host the audit did not record, apart
+from what the `allowed-tls-rules` and `allowed-ip-rules` it carries over from the audit run's own
+inputs admit.
 Whether to go further depends on what the step has access to:
 [Hardening](./docs/security.md#hardening) is what to look at when it holds credentials, personal
 data, or source you do not publish. For the full threat model, see
@@ -597,12 +603,12 @@ data, or source you do not publish. For the full threat model, see
 
 ### What isn't covered
 
-- `allowed-tls-rules` is not decrypted. The SNI and the port are checked, and the proxy resolves
-  that name itself, so the connection reaches the host the rule named, but nothing inside the TLS
-  session is seen.
-- `allowed-ip-rules` is not inspected at all, and doesn't require TLS either: once an `ip:port` pair
-  is allowed, any TCP-based protocol can use that path. Prefer a domain rule wherever the
-  destination has a stable name.
+- Traffic an `allowed-tls-rules` entry passes is not decrypted. The SNI and the port are checked,
+  and the proxy resolves that name itself, so the connection reaches the host the rule named, but
+  nothing inside the TLS session is seen.
+- Traffic an `allowed-ip-rules` entry passes is not inspected at all, and doesn't require TLS
+  either: once an `ip:port` pair is allowed, any TCP-based protocol can use that path. Prefer a
+  domain rule wherever the destination has a stable name.
 - `universal` never sees the method or the path. They travel inside TLS, so neither is enforced and
   neither reaches the report or the traffic artifact. A request fronted behind an allowed SNI is
   invisible to it as well, while `inspect` matches on the real `Host` and blocks it. See
@@ -624,8 +630,8 @@ data, or source you do not publish. For the full threat model, see
 
 The resolver has no upstream, so it returns nothing for a discovery record: `SRV`, `TXT`, `TLSA` and
 `URI` queries come back empty, and the command connects to the name a rule allowed rather than to
-one a nameserver picked for it. Clients that treat `SRV` as a discovery layer fall back to the host
-name itself, so the host a rule names is the host the command reaches.
+one a nameserver picked for it. A client that treats `SRV` as an optional discovery layer falls back
+to the host name itself, so the host a rule names is the host the command reaches.
 
 What this breaks is a client with no fallback, where the record is the only way it can find the
 service at all. A `mongodb+srv://` connection string is the one to expect: use `mongodb://` with the
@@ -640,7 +646,7 @@ reported as blocked; see
 ### Inside the sandbox
 
 - The isolated command cannot use Docker. If `docker`, or another container or VM runtime group, is
-  the runner's primary group, it is substituted for a safe one before the command runs, and the
+  the runner's primary group, it is replaced with a safe one before the command runs, and the
   host's `/run`, where the container runtimes, systemd-resolved, snapd and the rest keep their
   sockets, is covered by an empty tmpfs. See
   [Isolation mechanisms](docs/security.md#isolation-mechanisms).
@@ -771,8 +777,8 @@ Buildcage writes a separate allowlist for the one step you don't trust, so it ge
 command needs and nothing else, and a rule there can name a method and a URL rather than only a
 host. The two compose: a perimeter the job can't switch off, and a tighter policy inside it.
 
-Buildcage also runs on any Linux runner with Docker, self-hosted included, rather than on a
-firewall-enabled runner image.
+Buildcage also runs on Linux runners with Docker that meet its [requirements](#requirements),
+self-hosted included, and needs no firewall-enabled runner image.
 
 ## Documentation
 

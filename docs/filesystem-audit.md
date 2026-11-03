@@ -6,8 +6,9 @@
 > this action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem-audit: record` records every file the isolated step reads, writes, moves, deletes,
-changes the attributes of, and executes, and adds a **Filesystem Activity Report** section to the
-Job Summary:
+changes the attributes of, and executes, apart from
+[what it does not record](#what-it-does-not-record), and adds a **Filesystem Activity Report**
+section to the Job Summary:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -273,8 +274,7 @@ Never folded into a `dir/**` row, nor counted toward its three rows:
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
   has to name it, as above: `./d`, `./d/a` and `./d/b` stay three rows.
 
-That changes once the accessed paths table or the details would pass 300 KB, more rows than anyone
-reads:
+That changes once the accessed paths table or the details would pass 300 KB:
 
 - Each of those directories folds once five entries directly under it are not themselves among
   them. Those that are keep rows of their own: `/` folds into `/**`, but `/home/runner` still shows
@@ -733,7 +733,8 @@ acted, not which binary, and a process named `run-script.sh` is shown as the ste
 memfd's name is whatever its creator chose, so it is quoted after `memfd:` and never reads as a
 path. A control, format, separator, invisible or blank character, a space at either end, a quote, a
 backslash or a byte that is not UTF-8 in a name is shown escaped, and the details quote a name
-holding a space, so no name can rewrite the Job Summary or pass for another.
+holding a space, so no name can rewrite the Job Summary, and a character that does not show cannot
+make one name read as another.
 
 On a kernel that [skips the tracer's hooks](#skipped-hooks), a skipped hook drops the access it was
 following rather than report it against the wrong call, except that an open may carry an earlier

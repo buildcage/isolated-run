@@ -56,8 +56,9 @@ details.
 
 #### Rule inputs
 
-All of these are empty by default, and all of them are additive: a connection is allowed when any
-rule in any input matches. Which ones apply depends on the engine.
+All of these are empty by default. The `allowed-*` inputs are additive: a connection is allowed
+when any rule in any of them matches. `known-blocked-rules` allows nothing; it marks blocks you
+expect. Which ones apply depends on the engine.
 
 | Input                                  | `inspect` | `universal` | What one rule matches                                                                           |
 | -------------------------------------- | :-------: | :---------: | ----------------------------------------------------------------------------------------------- |
@@ -181,7 +182,7 @@ Each is also set under its name spelled with underscores, `traffic_artifact_name
 
 | `proxy-mode` | What it does                                                      | When to use it                                            |
 | ------------ | ----------------------------------------------------------------- | --------------------------------------------------------- |
-| `audit`      | Logs every destination the command reaches and blocks nothing     | First setup, adding a dependency, investigating a failure |
+| `audit`      | Logs every destination the command reaches and enforces no rules  | First setup, adding a dependency, investigating a failure |
 | `restrict`   | Allows only what the rules match, blocks and logs everything else | Everyday workflows, security-critical steps               |
 
 `audit` allows what the active engine can classify. A connection it cannot classify, such as an HTTP
@@ -191,9 +192,8 @@ Because `audit` enforces nothing, the `allowed-*-rules` have no effect in it; yo
 you move to `restrict`. Any other `proxy-mode` value, a differently cased one included, fails the
 step.
 
-Under `inspect`, `audit` is not a passive observer: TLS is still terminated, so a tool that pins a
-certificate fails there exactly as it would under `restrict`. `universal`'s audit mode decrypts
-nothing and breaks nothing.
+Under `inspect`, `audit` still terminates TLS, so a tool that pins a certificate fails there as it
+would under `restrict`. `universal` decrypts nothing in either mode.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named. Run `audit` first to find those domains.
@@ -318,9 +318,9 @@ to an address goes by `allowed-ip-rules` only.
 
 #### Ports
 
-A port is required on every rule. It is a decimal from 1 to 65535 without a leading zero (`443`,
-not `0443`), or `*` for any port. A URL rule may leave its port out, and takes the same form when
-it names one. A `~` rule's port is part of its regex and is not checked.
+Every host, IP and TLS rule must name a port. It is a decimal from 1 to 65535 without a leading zero
+(`443`, not `0443`), or `*` for any port. A URL rule may leave its port out, and takes the same form
+when it names one. A `~` rule's port is part of its regex and is not checked.
 
 | Rule                 | Matches                                                       |
 | -------------------- | ------------------------------------------------------------- |
