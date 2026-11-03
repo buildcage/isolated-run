@@ -73,7 +73,7 @@ export interface FilesystemPlan {
   overlayRoots: string[];
   /** The host mounts under an overlay root that ephemeral cannot overlay, so
    *  the command sees the empty directory beneath each. */
-  hiddenMounts?: string[];
+  hiddenMounts: string[];
   /** Normalized, free of symlinks and pre-created, in either filesystem mode.
    *  An entry naming a mediated runner file is left out: the mediation writes
    *  that file back instead of a bind. */
@@ -172,7 +172,7 @@ export function resolveFilesystemPlan(
   // the same reason. Only a literal `/` opts out: an entry that a symlinked
   // runner directory turns into `/` still meets that guard.
   if (written.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
+    return { overlayRoots: [], hiddenMounts: [], writeThroughPaths, mediatedVariables };
   }
 
   try {
@@ -205,7 +205,7 @@ export function resolveFilesystemPlan(
   }
 
   if (filesystemMode !== "ephemeral")
-    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
+    return { overlayRoots: [], hiddenMounts: [], writeThroughPaths, mediatedVariables };
 
   // Its own code: a failure reading the fixed candidates or the mount table is
   // not a write-through input problem.
@@ -220,7 +220,7 @@ export function resolveFilesystemPlan(
     const overlayRoots = [...candidateRoots, ...nested.roots];
     return {
       overlayRoots,
-      ...(nested.hidden.length && { hiddenMounts: nested.hidden }),
+      hiddenMounts: nested.hidden,
       writeThroughPaths,
       mediatedVariables,
     };

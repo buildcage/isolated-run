@@ -75112,12 +75112,12 @@ function withHostShmSize(mounts, hostShmBytes) {
 		};
 	});
 }
-const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_DIR = "/run", HOST_RUN_LOCK_DIR = "/run/lock";
+const RESOLV_CONF_DESTINATION = "/etc/resolv.conf", HOST_RUN_LOCK_DIR = "/run/lock";
 function hostRunCoverageLayers(varRunRealPath) {
 	let varRun = varRunRealPath === void 0 || isAtOrUnder(varRunRealPath, "/run") ? [] : [emptyRunTmpfs(varRunRealPath)];
 	return {
 		mounts: [
-			emptyRunTmpfs(HOST_RUN_DIR),
+			emptyRunTmpfs("/run"),
 			{
 				destination: HOST_RUN_LOCK_DIR,
 				type: "tmpfs",
@@ -75217,7 +75217,15 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 	].filter((p) => !!p))];
 }
 function scratchBaseLayers(execDir, aliases = []) {
-	return [...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
+	return [...scratchBaseCovers(aliases), {
+		destination: execDir,
+		type: "none",
+		source: execDir,
+		options: ["bind", "ro"]
+	}];
+}
+function scratchBaseCovers(aliases = []) {
+	return [SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
 		destination,
 		type: "tmpfs",
 		source: "tmpfs",
@@ -75226,12 +75234,7 @@ function scratchBaseLayers(execDir, aliases = []) {
 			"nodev",
 			"mode=0555"
 		]
-	})), {
-		destination: execDir,
-		type: "none",
-		source: execDir,
-		options: ["bind", "ro"]
-	}];
+	}));
 }
 function workingDirectoryOf(env, realpath = realPathOf) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
@@ -75295,23 +75298,29 @@ function assertSandboxUserCanSearch(wd, env, { uid = process.getuid(), gid = res
 	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`);
 }
 function hiddenBySandboxMounts(cwd, writeThroughPaths, hostMounts, varRunRealPath) {
-	let run = [HOST_RUN_DIR, ...varRunRealPath ? [varRunRealPath] : []].find((d) => isAtOrUnder(cwd, d));
-	if (run && !writeThroughPaths.some((w) => isAtOrUnder(cwd, w))) return `the sandbox mounts its own ${run}`;
-	let scratch = [SANDBOX_SCRATCH_BASE, ...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)].find((d) => isAtOrUnder(cwd, d));
-	return scratch && `the sandbox mounts its own ${scratch}`;
+	return hiddenWorkingDirectory(cwd, [
+		...hostRunCoverageLayers(varRunRealPath).mounts,
+		...writeThroughPaths.map((p) => ({
+			destination: p,
+			type: "none",
+			source: p,
+			options: ["rbind"]
+		})),
+		...scratchBaseCovers(pathAliases(hostMounts, SANDBOX_SCRATCH_BASE))
+	], []);
 }
 const unusable = (wd, why) => invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
-function assertSandboxWillShow(wd, writeThroughPaths, { hostMounts = listHostMounts, varRunRealPath = () => realHostProbes.varRunRealPath() } = {}) {
+function assertSandboxWillShow(wd, writeThroughPaths, { hostMounts = listHostMounts, varRunRealPath = () => realHostProbes.varRunRealPath(), realpath = realPathOf } = {}) {
 	let mounts;
 	try {
 		mounts = hostMounts();
 	} catch (e) {
 		throw new SandboxError(`Failed to read the host's mount table: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
-	let hidden = hiddenBySandboxMounts(wd.path, writeThroughPaths, mounts, varRunRealPath());
+	let entries = writeThroughPaths.map((p) => realpath(p)), hidden = hiddenBySandboxMounts(wd.path, entries, mounts, varRunRealPath());
 	if (hidden) throw unusable(wd, hidden);
 }
-function assertOverlayShows(wd, { overlayRoots, hiddenMounts = [], writeThroughPaths }) {
+function assertOverlayShows(wd, { overlayRoots, hiddenMounts, writeThroughPaths }) {
 	if (writeThroughPaths.some((w) => isAtOrUnder(wd.path, w))) return;
 	let deepest = [...overlayRoots, ...hiddenMounts].filter((m) => isAtOrUnder(wd.path, m)).reduce((a, m) => a && a.length >= m.length ? a : m, void 0);
 	if (deepest && hiddenMounts.includes(deepest)) throw unusable(wd, `filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(deepest)}, so the sandbox shows the empty directory beneath it`);
@@ -76299,6 +76308,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}), mediatedVariables = runnerFiles.filter(({ paths }) => filesystemMode !== "ephemeral" || paths.some((path) => resolved.some((entry) => isAtOrUnder(path, entry)))).map(({ variable }) => variable), writeThroughPaths = resolved.filter((p) => !runnerFiles.some(({ paths }) => paths.includes(p)));
 	if (validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedCaStorePaths().map((p) => realpath(p))), written.includes("/")) return {
 		overlayRoots: [],
+		hiddenMounts: [],
 		writeThroughPaths,
 		mediatedVariables
 	};
@@ -76324,6 +76334,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	}
 	if (filesystemMode !== "ephemeral") return {
 		overlayRoots: [],
+		hiddenMounts: [],
 		writeThroughPaths,
 		mediatedVariables
 	};
@@ -76336,7 +76347,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 		].filter((p) => !!p), writeThroughPaths, deps), nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
 		return {
 			overlayRoots: [...candidateRoots, ...nested.roots],
-			...nested.hidden.length && { hiddenMounts: nested.hidden },
+			hiddenMounts: nested.hidden,
 			writeThroughPaths,
 			mediatedVariables
 		};
@@ -77963,7 +77974,10 @@ function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDi
 		baseDir,
 		warn: deps.warn
 	});
-	if (workingDirectory && deps.assertOverlayShows(workingDirectory, plan), filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
+	if (filesystemMode === "ephemeral") {
+		workingDirectory && deps.assertOverlayShows(workingDirectory, plan);
+		for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
+	}
 	return plan;
 }
 async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {

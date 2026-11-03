@@ -30,7 +30,12 @@ describe("resolveFilesystemPlan", () => {
   it("returns an empty plan for persistent mode with no write-through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], mediatedVariables: [] });
+    expect(plan).toStrictEqual({
+      overlayRoots: [],
+      hiddenMounts: [],
+      writeThroughPaths: [],
+      mediatedVariables: [],
+    });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -77,6 +82,7 @@ describe("resolveFilesystemPlan", () => {
     const plan = resolveFilesystemPlan("persistent", "/", ENV, { exists });
     expect(plan).toStrictEqual({
       overlayRoots: [],
+      hiddenMounts: [],
       writeThroughPaths: ["/"],
       mediatedVariables: [],
     });
@@ -407,7 +413,7 @@ describe("resolveFilesystemPlan", () => {
       isDirectory: () => true,
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
-    expect(plan).not.toHaveProperty("hiddenMounts");
+    expect(plan.hiddenMounts).toStrictEqual([]);
   });
 
   it("warns about a host mount it leaves out rather than failing", () => {

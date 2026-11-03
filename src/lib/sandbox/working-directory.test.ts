@@ -285,6 +285,17 @@ describe("assertSandboxWillShow", () => {
     expect(() => assertSandboxWillShow(wd, [])).toThrow("the sandbox mounts its own /run");
   });
 
+  it("compares the write-through entries by their real paths", () => {
+    const realpath = (p: string) => p.replace(/^\/srv\/link/, "/run/app");
+    expect(() =>
+      assertSandboxWillShow(wd, ["/srv/link"], {
+        hostMounts: () => [],
+        varRunRealPath: () => "/run",
+        realpath,
+      }),
+    ).not.toThrow();
+  });
+
   it("names a mount table it cannot read", () => {
     expect(() =>
       assertSandboxWillShow(wd, [], {
@@ -329,7 +340,11 @@ describe("assertOverlayShows", () => {
     expect(() => assertOverlayShows(wd(`${WS}/app`), plan([`${WS}/fuse`]))).not.toThrow();
     expect(() => assertOverlayShows(wd(`${WS}/fuse/sub/app`), plan([`${WS}/fuse`]))).not.toThrow();
     expect(() =>
-      assertOverlayShows(wd(`${WS}/app`), { overlayRoots: [], writeThroughPaths: [] }),
+      assertOverlayShows(wd(`${WS}/app`), {
+        overlayRoots: [],
+        hiddenMounts: [],
+        writeThroughPaths: [],
+      }),
     ).not.toThrow();
   });
 

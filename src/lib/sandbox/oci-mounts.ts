@@ -268,16 +268,21 @@ export function writableDirsOf({
  */
 export function scratchBaseLayers(execDir: string, aliases: string[] = []): MountEntry[] {
   return [
-    ...[SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
-      destination,
-      type: "tmpfs",
-      source: "tmpfs",
-      options: ["nosuid", "nodev", "mode=0555"],
-    })),
+    ...scratchBaseCovers(aliases),
     // `bind`, never `rbind`: the scratch dir also holds the live
     // `mount --rbind /` rootfs by now, and a recursive bind would pull that
     // in as a second copy of the whole host `/`, read-write at that, since
     // `ro` covers only the top mount. execDir has no submounts of its own.
     { destination: execDir, type: "none", source: execDir, options: ["bind", "ro"] },
   ];
+}
+
+/** The empty tmpfs over the scratch base and each of its `aliases`. */
+export function scratchBaseCovers(aliases: string[] = []): MountEntry[] {
+  return [SANDBOX_SCRATCH_BASE, ...aliases].map((destination) => ({
+    destination,
+    type: "tmpfs",
+    source: "tmpfs",
+    options: ["nosuid", "nodev", "mode=0555"],
+  }));
 }

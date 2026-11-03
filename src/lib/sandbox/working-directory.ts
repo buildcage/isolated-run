@@ -14,7 +14,7 @@ import { SandboxError } from "../errors.ts";
 import { realHostProbes } from "./host-probes.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
-import { HOST_RUN_DIR } from "./oci-mounts.ts";
+import { hostRunCoverageLayers, scratchBaseCovers } from "./oci-mounts.ts";
 import { isAtOrUnder, pathAliases } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
@@ -172,10 +172,10 @@ export function assertSandboxUserCanSearch(
 }
 
 /**
- * Why a mount the sandbox always makes will hide the host's `cwd`, or
- * undefined: the empty /run, which a write-through entry holding `cwd` brings
- * back, or the scratch base under any of its names. The CA trust and runner
- * file mounts are known only later, for assertSandboxShows.
+ * Why the mounts the sandbox makes for every plan hide the host's `cwd`, or
+ * undefined. In buildOciConfig's order: the empty /run, the write-through
+ * binds that bring back what they hold, then the scratch base's cover. The CA
+ * trust and runner file mounts are known only later, for assertSandboxShows.
  */
 export function hiddenBySandboxMounts(
   cwd: string,
@@ -183,15 +183,17 @@ export function hiddenBySandboxMounts(
   hostMounts: MountinfoEntry[],
   varRunRealPath: string | undefined,
 ): string | undefined {
-  const run = [HOST_RUN_DIR, ...(varRunRealPath ? [varRunRealPath] : [])].find((d) =>
-    isAtOrUnder(cwd, d),
-  );
-  if (run && !writeThroughPaths.some((w) => isAtOrUnder(cwd, w)))
-    return `the sandbox mounts its own ${run}`;
-  const scratch = [SANDBOX_SCRATCH_BASE, ...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)].find(
-    (d) => isAtOrUnder(cwd, d),
-  );
-  return scratch && `the sandbox mounts its own ${scratch}`;
+  const mounts = [
+    ...hostRunCoverageLayers(varRunRealPath).mounts,
+    ...writeThroughPaths.map((p) => ({
+      destination: p,
+      type: "none",
+      source: p,
+      options: ["rbind"],
+    })),
+    ...scratchBaseCovers(pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)),
+  ];
+  return hiddenWorkingDirectory(cwd, mounts, []);
 }
 
 const unusable = (wd: WorkingDirectory, why: string) =>
@@ -206,7 +208,12 @@ export function assertSandboxWillShow(
   {
     hostMounts = listHostMounts,
     varRunRealPath = () => realHostProbes.varRunRealPath(),
-  }: { hostMounts?: () => MountinfoEntry[]; varRunRealPath?: () => string | undefined } = {},
+    realpath = realPathOf,
+  }: {
+    hostMounts?: () => MountinfoEntry[];
+    varRunRealPath?: () => string | undefined;
+    realpath?: (path: string) => string;
+  } = {},
 ): void {
   let mounts: MountinfoEntry[];
   try {
@@ -217,7 +224,10 @@ export function assertSandboxWillShow(
       "FILESYSTEM_PLAN_FAILED",
     );
   }
-  const hidden = hiddenBySandboxMounts(wd.path, writeThroughPaths, mounts, varRunRealPath());
+  // Real paths, as the plan mounts them, so an entry through a symlinked
+  // runner directory still holds the working directory.
+  const entries = writeThroughPaths.map((p) => realpath(p));
+  const hidden = hiddenBySandboxMounts(wd.path, entries, mounts, varRunRealPath());
   if (hidden) throw unusable(wd, hidden);
 }
 
@@ -231,9 +241,9 @@ export function assertOverlayShows(
   wd: WorkingDirectory,
   {
     overlayRoots,
-    hiddenMounts = [],
+    hiddenMounts,
     writeThroughPaths,
-  }: { overlayRoots: string[]; hiddenMounts?: string[]; writeThroughPaths: string[] },
+  }: { overlayRoots: string[]; hiddenMounts: string[]; writeThroughPaths: string[] },
 ): void {
   if (writeThroughPaths.some((w) => isAtOrUnder(wd.path, w))) return;
   const deepest = [...overlayRoots, ...hiddenMounts]

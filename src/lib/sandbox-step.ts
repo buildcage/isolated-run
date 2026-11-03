@@ -448,8 +448,8 @@ export function preflight(
     baseDir,
     warn: deps.warn,
   });
-  if (workingDirectory) deps.assertOverlayShows(workingDirectory, plan);
   if (filesystemMode === "ephemeral") {
+    if (workingDirectory) deps.assertOverlayShows(workingDirectory, plan);
     for (const line of formatFilesystemPlanLog(
       filesystemMode,
       plan.overlayRoots,

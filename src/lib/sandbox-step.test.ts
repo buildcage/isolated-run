@@ -843,6 +843,10 @@ describe("runSandboxStep", () => {
   it("checks the overlay shows working-directory against the plan before the proxy starts", async () => {
     const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
     mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "ephemeral",
+      writeThroughInput: "",
+    });
     mocks.assertOverlayShows.mockImplementation(() => {
       throw new SandboxError("not overlaid", "INVALID_WORKING_DIRECTORY");
     });
@@ -853,6 +857,17 @@ describe("runSandboxStep", () => {
       mocks.resolveFilesystemPlan.mock.results[0].value,
     );
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
+  it("leaves the overlay check out under persistent, which has no overlay", async () => {
+    mocks.readWorkingDirectory.mockReturnValue({
+      input: "app",
+      path: "/w/app",
+      isWorkspace: false,
+    });
+
+    await runSandboxStep({ ...ENV }, deps);
+    expect(mocks.assertOverlayShows).not.toHaveBeenCalled();
   });
 
   it("sets PWD to the workspace without working-directory", async () => {

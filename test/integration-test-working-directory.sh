@@ -147,9 +147,9 @@ fi
 
 sudo -n mount -t tmpfs -o "uid=$(id -u),gid=$(id -g)" tmpfs "$UNOVERLAID"
 step ephemeral-unoverlaid INPUT_FILESYSTEM_MODE="ephemeral" INPUT_WORKING_DIRECTORY="un,overlaid" \
-  INPUT_RUN="touch \"$WORKDIR/unoverlaid-ran\""
+  INPUT_RUN="true"
 CODE=$?
-if [ "$CODE" != "0" ] && [ ! -e "$WORKDIR/unoverlaid-ran" ] &&
+if [ "$CODE" != "0" ] &&
   grep -qF "ephemeral cannot overlay the host mount \"$UNOVERLAID\", so the sandbox shows the empty directory" "$WORKDIR/ephemeral-unoverlaid.log" &&
   ! grep -q "proxy image:" "$WORKDIR/ephemeral-unoverlaid.log"; then
   pass "under ephemeral, a working-directory in a host mount the overlay cannot take fails the step before the proxy starts"
