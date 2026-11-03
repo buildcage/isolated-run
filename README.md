@@ -19,7 +19,8 @@ and anything else is blocked and reported.
   paste back into the step.
 - A rule can name an HTTP method and a URL, inside TLS as well, so a step can fetch a package from a
   registry without being able to publish one to it.
-- It all runs inside your GitHub Actions job, with no agent and no external service.
+- It all runs inside your GitHub Actions job, with no agent to install and no hosted service in the
+  step's traffic path.
 
 See [buildcage.github.io](https://buildcage.github.io/) for what it does and why. To isolate a
 Docker build's `RUN` steps rather than a workflow step, use
@@ -58,12 +59,12 @@ runner with passwordless `sudo` and a working Docker installation:
   - Rootful Docker. The sandbox joins the proxy container's network namespace through the path
     Docker reports for it (`NetworkSettings.SandboxKey`), which under rootless Docker or
     `userns-remap` may live in a mount namespace of its own, out of the host's reach.
-  - `/var/tmp` reached without a symlink, since runc refuses a sandbox root whose path goes through
+  - A `/var/tmp` whose path contains no symlink, since runc refuses a sandbox root reached through
     one. Otherwise the step fails before writing anything there, saying where `/var/tmp` resolves.
   - For `filesystem-mode: ephemeral`, overlayfs support on the runner's own filesystem, checked by
-    a probe before the step. It fails where the runner itself runs in a container whose root
-    filesystem is overlayfs, since an overlay's `upperdir` cannot sit on overlayfs, and where the
-    sudoers scope does not allow `sudo rm -rf`.
+    a probe before the step. The probe, and with it the step, fails when the runner itself runs in
+    a container whose root filesystem is overlayfs, since an overlay's `upperdir` cannot sit on
+    overlayfs. It also fails when the sudoers scope does not allow `sudo rm -rf`.
   - A non-root runner user. The sandbox keeps the runner's own uid, and as uid 0 it refuses to start:
     filesystem permissions alone can't separate the command from root-owned host sockets. Don't run
     the runner as root (`RUNNER_ALLOW_RUNASROOT`).
@@ -77,7 +78,7 @@ A runner that falls short fails while the proxy starts, before the command runs.
 
 Wrap the command you want to isolate with this action instead of a plain `run:` step. Run once in
 [`audit`](#operation-modes) mode to collect what the command reaches, then switch to `restrict`. The
-examples below use the default `inspect` engine; [Engines](#engines) covers the choice between the two.
+examples below use the default `inspect` engine; [Engines](#engines) covers how to choose one.
 
 ### 1. Find out what the command reaches
 
@@ -85,7 +86,7 @@ examples below use the default `inspect` engine; [Engines](#engines) covers the 
 - name: Discover what the command reaches
   uses: buildcage/isolated-run@e17dbc9c53e03b39835b2f3e11834243d90aa183 # v2.5.0
   with:
-    proxy-mode: audit # Log every destination, block nothing
+    proxy-mode: audit # Log every destination, enforce no rules
     run: |
       npm ci
       npm test
@@ -96,11 +97,15 @@ The step writes every destination the command contacted to the Job Summary:
 <img src="assets/report-inspect-audit-mode.png" alt="Outbound Traffic Report (audit mode)" width="557">
 
 Its **Switch to restrict mode** section holds the allowlist, already written out from what the
-command actually did. A request whose method, host or path a rule would read as a wildcard is listed
-under it rather than written in, since copying it would permit more than was sent. The step it
-writes also keeps `filesystem-mode`, `write-through` and `filesystem-audit` when the run set them,
-from a config file too, as it names no `config-file`. It leaves out `expected-filesystem-rules`,
-with a comment to add the step's back.
+command actually did. A request whose method, host or path contains rule syntax, such as `*`, is
+listed below the allowlist instead of being added to it, since a rule copied from it would permit
+more than was sent.
+
+The generated step names no `config-file`, so it carries the step's filesystem inputs itself:
+`working-directory`, `filesystem-mode`, `write-through`, `filesystem-audit` and
+`fail-on-unexpected-file-access`, each when the run set it to something other than its default,
+whether in the workflow or in a config file. It leaves out `expected-filesystem-rules` and adds a
+comment asking you to copy the step's own rules back in.
 
 ### 2. Enforce the allowlist
 
@@ -129,23 +134,25 @@ unnoticed.
 
 ### Example workflows
 
-Each pair runs a command in audit, then in restrict with the rules audit reported and one request
-they block: `inspect` on an npm install ([audit](.github/workflows/example-inspect-audit.yml) ·
-[restrict](.github/workflows/example-inspect-restrict.yml)), `universal` on a Maven build
-([audit](.github/workflows/example-universal-audit.yml) ·
-[restrict](.github/workflows/example-universal-restrict.yml)).
+Each pair runs a command in audit, then in restrict with the rules the audit reported, plus one
+request those rules block so the report shows a block:
 
-A separate
-[ephemeral filesystem example](.github/workflows/example-ephemeral-filesystem.yml) shows which
-writes survive a `filesystem-mode: ephemeral` step and which the overlay discards, and the
-[filesystem audit example](.github/workflows/example-filesystem-audit.yml) records what an npm
-install touches, and its
-[`expected-filesystem-rules` counterpart](.github/workflows/example-filesystem-audit-expected.yml)
-shows only what falls outside a baseline taken from it. The AWS access key check runs against a real
-AWS account
-([audit](.github/workflows/example-aws-key-check-audit.yml) ·
-[restrict](.github/workflows/example-aws-key-check-restrict.yml)), assuming a role and blocking a
-key the step was not given.
+- `inspect` on an npm install: [audit](.github/workflows/example-inspect-audit.yml) ·
+  [restrict](.github/workflows/example-inspect-restrict.yml)
+- `universal` on a Maven build: [audit](.github/workflows/example-universal-audit.yml) ·
+  [restrict](.github/workflows/example-universal-restrict.yml)
+
+Other examples cover the filesystem and AWS features:
+
+- [Ephemeral filesystem](.github/workflows/example-ephemeral-filesystem.yml) shows which writes
+  survive a `filesystem-mode: ephemeral` step and which the overlay discards.
+- [Filesystem audit](.github/workflows/example-filesystem-audit.yml) records what an npm install
+  touches, and its
+  [`expected-filesystem-rules` counterpart](.github/workflows/example-filesystem-audit-expected.yml)
+  shows only what falls outside a baseline taken from it.
+- The AWS access key check runs against a real AWS account, assuming a role and blocking a key the
+  step was not given: [audit](.github/workflows/example-aws-key-check-audit.yml) ·
+  [restrict](.github/workflows/example-aws-key-check-restrict.yml)
 
 ## How `run` is executed
 
@@ -167,7 +174,7 @@ see [Working directory](./docs/reference.md#working-directory).
 
 ### Passing values to `run`
 
-Use the step's own `env:` (not a `with:` input) to pass values into `run`, exactly like a native
+Use the step's own `env:` (not a `with:` input) to pass values into `run`, as you would for a native
 `run:` step. The action forwards its process environment into the isolated command, so anything set
 via `env:` is available there too:
 
@@ -188,12 +195,12 @@ inject arbitrary commands. Passing the same value through `env:` instead means i
 isolated command as a single environment variable, never interpreted as shell syntax. This is the
 same
 [script injection guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections)
-GitHub gives for any workflow, and applies to this action's `run` input exactly as it would to a
-native `run:` step.
+GitHub gives for any workflow, and it applies to this action's `run` input the same way it applies
+to a native `run:` step.
 
 ## Engines
 
-`proxy-engine` selects how closely the command's traffic is examined.
+`proxy-engine` sets how much of each connection Buildcage reads, and so what a rule can match.
 
 |                                               | `inspect`<br>terminates TLS, checks method and URL         | `universal`<br>reads the SNI only, checks host and port |
 | --------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------- |
@@ -207,13 +214,13 @@ Start with `inspect`, and fall back to `universal` when something the command ru
 mounted CA. `inspect` is the default value of `proxy-engine`, so `universal` has to be set
 explicitly.
 
-Both intercept at the network level, so a tool that ignores `HTTP_PROXY` is covered either way, and
-both use the same sandbox and the same network boundary.
+Each engine intercepts at the network level, so a tool that ignores `HTTP_PROXY` is covered
+whichever one runs, and every engine uses the same sandbox and the same network boundary.
 
 ## Inputs
 
-`run` is the only required input, and the ones below are the rules you write by hand. The full list,
-with defaults and the engines each input applies to, is in
+`run` is the only required input. The sections below cover the rule inputs you write by hand. The
+full list, with defaults and the engines each input applies to, is in
 [Reference](./docs/reference.md#action-inputs), and the grammar those rules are written in is in
 [Rule syntax](./docs/reference.md#rule-syntax).
 
@@ -229,14 +236,18 @@ only whole-line `#` comments, since a path may contain a `#`.
 
 ### Operation modes
 
-`proxy-mode: audit` logs every destination the command reaches and blocks nothing. `restrict`, the
-default, allows only what the rules match and blocks and logs everything else. Start with `audit`
-when you first adopt Buildcage or when a dependency changes, and keep `restrict` for everyday runs.
+`proxy-mode: audit` logs every destination the command reaches and enforces none of the rules. It
+still blocks what no rule could allow, such as a malformed request or a name that resolves to an
+internal address like cloud metadata or the runner itself, and under `inspect` an origin whose
+certificate fails verification.
+`restrict`, the default, allows only what the rules match and blocks and logs everything else. Start
+with `audit` when you first adopt Buildcage or when a dependency changes, and keep `restrict` for
+everyday runs.
 
 If you forget a domain the command needs, `restrict` blocks it and the step fails with the
 destination named. Run `audit` first to find those domains.
 
-`audit` also lets a connection made straight to an address through. Under `universal` that includes
+`audit` also lets through a connection made straight to an address. Under `universal` that includes
 cloud metadata (`169.254.169.254`) and the runner's own addresses; `inspect` still blocks those
 unless a rule names the address as its host.
 
@@ -261,7 +272,8 @@ allowed-url-rules: |
 ```
 
 `allowed-tls-rules` passes a TLS destination through undecrypted, judged on its SNI and port. It is
-for TLS that isn't HTTPS, and for the hosts an `inspect` step must not decrypt:
+for TLS that isn't HTTPS, and for hosts whose clients cannot accept the `inspect` CA, such as a tool
+that pins its certificate:
 
 ```yaml
 allowed-tls-rules: |
@@ -311,7 +323,7 @@ known-blocked-rules: |
   telemetry.example.com
 ```
 
-A name blocked at resolution, before any connection, has no port. A bare `telemetry.example.com` (or
+A name that was only looked up, never connected to, has no port. A bare `telemetry.example.com` (or
 `telemetry.example.com:*`) covers it; `telemetry.example.com:443` does not, since no port was involved.
 
 One rule per line, and on `inspect` a line can also be a URL rule (a method and a URL, the
@@ -329,9 +341,10 @@ Any other blocked request to that host still fails the step. See
 ## The report
 
 Every step appends its own section to the Job Summary: the hosts it reached, the ones it was blocked
-from, and, in `audit`, the allowlist to switch to `restrict` with. An alert under its title counts
-what needs a look. With the [filesystem audit](./docs/filesystem-audit.md) on, a **Filesystem
-Activity Report** section follows the report.
+from, and, in `audit`, the allowlist to switch to `restrict` with. When anything needs attention, an
+alert under its title gives the counts, such as how many connections were blocked. With the
+[filesystem audit](./docs/filesystem-audit.md) on, a **Filesystem Activity Report** section follows
+the report.
 
 Under `inspect` a **Communication details** section lists every request in order with its method,
 URL, status and size, so a blocked entry names the URL that was attempted rather than a bare host.
@@ -358,7 +371,7 @@ address that only `inspect` sees. The fields are listed in
 Only `$GITHUB_WORKSPACE`, `$HOME`, `/tmp`, and `$RUNNER_TEMP` are writable by default. Every other
 path is remounted read-only for the duration of the `run` command. What the command can _read_ is
 not restricted. The build CA in the figure is the `inspect` engine's, and it is mounted after every
-writable path, so a `write-through:` entry cannot take the sandbox's CA trust with it.
+writable path, so a `write-through:` entry cannot hide or replace it.
 
 `filesystem-mode` controls what happens to those writes once the step ends:
 
@@ -367,8 +380,8 @@ writable path, so a `write-through:` entry cannot take the sandbox's CA trust wi
 | `persistent` (default)     | Writes to `$GITHUB_WORKSPACE`/`$HOME`/`/tmp`/`$RUNNER_TEMP` stay on the host after the step ends, as they would without the sandbox.                                                |
 | `ephemeral` (experimental) | Every writable path is discarded when the step ends (via an overlay). A host mount under one gets an overlay of its own, with [exceptions](./docs/reference.md#ephemeral-overlays). |
 
-`write-through:` names the paths whose writes reach the real host filesystem in either mode, the
-paths that opt out of whichever default applies:
+`write-through:` names extra paths whose writes reach the real host filesystem. What that means
+depends on the mode:
 
 | `filesystem-mode` | What `write-through:` does                                               |
 | ----------------- | ------------------------------------------------------------------------ |
@@ -400,7 +413,9 @@ to the old `writable:` and `allow_write:` inputs are all in
 > `write-through: /` is for trusted code only. Against a compromised command it gives up the
 > outbound restriction as well as the read-only one: all of `/run` and `$XDG_RUNTIME_DIR` are
 > reachable again, a `systemd --user` bus included, which starts a process outside the sandbox. The
-> commands this action runs on the host after the command are not kept out of writable paths either.
+> `docker`, `sudo` and, under `inspect`, `keytool` this action runs on the host after the command
+> are then taken from the first match on `$PATH`, even where the command can write, so the host may
+> run a copy the command replaced.
 > See [The `/` opt-out](./docs/reference.md#the--opt-out).
 
 <a id="filesystem_mode-ephemeral"></a>
@@ -438,7 +453,8 @@ is gone.
 > Summary this action writes its own report to. That report and the `traffic-artifact-name` and
 > `filesystem-audit-artifact-name` outputs are unaffected either way: all are written from the runner
 > host after the sandboxed command has exited, outside the overlay. A `$GITHUB_OUTPUT` kept this way
-> is trimmed to the entries the runner can read, and a dropped entry fails the step.
+> is written back only up to the first entry the runner cannot read. That entry and everything after
+> it are dropped, and the step fails.
 
 Name only what a later step needs, usually the build output; the [filesystem
 audit](./docs/filesystem-audit.md#choosing-write-through) shows where the command wrote. Everything
@@ -452,7 +468,8 @@ set through `$GITHUB_OUTPUT` is untrusted as in
 ### What stays read-only
 
 `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_STATE` stay read-only in either mode, although they sit
-under `$RUNNER_TEMP`; see [`write-through` paths](./docs/reference.md#write-through-paths).
+under `$RUNNER_TEMP`, unless `write-through:` names `$GITHUB_ENV` or `$GITHUB_PATH` itself; see
+[`write-through` paths](./docs/reference.md#write-through-paths).
 
 The runner's install directory, its `_actions` directory holding every action's checkout, and the
 docker CLI's config directory (`$DOCKER_CONFIG`, else `~/.docker`) stay read-only too, since the
@@ -469,9 +486,9 @@ what this means for a self-hosted runner's `_work`, are in
 > action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem-audit: record` records what the isolated step reads, writes, moves, deletes, changes the
-attributes of, and executes, and adds a section to the Job Summary: every path it touched, by the
-program and commands that touched it, with a flag for each action, and, folded below, one line per
-command and path.
+attributes of, and executes. It adds a section to the Job Summary with two collapsed parts: a table
+of every path the step touched, with the program and command that touched it and a flag for each
+kind of access, and a timeline with one line per command and path.
 `upload-filesystem-audit-artifact: true` also uploads the full record as a
 `buildcage-filesystem-audit-<id>` artifact; treat it as sensitive.
 
@@ -500,7 +517,7 @@ access falls outside them; see [Expected accesses](./docs/filesystem-audit.md#ex
 > `aws-key-check` and `allowed-aws-role-accounts` are **experimental**: their behavior, inputs, and
 > error messages may still change in a future release without following semver.
 
-Most AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
+Many AWS APIs, such as STS or CloudFormation, name no resource in the URL and reach whichever
 account signs the request, so a compromised dependency could sign with its own key and send data to
 its author's account. `aws-key-check: true` accepts only the key the step was given in
 `AWS_ACCESS_KEY_ID`, and `allowed-aws-role-accounts` adds the keys of roles in the accounts you
@@ -582,12 +599,13 @@ keeps such files from reaching them. `$GITHUB_ENV`, `$GITHUB_PATH` and `$GITHUB_
 read-only in either mode, and `write-through:` can open only the first two, by name (see
 [What stays read-only](#what-stays-read-only)).
 
-An allowlist also cannot stop anything leaving through a service you had to allow anyway. What it
-does stop is traffic to a destination that is not on the list, and infrastructure an attacker set up
-is normally not on it, because the command has no reason to reach it. That is also the hardest kind
-of leak to find afterwards.
+An allowlist also cannot stop anything leaving through a service you had to allow anyway. It stops
+traffic to destinations that are not on the list, such as infrastructure an attacker set up; see
+[Threat model](./docs/security.md#threat-model).
 
-An allowlist generated from an audit run already blocks every destination the audit did not record.
+An allowlist generated from an audit run already blocks every host the audit did not record, apart
+from what the `allowed-tls-rules` and `allowed-ip-rules` it carries over from the audit run's own
+inputs admit.
 Whether to go further depends on what the step has access to:
 [Hardening](./docs/security.md#hardening) is what to look at when it holds credentials, personal
 data, or source you do not publish. For the full threat model, see
@@ -597,24 +615,27 @@ data, or source you do not publish. For the full threat model, see
 
 ### What isn't covered
 
-- `allowed-tls-rules` is not decrypted. The SNI and the port are checked, and the proxy resolves
-  that name itself, so the connection reaches the host the rule named, but nothing inside the TLS
-  session is seen.
-- `allowed-ip-rules` is not inspected at all, and doesn't require TLS either: once an `ip:port` pair
-  is allowed, any TCP-based protocol can use that path. Prefer a domain rule wherever the
-  destination has a stable name.
+- Traffic an `allowed-tls-rules` entry passes is not decrypted. The SNI and the port are checked,
+  and the proxy resolves that name itself, so the connection reaches the host the rule named, but
+  nothing inside the TLS session is seen.
+- Traffic an `allowed-ip-rules` entry passes is not inspected at all, and doesn't require TLS
+  either: once an `ip:port` pair is allowed, any TCP-based protocol can use that path. Prefer a
+  domain rule wherever the destination has a stable name.
 - `universal` never sees the method or the path. They travel inside TLS, so neither is enforced and
   neither reaches the report or the traffic artifact. A request fronted behind an allowed SNI is
   invisible to it as well, while `inspect` matches on the real `Host` and blocks it. See
   [Domain fronting](./docs/security.md#domain-fronting).
-- The generated allowlist covers only what the engine classified. `allowed-tls-rules` and
-  `allowed-ip-rules` come back exactly as the audit run was configured with them, since nothing
-  behind a passthrough was ever decrypted.
+- Under `inspect`, the generated allowlist writes URL rules only from the requests the proxy read.
+  `allowed-tls-rules` and `allowed-ip-rules` are copied over unchanged from the audit run's own
+  inputs, since the traffic they pass through is never decrypted.
+- Under `universal`, the generated allowlist writes a host rule for the SNI or `Host` of each
+  connection made through a name, and an IP rule for each address reached directly.
 
 ### Protocols
 
-- UDP is dropped, so QUIC and HTTP/3 either fall back to TCP or fail. Port 53 to the proxy, which is
-  the resolver, is the one exception. ICMP is dropped too.
+- UDP is dropped, so QUIC and HTTP/3 either fall back to TCP or fail. The one exception is port 53
+  on the gateway, which is the proxy's own address and where the resolver listens. ICMP is dropped
+  too.
 - IPv6 is not used anywhere. The sandbox's interface toward the proxy has no IPv6 address, the
   rule syntax refuses an IPv6 address, forwarded IPv6 is dropped, and the proxy reaches allowed
   names over IPv4 only, so an allowed name with AAAA records and no A record never resolves and no
@@ -624,8 +645,8 @@ data, or source you do not publish. For the full threat model, see
 
 The resolver has no upstream, so it returns nothing for a discovery record: `SRV`, `TXT`, `TLSA` and
 `URI` queries come back empty, and the command connects to the name a rule allowed rather than to
-one a nameserver picked for it. Clients that treat `SRV` as a discovery layer fall back to the host
-name itself, so the host a rule names is the host the command reaches.
+one a nameserver picked for it. A client that treats `SRV` as an optional discovery layer falls back
+to the host name itself, so the host a rule names is the host the command reaches.
 
 What this breaks is a client with no fallback, where the record is the only way it can find the
 service at all. A `mongodb+srv://` connection string is the one to expect: use `mongodb://` with the
@@ -640,7 +661,7 @@ reported as blocked; see
 ### Inside the sandbox
 
 - The isolated command cannot use Docker. If `docker`, or another container or VM runtime group, is
-  the runner's primary group, it is substituted for a safe one before the command runs, and the
+  the runner's primary group, it is replaced with a safe one before the command runs, and the
   host's `/run`, where the container runtimes, systemd-resolved, snapd and the rest keep their
   sockets, is covered by an empty tmpfs. See
   [Isolation mechanisms](docs/security.md#isolation-mechanisms).
@@ -675,17 +696,18 @@ reported as blocked; see
   a non-default password, the step warns and a JVM build needs `proxy-engine: universal`. See
   [JVM keystores](./docs/reference.md#jvm-keystores).
 - `audit` terminates TLS as well. It drops the rules, not the interception, so a tool that cannot
-  accept the CA fails in `audit` exactly as it would in `restrict`. `universal`'s audit mode
-  decrypts nothing and breaks nothing.
+  accept the CA fails in `audit` just as it would in `restrict`. `universal` does not terminate TLS
+  in either mode.
 - A CA-trust variable the command's environment already sets is left alone rather than appended to,
   so a tool reading it fails TLS unless it points at the system store; the step warns about it.
   [Reference](./docs/reference.md#ca-trust-variables) lists the variables it checks.
 - Chromium trusts the CA only through the NSS database under the step's own `HOME`, so leave `HOME`
   alone within the command (`HOME=/tmp chromium` does not trust it). A Chromium before M146 does not
-  read `~/.local/share/pki/nssdb`, so use M146 or later where that is the database. A database the
-  runner user cannot write, or one too large to copy, gets no slot, and the step warns; use
-  `proxy-engine: universal` for Chromium there. Neither happens on a GitHub-hosted runner. See
-  [Chromium](./docs/reference.md#chromium).
+  read `~/.local/share/pki/nssdb`, so use M146 or later where that is the database. Buildcage adds
+  the CA by giving a copy of the database's `pkcs11.txt` an extra entry that points at a store
+  holding only the CA. A database the runner user cannot write, or one too large to copy, gets no
+  such entry, and the step warns; use `proxy-engine: universal` for Chromium there. Neither happens
+  on a GitHub-hosted runner. See [Chromium](./docs/reference.md#chromium).
 - A Firefox carrying Mozilla's own root list, such as Playwright's or the one Selenium drives, reads
   a per-profile database and does not trust the CA; use `proxy-engine: universal` or an
   `allowed-tls-rules` passthrough for it.
@@ -721,8 +743,9 @@ reported as blocked; see
 
 GitHub caps a Job Summary at 1 MiB per step, counting what the command itself wrote there, and drops
 the whole summary rather than truncating it. The report is written first, and what the command
-wrote is cut to fit what is left, with a note and a warning; the step does not fail. A report that
-would pass the limit on its own gives up its parts in a fixed order, the `restrict` example last.
+wrote is cut to fit what is left, with a note and a warning; the step does not fail. When the report
+alone would exceed the limit, its sections are cut or replaced by a note in a fixed order, the
+`restrict` example last.
 What was cut is recovered from the [traffic artifact](./docs/reference.md#traffic-artifact), or the
 filesystem audit's own artifact, and is not kept anywhere when neither was uploaded. The order is in
 [The Job Summary size cap](./docs/reference.md#the-job-summary-size-cap).
@@ -750,9 +773,9 @@ later step and post step. Name the one the command writes to in `write-through:`
 
 **Can I trust the action itself?**
 
-isolated-run relies on being verifiable rather than on being trusted. The source is open for anyone
-to read at any time, and the action runs only what was built from it: each release is immutable, its
-image is built from the release commit and signed, and the action verifies that before it runs.
+You can check what it runs instead of taking it on trust. The source is public, and the action runs
+only what was built from it: each release is immutable, its image is built from the release commit
+and signed, and the action verifies that signature before it runs.
 Changing what isolated-run does means changing its public source first. See
 [Image provenance verification](./docs/security.md#image-provenance-verification).
 
@@ -769,10 +792,11 @@ One policy for the whole run is one allowlist for every step in it: the destinat
 `actions/checkout`, the caches and the setup actions need stay open to every other step as well.
 Buildcage writes a separate allowlist for the one step you don't trust, so it gets the hosts its
 command needs and nothing else, and a rule there can name a method and a URL rather than only a
-host. The two compose: a perimeter the job can't switch off, and a tighter policy inside it.
+host. The two can be used together: GitHub's firewall as an outer limit the job cannot turn off,
+and Buildcage as a narrower allowlist for the step.
 
-Buildcage also runs on any Linux runner with Docker, self-hosted included, rather than on a
-firewall-enabled runner image.
+Buildcage also runs on Linux runners with Docker that meet its [requirements](#requirements),
+self-hosted included, and needs no firewall-enabled runner image.
 
 ## Documentation
 
@@ -786,12 +810,12 @@ firewall-enabled runner image.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests at
+Issues and pull requests are welcome at
 [github.com/buildcage/isolated-run](https://github.com/buildcage/isolated-run).
 
 ## Show Your Support
 
-If you find this action helpful, please consider giving it a star ⭐ on GitHub!
+If you find this action useful, please consider giving it a star on GitHub.
 
 ## Disclaimer
 
