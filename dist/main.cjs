@@ -77596,7 +77596,7 @@ function createHostDocker() {
 function fetchReport(containerName, parameters, proxyEngine) {
 	return readReport(createHostDocker(), containerName, parameters, proxyEngine);
 }
-var ProxyStoppedError = class extends Error {};
+var LogsUnreadableError = class extends Error {}, ProxyStoppedError = class extends LogsUnreadableError {};
 function readHealth(docker, containerName) {
 	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
@@ -77609,12 +77609,20 @@ function servicesAnswered(health) {
 function servicesAnswer(docker, containerName) {
 	return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
 }
+var LogReadError = class extends Error {};
+async function* readLog(docker, containerName, dir) {
+	try {
+		yield* readRotatedLog(docker, containerName, dir);
+	} catch (e) {
+		throw new LogReadError(errorMessage(e));
+	}
+}
 async function readReport(docker, containerName, parameters, proxyEngine) {
 	let health = readHealth(docker, containerName), build = proxyEngine === "inspect" ? buildInspectReportData : buildUniversalReportData;
 	try {
-		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
+		return await build(readLog(docker, containerName, "/var/log/haproxy"), readLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw servicesAnswered(health) && servicesAnswer(docker, containerName) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+		throw !servicesAnswered(health) || !servicesAnswer(docker, containerName) ? new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`) : e instanceof LogReadError ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${e.message}`) : e;
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {
@@ -77697,7 +77705,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
 		let message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-		e instanceof ProxyStoppedError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
+		e instanceof LogsUnreadableError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
 	}
 	let rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
