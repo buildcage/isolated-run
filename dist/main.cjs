@@ -72992,9 +72992,16 @@ function commandOf(program, runName, comm) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/fold-tree.ts
-const starred = (path) => path === "/" ? "/**" : `${path}/**`, looseKids = (node) => {
+const starred = (path) => path === "/" ? "/**" : `${path}/**`, twin = (kids, name) => {
+	let live = unmarked(name);
+	return live !== name && kids.has(live);
+}, another = (kids, name) => !twin(kids, name) && !kids.has(name + "\0 (deleted)"), childCount = (kids) => {
 	let n = 0;
-	for (let kid of node.kids?.values() ?? []) kid.kept || n++;
+	for (let name of kids.keys()) twin(kids, name) || n++;
+	return n;
+}, looseKids = (node) => {
+	let n = 0;
+	for (let [name, kid] of node.kids ?? []) !kid.kept && !twin(node.kids, name) && n++;
 	return n;
 };
 function climbGroup(path, parts = components(path)) {
@@ -73029,7 +73036,7 @@ function* treeLines(top, fanout, showWalked = !1) {
 		let e = stack.pop(), { folded, own, kids, kept } = e.node;
 		folded && flagBits(folded) && (yield [starred(pathTo(e)), folded]);
 		let shown = own && flagBits(own) ? own : void 0, ownLine = shown && !walked.has(e.node) ? shown : void 0;
-		if (kids?.size && !kept && kids.size + +!!ownLine >= fanout) {
+		if (kids?.size && !kept && childCount(kids) + +!!ownLine >= fanout) {
 			yield [starred(pathTo(e)), treeAgg(e.node)];
 			continue;
 		}
@@ -73105,7 +73112,7 @@ var Lines = class {
 					bytes: 0,
 					kept: this.isKept(parts, i + 1) || void 0
 				}, kids.set(parts[i], node), this.nodes++, parent) {
-					if (parent.folded || this.setBytes(parent, 0), !parent.kept && kids.size >= this.opts.fanout) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
+					if (!parent.folded && !this.opts.showWalked && this.setBytes(parent, 0), !parent.kept && childCount(kids) >= this.opts.fanout) return this.fold(parent), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
 					if (parent.kept && !node.kept && this.loose && looseKids(parent) >= 5) return this.foldLoose(parent, parts.slice(0, i), x.comm), this.addFolded(parent, parts.slice(0, i), x, parentSettled);
 				}
 				if (this.nodes > this.opts.nodes) return this.stop("paths");
@@ -73114,14 +73121,16 @@ var Lines = class {
 			if (i === parts.length - 1) {
 				node.own ??= newAgg();
 				let shown = flagBits(node.own) !== 0;
-				apply(node.own, x), settled && !shown && flagBits(node.own) && !node.kids?.size && this.setBytes(node, node.bytes + this.opts.rowBytes(x.path, x.comm));
+				apply(node.own, x), settled && !shown && flagBits(node.own) && (!node.kids?.size || this.opts.showWalked) && this.setBytes(node, node.bytes + this.opts.rowBytes(x.path, x.comm));
 				return;
 			}
 			node.kids ??= new Map(), kids = node.kids, parent = node, parentSettled = settled, settled &&= !!node.kept;
 		}
 	}
 	foldsInto(parent, kids, parts, i) {
-		return parent ? parent.kept ? !this.isKept(parts, i + 1) && looseKids(parent) + 1 >= 5 : kids.size + 1 >= this.opts.fanout : !1;
+		if (!parent) return !1;
+		let added = +!!another(kids, parts[i]);
+		return parent.kept ? !this.isKept(parts, i + 1) && looseKids(parent) + added >= 5 : childCount(kids) + added >= this.opts.fanout;
 	}
 	isKept(parts, depth) {
 		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
@@ -73137,7 +73146,9 @@ var Lines = class {
 		for (let [part, kid] of node.kids) kid.kept || (forEachInSubtree(kid, (n) => {
 			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0), this.nodes--;
 		}), node.kids.delete(part));
-		node.folded = agg, this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm));
+		node.folded = agg;
+		let own = this.opts.showWalked && node.own && flagBits(node.own) ? this.opts.rowBytes(spell(parts), comm) : 0;
+		this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm) + own);
 	}
 	addFolded(node, parts, x, settled) {
 		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), x.comm));
@@ -73474,7 +73485,7 @@ function createAuditSummary(prefixes) {
 					t,
 					seq: Number.isNaN(t) ? Infinity : seq++
 				}, parts = components(x.path), by = runner?.program ?? programOf(r.pid, r.comm ?? ""), cmd = runner?.cmd ?? x.comm;
-				paths.add({
+				prefixes.rules || paths.add({
 					...x,
 					comm: String(by),
 					cmd

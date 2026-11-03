@@ -286,6 +286,21 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     ]);
   });
 
+  it("counts a deleted file and the live one of its name as one child, in the details as in the table", () => {
+    const { summary } = marked(
+      { rules: rulesOf("ls R ./z") },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/b" },
+      { kind: "read", pid: 3, comm: "ls", path: "/work/d/a", deleted: true },
+    );
+    expect(rows(summary)).toStrictEqual(["ls R ./d/a", "ls R ./d/b"]);
+    expect(summary.details?.map((r) => `${r.path}${r.deleted ? " deleted" : ""}`)).toStrictEqual([
+      "./d/a",
+      "./d/b",
+      "./d/a deleted",
+    ]);
+  });
+
   it("lists a walked directory beside the rows that remain unexpected, in the details too", () => {
     const { summary } = marked(
       { rules: rulesOf("ls R ./d/a") },
