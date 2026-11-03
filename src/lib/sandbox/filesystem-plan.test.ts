@@ -205,6 +205,81 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
+  describe("an entry whose `..` climbs past a symlink", () => {
+    const WS = ENV.GITHUB_WORKSPACE;
+    const linked = (links: Record<string, string>) => ({
+      exists: alwaysExists,
+      lstat: (p: string) => ({ isSymbolicLink: () => p in links }),
+      readlink: (p: string) => links[p],
+      realpath: (p: string) => p,
+      mkdir: () => {},
+    });
+
+    it("refuses it, naming where the command's own `..` leads", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "../out", ENV, {
+          ...linked({ [`${WS}/current`]: "releases/v2" }),
+          baseDir: `${WS}/current`,
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "INVALID_WRITE_THROUGH_PATH",
+          message: expect.stringContaining(`instead: "${WS}/releases/out"`),
+        }),
+      );
+    });
+
+    it("refuses it without a working directory too", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "link/../out", ENV, linked({ [`${WS}/link`]: "/opt" })),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+    });
+
+    it("refuses a `..` out of a symlinked runner directory, which lands past its real path", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "../shared", ENV, {
+          ...linked({}),
+          realpath: (p: string) => (p === WS ? "/mnt/data/repo" : p),
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "INVALID_WRITE_THROUGH_PATH",
+          message: expect.stringContaining('leads the command to "/mnt/data/shared"'),
+        }),
+      );
+    });
+
+    it("finds a runner directory however its variable spells it", () => {
+      const env = { GITHUB_WORKSPACE: WS, RUNNER_TEMP: "/home/runner/./work/_temp" };
+      const plan = resolveFilesystemPlan("persistent", "$RUNNER_TEMP/a/../b", env, {
+        ...linked({ "/home": "var/home" }),
+        realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      });
+      expect(plan.writeThroughPaths).toStrictEqual(["/var/home/runner/work/_temp/b"]);
+    });
+
+    it("checks a path under no runner directory as written", () => {
+      const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: WS };
+      expect(() =>
+        resolveFilesystemPlan("persistent", "/opt/link/../out", env, linked({ "/opt/link": "x" })),
+      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
+    });
+
+    it("takes a `..` that passes no symlink", () => {
+      expect(
+        resolveFilesystemPlan("persistent", "a/../b", ENV, linked({})).writeThroughPaths,
+      ).toStrictEqual([`${WS}/b`]);
+    });
+
+    it("takes a symlinked runner directory at its real path first", () => {
+      const plan = resolveFilesystemPlan("persistent", "./a/../dist", ENV, {
+        ...linked({ "/home": "var/home" }),
+        realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      });
+      expect(plan.writeThroughPaths).toStrictEqual([`/var${WS}/dist`]);
+    });
+  });
+
   it("catches an overlap that only normalization reveals", () => {
     expect(() =>
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/./x`, ENV, {
@@ -251,6 +326,12 @@ describe("resolveFilesystemPlan", () => {
 
     it("leaves both under the overlay in ephemeral mode unless write-through covers them", () => {
       expect(plan("ephemeral", "./dist").mediatedVariables).toStrictEqual([]);
+    });
+
+    it("leaves a mediated file named through `..` to the mediation", () => {
+      const named = plan("ephemeral", "$RUNNER_TEMP/x/../_runner_file_commands/set_output_abc");
+      expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
+      expect(named.writeThroughPaths).toStrictEqual([]);
     });
 
     // The mediation writes the file back, so the entry needs no bind of its own.

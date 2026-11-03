@@ -932,14 +932,18 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
+function spellWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
-	}), tildeExpanded = expanded.startsWith("~/") ? (0, node_path.join)(env.HOME || "", expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : (0, node_path.join)(baseDir || "", tildeExpanded);
+	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded;
+	return (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
+}
+function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
+	let resolved = spellWriteThroughEntry(rawLine, env, baseDir);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
 	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);

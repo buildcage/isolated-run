@@ -17,6 +17,7 @@ import { RUNNER_ENV, withLinks } from "../test/runner-host.ts";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
+  spellWriteThroughEntry,
   assertKnownFilesExist,
   assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
@@ -168,6 +169,14 @@ describe("resolveWriteThroughEntry: a tilde with no HOME to expand to", () => {
     const resolved = resolveWriteThroughEntry("~/cache", { ...ENV, HOME: undefined });
     expect(resolved).not.toContain("undefined");
     expect(resolved.endsWith("/cache")).toBe(true);
+  });
+});
+
+describe("spellWriteThroughEntry", () => {
+  it("keeps the entry's `..` for the symlink check, which resolveWriteThroughEntry normalizes away", () => {
+    expect(spellWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/current/../out");
+    expect(spellWriteThroughEntry("~/a/../b", ENV)).toBe(`${ENV.HOME}/a/../b`);
+    expect(resolveWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/out");
   });
 });
 
