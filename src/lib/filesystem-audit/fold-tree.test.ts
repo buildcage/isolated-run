@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { dropWalkedDirs } from "../test/filesystem-audit.ts";
 import { fmtFlags, type Access } from "./agg.ts";
 import { keyOf, Lines } from "./fold-tree.ts";
-import { canonical, components, MEMFD, MEMFDS } from "./paths.ts";
+import { canonical, components, DELETED, MEMFD, MEMFDS } from "./paths.ts";
 import { BIT } from "./record.ts";
 
 describe("dropWalkedDirs", () => {
@@ -65,6 +65,24 @@ describe("Lines", () => {
     l.add(access("/a/3", BIT.W));
     l.add(access("/a/4"));
     expect(printed(l)).toStrictEqual(["RW c /a/**"]);
+  });
+
+  it("counts a deleted file and the live one of its name as one child", () => {
+    const l = lines();
+    for (const p of ["/a/1", `/a/1${DELETED}`, "/a/2"]) l.add(access(p));
+    expect(printed(l)).toHaveLength(3);
+    l.add(access(`/a/3${DELETED}`));
+    expect(printed(l)).toStrictEqual(["R c /a/**"]);
+  });
+
+  it("past the limit, takes no deleted file whose live namesake is there already", () => {
+    // Rows under a kept directory, which no fold takes back, fill the limit.
+    const l = lines({ limit: 2, keep: [components("/k")] });
+    for (const p of ["/q/1", "/q/2", "/k/x", "/k/y", "/k/z"]) l.add(access(p));
+    // Dropped, so its W never reaches the fold below.
+    l.add(access(`/q/1${DELETED}`, BIT.W));
+    l.add(access("/q/3"));
+    expect(printed(l)?.[0]).toBe("R c /q/**");
   });
 
   it("never folds a kept directory or its ancestors", () => {
@@ -151,6 +169,13 @@ describe("Lines", () => {
       for (const p of ["/a/1", "/a/2", "/a/3", "/b", "/c", "/d", "/e"]) l.add(access(p));
       expect(l.stopped).toBeUndefined();
       expect(printed(l)).toStrictEqual(["R c /home/u/x", "R d /home/u", "R c /**"]);
+    });
+
+    it("prints a kept directory's own row beside its loose fold where walked rows show", () => {
+      const l = lines({ limit: 5, keep: [home], showWalked: true });
+      l.add(access("/", BIT.W));
+      for (const p of five) l.add(access(p));
+      expect(printed(l)).toStrictEqual(["W c /", "R c /**"]);
     });
 
     it("then sends a new child to the fold, the kept directory itself and kept ones past it", () => {

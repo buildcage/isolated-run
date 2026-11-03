@@ -127,7 +127,8 @@ export interface AuditSummary {
   lost: boolean;
   /** Hooks the kernel skipped anywhere on the host while the step ran. */
   hostMissed: number;
-  /** Each part, or undefined where it was given up (see pathsCut). */
+  /** Each part, or undefined where it was given up (see pathsCut). Under
+   *  rules, which the unexpected table stands in for, paths is empty. */
   paths: PathRow[] | undefined;
   /** With expected-filesystem-rules, only the actions no rule took. */
   details: Row[] | undefined;
@@ -500,7 +501,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
       const cmd = runner?.cmd ?? x.comm;
-      paths.add({ ...x, comm: String(by), cmd }, parts);
+      // Under rules the unexpected table stands in for these.
+      if (!prefixes.rules) paths.add({ ...x, comm: String(by), cmd }, parts);
       const left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
       // A run is the command's that started it, as in the table.
       if (left) details.add({ ...x, comm: cmd, bit: left }, parts);

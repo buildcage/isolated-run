@@ -6,8 +6,9 @@
 > this action to a commit SHA rather than a version tag if you adopt it.
 
 `filesystem-audit: record` records every file the isolated step reads, writes, moves, deletes,
-changes the attributes of, and executes, and adds a **Filesystem Activity Report** section to the
-Job Summary:
+changes the attributes of, and executes, apart from
+[what it does not record](#what-it-does-not-record), and adds a **Filesystem Activity Report**
+section to the Job Summary:
 
 ```yaml
 - uses: buildcage/isolated-run@<sha>
@@ -43,19 +44,22 @@ what the step may write.
 - **Noticing a change** from the accesses a step usually makes: with `expected-filesystem-rules`,
   the summary lists only the accesses outside them. See [Expected accesses](#expected-accesses).
 
-It suits a step's first runs, a dependency update, or an investigation. It can also stay on, since a
-typical build barely slows down, and then each run leaves a record to compare against.
+It suits a step's first runs, a dependency update, or an investigation. It can also stay on (see
+[What changes in the step](#what-changes-in-the-step) for its cost), and then each run leaves a
+record to compare against.
 
 ## Getting started
 
 It needs a cgroup v2 host on Linux 6.1 or newer (6.4 on arm64) with the kernel's type information,
-which every GitHub-hosted Ubuntu runner has, and it makes the sandbox kill a program that makes a
-32-bit system call. [Requirements](#requirements) has the details and how to check a self-hosted runner.
+which every GitHub-hosted Ubuntu runner has. [Requirements](#requirements) has the details and how
+to check a self-hosted runner. With the audit on, the sandbox kills any program that makes a 32-bit
+system call.
 
 With `filesystem-audit: record` alone, as above, the step's Job Summary gets a **Filesystem Activity
 Report** section after the traffic report. The full record, with every access in order, is uploaded
-only when asked for, as the traffic artifact is. It can be downloaded from the run's page, or by a
-later step to query with `jq`, as in [The artifact](#the-artifact):
+as an artifact only when `upload-filesystem-audit-artifact: true` is set, just as the traffic
+artifact needs `upload-traffic-artifact: true`. You can download it from the run's page, or in a
+later step to query it with `jq`, as in [The artifact](#the-artifact):
 
 ```yaml
 - id: build
@@ -75,10 +79,10 @@ The `filesystem-audit-artifact-name` output names the uploaded artifact. It is e
 was uploaded, and without the `if:`, `download-artifact` would then download every artifact of the
 run.
 
-Each step with the audit on gets its own section and, when uploaded, its own artifact,
-`buildcage-filesystem-audit-<id>`, where `<id>` is the same random suffix as that step's traffic
-artifact, so several steps in one job never collide. Each section follows its step's traffic report,
-and both headings carry the step's `label`, so set `label` to tell the steps apart.
+Each step with the audit on gets its own section. When uploaded, it also gets its own artifact,
+`buildcage-filesystem-audit-<id>`. `<id>` is the same random suffix as that step's traffic artifact,
+so the artifacts of several steps in one job never collide. Each section follows its step's traffic
+report. Both headings carry the step's `label`, so set `label` to tell the steps apart.
 
 `filesystem-audit-retention-days` sets how long the artifact is kept; see
 [Reference](./reference.md#filesystem-audit-inputs). The artifact names each program the step ran
@@ -131,21 +135,23 @@ From the top:
   they first ran, and each one's paths in path order: the working directory, then the rest of the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one directory;
   see [Paths](#paths). The Command column lists the commands that made the row's accesses, in the
-  order they first did, and past three, the first two and how many more, as `and 2 more`; see
-  [Which command](#how-rows-are-grouped). A table that does not fit in the Job Summary leaves only
-  its note; see [Limits](#limits).
+  order they first did. When there are more than three, it shows the first two followed by a
+  count, such as `and 2 more`; see [Which command](#how-rows-are-grouped). A table that does not
+  fit in the Job Summary leaves only its note; see [Limits](#limits).
 - **File access details**, folded, has one row per command and path, in the order the rows were
-  first touched, with when that command first and last touched the path. A run is the row of the
-  command that started it, as in the table. Times count from the start of the step's proxy, on the
-  same clock as the traffic report's Communication details, so a file access can be matched to a
-  request.
+  first touched, with when that command first and last touched the path. A program run (`X`) is on
+  the row of the command that started it, as in the table. Times count from the start of the
+  step's proxy, on the same clock as the traffic report's Communication details, so a file access
+  can be matched to a request.
 - **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
-  them. It shows only when the run recorded a file access, and with rules, one outside them; see
-  [Expected accesses](#expected-accesses).
-- The closing line explains the `./`, `~/` and `dir/**` notations, and `$GITHUB_WORKSPACE/` when
-  [`working-directory`](./reference.md#working-directory) is set, links to the artifact that holds
-  the full record and links to this section. Where there is no artifact, it says how to ask for
-  one, or that the upload failed.
+  them. It shows only when the run recorded at least one file access and, when rules are set, at
+  least one access that no rule matches; see [Expected accesses](#expected-accesses).
+- The closing line:
+  - It explains the `./`, `~/` and `dir/**` notations, and `$GITHUB_WORKSPACE/` when
+    [`working-directory`](./reference.md#working-directory) is set.
+  - It links to the artifact that holds the full record. Where there is no artifact, it says how to
+    ask for one, or that the upload failed.
+  - It links to this section.
 
 A step that touched no file shows `No file access was recorded.` instead of all of these.
 
@@ -154,9 +160,9 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 - **A credential file read by something other than its tool.** A row such as `R ~/.npmrc`,
   `R ~/.ssh/id_rsa` or `R ~/.docker/config.json` says a program opened it. npm reads `~/.npmrc` on
   every run, and npm and a package's install script both show as `node`, so the program alone does
-  not tell them apart. The Command column does: npm renames itself after what it runs, as
-  `node[npm ci]`, while a script it starts shows as plain `node`. The artifact, if uploaded, also
-  gives each read's parent process.
+  not tell them apart. The Command column does: npm sets its process name to the npm command it is
+  running, so it shows as `node[npm ci]`, while a script it starts shows as plain `node`. The
+  artifact, if uploaded, also gives each read's parent process.
 - **A write meant to outlive the step.** `W` on `./.git/hooks/**`, `./package.json`, `~/.bashrc`,
   `~/.npmrc` or another file a later step or job runs or reads. A write to `$GITHUB_ENV` or
   `$GITHUB_PATH` is refused (`w!`) unless `write-through` names it, since both are read-only in the
@@ -175,14 +181,14 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 | Flag | Means                                                                                                |
 | ---- | ---------------------------------------------------------------------------------------------------- |
 | `R`  | Read, or mapped for reading or to run                                                                |
-| `W`  | Written, mapped shared and writable, created, truncated or moved to: a file, a directory, a link     |
+| `W`  | Written, mapped shared and writable, truncated, created, or moved to (a file, directory or link)     |
 | `X`  | Run as a program, on the row of the program that ran it                                              |
 | `M`  | Moved (renamed) away from this path; the new name shows `W`, or `M` too where two paths were swapped |
 | `L`  | Given a second name by a hard link; the new name shows `W`                                           |
 | `D`  | Deleted                                                                                              |
 | `A`  | Attributes changed: mode, owner, times, extended attributes                                          |
 | `r`  | Lowercase: the action failed every time it was tried here, such as opening a missing file            |
-| `r!` | Refused: for want of permission, by the sandbox or the file's own mode, or on a read-only path       |
+| `r!` | Refused by the sandbox or the file's mode, or a read-only path; `!` can follow any lowercase letter  |
 
 - A refusal shows even where the same action also succeeded, after the uppercase letters. `RWr!` on
   `~/.cache/**` means reads and writes under `~/.cache` succeeded and at least one read was refused.
@@ -192,25 +198,27 @@ A step that touched no file shows `No file access was recorded.` instead of all 
 
 ### Paths
 
-| Shown as              | Means                                                                                                   |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `./…`                 | Under the [working directory](./reference.md#working-directory), `$GITHUB_WORKSPACE` unless set         |
-| `$GITHUB_WORKSPACE/…` | Under `$GITHUB_WORKSPACE` but outside the working directory                                             |
-| `~/…`                 | Under `$HOME`                                                                                           |
-| `dir/**`              | `dir` and what was touched directly under it, which would take three or more rows, with all their flags |
+| Shown as              | Means                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `./…`                 | Under the [working directory](./reference.md#working-directory), `$GITHUB_WORKSPACE` unless set        |
+| `$GITHUB_WORKSPACE/…` | Under `$GITHUB_WORKSPACE` but outside the working directory                                            |
+| `~/…`                 | Under `$HOME`                                                                                          |
+| `dir/**`              | `dir` and what was touched below it, at any depth, with all their flags; some paths keep their own row |
 
-Some paths never fold into a `dir/**` row, such as the working directory, the workspace, `$HOME`
-and a program run; see [How rows are grouped](#how-rows-are-grouped). `/proc`, cut, in-memory,
-deleted and escaped names have notations of their own, listed next.
+A directory folds into a `dir/**` row once it would otherwise show three entries; see
+[Folding](#how-rows-are-grouped). Some paths never fold, such as the working directory, the
+workspace, `$HOME` and a program run. `/proc` paths, cut names (paths too long or too deep to
+record in full), in-memory files, deleted files and escaped names have notations of their own,
+listed next.
 
 ### Other notations
 
 | Shown as                                 | Means                                                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `/proc/self/…`                           | Under the `/proc` directory of the process that made the access                                                             |
-| `/proc/<pid>/…`                          | Under another process's directory in `/proc`, every process's shown as one                                                  |
-| `/proc/<pid>/task/<tid>/…`               | Under a thread's directory within a process's, every thread's shown as one, as in `/proc/self/task/<tid>/…`                 |
-| `…/name`                                 | A relative name whose directory was closed before it could be read, or a path too deep to record in full                    |
+| `/proc/<pid>/…`                          | Under another process's directory in `/proc`; every process number shows as `<pid>`, so they share rows                     |
+| `/proc/<pid>/task/<tid>/…`               | Under a thread's directory in `/proc`; every thread number shows as `<tid>`, also in `/proc/self/task/<tid>/…`              |
+| `…/name`                                 | A relative name whose starting directory was closed before the tracer read it, or a path too deep to record in full         |
 | `path…`                                  | A failed open's name too long to record in full, cut at its end                                                             |
 | `memfd:"name"`                           | A file that exists only in memory and has no path; the name is whatever its creator chose                                   |
 | `path (deleted)`                         | A file deleted while it was open, or created without a name and never given one; not shown inside a `dir/**` row            |
@@ -222,16 +230,21 @@ deleted and escaped names have notations of their own, listed next.
 
 ### How rows are grouped
 
-**Which program.** A program is named by its path, and a script run through its `#!` line by its
-own path; a script starting `#!/usr/bin/env node` runs `node` in turn, and what follows shows under
-`node`. A process that forks without running anything counts as its parent's program, and the
-step's own shell, which runs the `run` script, shows as `bash`.
+**Which program.** A program is named by its path. A script run through its `#!` line is named by
+the script's own path. A script starting `#!/usr/bin/env node` makes `env` run `node` in turn, so
+the script's accesses after that show under `node`. A process that forks without running anything
+counts as its parent's program. The step's own shell, which runs the `run` script, shows as `bash`.
 
-**Which command.** A command is named by its program's file name, and adds the name the process gave
-itself in brackets unless that is a name its exec gave it: the program's file name or the name it
-was run by, cut to 15 bytes as the kernel keeps it. So `/usr/bin/dash` run as `sh` shows as `dash`.
-A process with no program in the record, the step's shell and what it forks without running
-anything, shows its own name alone. A `[` or `]` in either name is escaped with `\`.
+**Which command.** A command is named by its program's file name, such as `node` for
+`/usr/local/bin/node`. When the process has given itself another name, that name follows in
+brackets, such as `node[npm ci]`.
+
+A name the process got from its exec is not shown in brackets. An exec names the process after the
+program's file name or the name it was run by, cut to 15 bytes, as the kernel keeps no more. So
+`/usr/bin/dash` run as `sh` shows as `dash`, not `dash[sh]`.
+
+A process with no program in the record shows its own name alone. These are the step's shell and
+the processes it forks without running anything. A `[` or `]` in either name is escaped with `\`.
 
 Any process can give itself any name, and a file name says nothing about where the file is: a file
 named `node` anywhere shows as `node`. Tell programs apart by their path in the Program column, where
@@ -242,53 +255,61 @@ each has rows of its own.
 - A program is shown under the file it ran, with symlinks followed.
 - A failed access is shown under the name the command passed, joined to its working directory, or
   the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
-  alone, as `fchmod`, is shown under that file's path.
+  alone, such as `fchmod`, is shown under that file's path.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
   it was refused: after `mkdir dist` and a write to `dist/app.js`, only `./dist/app.js` shows. Such
-  a row does not count toward a fold either. **Unexpected Accesses**, its details and the proposed
-  rules keep it, as a rule has to name it to take that access.
+  a row does not count toward a fold either. With `expected-filesystem-rules`, the
+  [Unexpected Accesses](#what-the-summary-shows) table, its details and the proposed rules keep
+  the directory's row, since a rule matches the access to the directory only if it names the
+  directory.
 
-**Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
-command's paths on their own, so they often name it; the artifact always does.
+**Folding.** A directory folds into one `dir/**` row once it would otherwise show three entries: its
+own row, if it has one, and each file or subdirectory directly under it that was touched or holds
+something touched. The `dir/**` row then covers the directory and everything below it, at any depth,
+with all their flags, except the paths listed below, which keep rows of their own. A file shown
+`(deleted)` and the file of the same name count as one entry toward a fold, here and past 300 KB.
 
-Never folded into a `dir/**` row, nor counted toward its three rows:
+A `dir/**` row does not say which path under it was refused. The details fold each command's paths
+separately, so they often still name it, and the artifact always does.
+
+These paths never fold into a `dir/**` row, and do not count toward its three entries:
 
 - `/`, `/home`, `/tmp`, `/proc`, the working directory, the workspace, `$HOME`, the directories
-  above them, `/proc/<pid>`, `/proc/self`, and the `…/` a relative name or a cut walk starts with.
+  above them, `/proc/<pid>`, `/proc/self`, and the `…/` that a relative name or a cut path starts
+  with.
 - `/etc`, `/root`, `~/.ssh`, `~/.aws`, `~/.config`, `~/.docker`, `~/.kube`, `~/.gnupg`, the same
-  directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`, which hold secrets
+  directories under `/root`, `/proc/<pid>/fd` and `/proc/<pid>/task/<tid>/fd`. These hold secrets
   or another process's descriptors, so a rule proposed for a read there names only the file read.
-  A directory below one still folds, as `/etc/ssl/**`. The directories above one do not either,
-  as folding one would hide the directory inside it: `/proc/<pid>/task` and
-  `/proc/<pid>/task/<tid>` stay unfolded, so another process's thread files show a row each, as
-  its own files do under `/proc/<pid>`.
-- `/usr/local` and the tool cache, `$RUNNER_TOOL_CACHE`, where a `dir/**` rule would take a read
-  or write of anything installed there, and the directories above them, such as `/usr`. What lies
-  below them still folds, as `/usr/lib/**`.
-- A program run, a path containing `..`, which may lead elsewhere through a symlink, a memfd,
-  `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`. A file a program loaded is not counted either.
+  A directory below one of them still folds, such as `/etc/ssl/**`. The directories above them do
+  not fold, since folding one would hide the directory inside it. So `/proc/<pid>/task` and
+  `/proc/<pid>/task/<tid>` stay unfolded, and another process's thread files show a row each, just
+  as its own files do under `/proc/<pid>`.
+- `/usr/local` and the tool cache (`$RUNNER_TOOL_CACHE`), where a `dir/**` rule would match a read
+  or write of anything installed there, and the directories above them, such as `/usr`. Other
+  directories below those still fold, such as `/usr/lib/**`.
+- A program run, a memfd, `$GITHUB_OUTPUT`, `$GITHUB_STEP_SUMMARY`, and a path containing `..`,
+  which may lead elsewhere through a symlink. A file a program loaded is not counted either.
 - In **Unexpected Accesses** and the proposed rules, a directory's own row kept only because a rule
   has to name it, as above: `./d`, `./d/a` and `./d/b` stay three rows.
 
-That changes once the accessed paths table or the details would pass 300 KB, more rows than anyone
-reads:
+That changes once the accessed paths table or the details would pass 300 KB:
 
-- Each of those directories folds once five entries directly under it are not themselves among
-  them. Those that are keep rows of their own: `/` folds into `/**`, but `/home/runner` still shows
-  its own rows.
-- Paths with `..` fold once five share what comes before their first `..`, into a row such as
-  `./a/../**`.
-- Memfds fold once there are five, into `memfd:**`: five of one program's in the table, of one
-  command's in the details.
+- Each directory named in the first three bullets above folds once it has five entries directly
+  under it that are not named there themselves. The named directories under it keep rows of their
+  own: `/` folds into `/**`, but `/home/runner` still shows its own rows.
+- Paths containing `..` fold once five of them share the part before their first `..`, into a row
+  such as `./a/../**`.
+- Memfds fold into `memfd:**` once there are five: five of one program in the table, or five of
+  one command in the details.
 - A program run, `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY` still never fold.
 
 ### What the summary leaves out
 
 - What any program does just to start: the shared libraries it loads, and its reads of them, of
-  `/etc/ld.so.cache` and of its own program file. Another program reading those files, as a
-  packaging tool reads a `.so`, is shown.
+  `/etc/ld.so.cache` and of its own program file. Another program reading those files, such
+  as a packaging tool reading a `.so`, is shown.
 - A pipe or a socket.
 - A refused system call that did not kill its program; see
   [Refused system calls](#refused-system-calls).
@@ -296,12 +317,13 @@ reads:
 ### Refused system calls
 
 A refused system call is one the sandbox's seccomp profile does not allow, such as `io_uring_setup`
-or `unshare`, which fails with `EPERM`. The artifact records each once per program a process runs,
-as a `syscall` line; the summary leaves it out, since many programs try a system call and carry on
-without it, as Node.js does with `io_uring_setup` each time it starts, and the sandbox refused it
-either way. A program that needs one, such as `bwrap` with `unshare`, fails instead, so when a step
-fails with `EPERM`, set `upload-filesystem-audit-artifact: true` and look for a `syscall` line in
-the artifact. One the profile allows only for some arguments, as `clone`, is not recorded even when
+or `unshare`, which fails with `EPERM`. The artifact records it as a `syscall` line, once for each
+process and program: a process records it again after it runs a new program. The summary leaves
+it out. Many programs try a system call and carry on without it, as Node.js does with
+`io_uring_setup` each time it starts, and the sandbox refused it either way. A program that needs
+one, such as `bwrap` with `unshare`, fails instead, so when a step fails with `EPERM`, set
+`upload-filesystem-audit-artifact: true` and look for a `syscall` line in the artifact. A system
+call the profile allows only for some arguments, such as `clone`, is not recorded even when
 refused, since the kernel's own `EPERM` for it would read the same.
 
 A program killed for a 32-bit system call is noted under the heading and shows in the details as
@@ -366,7 +388,7 @@ R read · W write · X exec · M move · L link · D delete · A attr · lowerca
 ```
 
 The baseline shows a new path or a new program. It cannot tell which code inside a program made an
-access: npm and a package's install script both run as `node`, so a rule for `node` takes either.
+access: npm and a package's install script both run as `node`, so a rule for `node` matches both.
 Like the audit itself, the rules never block an access. The
 [expected rules example](../.github/workflows/example-filesystem-audit-expected.yml) runs an npm
 install against a baseline.
@@ -403,7 +425,8 @@ install against a baseline.
    ```
 
    These match any Node version on x64 or arm64. A broad rule such as `~/**` also matches
-   what is worth seeing, such as `~/.ssh`, so widen no further than needed. Check what a proposed
+   accesses worth seeing, such as a read of `~/.ssh/id_rsa`, which then no longer shows as
+   unexpected, so widen no further than needed. Check what a proposed
    `dir/**` rule covers before adding it: where the files under it matter, find them in the
    artifact's `filesystem-audit.jsonl` and list them instead.
 
@@ -444,21 +467,24 @@ install against a baseline.
 
 4. Once the baseline holds steady, set `fail-on-unexpected-file-access: true` to fail the step on an
    access outside it. Keep `upload-filesystem-audit-artifact: true` while you want new rules
-   proposed: each run then uploads an artifact holding every path the step touched, and for a run
-   with an access outside the rules, it also holds the rules to add, as below. Drop the key when you
-   do not.
+   proposed: each run then uploads an artifact holding every path the step touched. For a run with
+   an access outside the rules, the artifact also holds the rules to add; see
+   [Keeping it up to date](#keeping-it-up-to-date). Once you no longer want rules proposed, remove
+   the key.
 
 ### Keeping it up to date
 
-A run with rules and `upload-filesystem-audit-artifact: true` proposes a file only when a recorded
-access fell outside them. It holds a rule for each access no rule matched, whether the rules are
-set under `with:` or in a config file, so it never repeats a rule you have. Review those rules: add
-the ones a change you know of explains, such as a dependency update, where the step keeps its
-rules, and look into the rest. Under `fail-on-unexpected-file-access`, a run that fails on an access
-the rules should have matched still proposes the file, so the rules can be fixed from it.
+A run with rules and `upload-filesystem-audit-artifact: true` writes
+`expected-filesystem-rules-to-add.txt` only when a recorded access fell outside the rules. The file
+holds a rule for each access no rule matched, whether the rules are set under `with:` or in a
+config file, so it never repeats a rule you have. Review those rules. Add the ones that a change you
+know of explains, such as a dependency update, to wherever the step keeps its rules (under `with:`
+or in its config file), and look into the rest. Under `fail-on-unexpected-file-access`, a run that
+fails on an access the rules should have matched still writes the file, so the rules can be fixed
+from it.
 
-Only the accesses no rule matched count toward a fold, so no `dir/**` row comes of paths
-your own rules already match. A proposed `dir/**` may cover one of your narrower rules; adding it
+Only the accesses no rule matched count toward a fold, so paths your own rules already match never
+produce a `dir/**` row. A proposed `dir/**` may cover one of your narrower rules; adding it
 leaves both, and you decide which to keep.
 
 A run where no recorded access fell outside the rules proposes no file, and its summary leaves out
@@ -468,32 +494,39 @@ either when the accesses touched too many distinct paths, when the file could no
 when the artifact could not be prepared or uploaded. The element then says so, and for each failure a
 warning gives the cause.
 
-The traffic report's **Switch to restrict mode** example stands for the whole step, with no
-`config-file`: the settings the step took from a config file are written under `with:`, so remove
-the step's `config-file` line when you paste it. It leaves out `expected-filesystem-rules`, which
-the summary's **Expected filesystem rules** element proposes, and where the step has rules, a
-comment says to add them back, under `with:` or in a config file. It also leaves out
-`upload-filesystem-audit-artifact`, which you add back to keep getting proposed rules, and adds
-`fail-on-unexpected-file-access: true` when the step set it.
+The traffic report's **Switch to restrict mode** example is a complete step definition with no
+`config-file`: the settings the step read from a config file are written under `with:`, so remove
+the step's `config-file` line when you paste it. For the audit, the example differs from the step
+in these ways:
+
+- It leaves out `expected-filesystem-rules`, which the summary's **Expected filesystem rules**
+  element proposes. Where the step has rules, a comment says to add them back, under `with:` or in
+  a config file.
+- It leaves out `upload-filesystem-audit-artifact`. Add it back to keep getting proposed rules.
+- It includes `fail-on-unexpected-file-access: true` when the step set it.
 
 ### What the summary shows
 
 - **Unexpected Accesses** takes the place of Accessed Paths, with the same columns, and is not
   folded; the artifact still has every access. Each row is one rule the proposed file adds.
 - **Unexpected access details**, folded after the table, lists the File access details rows of
-  those accesses, each with only the actions no rule took, and a directory row wherever the table
-  keeps one.
-- The verdict at the top of the traffic report counts the table's rows, or says there were too many
-  to list, and a warning says the same.
-- `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too, with the
-  verdict as a caution rather than a warning. It also fails the step when not every access could be
+  those accesses, each with only the actions no rule matched, and a directory row wherever the
+  table keeps one. Past 300 KB they fold more than the table does, as [Limits](#limits) says.
+- The verdict, the GitHub alert at the top of the traffic report that lists what needs a look,
+  counts the table's rows as `N unexpected file accesses`, or says there were too many to list. A
+  warning annotation says the same.
+- `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too. The
+  annotation is then an error, and the verdict lists the count as a caution, which makes it a
+  `CAUTION` alert rather than a `WARNING` one.
+- `fail-on-unexpected-file-access: true` also fails the step when not every access could be
   checked against the rules: when the recording could not be read or summarized, or misses some
-  accesses. The verdict then says `file access check incomplete`. Without rules, it counts every
-  access as unexpected, so a step that sets it and loses its rules fails rather than passing
-  unchecked. It needs `filesystem-audit: record`, and the step fails before it starts without it.
-  Skipped hooks do not fail it; see [Skipped hooks](#skipped-hooks).
+  accesses. The verdict then says `file access check incomplete`.
+- Without rules, `fail-on-unexpected-file-access: true` counts every access as unexpected, so a
+  step that sets it and loses its rules fails rather than passing unchecked. It needs
+  `filesystem-audit: record`; without that, the step fails before it starts. Skipped hooks do not
+  fail it; see [Skipped hooks](#skipped-hooks).
 - In the artifact, each line the rules were matched against carries `rule`, where the rule that
-  took it was written, or `unexpected`; see [Fields](#fields).
+  matched it was written, or `unexpected`; see [Fields](#fields).
 
 ### Rules
 
@@ -505,26 +538,32 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 
 - **Program**: the file the process runs, as the table names it. `*` alone is any program;
   otherwise wildcards work as in a path, so `*` stops at `/`. A process that ran nothing goes by
-  its own name, as the step's shell does as `bash`. Running a program is an `X` access of the
+  its own name, just as the step's shell goes by `bash`. Running a program is an `X` access of the
   program that ran it, as the table shows it: `bash X /usr/bin/curl`.
 - **Access**: the [flags](#flags); see [How rules match](#how-rules-match).
-- **Path**: as the table shows it, `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest
-  of the workspace, `~/` for `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without
-  its ` (deleted)`. A path in the working directory also matches under `$GITHUB_WORKSPACE/`, `~/` or
-  in full, from the directory as written or its real path. Steps in different directories can then
-  share a rule: under `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` takes `./dist/x`,
-  while `./web/dist/**` names `web/web/dist`, since `./` always starts at the working directory. A
-  name a command passed keeps its trailing `/` or `/.`, as `/missing/` for a failed
-  `rmdir /missing/`. `*` matches within one component of a path, and `**` across them, as a whole
-  component any number of them: `./dist/**` matches `./dist` and everything under it. Inside a
-  component, `**` still crosses them: `./dist/**.js` takes `./dist/a/b.js`, where `./dist/*.js`
-  would not. A `*` in a name shows as `\*`, which matches only a star. Regular expressions are not
-  supported.
-- **`/proc`**: `/proc/<pid>/` stands for the directory of any process, the one that made the access
-  included, `/proc/self/` for that one's alone, and `/proc/<pid>/task/<tid>/` for any of a
-  process's threads. A process the recording has no `nspid` for shows its own directory as
-  `/proc/<pid>/` too, which a `/proc/self/` rule does not take. `/proc/*/` would also match
-  `/proc/sys/` and every other entry in `/proc`.
+- **Path**: written as the table shows it.
+  - `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest of the workspace, `~/` for
+    `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without its ` (deleted)`.
+  - A path in the working directory also matches when written under `$GITHUB_WORKSPACE/` or `~/`,
+    or in full, from the directory as written or from its real path. Steps in different working
+    directories can then share a rule. Under `working-directory: web`,
+    `$GITHUB_WORKSPACE/web/dist/**` matches `./dist/x`, but `./web/dist/**` names `web/web/dist`,
+    since `./` always starts at the working directory.
+  - A name a command passed keeps its trailing `/` or `/.`, such as `/missing/` for a failed
+    `rmdir /missing/`.
+  - `*` matches within one component of a path. `**` as a whole component matches any number of
+    components, zero included: `./dist/**` matches `./dist` and everything under it. `**` inside a
+    component also matches across `/`: `./dist/**.js` matches `./dist/a/b.js`, where `./dist/*.js`
+    would not.
+  - A `*` in a name shows as `\*`, which matches only a star. Regular expressions are not
+    supported.
+- **`/proc`**: `/proc/<pid>/` stands for the directory of any process, including the one that made
+  the access. `/proc/self/` stands for the directory of the process that made the access only, and
+  `/proc/<pid>/task/<tid>/` for any of a process's threads. The recording knows which directory is
+  a process's own from its PID inside the sandbox (`nspid` in [the artifact](#fields)). A process
+  the recording has no `nspid` for shows its own directory as `/proc/<pid>/` too, which a
+  `/proc/self/` rule does not match. `/proc/*/` would also match `/proc/sys/` and every other entry
+  in `/proc`.
 - Fields are separated by spaces or tabs. A field holding a space, an empty one, and one starting
   with `#` are quoted, `"./my file"`, except `memfd:"name"`, which is quoted already. Names are
   written with the escapes the summary shows, `\"` and `\\` included, and are matched as the summary
@@ -539,16 +578,17 @@ other than three fields, a quote not closed or not ending its field, an access o
 an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component between
 two slashes in a path (`a//b`, `a/./b`, `a//`), or a number or `thread-self` in a `/proc` path.
 `<where>` is `input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of
-the config file, or `config` where YAML may have joined the value's lines, as outside a `|` block.
+the config file, or `config` where YAML may have joined the value's lines, such as outside a `|`
+block.
 The summary drops those components from a name a command passed, so a failed `rmdir /missing//`
 is written `/missing/`.
 
 ### How rules match
 
-- `R` takes a read whether it succeeded or failed, as a file that was missing matters less than one
-  that was read; `r` takes only a failed read.
-- `r!` takes a refused read and a failed one, as the table shows both as `r!`; `R` and `r` never
-  take a refusal, so write `Rr!` to expect one beside the reads.
+- `R` matches a read whether it succeeded or failed: a rule that expects a file to be read also
+  covers the lesser case of the file being missing. `r` matches only a failed read.
+- `r!` matches a refused read and a failed one, since a row with both shows only `r!`. `R` and `r`
+  never match a refusal, so write `Rr!` to expect a refusal beside the reads.
 - An access that only ever failed is unexpected once it succeeds, and one the sandbox refused is
   unexpected unless a rule names the refusal.
 - Rules match the accesses the accessed paths table counts: a library a program loads, the step's
@@ -615,12 +655,17 @@ The summary can also open with a warning, or be missing:
   at once can cause it.
 - **❗ This record is incomplete, with the error
   `The filesystem audit tracer did not finish its record`.** The step fails, in `audit` too. The
-  record has no [end line](#the-end-line). Either the tracer exited before the step ended, or did
-  not finish the record when the step stopped it, with a reason on a `filesystem-audit: fatal:`
-  line in the step log, such as one ending in `no space left on device` once the step filled the
-  disk. Or it wrote every access but could not count what it lost, with the reason on a
-  `filesystem-audit: read loss counters:` line in the log's `buildcage: filesystem audit totals`
-  group. A cancelled step does not add this error.
+  record has no [end line](#the-end-line), for one of these reasons:
+  - The tracer exited before the step ended.
+  - The tracer did not finish the record when the step stopped it.
+  - The tracer wrote every access but could not count what it lost. The reason is on a
+    `filesystem-audit: read loss counters:` line in the log's `buildcage: filesystem audit totals`
+    group.
+
+  For the first two, any reason the tracer gave is on a `filesystem-audit: fatal:` line in the
+  step log, such as one ending in `no space left on device` once the step filled the disk. A
+  cancelled step does not add this error.
+
 - **❗ The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so
   some accesses may be missing; see [Skipped hooks](#skipped-hooks).
 - **❗ The recording could not be read**, with a `Failed to read the filesystem audit recording`
@@ -667,13 +712,13 @@ where the kernel offers that mode.
   a failed `O_PATH` open is recorded as a failed read.
 - Work handed to a process outside the sandbox, such as an `ssh-agent` or `gpg-agent` reached over a
   socket.
-- An inode flag change through `ioctl`, as `chattr` makes, an extended attribute change other than
-  through `setxattr`, `lsetxattr` or `fsetxattr`, a failed `exec` or `mmap`, a `mkdir`, `mknod`,
-  `symlink` or `link` on a name already there (`EEXIST`), as `mkdir -p` meets at every level it
-  keeps, and one made by `bind(2)` that the kernel refuses before reaching its file. A failed `exec`
-  can still show the file it opened as an `open` with `x`.
-- An `open` refused before the kernel looked its name up, as one a seccomp filter stopped or one
-  with no free descriptor, unless it failed with `ENAMETOOLONG`.
+- An inode flag change through `ioctl`, such as one `chattr` makes, an extended attribute change
+  other than through `setxattr`, `lsetxattr` or `fsetxattr`, a failed `exec` or `mmap`, a `mkdir`,
+  `mknod`, `symlink` or `link` on a name already there (`EEXIST`), which `mkdir -p` meets at every
+  level that already exists, and one made by `bind(2)` that the kernel refuses before reaching its
+  file. A failed `exec` can still show the file it opened as an `open` with `x`.
+- An `open` refused before the kernel looked its name up, such as one a seccomp filter stopped or
+  one with no free descriptor, unless it failed with `ENAMETOOLONG`.
 - A call through a descriptor that the kernel refused before reaching its file, unless the
   descriptor is still open on a regular file or a directory when the call returns.
 - The sandbox's own setup, and the step's shell reading its script, unless the record is
@@ -689,8 +734,8 @@ the refusal is recorded as a `syscall`.
 
 ## What the step can do to the record
 
-The audit never blocks an access, so it is a visibility aid, not a control, and the step it watches
-can act on the record in the ways below.
+The audit never blocks an access. It only records what the step did, and the step it watches can
+act on that record in the ways below.
 
 **Altering the record.** The tracer runs as root on the runner host, outside the sandbox, and is
 watching the sandbox's cgroup before the step starts. It writes under `/var/tmp/buildcage-<uid>`,
@@ -708,31 +753,41 @@ the same user outside any sandbox can, as can a job sharing the machine and the 
 read the repository until it expires. It leaves out each program's arguments, but not the names
 commands pass for files: a secret a command tries to open, or uses as a symlink's target, is kept.
 
-**Falsifying what it says.** A successful access and a program the step ran are recorded with the
-path the kernel resolved. A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate
-counts as done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed
-record means only that the call returned an error: the step can install its own seccomp filter to
-fail a call before the kernel looks at the file. An open refused after the kernel reached its file
-is recorded as failed with the path it resolved. Any other failed call, and an attribute change
-through `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under
-the name the command passed, joined to its working directory or directory descriptor without
-resolving `..`; the artifact keeps that name as `name` where it differs from `path`. These names are
-best-effort: they are read from the command's memory when the call returns, so another thread can
-rewrite one first, or change directory so that a relative one is joined to another, and a process
-tracing the command can change the call's arguments. A failed open's flags are read the same way,
-but its name is the kernel's copy, unless the kernel refused the name as too long, when it is read
-like the others; rewriting the command's own copy can only leave a relative name without its
-directory. A change through a descriptor alone that fails before the kernel reaches its file,
-as `fchmod` on a read-only mount, and an `fsetxattr`, are recorded under the file the descriptor
-held when the call returned. Another thread can swap the descriptor first for another file, or close
-it or swap it for a pipe, which leaves no record. A path too deep to record in full is shown cut,
-with `…/`. A failed open's name too long to record in full is shown cut at its end, with `…`. A
-row's command name is the one the process gave itself, not a thread's, so it says which process
-acted, not which binary, and a process named `run-script.sh` is shown as the step's shell, `bash`. A
-memfd's name is whatever its creator chose, so it is quoted after `memfd:` and never reads as a
-path. A control, format, separator, invisible or blank character, a space at either end, a quote, a
-backslash or a byte that is not UTF-8 in a name is shown escaped, and the details quote a name
-holding a space, so no name can rewrite the Job Summary or pass for another.
+**Falsifying what it says.** What the record shows depends on whether the call succeeded and on how
+the tracer learned the name:
+
+- **Successful accesses.** A successful access and a program the step ran are recorded with the
+  path the kernel resolved.
+- **Failed calls.** A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate counts as
+  done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed record
+  means only that the call returned an error: the step can install its own seccomp filter to fail a
+  call before the kernel looks at the file. An open refused after the kernel reached its file is
+  recorded as failed with the path it resolved.
+- **Names the command passed.** Any other failed call, and an attribute change through
+  `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the
+  name the command passed, joined to its working directory or directory descriptor without
+  resolving `..`. The artifact keeps that name as `name` where it differs from `path`. These names
+  are best-effort, since they are read from the command's memory when the call returns. Before
+  that, another thread can rewrite one, or change directory so that a relative one is joined to
+  another, and a process tracing the command can change the call's arguments.
+- **Failed opens.** A failed open's flags are read the same way, but its name is the kernel's copy.
+  Only when the kernel refused the name as too long is it read like the others. Rewriting the
+  command's own copy can only leave a relative name without its directory.
+- **Descriptors.** A change through a descriptor alone that fails before the kernel reaches its
+  file, such as `fchmod` on a read-only mount, and an `fsetxattr`, are recorded under the file the
+  descriptor held when the call returned. Before that, another thread can swap the descriptor for
+  another file, or close it or swap it for a pipe, which leaves no record.
+- **Cut names.** A path too deep to record in full is shown cut, with `…/`. A failed open's name too
+  long to record in full is shown cut at its end, with `…`.
+- **Command names.** A row's command name is the one the process gave itself, not a thread's, so it
+  says which process acted, not which binary. The step's shell runs a script named `run-script.sh`
+  and is shown as `bash`, so any other process that gives itself the name `run-script.sh` is shown
+  as `bash` too.
+- **Escaping.** A memfd's name is whatever its creator chose, so it is quoted after `memfd:` and
+  never reads as a path. A control, format, separator, invisible or blank character, a space at
+  either end, a quote, a backslash or a byte that is not UTF-8 in a name is shown escaped, and the
+  details quote a name holding a space, so no name can rewrite the Job Summary, and a character that
+  does not show cannot make one name read as another.
 
 On a kernel that [skips the tracer's hooks](#skipped-hooks), a skipped hook drops the access it was
 following rather than report it against the wrong call, except that an open may carry an earlier
@@ -754,15 +809,15 @@ spells a path. Besides what [What it does not record](#what-it-does-not-record) 
   does only for a setuid program when `suid_dumpable` is 2. Setting `core_pattern` needs host
   privilege, but a relative one, as the default `core` is, puts the file in the crashing process's
   working directory, which the step chooses.
-- Flood the tracer until its buffers fill. What did not fit is lost, but the summary then says the
-  record is incomplete. Flooding can hide which accesses happened, not that some are missing.
+- Flood the tracer until its buffers fill. What did not fit is lost. The summary then says the
+  record is incomplete, so a reader learns that accesses are missing, though not which ones.
 - Touch more paths than the Job Summary has room for; [Limits](#limits) says what is kept. Every
   access stays in the artifact when one was uploaded.
 
-Where the tracer cannot start or cannot attach a probe the kernel offers, for want of cgroup v2, BTF
-or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep a partial
-record. A tracer that exits during the step, as one does when the step fills the disk it writes to,
-also fails the step, after the command, with the record cut where it stopped.
+Where the tracer cannot start or cannot attach a probe the kernel offers, because the host lacks
+cgroup v2, BTF or Linux 6.1 (6.4 on arm64), the step fails before the command runs rather than keep
+a partial record. A tracer that exits during the step, which happens when the step fills the disk
+it writes to, also fails the step, after the command, with the record cut where it stopped.
 
 ## Limits
 
@@ -843,8 +898,8 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `syscall`    | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
 | `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
 | `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
-| `rule`       | a line the rules took, with `expected-filesystem-rules`         | where the rule that took it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined the value's lines, as outside a `\|` block |
-| `unexpected` | a line the rules did not take, with `expected-filesystem-rules` | some access of the line, such as one side of a link or of a rename, no rule took                                                                                                                           |
+| `rule`       | a line a rule matched, when `expected-filesystem-rules` is set  | where the rule that matched it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined its lines, such as outside a `\|` block |
+| `unexpected` | a line no rule matched, when `expected-filesystem-rules` is set | some access of the line, such as one side of a link or of a rename, that no rule matched                                                                                                                   |
 
 A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted`, `exchange`
 and `unexpected` are absent rather than `false`. Without `expected-filesystem-rules`, no line has
@@ -914,7 +969,8 @@ The last line is the end line, such as
 tracer caught, and left out when it could not read these counts:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
-- `untracked` counts calls it could not follow, as when too many files were open at once or a name
-  could not be read, and calls whose return it never saw, as one still waiting when it stopped.
+- `untracked` counts calls it could not follow, such as when too many files were open at once or a
+  name could not be read, and calls whose return it never saw, such as one still waiting when it
+  stopped.
 - `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).
