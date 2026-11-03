@@ -265,12 +265,6 @@ if wait_for_step_marker writer.ready; then
   else
     fail "could not kill the resolver's s6-log in the proxy container"
   fi
-  # s6-supervise holds off a restart for up to a second.
-  for _ in $(seq 1 20); do
-    starts=$(docker exec "$CONTAINER" sh -c 'wc -l < /var/run/coredns-log/starts')
-    [ "${starts// /}" = "2" ] && break
-    sleep 0.5
-  done
 else
   fail "the command never started"
   cat "$STEP_PREFIX.log"

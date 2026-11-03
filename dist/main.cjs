@@ -71957,8 +71957,8 @@ function reduceTimeline(timeline, knownBlockedRules) {
 		blockedCount: blockedEvents.length
 	};
 }
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered, resolverLogStarts }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy), resolverLog = resolverLogStarts === void 0 ? void 0 : resolverLogStarts - 1;
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered, resolverLogDeaths: resolverLog }) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy);
 	return {
 		engine,
 		parameters,
@@ -77236,15 +77236,6 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 	};
 }
 //#endregion
-//#region src/core/lib/docker/start-ledger.ts
-function readStartLedger(docker, containerId, path) {
-	try {
-		return docker.exec(containerId, ["cat", path]).split("\n").length - 1 || void 0;
-	} catch {
-		return;
-	}
-}
-//#endregion
 //#region src/core/lib/docker/proxy-dropped-logs.ts
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
 	"i=0",
@@ -77292,7 +77283,7 @@ function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.rando
 	} : {
 		answered: !0,
 		count: caughtUp ? parseDroppedLogs(metrics) : void 0,
-		logConnections: readStartLedger(docker, containerId, "/var/run/haproxy-log/connections")
+		logConnections: readLogConnections(docker, containerId)
 	};
 }
 function readProxyAnswered(docker, containerId) {
@@ -77313,8 +77304,19 @@ function readMetrics(docker, containerId) {
 		return;
 	}
 }
-function readResolverLogStarts(docker, containerId) {
-	return readStartLedger(docker, containerId, "/var/run/coredns-log/starts");
+function readLogConnections(docker, containerId) {
+	try {
+		return docker.exec(containerId, ["cat", "/var/run/haproxy-log/connections"]).split("\n").length - 1 || void 0;
+	} catch {
+		return;
+	}
+}
+function readResolverLogDeaths(docker, containerId) {
+	try {
+		return docker.exec(containerId, ["s6-svdt", "/run/service/coredns-log"]).split("\n").length - 1;
+	} catch {
+		return;
+	}
 }
 function readResolverAnswered(docker, containerId) {
 	try {
@@ -77660,7 +77662,7 @@ function readHealth(docker, containerName) {
 	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
 		resolverAnswered: readResolverAnswered(docker, containerName),
-		resolverLogStarts: readResolverLogStarts(docker, containerName)
+		resolverLogDeaths: readResolverLogDeaths(docker, containerName)
 	};
 }
 function servicesAnswered(health) {
