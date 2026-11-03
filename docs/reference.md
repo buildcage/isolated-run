@@ -544,6 +544,7 @@ record when:
 - the proxy lost lines it could not write
 - the proxy or the resolver restarted during the step, since a connection still open when the proxy
   stopped never gets its line
+- the proxy's log writer restarted during the step, losing the lines it had not yet written
 
 In `audit` mode, or with `fail-on-blocked: false`, an incomplete report is a notice instead.
 

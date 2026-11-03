@@ -36,11 +36,17 @@ describe("readReport", () => {
   const gone = () => {
     throw new Error("container is not running");
   };
+  /** A log read that fails as `fail` does, once it is iterated. */
+  const unreadable = (fail: () => never): Docker["execLines"] =>
+    // eslint-disable-next-line require-yield
+    async function* () {
+      fail();
+    };
 
   it.each(["inspect", "universal"] as const)(
     "names a stopped container when neither the logs nor the services answer (%s)",
     async (engine) => {
-      const stopped = { exec: vi.fn(gone) } as unknown as Docker;
+      const stopped = { exec: vi.fn(gone), execLines: unreadable(gone) } as unknown as Docker;
 
       const result = readReport(stopped, containerName, reportParams(), engine);
 
@@ -58,7 +64,12 @@ describe("readReport", () => {
     });
 
     await expect(
-      readReport({ exec } as unknown as Docker, containerName, reportParams(), "inspect"),
+      readReport(
+        { exec, execLines: unreadable(gone) } as unknown as Docker,
+        containerName,
+        reportParams(),
+        "inspect",
+      ),
     ).rejects.toThrow(ProxyStoppedError);
   });
 
@@ -71,24 +82,34 @@ describe("readReport", () => {
     });
 
     await expect(
-      readReport({ exec } as unknown as Docker, containerName, reportParams(), "inspect"),
+      readReport(
+        { exec, execLines: unreadable(gone) } as unknown as Docker,
+        containerName,
+        reportParams(),
+        "inspect",
+      ),
     ).rejects.toThrow(ProxyStoppedError);
   });
 
   it("passes the read error on as it is while both services answer", async () => {
     const exec = vi.fn((_id: string, args: string[]) => {
       if (args[0] === "curl") return "haproxy_process_dropped_logs_total 0\n";
-      throw new Error("ls failed");
+      return gone();
     });
 
     const result = readReport(
-      { exec } as unknown as Docker,
+      {
+        exec,
+        execLines: unreadable(() => {
+          throw new Error("read failed");
+        }),
+      } as unknown as Docker,
       containerName,
       reportParams(),
       "inspect",
     );
 
-    await expect(result).rejects.toThrow("ls failed");
+    await expect(result).rejects.toThrow("read failed");
     await expect(result).rejects.not.toThrow(ProxyStoppedError);
   });
 });
