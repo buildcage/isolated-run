@@ -500,7 +500,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const parts = components(x.path);
       const by = runner?.program ?? programOf(r.pid, r.comm ?? "");
       const cmd = runner?.cmd ?? x.comm;
-      paths.add({ ...x, comm: String(by), cmd }, parts);
+      // Under rules the unexpected table stands in for these.
+      if (!prefixes.rules) paths.add({ ...x, comm: String(by), cmd }, parts);
       const left = tally ? takeForRules(x, parts, by, cmd) : x.bit;
       // A run is the command's that started it, as in the table.
       if (left) details.add({ ...x, comm: cmd, bit: left }, parts);

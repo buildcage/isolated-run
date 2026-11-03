@@ -1,5 +1,5 @@
 import { apply, flagBits, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
-import { components, isRunnerFile, MEMFD, MEMFDS, spell, unfoldable } from "./paths.ts";
+import { components, DELETED, isRunnerFile, MEMFD, MEMFDS, spell, unfoldable } from "./paths.ts";
 import { BIT } from "./record.ts";
 
 /**
@@ -11,10 +11,26 @@ const LOOSE_FANOUT = 5;
 /** The line that stands for everything at and below `path`. */
 const starred = (path: string): string => (path === "/" ? "/**" : `${path}/**`);
 
+/** Whether `name` is a deleted file whose live namesake is also in `kids`. */
+const twin = (kids: Map<string, Node>, name: string): boolean =>
+  name.endsWith(DELETED) && kids.has(name.slice(0, -DELETED.length));
+
+/** Whether a new child `name` would be another of `kids`, not a twin of one. */
+const another = (kids: Map<string, Node>, name: string): boolean =>
+  !twin(kids, name) && !kids.has(name + DELETED);
+
+// A deleted file and the live one of its name are one child, as the rule
+// table counts them.
+const childCount = (kids: Map<string, Node>): number => {
+  let n = 0;
+  for (const name of kids.keys()) if (!twin(kids, name)) n++;
+  return n;
+};
+
 // A kept directory's children that a loose fold takes in.
 const looseKids = (node: Node): number => {
   let n = 0;
-  for (const kid of node.kids?.values() ?? []) if (!kid.kept) n++;
+  for (const [name, kid] of node.kids ?? []) if (!kid.kept && !twin(node.kids!, name)) n++;
   return n;
 };
 
@@ -125,7 +141,7 @@ function* treeLines(
     // Its own line counts toward a fold too, unless it is only a walk, even
     // where showWalked prints it. Whether that line prints can change until
     // every access is in, so this fold waits for them.
-    if (kids?.size && !kept && kids.size + (ownLine ? 1 : 0) >= fanout) {
+    if (kids?.size && !kept && childCount(kids) + (ownLine ? 1 : 0) >= fanout) {
       yield [starred(pathTo(e)), treeAgg(e.node)];
       continue;
     }
@@ -265,10 +281,11 @@ export class Lines {
         kids.set(parts[i], node);
         this.nodes++;
         if (parent) {
-          // No longer a leaf, its own line may be only the walk to this one.
+          // No longer a leaf, its own line may be only the walk to this one,
+          // which prints only where walked rows do.
           // A kept directory folded loose keeps the bytes of its "dir/**" line.
-          if (!parent.folded) this.setBytes(parent, 0);
-          if (!parent.kept && kids.size >= this.opts.fanout) {
+          if (!parent.folded && !this.opts.showWalked) this.setBytes(parent, 0);
+          if (!parent.kept && childCount(kids) >= this.opts.fanout) {
             this.fold(parent);
             return this.addFolded(parent, parts.slice(0, i), x, parentSettled);
           }
@@ -294,7 +311,7 @@ export class Lines {
         const shown = flagBits(node.own) !== 0;
         apply(node.own, x);
         // A kept directory folded loose has its "dir/**" line counted already.
-        if (settled && !shown && flagBits(node.own) && !node.kids?.size)
+        if (settled && !shown && flagBits(node.own) && (!node.kids?.size || this.opts.showWalked))
           this.setBytes(node, node.bytes + this.opts.rowBytes(x.path, x.comm));
         return;
       }
@@ -315,8 +332,9 @@ export class Lines {
     i: number,
   ): boolean {
     if (!parent) return false;
-    if (!parent.kept) return kids.size + 1 >= this.opts.fanout;
-    return !this.isKept(parts, i + 1) && looseKids(parent) + 1 >= LOOSE_FANOUT;
+    const added = another(kids, parts[i]) ? 1 : 0;
+    if (!parent.kept) return childCount(kids) + added >= this.opts.fanout;
+    return !this.isKept(parts, i + 1) && looseKids(parent) + added >= LOOSE_FANOUT;
   }
 
   // A kept directory's ancestors are kept too, or folding one would hide it.

@@ -251,7 +251,8 @@ each has rows of its own.
   rules keep it, as a rule has to name it to take that access.
 
 **Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
-command's paths on their own, so they often name it; the artifact always does.
+command's paths on their own, so they often name it; the artifact always does. A file shown
+`(deleted)` and the file of the same name count as one of the three.
 
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
@@ -482,7 +483,7 @@ comment says to add them back, under `with:` or in a config file. It also leaves
   folded; the artifact still has every access. Each row is one rule the proposed file adds.
 - **Unexpected access details**, folded after the table, lists the File access details rows of
   those accesses, each with only the actions no rule took, and a directory row wherever the table
-  keeps one.
+  keeps one. Past 300 KB they fold more than the table does, as [Limits](#limits) says.
 - The verdict at the top of the traffic report counts the table's rows, or says there were too many
   to list, and a warning says the same.
 - `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too, with the

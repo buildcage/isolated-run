@@ -551,6 +551,42 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
   it("prints no details where a note takes the place of the table", () => {
     expect(renderGiven({ ...strays(undefined), proposedCut: true })).not.toContain("<details>");
   });
+
+  const stray = {
+    program: { path: "/bin/cat" },
+    commands: ["cat"],
+    flags: "W",
+    path: { path: "./b" },
+  };
+
+  it("titles the details as unexpected under fail-on-unexpected-file-access with no rules", () => {
+    const md = joinSummaryBlocks(
+      renderAuditSummaryBlocks(strays([stray]), {
+        title: "T",
+        startedAt: undefined,
+        priorities: FILESYSTEM_PRIORITIES,
+        cutNote: () => "",
+        expected: "empty",
+      }),
+    );
+    expect(md).toContain("<summary>🔍 Unexpected access details</summary>");
+  });
+
+  it("puts the cut note in place of details given up beside the table", () => {
+    const md = joinSummaryBlocks(
+      renderAuditSummaryBlocks(
+        { ...strays([stray]), details: undefined, detailsCut: "paths" },
+        {
+          title: "T",
+          startedAt: undefined,
+          priorities: FILESYSTEM_PRIORITIES,
+          cutNote: (cause) => `cut: ${cause}\n`,
+          expected: "given",
+        },
+      ),
+    );
+    expect(md).toContain("<summary>🔍 Unexpected access details</summary>\n\ncut: paths\n");
+  });
 });
 
 describe("renderAuditSummaryBlocks: layout", () => {
