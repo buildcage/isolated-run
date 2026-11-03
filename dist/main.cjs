@@ -77262,33 +77262,7 @@ function readResolverAnswered(docker, containerId) {
 }
 //#endregion
 //#region src/core/lib/docker/rotated-log.ts
-const READ_SCRIPT = [
-	"cd \"$1\" || exit 1",
-	"i=0",
-	"until command exec 3<current; do",
-	"  i=$((i + 1))",
-	"  if [ $i -ge 10 ]; then exec 3</dev/null; break; fi",
-	"  sleep 0.1",
-	"done 2>/dev/null",
-	"last=$(stat -L -c %d:%i /proc/self/fd/3)",
-	"seen=\" \"",
-	"more=1",
-	"while [ $more = 1 ]; do",
-	"  more=0",
-	"  for f in @????????????????????????.? previous; do",
-	"    [ -e \"$f\" ] || continue",
-	"    if ! command exec 4<\"$f\"; then more=1; continue; fi 2>/dev/null",
-	"    id=$(stat -L -c %d:%i /proc/self/fd/4)",
-	"    [ \"$id\" = \"$last\" ] && break",
-	"    case $seen in *\" $id \"*) continue ;; esac",
-	"    seen=\"$seen$id \"",
-	"    cat <&4",
-	"    more=1",
-	"  done",
-	"done",
-	"exec 4<&-",
-	"cat <&3"
-].join("\n");
+const READ_SCRIPT = "cd \"$1\" || exit 1,i=0,until command exec 3<current; do,  i=$((i + 1)),  if [ $i -ge 10 ]; then exec 3</dev/null; break; fi,  sleep 0.1,done 2>/dev/null,last=$(stat -L -c %d:%i /proc/self/fd/3),[ -n \"$last\" ] || exit 1,seen=\" \",listed=,while :; do,  now=$(ls -d @????????????????????????.? previous 2>/dev/null),  [ \"$now\" = \"$listed\" ] && break,  listed=$now,  for f in $now; do,    command exec 4<\"$f\" 2>/dev/null || continue,    id=$(stat -L -c %d:%i /proc/self/fd/4),    [ -n \"$id\" ] || exit 1,    [ \"$id\" = \"$last\" ] && break,    case $seen in *\" $id \"*) continue ;; esac,    seen=\"$seen$id \",    cat <&4 || exit 1,    [ -z \"$(tail -c 1 /proc/self/fd/4)\" ] || echo,  done,done,exec 4<&-,cat <&3".split(",").join("\n");
 function readRotatedLog(docker, containerId, dir) {
 	return docker.execLines(containerId, [
 		"sh",
