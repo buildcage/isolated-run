@@ -89,7 +89,7 @@ describe("readReport", () => {
         "inspect",
       ),
     ).rejects.toThrow(ProxyStoppedError);
-    // Asked again without a second barrier, which a hung proxy would sit out.
+    // Asked again without a second barrier, which would wait on a hung proxy.
     expect(exec.mock.calls.filter(([, args]) => args[0] === "sh").length).toBe(1);
   });
 
