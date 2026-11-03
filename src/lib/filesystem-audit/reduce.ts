@@ -210,8 +210,8 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
-  // The working directory, the workspace and $HOME by their real paths, where
-  // canonical puts every path, escaped.
+  // The escaped real paths of the working directory, the workspace and $HOME,
+  // where canonical moves the paths they hold.
   const real = (spellings: string[]): string[] => spellings.slice(-1).map(escapePath);
   const shownPrefixes = {
     ...(prefixes.cwd && { cwd: real(prefixes.cwd) }),
