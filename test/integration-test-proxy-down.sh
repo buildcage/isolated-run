@@ -231,7 +231,7 @@ if [ "$FAILURES" -gt "$FAILURES_BEFORE" ]; then
 fi
 
 echo ""
-echo "--- the proxy's log writer killed ---"
+echo "--- the log writers killed ---"
 # haproxy hands its next line to a new s6-log, and nothing in the log itself
 # shows the lines the killed one had not written.
 FAILURES_BEFORE=$FAILURES
@@ -258,6 +258,19 @@ if wait_for_step_marker writer.ready; then
   else
     fail "could not kill the proxy's s6-log in the proxy container"
   fi
+  # CoreDNS keeps writing into the pipe the new s6-log reads, so nothing in the
+  # resolver's log shows the lines the killed one had not written either.
+  if docker exec "$CONTAINER" pkill -KILL -f "s6-log .*/var/log/coredns"; then
+    pass "the resolver's s6-log killed in the proxy container"
+  else
+    fail "could not kill the resolver's s6-log in the proxy container"
+  fi
+  # s6-supervise holds off a restart for up to a second.
+  for _ in $(seq 1 20); do
+    starts=$(docker exec "$CONTAINER" sh -c 'wc -l < /var/run/coredns-log/starts')
+    [ "${starts// /}" = "2" ] && break
+    sleep 0.5
+  done
 else
   fail "the command never started"
   cat "$STEP_PREFIX.log"
@@ -270,7 +283,7 @@ if wait_step_gone "$STEP_END_TIMEOUT"; then
   STEP_EXIT=$?
   STEP_PID=""
 else
-  fail "the step did not end within ${STEP_END_TIMEOUT}s of the log writer dying"
+  fail "the step did not end within ${STEP_END_TIMEOUT}s of the log writers dying"
   stop_step
   STEP_EXIT="timeout"
 fi
@@ -278,6 +291,8 @@ fi
 check_status "the step passed with fail-on-blocked: false" "$STEP_EXIT" 0
 assert_file_has "$STEP_PREFIX.log" "the step's notice counts the log writer's restart" \
   "The proxy's log writer restarted 1 time"
+assert_file_has "$STEP_PREFIX.log" "the step's notice counts the resolver's log writer's restart" \
+  "The DNS resolver's log writer restarted 1 time"
 SUMMARY=$(cat "$STEP_PREFIX.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
 
