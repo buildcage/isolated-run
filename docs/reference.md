@@ -1007,8 +1007,8 @@ use an expression such as `${{ runner.temp }}` instead. A `..` may only start th
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
   `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`.
-- The directory's symlinks are resolved once, before the step does anything else, and the command
-  and every relative path start from where they lead, as after `cd -P`. With `current` linking to
+- The directory's symlinks are resolved once, when the step starts, and the command and every
+  relative path start from where they lead, as after `cd -P`. With `current` linking to
   `releases/v2`, `working-directory: current` starts the command in `releases/v2`,
   `write-through: dist` is `releases/v2/dist`, and `write-through: ../out` and
   `config-file: ../x.yml` are in `releases`, where the command's own `cd ..` goes.
@@ -1020,7 +1020,8 @@ use an expression such as `${{ runner.temp }}` instead. A `..` may only start th
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.
-- `PWD` is set to the directory's real path, symlinks resolved.
+- `PWD` is the directory's real path. Without `working-directory` it is the workspace's real path,
+  which differs from `$GITHUB_WORKSPACE` when that goes through a symlink.
 
 ## CA trust variables
 

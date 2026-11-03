@@ -110,14 +110,13 @@ else
   fail "expected PWD $REAL_OUTSIDE/releases/v2, got $(cat "$OUTSIDE/releases/out/pwd-env" 2>/dev/null)"
 fi
 
-ln -s releases/v2 "$WORKDIR/current"
-step dotdot INPUT_WORKING_DIRECTORY="current/.." INPUT_RUN="touch \"$WORKDIR/dotdot-ran\""
+step dotdot INPUT_WORKING_DIRECTORY="$OUTSIDE/current/.." INPUT_RUN="touch \"$WORKDIR/dotdot-ran\""
 CODE=$?
 if [ "$CODE" != "0" ] && [ ! -e "$WORKDIR/dotdot-ran" ] &&
-  grep -q 'working-directory "current/.." has a ".." after its start' "$WORKDIR/dotdot.log"; then
+  grep -qF "working-directory \"$OUTSIDE/current/..\" has a \"..\" after its start" "$WORKDIR/dotdot.log"; then
   pass "a .. after the start of working-directory fails the step"
 else
-  fail "expected working-directory: current/.. to be refused (exit $CODE)"
+  fail "expected working-directory: $OUTSIDE/current/.. to be refused (exit $CODE)"
   cat "$WORKDIR/dotdot.log"
 fi
 

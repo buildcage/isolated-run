@@ -67,7 +67,7 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
-  /** What `./` stands for, as workingDirectoryOf spells it: the workspace when absent. */
+  /** What `./` stands for, the working directory's real path: the workspace when absent. */
   workingDirectory?: string;
   /** The runner files the command wrote through backing copies. */
   mediated: readonly MediatedVariable[];
