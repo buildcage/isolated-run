@@ -231,7 +231,9 @@ only whole-line `#` comments, since a path may contain a `#`.
 ### Operation modes
 
 `proxy-mode: audit` logs every destination the command reaches and enforces none of the rules. It
-still blocks a malformed request and a name that resolves to cloud metadata or the runner itself.
+still blocks what no rule could allow, such as a malformed request or a name that resolves to an
+internal address like cloud metadata or the runner itself, and under `inspect` an origin whose
+certificate fails verification.
 `restrict`, the default, allows only what the rules match and blocks and logs everything else. Start
 with `audit` when you first adopt Buildcage or when a dependency changes, and keep `restrict` for
 everyday runs.

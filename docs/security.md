@@ -698,9 +698,10 @@ sandbox itself:
 ## Hardening
 
 Buildcage runs against the command you already have, and an allowlist generated from an audit run
-already blocks every destination the audit did not record. Going further is about shrinking the set
-of services that stay reachable, which is the [structural limit](#threat-model) above. Weigh what
-follows against what the step has access to.
+already blocks every host the audit did not record, apart from what the `allowed-tls-rules` and
+`allowed-ip-rules` it carries over from the audit run's own inputs admit. Going further is about
+shrinking the set of services that stay reachable, which is the [structural limit](#threat-model)
+above. Weigh what follows against what the step has access to.
 
 ### Keep each rule as narrow as it can be
 
