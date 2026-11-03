@@ -64,6 +64,7 @@ import {
   type FilesystemAuditPaths,
 } from "./sandbox/filesystem-audit-paths.ts";
 import {
+  readHostMounts,
   resolveFilesystemPlan,
   resolveWriteThroughInput,
   validateFilesystemInputs,
@@ -85,7 +86,6 @@ import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
 import {
-  assertOverlayShows,
   assertSandboxUserCanSearch,
   assertSandboxWillShow,
   readWorkingDirectory,
@@ -148,7 +148,6 @@ const realDeps = {
   readWorkingDirectory,
   assertSandboxUserCanSearch,
   assertSandboxWillShow,
-  assertOverlayShows,
   savePinningForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -156,6 +155,7 @@ const realDeps = {
   checkOverlayfsSupport,
   checkFilesystemAuditHost,
   createAnnotation,
+  readHostMounts,
   resolveFilesystemPlan,
   pinHostCommands,
   /** Resolves a path on the host for pinningPaths. */
@@ -434,9 +434,12 @@ export function preflight(
   );
 
   // Before image verification and the proxy start.
+  // Read once, for the check below and the filesystem plan.
+  const hostMounts =
+    workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
   if (workingDirectory) {
     deps.assertSandboxUserCanSearch(workingDirectory, env);
-    deps.assertSandboxWillShow(workingDirectory, writeThrough);
+    deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts);
   }
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
@@ -447,9 +450,10 @@ export function preflight(
   const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
     baseDir,
     warn: deps.warn,
+    listHostMounts: () => hostMounts,
+    workingDirectory,
   });
   if (filesystemMode === "ephemeral") {
-    if (workingDirectory) deps.assertOverlayShows(workingDirectory, plan);
     for (const line of formatFilesystemPlanLog(
       filesystemMode,
       plan.overlayRoots,

@@ -13,7 +13,6 @@ import { errorMessage } from "#core/lib/errors.ts";
 import { SandboxError } from "../errors.ts";
 import { realHostProbes } from "./host-probes.ts";
 import { resolveSandboxGid } from "./identity.ts";
-import { listHostMounts } from "./mountinfo.ts";
 import { hostRunCoverageLayers, scratchBaseCovers } from "./oci-mounts.ts";
 import { isAtOrUnder, pathAliases } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -205,27 +204,14 @@ const unusable = (wd: WorkingDirectory, why: string) =>
 export function assertSandboxWillShow(
   wd: WorkingDirectory,
   writeThroughPaths: string[],
+  mounts: MountinfoEntry[],
   {
-    hostMounts = listHostMounts,
     varRunRealPath = () => realHostProbes.varRunRealPath(),
     realpath = realPathOf,
-  }: {
-    hostMounts?: () => MountinfoEntry[];
-    varRunRealPath?: () => string | undefined;
-    realpath?: (path: string) => string;
-  } = {},
+  }: { varRunRealPath?: () => string | undefined; realpath?: (path: string) => string } = {},
 ): void {
-  let mounts: MountinfoEntry[];
-  try {
-    mounts = hostMounts();
-  } catch (e) {
-    throw new SandboxError(
-      `Failed to read the host's mount table: ${errorMessage(e)}`,
-      "FILESYSTEM_PLAN_FAILED",
-    );
-  }
-  // Real paths, as the plan mounts them, so an entry through a symlinked
-  // runner directory still holds the working directory.
+  // Resolved in full, so an entry through a symlinked runner directory holds
+  // the working directory; the plan refuses one through any other symlink.
   const entries = writeThroughPaths.map((p) => realpath(p));
   const hidden = hiddenBySandboxMounts(wd.path, entries, mounts, varRunRealPath());
   if (hidden) throw unusable(wd, hidden);

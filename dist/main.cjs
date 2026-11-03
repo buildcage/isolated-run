@@ -75310,13 +75310,7 @@ function hiddenBySandboxMounts(cwd, writeThroughPaths, hostMounts, varRunRealPat
 	], []);
 }
 const unusable = (wd, why) => invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
-function assertSandboxWillShow(wd, writeThroughPaths, { hostMounts = listHostMounts, varRunRealPath = () => realHostProbes.varRunRealPath(), realpath = realPathOf } = {}) {
-	let mounts;
-	try {
-		mounts = hostMounts();
-	} catch (e) {
-		throw new SandboxError(`Failed to read the host's mount table: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
-	}
+function assertSandboxWillShow(wd, writeThroughPaths, mounts, { varRunRealPath = () => realHostProbes.varRunRealPath(), realpath = realPathOf } = {}) {
 	let entries = writeThroughPaths.map((p) => realpath(p)), hidden = hiddenBySandboxMounts(wd.path, entries, mounts, varRunRealPath());
 	if (hidden) throw unusable(wd, hidden);
 }
@@ -76327,35 +76321,45 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
 	}
+	let overlay = filesystemMode === "ephemeral" ? planOverlay(env, writeThroughPaths, hostMounts, deps) : {
+		overlayRoots: [],
+		hiddenMounts: []
+	};
+	filesystemMode === "ephemeral" && deps.workingDirectory && assertOverlayShows(deps.workingDirectory, {
+		...overlay,
+		writeThroughPaths
+	});
 	try {
 		ensureWriteThroughTargetsExist(writeThroughPaths, deps);
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
 	}
-	if (filesystemMode !== "ephemeral") return {
-		overlayRoots: [],
-		hiddenMounts: [],
+	return {
+		...overlay,
 		writeThroughPaths,
 		mediatedVariables
 	};
+}
+function planOverlay(env, writeThroughPaths, hostMounts, deps) {
 	try {
-		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), candidateRoots = determineOverlayRoots([
+		let { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath), overlayCandidates = [
 			home,
 			runnerTemp,
 			tmp,
 			workdir
-		].filter((p) => !!p), writeThroughPaths, deps), nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
+		].filter((p) => !!p), exists = deps.exists ?? node_fs.existsSync, candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, {
+			...deps,
+			exists: (c) => exists(c) || writeThroughPaths.some((w) => isAtOrUnder(w, c))
+		}), nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
 		return {
 			overlayRoots: [...candidateRoots, ...nested.roots],
-			hiddenMounts: nested.hidden,
-			writeThroughPaths,
-			mediatedVariables
+			hiddenMounts: nested.hidden
 		};
 	} catch (e) {
 		throw new SandboxError(`Failed to determine filesystem-mode: ephemeral's overlay roots: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
 	}
 }
-function readHostMounts(deps) {
+function readHostMounts(deps = {}) {
 	try {
 		return (deps.listHostMounts ?? listHostMounts)();
 	} catch (e) {
@@ -77840,7 +77844,6 @@ const realDeps = {
 	readWorkingDirectory,
 	assertSandboxUserCanSearch,
 	assertSandboxWillShow,
-	assertOverlayShows,
 	savePinningForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
@@ -77848,6 +77851,7 @@ const realDeps = {
 	checkOverlayfsSupport,
 	checkFilesystemAuditHost,
 	createAnnotation,
+	readHostMounts,
 	resolveFilesystemPlan,
 	pinHostCommands,
 	realPathOf,
@@ -77969,15 +77973,16 @@ function readStepInputs(env, deps) {
 function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDir, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), workingDirectory && (deps.assertSandboxUserCanSearch(workingDirectory, env), deps.assertSandboxWillShow(workingDirectory, writeThrough)), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env);
+	let hostMounts = workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
+	workingDirectory && (deps.assertSandboxUserCanSearch(workingDirectory, env), deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts)), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
 	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
 		baseDir,
-		warn: deps.warn
+		warn: deps.warn,
+		listHostMounts: () => hostMounts,
+		workingDirectory
 	});
-	if (filesystemMode === "ephemeral") {
-		workingDirectory && deps.assertOverlayShows(workingDirectory, plan);
-		for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
-	}
+	if (filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
 	return plan;
 }
 async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {

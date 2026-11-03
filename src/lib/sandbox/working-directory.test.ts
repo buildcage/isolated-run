@@ -18,10 +18,6 @@ import {
   workingDirectoryOf,
 } from "./working-directory.ts";
 
-vi.mock("./mountinfo.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./mountinfo.ts")>()),
-  listHostMounts: () => [],
-}));
 vi.mock("./host-probes.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./host-probes.ts")>();
   return { ...actual, realHostProbes: { ...actual.realHostProbes, varRunRealPath: () => "/run" } };
@@ -271,9 +267,7 @@ describe("assertSandboxWillShow", () => {
   const wd = { input: "../run", path: "/run/app", isWorkspace: false };
 
   it("refuses a working directory the sandbox will hide, naming why", () => {
-    expect(() =>
-      assertSandboxWillShow(wd, [], { hostMounts: () => [], varRunRealPath: () => "/run" }),
-    ).toThrow(
+    expect(() => assertSandboxWillShow(wd, [], [], { varRunRealPath: () => "/run" })).toThrow(
       new SandboxError(
         'working-directory "../run" (/run/app) is unusable: the sandbox mounts its own /run.',
         "INVALID_WORKING_DIRECTORY",
@@ -281,39 +275,20 @@ describe("assertSandboxWillShow", () => {
     );
   });
 
-  it("reads the host's mounts and /var/run by default", () => {
-    expect(() => assertSandboxWillShow(wd, [])).toThrow("the sandbox mounts its own /run");
+  it("probes /var/run by default", () => {
+    expect(() => assertSandboxWillShow(wd, [], [])).toThrow("the sandbox mounts its own /run");
   });
 
   it("compares the write-through entries by their real paths", () => {
     const realpath = (p: string) => p.replace(/^\/srv\/link/, "/run/app");
     expect(() =>
-      assertSandboxWillShow(wd, ["/srv/link"], {
-        hostMounts: () => [],
-        varRunRealPath: () => "/run",
-        realpath,
-      }),
+      assertSandboxWillShow(wd, ["/srv/link"], [], { varRunRealPath: () => "/run", realpath }),
     ).not.toThrow();
-  });
-
-  it("names a mount table it cannot read", () => {
-    expect(() =>
-      assertSandboxWillShow(wd, [], {
-        hostMounts: () => {
-          throw new Error("EACCES");
-        },
-      }),
-    ).toThrow(
-      new SandboxError("Failed to read the host's mount table: EACCES", "FILESYSTEM_PLAN_FAILED"),
-    );
   });
 
   it("passes one it will show", () => {
     expect(() =>
-      assertSandboxWillShow({ ...wd, path: WS }, [], {
-        hostMounts: () => [],
-        varRunRealPath: () => undefined,
-      }),
+      assertSandboxWillShow({ ...wd, path: WS }, [], [], { varRunRealPath: () => undefined }),
     ).not.toThrow();
   });
 });

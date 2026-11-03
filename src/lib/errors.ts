@@ -33,7 +33,8 @@ import { ActionError, errorMessage } from "#core/lib/errors.ts";
  *                                     which is what ephemeral's own cleanup needs too
  *   FILESYSTEM_PLAN_FAILED            computing filesystem-mode: ephemeral's overlay roots failed for a reason
  *                                     unrelated to write-through's own syntax (e.g. a permissions error reading
- *                                     one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths)
+ *                                     one of the fixed $HOME/$RUNNER_TEMP/etc. candidate paths), or the host's
+ *                                     mount table the working-directory check reads could not be read
  *   SCRATCH_BASE_UNSAFE               the sandbox scratch base exists but isn't a private directory the action owns
  *   CONTAINER_NAME_INVALID            a value read back from GITHUB_STATE isn't a name this action generates
  *   SCRATCH_DIR_UNSAFE                the sudo rm -rf fallback's target isn't owned by the runner uid
