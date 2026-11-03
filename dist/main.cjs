@@ -71088,7 +71088,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 }
 function describeInterruptions({ proxyAnswered, resolverAnswered, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer restarted ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
@@ -71956,19 +71956,20 @@ function reduceTimeline(timeline, knownBlockedRules) {
 		blockedCount: blockedEvents.length
 	};
 }
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy);
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered, resolverLogStarts }) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy), resolverLog = resolverLogStarts ? resolverLogStarts - 1 : void 0;
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLog === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLog === 0 && resolverLog === 0,
 		proxyAnswered: droppedLogs.answered,
 		resolverAnswered,
 		restarts: {
 			proxy,
 			resolver,
-			proxyLog: proxyLog ?? 0
+			proxyLog: proxyLog ?? 0,
+			resolverLog: resolverLog ?? 0
 		},
 		startedAt,
 		timeline
@@ -77309,6 +77310,13 @@ function readLogConnections(docker, containerId) {
 		return;
 	}
 }
+function readResolverLogStarts(docker, containerId) {
+	try {
+		return docker.exec(containerId, ["cat", "/var/run/coredns-log/starts"]).split("\n").length - 1;
+	} catch {
+		return;
+	}
+}
 function readResolverAnswered(docker, containerId) {
 	try {
 		return docker.exec(containerId, [
@@ -77652,7 +77660,8 @@ var LogsUnreadableError = class extends Error {}, ProxyStoppedError = class exte
 function readHealth(docker, containerName) {
 	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
-		resolverAnswered: readResolverAnswered(docker, containerName)
+		resolverAnswered: readResolverAnswered(docker, containerName),
+		resolverLogStarts: readResolverLogStarts(docker, containerName)
 	};
 }
 function servicesAnswered(health) {

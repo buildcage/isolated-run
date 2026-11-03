@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
 import { readProxyAnswered, readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
-import { readResolverAnswered } from "#core/lib/docker/resolver-health.ts";
+import { readResolverAnswered, readResolverLogStarts } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
@@ -59,6 +59,7 @@ function readHealth(docker: Docker, containerName: string): ServiceHealth {
   return {
     droppedLogs: readProxyDroppedLogs(docker, containerName),
     resolverAnswered: readResolverAnswered(docker, containerName),
+    resolverLogStarts: readResolverLogStarts(docker, containerName),
   };
 }
 
