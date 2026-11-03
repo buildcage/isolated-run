@@ -843,17 +843,17 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
 //#endregion
-//#region src/lib/post-write-through.ts
-function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+//#region src/lib/post-pinning.ts
+function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
 	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `write-through-${id}`);
+	return (0, node_path.join)(scratchBase, `pinning-${id}`);
 }
-function takeWriteThroughForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postWriteThroughPath(env, scratchBase);
+function takePinningForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postPinningPath(env, scratchBase);
 	if (path) try {
-		return (0, node_fs.readFileSync)(path, "utf8");
+		return JSON.parse((0, node_fs.readFileSync)(path, "utf8"));
 	} catch (e) {
 		if (e.code === "ENOENT") return;
 		throw e;
@@ -925,11 +925,9 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 //#region src/core/lib/actions/dot-dot.ts
 function hasDotDotAfterStart(path) {
 	let parts = path.split("/"), start = 0;
-	for (; parts[start] === ".." || parts[start] === ".";) start++;
+	for (; ["..", "."].includes(parts[start]) || start > 0 && parts[start] === "";) start++;
 	return parts.slice(start).includes("..");
 }
-//#endregion
-//#region src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
@@ -939,8 +937,8 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
-	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} has a ".." after its start; only a leading "../" may climb.`);
+function resolveWriteThroughEntry(rawLine, env, baseDir) {
+	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} has a ".." after its start. Name the path without it; only a relative path may climb, with a leading "../".`);
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
@@ -1082,8 +1080,8 @@ async function stopProxyContainer({ containerName, projectName }) {
 }
 function main() {
 	normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
-	let savedWriteThrough = takeWriteThroughForPost(process.env);
-	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env, workingDirectoryOf(process.env)), process.env);
+	let saved = takePinningForPost(process.env);
+	pinHostCommands(pinningPaths(() => saved?.writeThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env, saved?.baseDir ?? workingDirectoryOf(process.env)), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")

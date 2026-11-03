@@ -105,7 +105,7 @@ export interface ResolveFilesystemPlanDeps {
 export function resolveWriteThroughInput(
   writeThroughInput: string,
   env: NodeJS.ProcessEnv,
-  baseDir?: string,
+  baseDir: string | undefined,
 ): string[] {
   try {
     return resolveWriteThroughPaths(writeThroughInput, env, baseDir);

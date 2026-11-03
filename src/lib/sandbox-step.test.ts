@@ -44,7 +44,7 @@ const mocks = {
   readStepLabel: vi.fn(),
   readWorkingDirectory: vi.fn(),
   assertSandboxUserCanSearch: vi.fn(),
-  saveWriteThroughForPost: vi.fn(),
+  savePinningForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
   checkPasswordlessSudo: vi.fn(),
@@ -265,14 +265,14 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.saveWriteThroughForPost).toHaveBeenCalledWith(ENV, "/opt/cache");
-    expect(orderOf(mocks.saveWriteThroughForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
+    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, { writeThrough: "/opt/cache" });
+    expect(orderOf(mocks.savePinningForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
   });
 
-  it("saves nothing without config-file, leaving post the workflow's own input", async () => {
+  it("saves nothing without config-file or working-directory, leaving post the workflow's own inputs", async () => {
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
+    expect(mocks.savePinningForPost).not.toHaveBeenCalled();
   });
 
   it("returns the isolated command's own exit code", async () => {
@@ -552,7 +552,7 @@ describe("runSandboxStep", () => {
     await expect(runSandboxStep(ENV, deps)).rejects.toMatchObject({
       code: "SCRATCH_BASE_SYMLINKED",
     });
-    expect(mocks.saveWriteThroughForPost).not.toHaveBeenCalled();
+    expect(mocks.savePinningForPost).not.toHaveBeenCalled();
     expect(mocks.checkPasswordlessSudo).not.toHaveBeenCalled();
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
@@ -801,6 +801,9 @@ describe("runSandboxStep", () => {
     expect(mocks.applyConfigFile.mock.calls[0][2]).toBe(workingDirectory.path);
     expect(mocks.resolveFilesystemPlan.mock.calls[0][3].baseDir).toBe(workingDirectory.path);
     expect(mocks.pinHostCommands.mock.calls[0][0]).toContain(`${workingDirectory.path}/bin`);
+    expect(mocks.savePinningForPost.mock.calls[0][1]).toStrictEqual({
+      baseDir: workingDirectory.path,
+    });
     expect(mocks.runSandboxedCommand.mock.calls[0][0]).toMatchObject({
       workingDirectory,
       envOverrides: { PWD: workingDirectory.path },

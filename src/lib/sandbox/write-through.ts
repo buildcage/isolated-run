@@ -1,7 +1,7 @@
 import { accessSync, constants, lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, normalize } from "node:path";
 
-import { hasDotDotAfterStart } from "#core/lib/actions/dot-dot.ts";
+import { DOT_DOT_AFTER_START, hasDotDotAfterStart } from "#core/lib/actions/dot-dot.ts";
 
 import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 
@@ -42,7 +42,7 @@ export const WRITE_THROUGH_ALL = "/";
  * 1. $NAME / ${NAME} expansion, allowlisted names only.
  * 2. A leading `~/` (only) expands to $HOME.
  * 3. A relative path resolves against `baseDir`, the working directory's real
- *    path, or $GITHUB_WORKSPACE when absent.
+ *    path; with none, it is an error.
  * A `..` may only lead a relative line: from a base without symlinks,
  * normalize() then takes it where the command's own `..` goes.
  * The result is normalized and stripped of any trailing slash. Only a
@@ -56,13 +56,10 @@ export const WRITE_THROUGH_ALL = "/";
 export function resolveWriteThroughEntry(
   rawLine: string,
   env: NodeJS.ProcessEnv,
-  baseDir: string | undefined = env.GITHUB_WORKSPACE,
+  baseDir: string | undefined,
 ): string {
   if (hasDotDotAfterStart(rawLine)) {
-    throw new Error(
-      `write-through entry ${JSON.stringify(rawLine)} has a ".." after its start; only a ` +
-        'leading "../" may climb.',
-    );
+    throw new Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
   }
   const expanded = rawLine.replace(
     VAR_PATTERN,
@@ -141,7 +138,7 @@ export function splitWriteThroughInput(input: string | undefined): string[] {
 export function resolveWriteThroughPaths(
   input: string | undefined,
   env: NodeJS.ProcessEnv,
-  baseDir?: string,
+  baseDir: string | undefined,
 ): string[] {
   const lines = splitWriteThroughInput(input);
   return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];

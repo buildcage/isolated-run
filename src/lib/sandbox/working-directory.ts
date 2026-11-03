@@ -6,7 +6,7 @@
 import { statSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, relative } from "node:path";
 
-import { hasDotDotAfterStart } from "#core/lib/actions/dot-dot.ts";
+import { DOT_DOT_AFTER_START, hasDotDotAfterStart } from "#core/lib/actions/dot-dot.ts";
 import { inputEnvName } from "#core/lib/actions/input-names.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
@@ -81,8 +81,7 @@ export function readWorkingDirectory(
   const input = env[inputEnvName(WORKING_DIRECTORY_INPUT)]?.trim() ?? "";
   if (!input) return undefined;
   const named = `working-directory ${JSON.stringify(input)}`;
-  if (hasDotDotAfterStart(input))
-    throw invalid(`${named} has a ".." after its start; only a leading "../" may climb.`);
+  if (hasDotDotAfterStart(input)) throw invalid(`${named} ${DOT_DOT_AFTER_START}`);
   const path = workingDirectoryOf(env, realpath);
   if (!path) throw invalid(`${named} is relative and $GITHUB_WORKSPACE is not set.`);
   let st: Stats;

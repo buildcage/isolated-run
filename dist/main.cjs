@@ -15416,9 +15416,10 @@ var require_identity$1 = __commonJSMin(((exports) => {
 }))();
 function hasDotDotAfterStart(path) {
 	let parts = path.split("/"), start = 0;
-	for (; parts[start] === ".." || parts[start] === ".";) start++;
+	for (; ["..", "."].includes(parts[start]) || start > 0 && parts[start] === "";) start++;
 	return parts.slice(start).includes("..");
 }
+const DOT_DOT_AFTER_START = "has a \"..\" after its start. Name the path without it; only a relative path may climb, with a leading \"../\".";
 //#endregion
 //#region src/core/lib/actions/input-names.ts
 init_core();
@@ -15471,14 +15472,14 @@ function isOutside(root, path) {
 }
 function resolveConfigPath(path, env, baseDir) {
 	let pathError = (reason) => new ConfigFileError(`config-file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
-	if (hasDotDotAfterStart(path)) throw pathError("has a \"..\" after its start; only a leading \"../\" may climb.");
-	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), notFound = (at) => pathError(`(${at}) was not found. Check the path, and that an earlier step checked out the repository.`), realWorkspace;
+	if (hasDotDotAfterStart(path)) throw pathError(DOT_DOT_AFTER_START);
+	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), realWorkspace;
 	try {
 		realWorkspace = (0, node_fs.realpathSync)(workspace);
-	} catch {
-		throw notFound(workspace);
+	} catch (e) {
+		throw pathError(`cannot be read: the workspace (${workspace}) is missing: ${errorMessage(e)}`);
 	}
-	let outside = (to) => pathError(`(${to}) leads outside the workspace (${workspace}).`), full = (0, node_path.resolve)(baseDir ?? realWorkspace, path), real;
+	let notFound = (at) => pathError(`(${at}) was not found. Check the path, and that an earlier step checked out the repository.`), named = realWorkspace === workspace ? workspace : `${workspace}, at ${realWorkspace}`, outside = (to) => pathError(`${to === path ? "" : `(${to}) `}leads outside the workspace (${named}).`), full = (0, node_path.resolve)(baseDir ?? realWorkspace, path), real;
 	try {
 		real = (0, node_fs.realpathSync)(full);
 	} catch {
@@ -74165,7 +74166,7 @@ function readWorkingDirectory(env, { realpath = realPathOf, stat = node_fs.statS
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "";
 	if (!input) return;
 	let named = `working-directory ${JSON.stringify(input)}`;
-	if (hasDotDotAfterStart(input)) throw invalid(`${named} has a ".." after its start; only a leading "../" may climb.`);
+	if (hasDotDotAfterStart(input)) throw invalid(`${named} ${DOT_DOT_AFTER_START}`);
 	let path = workingDirectoryOf(env, realpath);
 	if (!path) throw invalid(`${named} is relative and $GITHUB_WORKSPACE is not set.`);
 	let st;
@@ -74450,8 +74451,8 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
-	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} has a ".." after its start; only a leading "../" may climb.`);
+function resolveWriteThroughEntry(rawLine, env, baseDir) {
+	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
@@ -74757,16 +74758,16 @@ function probeOverlayMount(probeDir, exec) {
 	});
 }
 //#endregion
-//#region src/lib/post-write-through.ts
-function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+//#region src/lib/post-pinning.ts
+function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
 	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `write-through-${id}`);
+	return (0, node_path.join)(scratchBase, `pinning-${id}`);
 }
-function saveWriteThroughForPost(env, writeThroughInput, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postWriteThroughPath(env, scratchBase);
-	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, writeThroughInput, { mode: 384 }));
+function savePinningForPost(env, pinning, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postPinningPath(env, scratchBase);
+	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, JSON.stringify(pinning), { mode: 384 }));
 }
 //#endregion
 //#region src/core/lib/docker/args.ts
@@ -77788,7 +77789,7 @@ const realDeps = {
 	readStepLabel,
 	readWorkingDirectory,
 	assertSandboxUserCanSearch,
-	saveWriteThroughForPost,
+	savePinningForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
 	checkPasswordlessSudo,
@@ -77873,7 +77874,10 @@ function readStepInputs(env, deps) {
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env[EXPECTED_RULES_ENV] ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
-	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
+	deps.checkScratchBaseParent(), (workingDirectory || configFile) && deps.savePinningForPost(env, {
+		...workingDirectory && { baseDir },
+		...configFile && { writeThrough: writeThroughInput }
+	});
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem-audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail-on-unexpected-file-access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;

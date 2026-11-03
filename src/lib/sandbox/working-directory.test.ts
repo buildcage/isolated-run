@@ -137,7 +137,8 @@ describe("readWorkingDirectory", () => {
 
   it.each(["current/..", "a/../b", "/opt/../srv"])("refuses a .. after the start: %j", (input) => {
     expect(refused(envWith(input), { realpath: LINKED, stat: () => stats() })).toBe(
-      `working-directory ${JSON.stringify(input)} has a ".." after its start; only a leading "../" may climb.`,
+      `working-directory ${JSON.stringify(input)} has a ".." after its start. Name the path ` +
+        'without it; only a relative path may climb, with a leading "../".',
     );
   });
 

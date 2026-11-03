@@ -2,7 +2,10 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { RUNNER_DIRS_ENV } from "../test/runner-host.ts";
-import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
+import {
+  resolveFilesystemPlan as resolvePlan,
+  validateFilesystemInputs,
+} from "./filesystem-plan.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -12,6 +15,10 @@ vi.mock("./mountinfo.ts", () => ({ listHostMounts: vi.fn(() => []) }));
 
 // Back to the empty table, in case a test's own value went unread.
 beforeEach(() => vi.mocked(listHostMounts).mockReset());
+
+// The step always passes the working directory; here it is the workspace unless a test says.
+const resolveFilesystemPlan = (...[mode, input, env, deps]: Parameters<typeof resolvePlan>) =>
+  resolvePlan(mode, input, env, { baseDir: env.GITHUB_WORKSPACE, ...deps });
 
 describe("resolveFilesystemPlan", () => {
   const ENV = RUNNER_DIRS_ENV;
