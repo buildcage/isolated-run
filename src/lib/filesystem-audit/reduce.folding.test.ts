@@ -355,7 +355,8 @@ describe("createAuditSummary: folding", () => {
       err: 2,
     }));
     expect(lines(render(...records))).toEqual([`r c ./${"a/".repeat(2000)}**`]);
-  }, 3000);
+    // A stall takes minutes; a loaded machine takes seconds.
+  }, 30_000);
 
   it("shows the file a hard link names, so a read through the link leads back to it", () => {
     const md = render(

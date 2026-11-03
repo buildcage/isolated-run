@@ -707,6 +707,41 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
       write("/x/b/1"),
     );
     expect(summary.proposed).toBeUndefined();
-    expect(summary.proposedCut).toBe(true);
+    expect(summary.proposedCut).toBe("paths");
+  });
+
+  it("keeps the unexpected accesses' details where their table is given up", () => {
+    const { summary } = marked(
+      // The details fold /tmp once loose, which the table never does.
+      { rules: rulesOf("cat R /etc/hosts"), limits: { nodes: 12, loose: 1 } },
+      { kind: "read", pid: 3, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+      ...Array.from({ length: 20 }, (_, i) => ({
+        kind: "write",
+        pid: 3,
+        comm: "cat",
+        path: `/tmp/${i}`,
+      })),
+    );
+    expect(summary.proposed).toBeUndefined();
+    expect(summary.details?.map((r) => r.path)).toContain("~/.ssh/id_rsa");
+  });
+
+  it("gives the proposals up where not one fits the size limit", () => {
+    const { summary } = marked(
+      { propose: true, limits: { bytes: 1 } },
+      { kind: "write", pid: 3, comm: "cat", path: "/a/x" },
+    );
+    expect(summary.proposed).toBeUndefined();
+    expect(summary.proposedCut).toBe("size");
+  });
+
+  it("cuts the proposals short at the size limit and says so", () => {
+    const { summary } = marked(
+      { propose: true, limits: { bytes: 60 } },
+      ...["a", "b", "c", "d"].map((d) => ({ kind: "write", pid: 3, comm: "cat", path: `/${d}/x` })),
+    );
+    expect(summary.proposedCut).toBe("size");
+    expect(summary.proposed?.length).toBeGreaterThan(0);
+    expect(summary.proposed?.length).toBeLessThan(4);
   });
 });

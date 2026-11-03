@@ -13,6 +13,7 @@ import {
   tableRows,
 } from "../test/filesystem-audit.ts";
 import { newAgg } from "./agg.ts";
+import type { CutCause } from "./fold-tree.ts";
 import type { AuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
 
@@ -504,13 +505,13 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     matched: 1,
     unexpected: proposed?.length ?? 0,
   });
-  const renderGiven = (summary: AuditSummary) =>
+  const renderGiven = (summary: AuditSummary, cutNote: (cause?: CutCause) => string = () => "") =>
     joinSummaryBlocks(
       renderAuditSummaryBlocks(summary, {
         title: "T",
         startedAt: undefined,
         priorities: FILESYSTEM_PRIORITIES,
-        cutNote: () => "",
+        cutNote,
         expected: "given",
       }),
     );
@@ -548,8 +549,55 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
     );
   });
 
-  it("prints no details where a note takes the place of the table", () => {
-    expect(renderGiven({ ...strays(undefined), proposedCut: true })).not.toContain("<details>");
+  const noted = (cause?: CutCause) => `cut:${cause}\n\n`;
+
+  it("prints the details left where a note takes the place of the accessed paths", () => {
+    const md = joinSummaryBlocks(
+      renderAuditSummaryBlocks(
+        {
+          ...strays(undefined),
+          paths: undefined,
+          pathsCut: "paths",
+          details: [
+            { agg: newAgg(), flags: "R", comm: "cat", commField: "cat", path: "~/.ssh/id_rsa" },
+          ],
+        },
+        {
+          title: "T",
+          startedAt: undefined,
+          priorities: FILESYSTEM_PRIORITIES,
+          cutNote: noted,
+        },
+      ),
+    );
+    expect(md).toContain("cut:paths");
+    expect(md).not.toContain("📂 Accessed Paths");
+    expect(md).toContain("R cat ~/.ssh/id_rsa");
+  });
+
+  it("prints no details where a note takes the place of the table and of them", () => {
+    expect(renderGiven({ ...strays(undefined), proposedCut: "paths" })).not.toContain("<details>");
+  });
+
+  it("prints the details left where a note takes the place of the table", () => {
+    const md = renderGiven(
+      {
+        ...strays(undefined),
+        details: [
+          { agg: newAgg(), flags: "R", comm: "cat", commField: "cat", path: "~/.ssh/id_rsa" },
+        ],
+        proposedCut: "paths",
+      },
+      noted,
+    );
+    expect(md).toContain("cut:paths");
+    expect(md).toContain("<summary>🔍 Unexpected access details</summary>");
+    expect(md).toContain("R cat ~/.ssh/id_rsa");
+  });
+
+  it("notes a table cut short for size after it", () => {
+    const md = renderGiven({ ...strays([stray]), proposedCut: "size" }, noted);
+    expect(md).toMatch(/\| `\.\/b` \|\n\ncut:size/);
   });
 
   const stray = {

@@ -49,9 +49,13 @@ export const RULES_TO_ADD_HEADER = [
   `# ${RECORD_FILE} in this artifact and list them instead.`,
 ];
 
+/** The last line of a file cut short for size. */
+export const RULES_CUT_NOTE = `# Cut short: more accesses fell outside ${EXPECTED_RULES_INPUT} than fit here. ${RECORD_FILE} in this artifact has them all.`;
+
 /** The proposed rules under the header, a block per program with its accesses
- *  in a column, so one long program path widens only its own block. */
-export function rulesToAdd(proposed: RuleRow[]): string {
+ *  in a column, so one long program path widens only its own block. `cut`
+ *  ends a list cut short for size with a note. */
+export function rulesToAdd(proposed: RuleRow[], cut = false): string {
   const blocks: string[][][] = [];
   for (const r of proposed) {
     const row = [ruleField(r.program.path), r.flags, ruleField(r.path.path)];
@@ -65,7 +69,13 @@ export function rulesToAdd(proposed: RuleRow[]): string {
       .map(([program, flags, path]) => `${program}  ${flags.padEnd(flagsW)}  ${path}`)
       .join("\n");
   });
-  return [...RULES_TO_ADD_HEADER, "", lines.join("\n\n"), ""].join("\n");
+  return [
+    ...RULES_TO_ADD_HEADER,
+    "",
+    lines.join("\n\n"),
+    ...(cut ? ["", RULES_CUT_NOTE] : []),
+    "",
+  ].join("\n");
 }
 
 /**
@@ -79,9 +89,9 @@ export function writeProposedRules(
   writeFile: (path: string, content: string) => void,
 ): ProposedRules {
   if (!summary) return "write-failed";
-  if (summary.proposedCut) return "too-many-paths";
+  if (!summary.proposed) return "too-many-paths";
   try {
-    writeFile(path, rulesToAdd(summary.proposed!));
+    writeFile(path, rulesToAdd(summary.proposed, summary.proposedCut === "size"));
     return "written";
   } catch (e) {
     annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`);
