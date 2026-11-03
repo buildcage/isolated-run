@@ -15472,13 +15472,19 @@ function isOutside(root, path) {
 function resolveConfigPath(path, env, baseDir) {
 	let pathError = (reason) => new ConfigFileError(`config-file ${JSON.stringify(path)} ${reason}`, "CONFIG_FILE_PATH");
 	if (hasDotDotAfterStart(path)) throw pathError("has a \"..\" after its start; only a leading \"../\" may climb.");
-	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), full = (0, node_path.resolve)(baseDir ?? (0, node_fs.realpathSync)(workspace), path), real;
+	let workspace = (0, node_path.resolve)(env.GITHUB_WORKSPACE || process.cwd()), notFound = (at) => pathError(`(${at}) was not found. Check the path, and that an earlier step checked out the repository.`), realWorkspace;
+	try {
+		realWorkspace = (0, node_fs.realpathSync)(workspace);
+	} catch {
+		throw notFound(workspace);
+	}
+	let outside = (to) => pathError(`(${to}) leads outside the workspace (${workspace}).`), full = (0, node_path.resolve)(baseDir ?? realWorkspace, path), real;
 	try {
 		real = (0, node_fs.realpathSync)(full);
 	} catch {
-		throw pathError(`(${full}) was not found. Check the path, and that an earlier step checked out the repository.`);
+		throw isOutside(workspace, full) && isOutside(realWorkspace, full) ? outside(full) : notFound(full);
 	}
-	if (isOutside((0, node_fs.realpathSync)(workspace), real)) throw pathError(`(${real}) leads outside the workspace (${workspace}).`);
+	if (isOutside(realWorkspace, real)) throw outside(real);
 	return real;
 }
 const resolved = (node, doc) => (0, import_dist$5.isAlias)(node) ? node.resolve(doc) : node;
@@ -74751,16 +74757,16 @@ function probeOverlayMount(probeDir, exec) {
 	});
 }
 //#endregion
-//#region src/lib/post-pinning.ts
-function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+//#region src/lib/post-write-through.ts
+function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
 	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `pinning-${id}`);
+	return (0, node_path.join)(scratchBase, `write-through-${id}`);
 }
-function savePinningForPost(env, pinning, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postPinningPath(env, scratchBase);
-	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, JSON.stringify(pinning), { mode: 384 }));
+function saveWriteThroughForPost(env, writeThroughInput, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postWriteThroughPath(env, scratchBase);
+	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, writeThroughInput, { mode: 384 }));
 }
 //#endregion
 //#region src/core/lib/docker/args.ts
@@ -77782,7 +77788,7 @@ const realDeps = {
 	readStepLabel,
 	readWorkingDirectory,
 	assertSandboxUserCanSearch,
-	savePinningForPost,
+	saveWriteThroughForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
 	checkPasswordlessSudo,
@@ -77867,10 +77873,7 @@ function readStepInputs(env, deps) {
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env[EXPECTED_RULES_ENV] ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
-	deps.checkScratchBaseParent(), deps.savePinningForPost(env, {
-		baseDir,
-		...configFile && { writeThrough: writeThroughInput }
-	});
+	deps.checkScratchBaseParent(), configFile && deps.saveWriteThroughForPost(env, writeThroughInput);
 	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem-audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail-on-unexpected-file-access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
