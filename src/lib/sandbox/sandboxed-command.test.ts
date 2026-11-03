@@ -874,7 +874,7 @@ describe("assembleBundle", () => {
   describe("working-directory", () => {
     // A real directory this process can enter, as the check stats the host.
     const real = realpathSync(tmpdir());
-    const workingDirectory = { input: "app", dir: real, real, isWorkspace: false };
+    const workingDirectory = { input: "app", path: real, isWorkspace: false };
     const built = (mounts: object[] = []) => ({
       process: {},
       mounts,

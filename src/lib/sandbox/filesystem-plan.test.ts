@@ -2,7 +2,10 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
 import { RUNNER_DIRS_ENV } from "../test/runner-host.ts";
-import { resolveFilesystemPlan, validateFilesystemInputs } from "./filesystem-plan.ts";
+import {
+  resolveFilesystemPlan as resolvePlan,
+  validateFilesystemInputs,
+} from "./filesystem-plan.ts";
 import { listHostMounts } from "./mountinfo.ts";
 import { reservedInternalDestinations } from "./oci-mounts.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
@@ -12,6 +15,10 @@ vi.mock("./mountinfo.ts", () => ({ listHostMounts: vi.fn(() => []) }));
 
 // Back to the empty table, in case a test's own value went unread.
 beforeEach(() => vi.mocked(listHostMounts).mockReset());
+
+// The step always passes the working directory; here it is the workspace unless a test says.
+const resolveFilesystemPlan = (...[mode, input, env, deps]: Parameters<typeof resolvePlan>) =>
+  resolvePlan(mode, input, env, { baseDir: env.GITHUB_WORKSPACE, ...deps });
 
 describe("resolveFilesystemPlan", () => {
   const ENV = RUNNER_DIRS_ENV;
@@ -80,7 +87,7 @@ describe("resolveFilesystemPlan", () => {
     // Unchecked, these would drop the read-only restriction wholesale under
     // persistent and leave ephemeral with no overlay roots at all.
     for (const mode of ["persistent", "ephemeral"] as const) {
-      for (const spelling of ["/.", "//", `${ENV.GITHUB_WORKSPACE}/../../../../..`]) {
+      for (const spelling of ["/.", "//", "../../../../.."]) {
         let caught: unknown;
         try {
           resolveFilesystemPlan(mode, spelling, ENV);
@@ -205,7 +212,7 @@ describe("resolveFilesystemPlan", () => {
     });
   });
 
-  describe("an entry whose `..` climbs past a symlink", () => {
+  describe("an entry with a `..`", () => {
     const WS = ENV.GITHUB_WORKSPACE;
     const linked = (links: Record<string, string>) => ({
       exists: alwaysExists,
@@ -215,68 +222,34 @@ describe("resolveFilesystemPlan", () => {
       mkdir: () => {},
     });
 
-    it("refuses it, naming where the command's own `..` leads", () => {
-      expect(() =>
-        resolveFilesystemPlan("persistent", "../out", ENV, {
-          ...linked({ [`${WS}/current`]: "releases/v2" }),
-          baseDir: `${WS}/current`,
-        }),
-      ).toThrow(
-        expect.objectContaining({
-          code: "INVALID_WRITE_THROUGH_PATH",
-          message: expect.stringContaining(`instead: "${WS}/releases/out"`),
-        }),
-      );
-    });
-
-    it("refuses it without a working directory too", () => {
+    it("refuses one after the start", () => {
       expect(() =>
         resolveFilesystemPlan("persistent", "link/../out", ENV, linked({ [`${WS}/link`]: "/opt" })),
-      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
-    });
-
-    it("refuses a `..` out of a symlinked runner directory, which lands past its real path", () => {
-      expect(() =>
-        resolveFilesystemPlan("persistent", "../shared", ENV, {
-          ...linked({}),
-          realpath: (p: string) => (p === WS ? "/mnt/data/repo" : p),
-        }),
       ).toThrow(
         expect.objectContaining({
           code: "INVALID_WRITE_THROUGH_PATH",
-          message: expect.stringContaining('leads the command to "/mnt/data/shared"'),
+          message: expect.stringContaining('has a ".." after its start'),
         }),
       );
     });
 
-    it("finds a runner directory however its variable spells it", () => {
-      const env = { GITHUB_WORKSPACE: WS, RUNNER_TEMP: "/home/runner/./work/_temp" };
-      const plan = resolveFilesystemPlan("persistent", "$RUNNER_TEMP/a/../b", env, {
+    it("climbs a leading one from the working directory's real path", () => {
+      const plan = resolveFilesystemPlan("persistent", "../out\ndist", ENV, {
+        ...linked({ [`${WS}/current`]: "releases/v2" }),
+        baseDir: `${WS}/releases/v2`,
+      });
+      expect(plan.writeThroughPaths).toStrictEqual([
+        `${WS}/releases/out`,
+        `${WS}/releases/v2/dist`,
+      ]);
+    });
+
+    it("takes a symlinked runner directory at its real path", () => {
+      const plan = resolveFilesystemPlan("persistent", "./dist\n$RUNNER_TEMP/b", ENV, {
         ...linked({ "/home": "var/home" }),
         realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
       });
-      expect(plan.writeThroughPaths).toStrictEqual(["/var/home/runner/work/_temp/b"]);
-    });
-
-    it("checks a path under no runner directory as written", () => {
-      const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: WS };
-      expect(() =>
-        resolveFilesystemPlan("persistent", "/opt/link/../out", env, linked({ "/opt/link": "x" })),
-      ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
-    });
-
-    it("takes a `..` that passes no symlink", () => {
-      expect(
-        resolveFilesystemPlan("persistent", "a/../b", ENV, linked({})).writeThroughPaths,
-      ).toStrictEqual([`${WS}/b`]);
-    });
-
-    it("takes a symlinked runner directory at its real path first", () => {
-      const plan = resolveFilesystemPlan("persistent", "./a/../dist", ENV, {
-        ...linked({ "/home": "var/home" }),
-        realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
-      });
-      expect(plan.writeThroughPaths).toStrictEqual([`/var${WS}/dist`]);
+      expect(plan.writeThroughPaths).toStrictEqual([`/var${WS}/dist`, `/var${ENV.RUNNER_TEMP}/b`]);
     });
   });
 
@@ -328,8 +301,8 @@ describe("resolveFilesystemPlan", () => {
       expect(plan("ephemeral", "./dist").mediatedVariables).toStrictEqual([]);
     });
 
-    it("leaves a mediated file named through `..` to the mediation", () => {
-      const named = plan("ephemeral", "$RUNNER_TEMP/x/../_runner_file_commands/set_output_abc");
+    it("leaves a mediated file named in another spelling to the mediation", () => {
+      const named = plan("ephemeral", "$RUNNER_TEMP/./_runner_file_commands//set_output_abc");
       expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
       expect(named.writeThroughPaths).toStrictEqual([]);
     });

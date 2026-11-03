@@ -843,17 +843,17 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
 //#endregion
-//#region src/lib/post-write-through.ts
-function postWriteThroughPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+//#region src/lib/post-pinning.ts
+function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
 	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `write-through-${id}`);
+	return (0, node_path.join)(scratchBase, `pinning-${id}`);
 }
-function takeWriteThroughForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postWriteThroughPath(env, scratchBase);
+function takePinningForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postPinningPath(env, scratchBase);
 	if (path) try {
-		return (0, node_fs.readFileSync)(path, "utf8");
+		return JSON.parse((0, node_fs.readFileSync)(path, "utf8"));
 	} catch (e) {
 		if (e.code === "ENOENT") return;
 		throw e;
@@ -922,7 +922,12 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 	].filter((p) => !!p))];
 }
 //#endregion
-//#region src/lib/sandbox/write-through.ts
+//#region src/core/lib/actions/dot-dot.ts
+function hasDotDotAfterStart(path) {
+	let parts = path.split("/"), start = 0;
+	for (; ["..", "."].includes(parts[start]) || start > 0 && parts[start] === "";) start++;
+	return parts.slice(start).includes("..");
+}
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
@@ -932,18 +937,15 @@ const ALLOWED_WRITE_THROUGH_VARS = [
 	"GITHUB_PATH",
 	"GITHUB_STEP_SUMMARY"
 ], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function spellWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
+function resolveWriteThroughEntry(rawLine, env, baseDir) {
+	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} has a ".." after its start. Name the path without it; only a relative path may climb, with a leading "../".`);
 	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
 		let name = braced ?? bare;
 		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
 		let value = env[name];
 		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
 		return value;
-	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded;
-	return (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
-}
-function resolveWriteThroughEntry(rawLine, env, baseDir = env.GITHUB_WORKSPACE) {
-	let resolved = spellWriteThroughEntry(rawLine, env, baseDir);
+	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
 	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
 	let normalized = (0, node_path.normalize)(resolved);
 	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
@@ -1057,10 +1059,9 @@ function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
-const withoutTrailingSlash = (path) => path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
-function workingDirectoryOf(env) {
+function workingDirectoryOf(env, realpath = realPathOf) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
-	if ((0, node_path.isAbsolute)(input) || workspace) return withoutTrailingSlash((0, node_path.normalize)((0, node_path.isAbsolute)(input) ? input : (0, node_path.join)(workspace, input)));
+	if ((0, node_path.isAbsolute)(input) || workspace) return (0, node_path.isAbsolute)(input) ? realpath(input) : realpath(input ? `${workspace}/${input}` : workspace);
 }
 //#endregion
 //#region src/post.ts
@@ -1079,8 +1080,8 @@ async function stopProxyContainer({ containerName, projectName }) {
 }
 function main() {
 	normalizeInputNames(process.env, ACTION_INPUTS, CONFIG_FILE_INPUTS.lists);
-	let savedWriteThrough = takeWriteThroughForPost(process.env);
-	pinHostCommands(pinningPaths(() => savedWriteThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env, workingDirectoryOf(process.env)), process.env);
+	let saved = takePinningForPost(process.env);
+	pinHostCommands(pinningPaths(() => saved?.writeThrough ?? readFilesystemInputs(() => {}).writeThroughInput, process.env, saved?.baseDir ?? workingDirectoryOf(process.env)), process.env);
 	let targets = planPostCleanup({
 		containerName: getState("container_name"),
 		ephemeralRoots: getState("ephemeral_overlay_roots")

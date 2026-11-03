@@ -25,9 +25,6 @@ import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { MountinfoEntry } from "./types.ts";
 import {
   resolveWriteThroughPaths,
-  resolveWriteThroughEntry,
-  spellWriteThroughEntry,
-  splitWriteThroughInput,
   assertNoSymlinkInWriteThrough,
   assertKnownFilesExist,
   ensureWriteThroughTargetsExist,
@@ -108,7 +105,7 @@ export interface ResolveFilesystemPlanDeps {
 export function resolveWriteThroughInput(
   writeThroughInput: string,
   env: NodeJS.ProcessEnv,
-  baseDir?: string,
+  baseDir: string | undefined,
 ): string[] {
   try {
     return resolveWriteThroughPaths(writeThroughInput, env, baseDir);
@@ -184,9 +181,6 @@ export function resolveFilesystemPlan(
   // From here each entry is the real path the checks below and the mount act on.
   try {
     for (const path of writeThroughPaths) assertNoSymlinkInWriteThrough(path, deps);
-    for (const line of splitWriteThroughInput(writeThroughInput)) {
-      assertDotDotLandsOnEntry(line, env, writeThroughPaths, realpath, deps);
-    }
   } catch (e) {
     throw new SandboxError(
       `Invalid write-through: ${errorMessage(e)}`,
@@ -265,35 +259,4 @@ function onRealRunnerDir(
     .filter((d) => isAtOrUnder(path, d))
     .sort(longestFirst)[0];
   return dir === undefined ? path : join(realpath(dir), relative(dir, path));
-}
-
-/**
- * normalize() takes a `..` by spelling, the command's own `..` by where the
- * kernel goes, so an entry with one must land on the same path both ways.
- * Mediated runner files are not mounted, so they are left out.
- */
-function assertDotDotLandsOnEntry(
-  line: string,
-  env: NodeJS.ProcessEnv,
-  writeThroughPaths: string[],
-  realpath: (path: string) => string,
-  deps: ResolveFilesystemPlanDeps,
-): void {
-  const spelled = spellWriteThroughEntry(line, env, deps.baseDir);
-  if (!spelled.split("/").includes("..")) return;
-  const entry = onRealRunnerDir(resolveWriteThroughEntry(line, env, deps.baseDir), env, realpath);
-  if (!writeThroughPaths.includes(entry)) return;
-  const dir = runnerDirs(env)
-    .filter((d) => spelled === d || spelled.startsWith(`${d}/`))
-    .sort(longestFirst)[0];
-  const onReal = dir === undefined ? spelled : realpath(normalize(dir)) + spelled.slice(dir.length);
-  assertNoSymlinkInWriteThrough(onReal, deps);
-  const { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = deps;
-  const lands = realPathOf(onReal, { lstat, readlink });
-  if (lands !== entry) {
-    throw new Error(
-      `write-through entry ${JSON.stringify(line)} is ${JSON.stringify(entry)} as written, but ` +
-        `its ".." leads the command to ${JSON.stringify(lands)}. Name that path instead.`,
-    );
-  }
 }

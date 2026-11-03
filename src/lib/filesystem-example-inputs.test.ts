@@ -64,7 +64,7 @@ describe("filesystemExampleInputs", () => {
 
   it("writes working-directory first where it is not the workspace, quoted only where YAML needs it", () => {
     const at = (input: string, isWorkspace = false) => ({
-      workingDirectory: { input, dir: `/w/${input}`, real: `/w/${input}`, isWorkspace },
+      workingDirectory: { input, path: `/w/${input}`, isWorkspace },
       filesystemAudit: "off" as const,
       ...NO_RULES,
     });

@@ -17,7 +17,6 @@ import { RUNNER_ENV, withLinks } from "../test/runner-host.ts";
 import {
   resolveWriteThroughEntry,
   resolveWriteThroughPaths,
-  spellWriteThroughEntry,
   assertKnownFilesExist,
   assertNoSymlinkInWriteThrough,
   ensureWriteThroughTargetsExist,
@@ -26,25 +25,26 @@ import {
 } from "./write-through.ts";
 
 const ENV = RUNNER_ENV;
+const WS = ENV.GITHUB_WORKSPACE;
 
 describe("resolveWriteThroughEntry", () => {
   it("expands $NAME and ${NAME} forms for allowed variables", () => {
-    expect(resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV)).toBe(ENV.GITHUB_OUTPUT);
-    expect(resolveWriteThroughEntry("${GITHUB_OUTPUT}", ENV)).toBe(ENV.GITHUB_OUTPUT);
+    expect(resolveWriteThroughEntry("$GITHUB_OUTPUT", ENV, WS)).toBe(ENV.GITHUB_OUTPUT);
+    expect(resolveWriteThroughEntry("${GITHUB_OUTPUT}", ENV, WS)).toBe(ENV.GITHUB_OUTPUT);
   });
 
   it("expands a leading ~/ to $HOME", () => {
-    expect(resolveWriteThroughEntry("~/.local/bin", ENV)).toBe("/home/runner/.local/bin");
+    expect(resolveWriteThroughEntry("~/.local/bin", ENV, WS)).toBe("/home/runner/.local/bin");
   });
 
   it("does not expand a bare ~ or ~user/ -- treated as an ordinary relative path instead", () => {
-    expect(resolveWriteThroughEntry("~", ENV)).toBe(`${ENV.GITHUB_WORKSPACE}/~`);
-    expect(resolveWriteThroughEntry("~other/x", ENV)).toBe(`${ENV.GITHUB_WORKSPACE}/~other/x`);
+    expect(resolveWriteThroughEntry("~", ENV, WS)).toBe(`${ENV.GITHUB_WORKSPACE}/~`);
+    expect(resolveWriteThroughEntry("~other/x", ENV, WS)).toBe(`${ENV.GITHUB_WORKSPACE}/~other/x`);
   });
 
   it("resolves a relative path against $GITHUB_WORKSPACE", () => {
-    expect(resolveWriteThroughEntry("./dist", ENV)).toBe("/home/runner/work/repo/repo/dist");
-    expect(resolveWriteThroughEntry("dist", ENV)).toBe("/home/runner/work/repo/repo/dist");
+    expect(resolveWriteThroughEntry("./dist", ENV, WS)).toBe("/home/runner/work/repo/repo/dist");
+    expect(resolveWriteThroughEntry("dist", ENV, WS)).toBe("/home/runner/work/repo/repo/dist");
   });
 
   it("resolves a relative path against the working directory when given one", () => {
@@ -58,107 +58,120 @@ describe("resolveWriteThroughEntry", () => {
   });
 
   it("leaves an absolute path untouched (after normalization)", () => {
-    expect(resolveWriteThroughEntry("/usr/local/bin", ENV)).toBe("/usr/local/bin");
+    expect(resolveWriteThroughEntry("/usr/local/bin", ENV, WS)).toBe("/usr/local/bin");
   });
 
-  it("normalizes .. segments", () => {
-    expect(resolveWriteThroughEntry("/usr/local/bin/../lib", ENV)).toBe("/usr/local/lib");
+  it("climbs a leading .. from the base", () => {
+    expect(resolveWriteThroughEntry("../../out", ENV, "/opt/app/web")).toBe("/opt/out");
+    expect(resolveWriteThroughEntry("./../out", ENV, "/opt/app")).toBe("/opt/out");
   });
+
+  it.each([
+    "/usr/local/bin/../lib",
+    "a/../b",
+    "../a/../b",
+    "~/../x",
+    "$GITHUB_WORKSPACE/..",
+    "/opt/..",
+  ])(
+    "refuses a .. after the start, which the spelling and a symlink would take apart: %j",
+    (line) => {
+      expect(() => resolveWriteThroughEntry(line, ENV, WS)).toThrow(
+        `write-through entry ${JSON.stringify(line)} has a ".." after its start. Name the path ` +
+          'without it; only a relative path may climb, with a leading "../".',
+      );
+    },
+  );
 
   it("rejects an unlisted variable name", () => {
-    expect(() => resolveWriteThroughEntry("$SECRET_TOKEN/x", ENV)).toThrow(
+    expect(() => resolveWriteThroughEntry("$SECRET_TOKEN/x", ENV, WS)).toThrow(
       /unsupported variable \$SECRET_TOKEN/,
     );
   });
 
   it("rejects an allowed variable that isn't set, rather than resolving somewhere else", () => {
     const { RUNNER_TEMP: _omitted, ...noRunnerTemp } = ENV;
-    expect(() => resolveWriteThroughEntry("$RUNNER_TEMP/cache", noRunnerTemp)).toThrow(
+    expect(() => resolveWriteThroughEntry("$RUNNER_TEMP/cache", noRunnerTemp, WS)).toThrow(
       /\$RUNNER_TEMP, which is not set/,
     );
   });
 
   it("rejects a relative entry when $GITHUB_WORKSPACE is unset, rather than returning a relative path", () => {
-    expect(() => resolveWriteThroughEntry("./dist", { HOME: ENV.HOME })).toThrow(/is relative/);
+    expect(() => resolveWriteThroughEntry("./dist", { HOME: ENV.HOME }, undefined)).toThrow(
+      /is relative/,
+    );
   });
 
   it("strips a trailing slash so the result string-equals the bare candidate path", () => {
-    expect(resolveWriteThroughEntry("$HOME/", ENV)).toBe(ENV.HOME);
-    expect(resolveWriteThroughEntry("/usr/local/bin/", ENV)).toBe("/usr/local/bin");
+    expect(resolveWriteThroughEntry("$HOME/", ENV, WS)).toBe(ENV.HOME);
+    expect(resolveWriteThroughEntry("/usr/local/bin/", ENV, WS)).toBe("/usr/local/bin");
   });
 
   it("leaves a bare '/' alone rather than stripping it down to an empty string", () => {
-    expect(resolveWriteThroughEntry("/", ENV)).toBe("/");
+    expect(resolveWriteThroughEntry("/", ENV, WS)).toBe("/");
   });
 
   it("rejects an entry that only resolves to '/', so the full opt-out has to be spelled out", () => {
-    for (const spelling of [
-      "/.",
-      "//",
-      "/opt/..",
-      "../../../../..",
-      "$GITHUB_WORKSPACE/../../../../..",
-    ]) {
-      expect(() => resolveWriteThroughEntry(spelling, ENV)).toThrow(/resolves to "\/"/);
+    for (const spelling of ["/.", "//", "../../../../..", "../../../../../../.."]) {
+      expect(() => resolveWriteThroughEntry(spelling, ENV, WS)).toThrow(/resolves to "\/"/);
     }
   });
 
-  it("still allows '..' that lands anywhere other than '/'", () => {
-    expect(resolveWriteThroughEntry("/opt/x/..", ENV)).toBe("/opt");
-    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE/../..", ENV)).toBe("/home/runner/work");
+  it("still allows a leading '..' that lands anywhere other than '/'", () => {
+    expect(resolveWriteThroughEntry("../..", ENV, WS)).toBe("/home/runner/work");
   });
 
   it("does not swallow a stray closing brace from a malformed reference", () => {
     // "$GITHUB_WORKSPACE}suffix" is missing its opening brace: the "}"
     // must be treated as literal text, not consumed into the match.
-    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE}suffix", ENV)).toBe(
+    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE}suffix", ENV, WS)).toBe(
       `${ENV.GITHUB_WORKSPACE}}suffix`,
     );
   });
 
   it("accepts every allowed variable name", () => {
-    expect(resolveWriteThroughEntry("$HOME", ENV)).toBe(ENV.HOME);
-    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE", ENV)).toBe(ENV.GITHUB_WORKSPACE);
-    expect(resolveWriteThroughEntry("$RUNNER_TEMP", ENV)).toBe(ENV.RUNNER_TEMP);
-    expect(resolveWriteThroughEntry("$GITHUB_ENV", ENV)).toBe(ENV.GITHUB_ENV);
-    expect(resolveWriteThroughEntry("$GITHUB_PATH", ENV)).toBe(ENV.GITHUB_PATH);
-    expect(resolveWriteThroughEntry("$GITHUB_STEP_SUMMARY", ENV)).toBe(ENV.GITHUB_STEP_SUMMARY);
+    expect(resolveWriteThroughEntry("$HOME", ENV, WS)).toBe(ENV.HOME);
+    expect(resolveWriteThroughEntry("$GITHUB_WORKSPACE", ENV, WS)).toBe(ENV.GITHUB_WORKSPACE);
+    expect(resolveWriteThroughEntry("$RUNNER_TEMP", ENV, WS)).toBe(ENV.RUNNER_TEMP);
+    expect(resolveWriteThroughEntry("$GITHUB_ENV", ENV, WS)).toBe(ENV.GITHUB_ENV);
+    expect(resolveWriteThroughEntry("$GITHUB_PATH", ENV, WS)).toBe(ENV.GITHUB_PATH);
+    expect(resolveWriteThroughEntry("$GITHUB_STEP_SUMMARY", ENV, WS)).toBe(ENV.GITHUB_STEP_SUMMARY);
   });
 });
 
 describe("resolveWriteThroughPaths", () => {
   it("splits on newlines, trims, and drops blank lines", () => {
-    expect(resolveWriteThroughPaths("$GITHUB_WORKSPACE\n\n  ./dist  \n", ENV)).toStrictEqual([
+    expect(resolveWriteThroughPaths("$GITHUB_WORKSPACE\n\n  ./dist  \n", ENV, WS)).toStrictEqual([
       ENV.GITHUB_WORKSPACE,
       `${ENV.GITHUB_WORKSPACE}/dist`,
     ]);
   });
 
   it("returns [] for undefined/empty input", () => {
-    expect(resolveWriteThroughPaths(undefined, ENV)).toStrictEqual([]);
-    expect(resolveWriteThroughPaths("", ENV)).toStrictEqual([]);
-    expect(resolveWriteThroughPaths("   \n  \n", ENV)).toStrictEqual([]);
+    expect(resolveWriteThroughPaths(undefined, ENV, WS)).toStrictEqual([]);
+    expect(resolveWriteThroughPaths("", ENV, WS)).toStrictEqual([]);
+    expect(resolveWriteThroughPaths("   \n  \n", ENV, WS)).toStrictEqual([]);
   });
 
   it("does not split on internal spaces (paths may contain them)", () => {
-    expect(resolveWriteThroughPaths("/path with spaces\n/other", ENV)).toStrictEqual([
+    expect(resolveWriteThroughPaths("/path with spaces\n/other", ENV, WS)).toStrictEqual([
       "/path with spaces",
       "/other",
     ]);
   });
 
   it("folds duplicates, including ones only different spellings made look distinct", () => {
-    expect(resolveWriteThroughPaths("/opt/cache\n/opt/cache/\n/opt/./cache", ENV)).toStrictEqual([
-      "/opt/cache",
-    ]);
+    expect(
+      resolveWriteThroughPaths("/opt/cache\n/opt/cache/\n/opt/./cache", ENV, WS),
+    ).toStrictEqual(["/opt/cache"]);
   });
 
   it("keeps the lone / sentinel intact", () => {
-    expect(resolveWriteThroughPaths("/", ENV)).toStrictEqual(["/"]);
+    expect(resolveWriteThroughPaths("/", ENV, WS)).toStrictEqual(["/"]);
   });
 
   it("drops a whole-line comment, keeping the / sentinel on its own line", () => {
-    expect(resolveWriteThroughPaths("# drop the restriction\n/", ENV)).toStrictEqual(["/"]);
+    expect(resolveWriteThroughPaths("# drop the restriction\n/", ENV, WS)).toStrictEqual(["/"]);
   });
 });
 
@@ -166,17 +179,9 @@ describe("resolveWriteThroughEntry: a tilde with no HOME to expand to", () => {
   // The empty fallback leaves a relative path, which then resolves against the
   // workspace like any other. What matters is that "undefined" never lands in it.
   it("resolves the remainder rather than putting undefined in the path", () => {
-    const resolved = resolveWriteThroughEntry("~/cache", { ...ENV, HOME: undefined });
+    const resolved = resolveWriteThroughEntry("~/cache", { ...ENV, HOME: undefined }, WS);
     expect(resolved).not.toContain("undefined");
     expect(resolved.endsWith("/cache")).toBe(true);
-  });
-});
-
-describe("spellWriteThroughEntry", () => {
-  it("keeps the entry's `..` for the symlink check, which resolveWriteThroughEntry normalizes away", () => {
-    expect(spellWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/current/../out");
-    expect(spellWriteThroughEntry("~/a/../b", ENV)).toBe(`${ENV.HOME}/a/../b`);
-    expect(resolveWriteThroughEntry("../out", ENV, "/ws/current")).toBe("/ws/out");
   });
 });
 

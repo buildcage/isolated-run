@@ -53,7 +53,7 @@ import {
   readStepLabel,
 } from "./inputs.ts";
 import { checkOverlayfsSupport } from "./overlayfs-preflight.ts";
-import { saveWriteThroughForPost } from "./post-write-through.ts";
+import { savePinningForPost } from "./post-pinning.ts";
 import { startSandboxProxy, stopSandboxProxy } from "./proxy-lifecycle.ts";
 import { commandSummaryDroppedMessage, commandSummaryDroppedNote } from "./report.ts";
 import { ACTION_INPUT_ENV_KEYS } from "./sandbox/env-loader.ts";
@@ -145,7 +145,7 @@ const realDeps = {
   readStepLabel,
   readWorkingDirectory,
   assertSandboxUserCanSearch,
-  saveWriteThroughForPost,
+  savePinningForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
   checkPasswordlessSudo,
@@ -296,7 +296,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   }
   // Before config-file, whose path is relative to it.
   const workingDirectory = deps.readWorkingDirectory(env);
-  const baseDir = workingDirectory?.dir ?? workingDirectoryOf(env);
+  const baseDir = workingDirectory?.path ?? workingDirectoryOf(env, deps.realPathOf);
   const configFile = deps.applyConfigFile(env, CONFIG_FILE_INPUTS, baseDir);
   if (configFile?.warning) deps.warn(configFile.warning);
 
@@ -322,10 +322,14 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
       "fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.",
       "INVALID_EXPECTED_FILESYSTEM_RULES",
     );
-  // Before saveWriteThroughForPost, the first write under the scratch base.
+  // Before savePinningForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
-  // Before the command runs, for the post step's pinning; see post-write-through.ts.
-  if (configFile) deps.saveWriteThroughForPost(env, writeThroughInput);
+  // Before the command runs, for the post step's pinning; see post-pinning.ts.
+  if (workingDirectory || configFile)
+    deps.savePinningForPost(env, {
+      ...(workingDirectory && { baseDir }),
+      ...(configFile && { writeThrough: writeThroughInput }),
+    });
   // Needed only later, but read here so a typo fails before any setup.
   const failOnCaResidue = deps.readFailOnCaResidue();
   const failOnBlocked = deps.readFailOnBlocked();

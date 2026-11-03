@@ -1,6 +1,8 @@
 import { accessSync, constants, lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, normalize } from "node:path";
 
+import { DOT_DOT_AFTER_START, hasDotDotAfterStart } from "#core/lib/actions/dot-dot.ts";
+
 import { realSymlinkDeps, resolveHostPath, type SymlinkDeps } from "./symlinks.ts";
 
 /** Env vars a write-through: entry may reference via $NAME/${NAME}. Not
@@ -36,19 +38,29 @@ const VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g
 export const WRITE_THROUGH_ALL = "/";
 
 /**
- * One raw write-through: line as a host path, still spelled as written:
+ * Resolve one raw write-through: line into an absolute, normalized host path:
  * 1. $NAME / ${NAME} expansion, allowlisted names only.
  * 2. A leading `~/` (only) expands to $HOME.
- * 3. A relative path resolves against `baseDir`, the working directory as
- *    workingDirectoryOf spells it, or $GITHUB_WORKSPACE when absent.
- * Its `..` stay: normalize() resolves them by spelling, while the command's
- * own `..` goes where the kernel takes it.
+ * 3. A relative path resolves against `baseDir`, the working directory's real
+ *    path; with none, it is an error.
+ * A `..` may only lead a relative line: from a base without symlinks,
+ * normalize() then takes it where the command's own `..` goes.
+ * The result is normalized and stripped of any trailing slash. Only a
+ * literal `/` is the WRITE_THROUGH_ALL sentinel; anything else that
+ * normalizes to it is an error.
+ *
+ * Normalizing here is what makes assertScratchBaseNotWritable's overlap check
+ * sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
+ * otherwise slip past a guard that the plain path trips.
  */
-export function spellWriteThroughEntry(
+export function resolveWriteThroughEntry(
   rawLine: string,
   env: NodeJS.ProcessEnv,
-  baseDir: string | undefined = env.GITHUB_WORKSPACE,
+  baseDir: string | undefined,
 ): string {
+  if (hasDotDotAfterStart(rawLine)) {
+    throw new Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
+  }
   const expanded = rawLine.replace(
     VAR_PATTERN,
     (_match, braced: string | undefined, bare: string | undefined) => {
@@ -74,25 +86,7 @@ export function spellWriteThroughEntry(
   // Joined by hand, as join() would normalize.
   const under = (base: string | undefined, rest: string) => (base ? `${base}/${rest}` : rest);
   const tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded;
-  return isAbsolute(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
-}
-
-/**
- * Resolve one raw write-through: line into an absolute, normalized host path:
- * spellWriteThroughEntry, normalized and stripped of any trailing slash. Only
- * a literal `/` is the WRITE_THROUGH_ALL sentinel; anything else that
- * normalizes to it is an error.
- *
- * Normalizing here is what makes assertScratchBaseNotWritable's overlap check
- * sound: it compares path strings, so "/var/tmp/buildcage-1000/./x" would
- * otherwise slip past a guard that the plain path trips.
- */
-export function resolveWriteThroughEntry(
-  rawLine: string,
-  env: NodeJS.ProcessEnv,
-  baseDir: string | undefined = env.GITHUB_WORKSPACE,
-): string {
-  const resolved = spellWriteThroughEntry(rawLine, env, baseDir);
+  const resolved = isAbsolute(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
 
   // Everything downstream (the scratch-base overlap check, the mkdir, the
   // OCI mount destination) assumes an absolute path. Only reachable with $HOME
@@ -144,7 +138,7 @@ export function splitWriteThroughInput(input: string | undefined): string[] {
 export function resolveWriteThroughPaths(
   input: string | undefined,
   env: NodeJS.ProcessEnv,
-  baseDir?: string,
+  baseDir: string | undefined,
 ): string[] {
   const lines = splitWriteThroughInput(input);
   return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];

@@ -458,7 +458,7 @@ export function assembleBundle(
     const identity = resolveIdentity(env, options.warn, deps);
     config = buildOciConfig(baseSpec, {
       identity,
-      cwd: options.workingDirectory?.real,
+      cwd: options.workingDirectory?.path,
       writable: { ...layout.defaultDirs, writablePaths: writeThroughPaths },
       ephemeral:
         filesystemMode === "ephemeral"
