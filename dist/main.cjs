@@ -71124,7 +71124,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 			message: facts.length ? `${incomplete}. ${facts.join(" ")}` : incomplete
 		};
 	}
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or could not say whether it had). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or the report could not tell whether the proxy or a log writer lost any). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -71589,7 +71589,8 @@ function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
 	if (top += renderVerdict(report, verdictItems), !report.logLooksPlausible) {
 		let facts = describeInterruptions(report);
-		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or could not say whether it had).
+		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or the report could not tell whether
+> the proxy or a log writer lost any).
 > A missing beginning was either removed or rotated out by traffic heavy enough to fill the
 > 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand
 > made as long as a request can be.
@@ -71957,7 +71958,7 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered, resolverLogStarts }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy), resolverLog = resolverLogStarts ? resolverLogStarts - 1 : void 0;
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy), resolverLog = resolverLogStarts === void 0 ? void 0 : Math.max(0, resolverLogStarts - 1);
 	return {
 		engine,
 		parameters,
