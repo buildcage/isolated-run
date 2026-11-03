@@ -10,7 +10,7 @@ import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summa
 
 import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
 import { commandOf, type Command } from "./command.ts";
-import { escapeForDisplay } from "./escape.ts";
+import { escapeForDisplay, escapePath } from "./escape.ts";
 import { keyOf, Lines, type CutCause } from "./fold-tree.ts";
 import {
   canonical,
@@ -99,10 +99,6 @@ export interface PathRow extends Row {
   program: Shown & { rank: number };
   commands: string[];
 }
-
-// Each name on its own, so a blank leading or ending one is escaped wherever
-// it falls in the path.
-const escapePath = (path: string): string => path.split("/").map(escapeForDisplay).join("/");
 
 /** A proposed rule: a program, its accesses as a rule spells them, and a path. */
 export interface RuleRow {
@@ -214,17 +210,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     }
   };
 
-  // The working directory, the workspace and $HOME, each spelling escaped.
-  // Every one names a path for a rule; canonical gives each path the first.
-  const spelledPrefixes = {
-    ...(prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) }),
-    workspace: prefixes.workspace.map(escapePath),
-    home: prefixes.home.map(escapePath),
-  };
+  // The escaped real paths of the working directory, the workspace and $HOME,
+  // where canonical moves the paths they hold.
+  const real = (spellings: string[]): string[] => spellings.slice(-1).map(escapePath);
   const shownPrefixes = {
-    ...(spelledPrefixes.cwd && { cwd: spelledPrefixes.cwd.slice(0, 1) }),
-    workspace: spelledPrefixes.workspace.slice(0, 1),
-    home: spelledPrefixes.home.slice(0, 1),
+    ...(prefixes.cwd && { cwd: real(prefixes.cwd) }),
+    workspace: real(prefixes.workspace),
+    home: real(prefixes.home),
   };
   const fanout = prefixes.fanout ?? DEFAULT_FANOUT;
   // "…" stands for the unknown start of a cut or relative name, so it folds
@@ -543,7 +535,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // That name, and in the working directory each it would have without one.
   function ruleNames(path: string): string[] {
     if (path.startsWith(MEMFD)) return [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`];
-    return ruleSpellings(unmarked(path), shownPrefixes, spelledPrefixes);
+    return ruleSpellings(unmarked(path), shownPrefixes);
   }
 
   function ruleRowsOf(tally: RuleTally): RuleRow[] | undefined {

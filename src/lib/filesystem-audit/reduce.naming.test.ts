@@ -176,6 +176,28 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["R node ./a", "R node $GITHUB_WORKSPACE/b"]);
   });
 
+  it("keys a file once when the working directory holds the workspace's symlink and its target", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", comm: "node", path: "/h/work/r/a" },
+        { kind: "read", comm: "node", path: "/h/ws-real/a" },
+      ),
+      { cwd: ["/h"], workspace: ["/h/work/r", "/h/ws-real"], home: ["/h"] },
+    );
+    expect(lines(md)).toEqual(["R node ./ws-real/a"]);
+  });
+
+  it("keys a failed access through the workspace's symlink with the working directory's real path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "open", failed: true, comm: "node", path: "/sym/work/app/x", err: 2 },
+        { kind: "read", comm: "node", path: "/real/work/app/x" },
+      ),
+      { cwd: ["/real/work/app"], workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["R node ./x"]);
+  });
+
   it("takes / as a working directory like any other", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

@@ -147,15 +147,15 @@ describe("createAuditSummary: folding", () => {
     ]);
   });
 
-  it("keeps the workspace and $HOME whole under any spelling, but not the real path's parents", () => {
+  it("keeps the workspace and $HOME whole under any spelling, but not the symlink's parents", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/real/work/${f}` })),
-        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/data/u/.ssh/${f}` })),
-        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/data/${f}` })),
-        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/real/${f}` })),
+        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/sym/work/${f}` })),
+        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/hu/u/.ssh/${f}` })),
+        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/hu/${f}` })),
+        ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/sym/${f}` })),
       ),
-      { workspace: ["/sym/work", "/real/work"], home: ["/home/u", "/data/u"] },
+      { workspace: ["/sym/work", "/real/work"], home: ["/hu/u", "/data/u"] },
     );
     expect(lines(md)).toEqual([
       "R c ./a",
@@ -164,8 +164,8 @@ describe("createAuditSummary: folding", () => {
       "R c ~/.ssh/a",
       "R c ~/.ssh/b",
       "R c ~/.ssh/c",
-      "R c /data/**",
-      "R c /real/**",
+      "R c /hu/**",
+      "R c /sym/**",
     ]);
   });
 

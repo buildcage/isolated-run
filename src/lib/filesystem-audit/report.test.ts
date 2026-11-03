@@ -412,6 +412,27 @@ describe("readStepFilesystemAudit", () => {
     );
   });
 
+  it("escapes the working directory's name in the legend as a path is", async () => {
+    const { deps: d, summaries } = deps({
+      raw: JSON.stringify({ kind: "write", comm: "node", path: "/work/a\nb/x" }),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work" },
+        workingDirectory: "/work/a\nb",
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain(
+      "`./` `$GITHUB_WORKSPACE/a\\nb` · `$GITHUB_WORKSPACE/` workspace",
+    );
+  });
+
   it("names no working directory in the legend when it is the workspace", async () => {
     const { deps: d, summaries } = deps({
       raw: JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
