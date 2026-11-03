@@ -92,14 +92,15 @@ fi
 mkdir -p "$WORKDIR/releases/v2"
 ln -s releases/v2 "$WORKDIR/current"
 step linked INPUT_WORKING_DIRECTORY="current" INPUT_WRITE_THROUGH="../out" \
-  INPUT_RUN="pwd >\"$WORKDIR/linked-pwd\""
+  INPUT_RUN="touch \"$WORKDIR/linked-ran\""
 CODE=$?
-if [ "$(cat "$WORKDIR/linked-pwd" 2>/dev/null)" = "$WORKDIR/releases/v2" ]; then
+REAL_WORKDIR=$(cd "$WORKDIR" && pwd -P)
+if [ -e "$WORKDIR/linked-ran" ]; then
   fail "expected write-through: ../out through the symlinked working-directory to stop the command"
-elif [ "$CODE" != "0" ] && grep -q "instead: \"$WORKDIR/releases/out\"" "$WORKDIR/linked.log"; then
+elif [ "$CODE" != "0" ] && grep -q "instead: \"$REAL_WORKDIR/releases/out\"" "$WORKDIR/linked.log"; then
   pass "a write-through .. out of a symlinked working-directory fails the step, naming where it leads"
 else
-  fail "expected write-through: ../out to be refused with a hint at $WORKDIR/releases/out (exit $CODE)"
+  fail "expected write-through: ../out to be refused with a hint at $REAL_WORKDIR/releases/out (exit $CODE)"
   cat "$WORKDIR/linked.log"
 fi
 

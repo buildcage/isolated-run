@@ -41,8 +41,8 @@ export const WRITE_THROUGH_ALL = "/";
  * 2. A leading `~/` (only) expands to $HOME.
  * 3. A relative path resolves against `baseDir`, the working directory as
  *    workingDirectoryOf spells it, or $GITHUB_WORKSPACE when absent.
- * Its `..` stay, for the symlink check: normalize() resolves them by spelling,
- * not by where the command's own `..` leads.
+ * Its `..` stay: normalize() resolves them by spelling, while the command's
+ * own `..` goes where the kernel takes it.
  */
 export function spellWriteThroughEntry(
   rawLine: string,

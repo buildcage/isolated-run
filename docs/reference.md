@@ -962,9 +962,9 @@ use an expression such as `${{ runner.temp }}` instead.
   set `working-directory` itself, and the file must still be in `$GITHUB_WORKSPACE`. Adding
   `working-directory` to a step changes where its relative `write-through` paths point: with
   `working-directory: app`, `write-through: app/dist` becomes `app/app/dist`. When the directory
-  as written goes through a symlink, outside the `$GITHUB_WORKSPACE`, `$HOME` or `$RUNNER_TEMP`
-  path itself, a relative `write-through` path goes through it too, even one that climbs back out
-  with `..`, and [`write-through`](#write-through-paths) refuses it; name the path it leads to
+  as written goes through a symlink, other than in the `$GITHUB_WORKSPACE`, `$HOME` or
+  `$RUNNER_TEMP` path itself, every relative `write-through` path goes through it too, `../out`
+  included, and [`write-through`](#write-through-paths) refuses it; name the path it leads to
   instead.
 - A `..` in `working-directory` itself, or in a relative `config-file` path, climbs the path as
   written rather than out of where a symlink leads: with `current` linking to `releases/v2`,
@@ -1112,7 +1112,9 @@ this:
   sandbox keeps read-only, such as a tool installed under `/opt/hostedtoolcache`. The part of a path
   that is `$HOME`, `$GITHUB_WORKSPACE` or `$RUNNER_TEMP` is taken at its real path, as persistent
   mode does, so only what the entry adds below one is checked: `~/.cache` works where `/home` links
-  to `/var/home`.
+  to `/var/home`. A `..` that climbs above one of them is resolved from its real path, as the
+  command's own `..` is. If that lands somewhere other than the path as written, the step fails and
+  names where it lands.
 - A path that doesn't already exist is created before the step runs, always as a directory, the same
   convention Docker itself uses for a bind mount whose host source doesn't exist yet
   (`docker run -v`/`--mount`), never as a file. `$GITHUB_OUTPUT`, `$GITHUB_ENV`, `$GITHUB_PATH`, and

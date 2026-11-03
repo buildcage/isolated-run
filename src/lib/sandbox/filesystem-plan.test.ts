@@ -235,6 +235,29 @@ describe("resolveFilesystemPlan", () => {
       ).toThrow(expect.objectContaining({ code: "INVALID_WRITE_THROUGH_PATH" }));
     });
 
+    it("refuses a `..` out of a symlinked runner directory, which lands past its real path", () => {
+      expect(() =>
+        resolveFilesystemPlan("persistent", "../shared", ENV, {
+          ...linked({}),
+          realpath: (p: string) => (p === WS ? "/mnt/data/repo" : p),
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "INVALID_WRITE_THROUGH_PATH",
+          message: expect.stringContaining('leads the command to "/mnt/data/shared"'),
+        }),
+      );
+    });
+
+    it("finds a runner directory however its variable spells it", () => {
+      const env = { GITHUB_WORKSPACE: WS, RUNNER_TEMP: "/home/runner/./work/_temp" };
+      const plan = resolveFilesystemPlan("persistent", "$RUNNER_TEMP/a/../b", env, {
+        ...linked({ "/home": "var/home" }),
+        realpath: (p: string) => p.replace(/^\/home\//, "/var/home/"),
+      });
+      expect(plan.writeThroughPaths).toStrictEqual(["/var/home/runner/work/_temp/b"]);
+    });
+
     it("checks a path under no runner directory as written", () => {
       const env = { HOME: ENV.HOME, GITHUB_WORKSPACE: WS };
       expect(() =>
@@ -303,6 +326,12 @@ describe("resolveFilesystemPlan", () => {
 
     it("leaves both under the overlay in ephemeral mode unless write-through covers them", () => {
       expect(plan("ephemeral", "./dist").mediatedVariables).toStrictEqual([]);
+    });
+
+    it("leaves a mediated file named through `..` to the mediation", () => {
+      const named = plan("ephemeral", "$RUNNER_TEMP/x/../_runner_file_commands/set_output_abc");
+      expect(named.mediatedVariables).toStrictEqual(["GITHUB_OUTPUT"]);
+      expect(named.writeThroughPaths).toStrictEqual([]);
     });
 
     // The mediation writes the file back, so the entry needs no bind of its own.
