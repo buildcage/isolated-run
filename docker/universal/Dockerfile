@@ -127,8 +127,8 @@ ENV S6_LOGGING=0
 ENV S6_CMD_WAIT_FOR_SERVICES_MAXTIME=60000
 ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 # Shutdown sleeps this long unconditionally between its SIGTERM and SIGKILL.
-# Teardown kills the container outright, so only a `docker stop` or the
-# container ending on its own waits. The services stop in under 50ms.
+# The action's teardown kills the container outright, so only a `docker stop`
+# or the container ending on its own waits. The services stop in under 50ms.
 ENV S6_KILL_GRACETIME=500
 
 RUN mkdir -p /etc/haproxy/rules /var/log/haproxy /etc/coredns /var/log/coredns
