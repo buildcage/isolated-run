@@ -71,6 +71,9 @@ export interface FilesystemPlan {
   /** filesystem-mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
+  /** The host mounts under an overlay root that ephemeral cannot overlay, so
+   *  the command sees the empty directory beneath each. */
+  hiddenMounts?: string[];
   /** Normalized, free of symlinks and pre-created, in either filesystem mode.
    *  An entry naming a mediated runner file is left out: the mediation writes
    *  that file back instead of a bind. */
@@ -213,11 +216,14 @@ export function resolveFilesystemPlan(
       Boolean(p),
     );
     const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
-    const overlayRoots = [
-      ...candidateRoots,
-      ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
-    ];
-    return { overlayRoots, writeThroughPaths, mediatedVariables };
+    const nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
+    const overlayRoots = [...candidateRoots, ...nested.roots];
+    return {
+      overlayRoots,
+      ...(nested.hidden.length && { hiddenMounts: nested.hidden }),
+      writeThroughPaths,
+      mediatedVariables,
+    };
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem-mode: ephemeral's overlay roots: ${errorMessage(e)}`,

@@ -407,6 +407,7 @@ describe("resolveFilesystemPlan", () => {
       isDirectory: () => true,
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
+    expect(plan).not.toHaveProperty("hiddenMounts");
   });
 
   it("warns about a host mount it leaves out rather than failing", () => {
@@ -422,6 +423,7 @@ describe("resolveFilesystemPlan", () => {
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/tmp"]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
+    expect(plan.hiddenMounts).toStrictEqual(["/home/runner/remote"]);
   });
 
   it("reads the host mount table by default", () => {

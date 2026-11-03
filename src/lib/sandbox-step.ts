@@ -86,6 +86,7 @@ import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-
 import { realPathOf } from "./sandbox/symlinks.ts";
 import {
   assertSandboxUserCanSearch,
+  assertSandboxWillShow,
   readWorkingDirectory,
   workingDirectoryOf,
 } from "./sandbox/working-directory.ts";
@@ -145,6 +146,7 @@ const realDeps = {
   readStepLabel,
   readWorkingDirectory,
   assertSandboxUserCanSearch,
+  assertSandboxWillShow,
   savePinningForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -441,6 +443,7 @@ export function preflight(
     baseDir,
     warn: deps.warn,
   });
+  if (workingDirectory) deps.assertSandboxWillShow(workingDirectory, plan);
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(
       filesystemMode,

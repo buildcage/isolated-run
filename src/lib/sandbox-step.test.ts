@@ -44,6 +44,7 @@ const mocks = {
   readStepLabel: vi.fn(),
   readWorkingDirectory: vi.fn(),
   assertSandboxUserCanSearch: vi.fn(),
+  assertSandboxWillShow: vi.fn(),
   savePinningForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -826,10 +827,26 @@ describe("runSandboxStep", () => {
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
+  it("checks the sandbox will show working-directory against the plan before the proxy starts", async () => {
+    const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.assertSandboxWillShow.mockImplementation(() => {
+      throw new SandboxError("hidden", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("hidden");
+    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(
+      workingDirectory,
+      mocks.resolveFilesystemPlan.mock.results[0].value,
+    );
+    expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
+  });
+
   it("sets PWD to the workspace without working-directory", async () => {
     await runSandboxStep({ ...ENV }, deps);
 
     expect(mocks.assertSandboxUserCanSearch).not.toHaveBeenCalled();
+    expect(mocks.assertSandboxWillShow).not.toHaveBeenCalled();
     expect(mocks.runSandboxedCommand.mock.calls[0][0].envOverrides).toStrictEqual({
       PWD: ENV.GITHUB_WORKSPACE,
     });

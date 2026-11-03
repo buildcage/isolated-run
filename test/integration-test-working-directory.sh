@@ -3,7 +3,9 @@
 # starts there with PWD set to it, a relative write-through path and config-file
 # resolve against its real path, and a directory that is missing or that the
 # sandbox mounts over fails the step, the missing one left uncreated, as does a
-# `..` after the input's start.
+# `..` after the input's start. Under filesystem-mode: ephemeral, one outside
+# the overlay is read-only, and one in a host mount the overlay cannot take
+# fails the step before the command runs.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
@@ -14,10 +16,13 @@ WORKDIR=$(mktemp -d)
 # write-through entry resolved against it.
 OUTSIDE=/opt/buildcage-working-directory-test
 SHM=/dev/shm/buildcage-working-directory-test
+# Under the workspace's overlay, and named so the overlay cannot take it.
+UNOVERLAID="$WORKDIR/un,overlaid"
 sudo -n mkdir -p "$OUTSIDE/out"
 sudo -n chown -R "$(id -u):$(id -g)" "$OUTSIDE"
-mkdir -p "$SHM" "$WORKDIR/app"
+mkdir -p "$SHM" "$WORKDIR/app" "$UNOVERLAID"
 cleanup() {
+  sudo -n umount "$UNOVERLAID" >/dev/null 2>&1
   sudo -n rm -rf "$OUTSIDE"
   rm -rf "$WORKDIR" "$SHM"
 }
@@ -127,6 +132,29 @@ if [ "$CODE" != "0" ] && grep -q "the sandbox mounts its own /dev/shm" "$WORKDIR
 else
   fail "expected a working-directory under /dev/shm to fail (exit $CODE)"
   cat "$WORKDIR/shm.log"
+fi
+
+step ephemeral-outside INPUT_FILESYSTEM_MODE="ephemeral" INPUT_WORKING_DIRECTORY="$OUTSIDE" \
+  INPUT_RUN="touch here"
+CODE=$?
+if [ "$CODE" != "0" ] && [ ! -e "$OUTSIDE/here" ]; then
+  pass "under ephemeral, a working-directory outside the overlay is read-only"
+else
+  fail "expected a write in $OUTSIDE to fail under ephemeral (exit $CODE)"
+  cat "$WORKDIR/ephemeral-outside.log"
+fi
+
+sudo -n mount -t tmpfs -o "uid=$(id -u),gid=$(id -g)" tmpfs "$UNOVERLAID"
+step ephemeral-unoverlaid INPUT_FILESYSTEM_MODE="ephemeral" INPUT_WORKING_DIRECTORY="un,overlaid" \
+  INPUT_RUN="touch \"$WORKDIR/unoverlaid-ran\""
+CODE=$?
+if [ "$CODE" != "0" ] && [ ! -e "$WORKDIR/unoverlaid-ran" ] &&
+  grep -qF "ephemeral cannot overlay the host mount $UNOVERLAID, so the sandbox shows the empty directory" "$WORKDIR/ephemeral-unoverlaid.log" &&
+  ! grep -q "proxy image:" "$WORKDIR/ephemeral-unoverlaid.log"; then
+  pass "under ephemeral, a working-directory in a host mount the overlay cannot take fails the step before the proxy starts"
+else
+  fail "expected working-directory: un,overlaid to be refused before the proxy starts (exit $CODE)"
+  cat "$WORKDIR/ephemeral-unoverlaid.log"
 fi
 
 assert_results

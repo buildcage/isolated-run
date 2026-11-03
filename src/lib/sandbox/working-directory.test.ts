@@ -1,18 +1,30 @@
 import type { Stats } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
 import {
   assertSandboxShows,
   assertSandboxUserCanSearch,
+  assertSandboxWillShow,
+  hiddenBeforeStart,
   hiddenWorkingDirectory,
   isWorkspace,
   readWorkingDirectory,
   unsearchableAncestor,
   workingDirectoryOf,
 } from "./working-directory.ts";
+
+vi.mock("./mountinfo.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./mountinfo.ts")>()),
+  listHostMounts: () => [],
+}));
+vi.mock("./host-probes.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./host-probes.ts")>();
+  return { ...actual, realHostProbes: { ...actual.realHostProbes, varRunRealPath: () => "/run" } };
+});
 
 const WS = "/home/runner/work/repo/repo";
 // null leaves $GITHUB_WORKSPACE unset.
@@ -217,6 +229,88 @@ describe("hiddenWorkingDirectory", () => {
     expect(hiddenWorkingDirectory("/proc/acpi/x", [], ["/proc/acpi"])).toBe(
       "/proc/acpi is hidden from the sandbox",
     );
+  });
+});
+
+describe("hiddenBeforeStart", () => {
+  const plan = (writeThroughPaths: string[] = [], hiddenMounts?: string[]) => ({
+    writeThroughPaths,
+    ...(hiddenMounts && { hiddenMounts }),
+  });
+
+  it("finds a working directory in a host mount ephemeral cannot overlay", () => {
+    expect(hiddenBeforeStart(`${WS}/fuse/app`, plan([], [`${WS}/fuse`]), [], undefined)).toBe(
+      `filesystem-mode: ephemeral cannot overlay the host mount ${WS}/fuse, so the sandbox shows the empty directory beneath it`,
+    );
+    expect(hiddenBeforeStart(WS, plan([], [`${WS}/fuse`]), [], undefined)).toBeUndefined();
+  });
+
+  it("finds a working directory under the empty /run, or a /var/run elsewhere", () => {
+    expect(hiddenBeforeStart("/run/app", plan(), [], undefined)).toBe(
+      "the sandbox mounts its own /run",
+    );
+    expect(hiddenBeforeStart("/srv/run/app", plan(), [], "/srv/run")).toBe(
+      "the sandbox mounts its own /srv/run",
+    );
+  });
+
+  it("leaves a working directory a write-through entry holds to that entry's mount", () => {
+    expect(hiddenBeforeStart("/run/app/x", plan(["/run/app"]), [], undefined)).toBeUndefined();
+    expect(
+      hiddenBeforeStart(`${WS}/fuse/out`, plan([`${WS}/fuse/out`], [`${WS}/fuse`]), [], undefined),
+    ).toBeUndefined();
+  });
+
+  it("finds a working directory under the scratch base, any of its aliases, or a reserved path, write-through or not", () => {
+    expect(
+      hiddenBeforeStart(`${SANDBOX_SCRATCH_BASE}/x`, plan([SANDBOX_SCRATCH_BASE]), [], undefined),
+    ).toBe(`the sandbox mounts its own ${SANDBOX_SCRATCH_BASE}`);
+    const mounts = [
+      { mountPoint: "/var/tmp", fsType: "ext4", device: "8:1", root: "/var/tmp" },
+      { mountPoint: "/mnt/vt", fsType: "ext4", device: "8:1", root: "/var/tmp" },
+    ];
+    const alias = `/mnt/vt/${SANDBOX_SCRATCH_BASE.slice("/var/tmp/".length)}`;
+    expect(hiddenBeforeStart(`${alias}/x`, plan(), mounts, undefined)).toBe(
+      `the sandbox mounts its own ${alias}`,
+    );
+    expect(hiddenBeforeStart("/etc/resolv.conf", plan(["/etc"]), [], undefined)).toBe(
+      "the sandbox mounts its own /etc/resolv.conf",
+    );
+  });
+});
+
+describe("assertSandboxWillShow", () => {
+  const wd = { input: "../run", path: "/run/app", isWorkspace: false };
+
+  it("refuses a working directory the sandbox will hide, naming why", () => {
+    expect(() =>
+      assertSandboxWillShow(
+        wd,
+        { writeThroughPaths: [] },
+        { hostMounts: () => [], varRunRealPath: () => "/run" },
+      ),
+    ).toThrow(
+      new SandboxError(
+        'working-directory "../run" (/run/app) is unusable: the sandbox mounts its own /run.',
+        "INVALID_WORKING_DIRECTORY",
+      ),
+    );
+  });
+
+  it("reads the host's mounts and /var/run by default", () => {
+    expect(() => assertSandboxWillShow(wd, { writeThroughPaths: [] })).toThrow(
+      "the sandbox mounts its own /run",
+    );
+  });
+
+  it("passes one it will show", () => {
+    expect(() =>
+      assertSandboxWillShow(
+        { ...wd, path: WS },
+        { writeThroughPaths: [] },
+        { hostMounts: () => [], varRunRealPath: () => undefined },
+      ),
+    ).not.toThrow();
   });
 });
 
