@@ -46,12 +46,14 @@ export function fetchReport(
 }
 /* v8 ignore stop */
 
+/** The logs could not be read, so the step fails whatever the mode. */
+export class LogsUnreadableError extends Error {}
+
 /**
  * The logs could not be read and the proxy or the resolver did not answer
- * either, as when the whole container stopped. The step fails for it whatever
- * the mode.
+ * either, as when the whole container stopped.
  */
-export class ProxyStoppedError extends Error {}
+export class ProxyStoppedError extends LogsUnreadableError {}
 
 function readHealth(docker: Docker, containerName: string): ServiceHealth {
   return {
@@ -86,7 +88,11 @@ export async function readReport(
     );
   } catch (e) {
     // Asked again, as the container can stop after the first answer.
-    if (servicesAnswered(health) && servicesAnswer(docker, containerName)) throw e;
+    if (servicesAnswered(health) && servicesAnswer(docker, containerName)) {
+      throw new LogsUnreadableError(
+        `the proxy and the DNS resolver answered but the logs could not be read: ${errorMessage(e)}`,
+      );
+    }
     throw new ProxyStoppedError(
       `the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`,
     );

@@ -16,7 +16,7 @@ import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
-import { fetchReport, ProxyStoppedError, readActionVersion } from "./report-fetch.ts";
+import { fetchReport, LogsUnreadableError, readActionVersion } from "./report-fetch.ts";
 import {
   COMMAND_SUMMARY_CUT_MESSAGE,
   missingReportFrame,
@@ -94,8 +94,8 @@ export interface ReportStepOptions {
  *
  * Never throws. A failure here is a warning naming the step that failed, and
  * under `restrict` with fail-on-blocked it also fails the step: a report that
- * could not be read or recorded cannot vouch that nothing was blocked. A
- * report lost to a stopped proxy fails it in any mode.
+ * could not be read or recorded cannot vouch that nothing was blocked. Logs
+ * the report could not read fail it in any mode.
  */
 export async function reportStepTraffic(
   {
@@ -134,7 +134,7 @@ export async function reportStepTraffic(
     report = await fetchReport(containerName, parameters, proxyEngine);
   } catch (e) {
     const message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-    if (e instanceof ProxyStoppedError) {
+    if (e instanceof LogsUnreadableError) {
       annotation.error(`${message}; failing the step whatever the mode`);
       process.exitCode = 1;
     } else {

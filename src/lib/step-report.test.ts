@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
-import { ProxyStoppedError } from "./report-fetch.ts";
+import { LogsUnreadableError, ProxyStoppedError } from "./report-fetch.ts";
 import { COMMAND_SUMMARY_CUT_MESSAGE, missingReportFrame, summaryFooter } from "./report.ts";
 import {
   reportStepTraffic,
@@ -304,12 +304,14 @@ describe("reportStepTraffic", () => {
   );
 
   it.each([
-    { mode: "restrict", failOnBlocked: false },
-    { mode: "audit", failOnBlocked: true },
+    { mode: "restrict", failOnBlocked: false, error: ProxyStoppedError },
+    { mode: "audit", failOnBlocked: true, error: ProxyStoppedError },
+    { mode: "restrict", failOnBlocked: false, error: LogsUnreadableError },
+    { mode: "audit", failOnBlocked: true, error: LogsUnreadableError },
   ])(
-    "fails the step when the report was lost to a stopped proxy ($mode, fail-on-blocked=$failOnBlocked)",
-    async ({ mode, failOnBlocked }) => {
-      mocks.fetchReport.mockRejectedValue(new ProxyStoppedError("container is gone"));
+    "fails the step when the logs could not be read ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
+    async ({ mode, failOnBlocked, error }) => {
+      mocks.fetchReport.mockRejectedValue(new error("container is gone"));
 
       await expect(
         reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),

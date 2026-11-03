@@ -3,7 +3,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Docker } from "#core/lib/docker/client.ts";
 import { reportParams } from "#core/lib/test/report-data.node.ts";
 
-import { ProxyStoppedError, readActionVersion, readReport } from "./report-fetch.ts";
+import {
+  LogsUnreadableError,
+  ProxyStoppedError,
+  readActionVersion,
+  readReport,
+} from "./report-fetch.ts";
 
 // Label parsing is tested in action-version.test.ts.
 const readLabels = vi.fn();
@@ -93,7 +98,7 @@ describe("readReport", () => {
     expect(exec.mock.calls.filter(([, args]) => args[0] === "sh").length).toBe(1);
   });
 
-  it("passes the read error on as it is while both services answer", async () => {
+  it("names the unreadable logs while both services answer", async () => {
     const exec = vi.fn((_id: string, args: string[]) => {
       if (args[0] === "curl") return "haproxy_process_dropped_logs_total 0\n";
       return gone();
@@ -111,7 +116,10 @@ describe("readReport", () => {
       "inspect",
     );
 
-    await expect(result).rejects.toThrow("read failed");
+    await expect(result).rejects.toThrow(LogsUnreadableError);
     await expect(result).rejects.not.toThrow(ProxyStoppedError);
+    await expect(result).rejects.toThrow(
+      "the proxy and the DNS resolver answered but the logs could not be read: read failed",
+    );
   });
 });

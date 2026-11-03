@@ -77596,7 +77596,7 @@ function createHostDocker() {
 function fetchReport(containerName, parameters, proxyEngine) {
 	return readReport(createHostDocker(), containerName, parameters, proxyEngine);
 }
-var ProxyStoppedError = class extends Error {};
+var LogsUnreadableError = class extends Error {}, ProxyStoppedError = class extends LogsUnreadableError {};
 function readHealth(docker, containerName) {
 	return {
 		droppedLogs: readProxyDroppedLogs(docker, containerName),
@@ -77614,7 +77614,7 @@ async function readReport(docker, containerName, parameters, proxyEngine) {
 	try {
 		return await build(readRotatedLog(docker, containerName, "/var/log/haproxy"), readRotatedLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw servicesAnswered(health) && servicesAnswer(docker, containerName) ? e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
+		throw servicesAnswered(health) && servicesAnswer(docker, containerName) ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${errorMessage(e)}`) : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {
@@ -77697,7 +77697,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
 		let message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-		e instanceof ProxyStoppedError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
+		e instanceof LogsUnreadableError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
 	}
 	let rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
