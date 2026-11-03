@@ -354,7 +354,8 @@ URL](docs/security.md#credentials-in-a-url).
 In `restrict` mode a blocked connection fails the step, and so does a report that could not be read
 or written, since it can't show that nothing was blocked. Set `fail-on-blocked: false` to report
 without failing, or list what you expect to stay blocked in `known-blocked-rules`. In `audit` mode
-a blocked connection or an incomplete report does not fail the step. How the alert and the tables
+a blocked connection or an incomplete report does not fail the step. A proxy or resolver that
+stopped answering fails it in either mode. How the alert and the tables
 are made up, and what a `dns-service-not-allowed` row means, is in
 [Report details](./docs/reference.md#report-details).
 

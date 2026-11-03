@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
-import { readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
+import { readProxyAnswered, readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
 import { readResolverAnswered } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -64,6 +64,11 @@ function servicesAnswered(health: ServiceHealth): boolean {
   return health.droppedLogs.answered && health.resolverAnswered;
 }
 
+/** Whether both services still answer, without logging another barrier. */
+function servicesAnswer(docker: Docker, containerName: string): boolean {
+  return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
+}
+
 export async function readReport(
   docker: Docker,
   containerName: string,
@@ -81,7 +86,7 @@ export async function readReport(
     );
   } catch (e) {
     // Asked again, as the container can stop after the first answer.
-    if (servicesAnswered(health) && servicesAnswered(readHealth(docker, containerName))) throw e;
+    if (servicesAnswered(health) && servicesAnswer(docker, containerName)) throw e;
     throw new ProxyStoppedError(
       `the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`,
     );
