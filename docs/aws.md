@@ -17,8 +17,9 @@ credentials such as a role's. The proxy reads only the ID; the secret access key
 
 ## Why URL rules are not enough
 
-URL rules decide whose resource a request reaches wherever the host or path names it. Many AWS APIs
-name no resource, though, and the account a request reaches is decided by the key that signs it.
+When a request's host or path names the resource it reaches, such as an S3 bucket, a URL rule can
+decide whose resource that is. Many AWS APIs name no resource there, though, and the account a
+request reaches is decided by the key that signs it.
 This page sorts AWS API hosts into those two kinds:
 
 | Kind                                      | Example                                                                 | The account a request reaches                     |
@@ -45,6 +46,9 @@ the key the step started with, and the keys STS issues for roles in the accounts
 carried in from anywhere else is blocked, and so are most unsigned requests to a host that serves
 every account. [How the check decides](#how-the-check-decides) has the exact rules.
 
+The proxy learns a key when it reads the key from an STS answer or an ECR registry redirect and
+adds it to the keys it knows.
+
 It does not stop a request signed with your own key from reaching another account's resource, such
 as its SNS topic; IAM closes those, see
 [What it does not protect against](#what-it-does-not-protect-against).
@@ -52,7 +56,7 @@ as its SNS topic; IAM closes those, see
 ## Getting started
 
 The check needs the default `proxy-engine: inspect` and an access key ID in `AWS_ACCESS_KEY_ID`
-when the step starts; without either, the step fails, in `audit` too. Run
+when the step starts; without either, the step fails (see [What it needs](#what-it-needs)). Run
 `aws-actions/configure-aws-credentials` as an ordinary step before this one. Its own STS call does
 not pass through the proxy, and the temporary credentials it exports, an `ASIA…` key, are the key
 the step starts with. [Compatibility](#compatibility) covers other sources of credentials and what
@@ -73,8 +77,9 @@ would block. A step that uses only the credentials it is given needs `aws-key-ch
     run: aws ecs update-service --cluster app --service web --force-new-deployment
 ```
 
-`audit` needs no URL rules; the report writes them for `restrict`, as below. They allow what the run
-reached, so read them before switching.
+`audit` needs no URL rules; the report writes them for `restrict` in its example (see
+[The restrict example](#the-restrict-example)). They allow what the run reached, so read them
+before switching.
 
 A step that assumes roles of its own, as the CDK does, also names the accounts those roles are in.
 `allowed-aws-role-accounts` works only with `aws-key-check: true`; without it the step fails. Start
@@ -117,9 +122,9 @@ The report is the step's section in the workflow run's Job Summary.
 
 ### 🔑 AWS Keys
 
-This table follows the allowed hosts and has one row per access key that signed a request or that an
-STS or ECR answer issued, so it shows what the check made of each key even in a run where it blocked
-nothing:
+This table comes after **✅ Allowed Hosts** (**📋 Audited Hosts** in `audit`). It has one row per
+access key that signed a request or that an STS or ECR answer issued, so it shows what the check
+made of each key:
 
 | Key   | Check                                         | Source                            | Hosts                                                                  | Requests |
 | ----- | --------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | -------: |
@@ -135,7 +140,7 @@ report uses the same numbers.
   when it blocked one or `restrict` would, and `not checked` when it did neither, such as for a key
   issued and never used.
 - **Source** says where the key came from. All but `starting key` and `unknown` are followed in
-  brackets by the key that signed the call that issued it, as `(from key 1)`, or by
+  parentheses by the key that signed the call that issued it, as `(from key 1)`, or by
   `a web identity` or `a registry token` for an unsigned one:
   - `starting key`: the key the step started with.
   - `role in <account>`: one an STS call in the run issued for a role in that account.
@@ -160,7 +165,7 @@ as a web identity's, ends in `[issued aws key N]`:
 Nothing is blocked. A warning annotation counts the requests `restrict` would block, and
 **⚠️ Restrict Would Block** lists them in two tables: one row per key for `aws-key-not-allowed`, and
 one row per host for every other reason, as in **🚫 Blocked Hosts**. The check judges every request,
-so one no URL rule allows can carry an `aws-` reason too.
+so a request that no URL rule allows can still show an `aws-` reason.
 
 | Key (aws-key-not-allowed)         | Hosts                                                                  | Count |
 | --------------------------------- | ---------------------------------------------------------------------- | ----: |
@@ -187,12 +192,14 @@ with an `aws-` reason. The ones they allow and the check blocks are listed under
 
 The report's **Switch to restrict mode** example includes `aws-key-check: true` and
 `allowed-aws-role-accounts`. The accounts it lists are the ones you gave, plus each account the run
-assumed a role in. It reads them from every STS answer, including one to a request `restrict` would
-block, so a chain of roles, as the CDK assumes them, shows in full after one run. Anything in the
-step can assume a role, including one in an account its author controls, so each added account is
-left commented out, and so is the input itself when you gave none. Its comment says what naming that
-account alone lets through: the keys in **⚠️ Restrict Would Block** from its roles or from ECR
-registry requests they signed, and an `AssumeRoleWithWebIdentity` call for a role in it:
+assumed a role in. The report reads those from every STS answer, including one to a request
+`restrict` would block, so a chain of roles, as the CDK assumes them, shows in full after one run.
+
+Anything in the step can assume a role, including one in an account its author controls. So each
+account the report added is left commented out, and so is the input itself when you gave none. The
+comment on such an account says what naming that account alone lets through: the keys in
+**⚠️ Restrict Would Block** from its roles or from ECR registry requests they signed, and an
+`AssumeRoleWithWebIdentity` call for a role in it:
 
 ```yaml
 aws-key-check: true
@@ -218,8 +225,8 @@ see, so it is blocked as `aws-unsupported-credential`. Call Bedrock with the rol
 
 ### Downloading a presigned URL
 
-A presigned URL carries the key of whoever signed it, such as Lambda `GetFunction`'s
-`Code.Location` or a vendor's download link, and is blocked as `aws-key-not-allowed`. Download it
+A presigned URL someone else signed, such as Lambda `GetFunction`'s `Code.Location` or a vendor's
+download link, carries that signer's key and is blocked as `aws-key-not-allowed`. Download it
 in a step without the check. `aws sts get-access-key-info --access-key-id <key-id>`, with the key
 ID from the URL's `X-Amz-Credential`, names the account it belongs to.
 
@@ -233,16 +240,18 @@ affected: the proxy learns the key ECR signs them with (see [Which keys pass](#w
 
 ### What it needs
 
+Without either of these, the step fails before the proxy starts, in `audit` too:
+
 - The default `proxy-engine: inspect`. `universal` never sees a request's headers, so the check
-  fails the step there, in `audit` too.
-- An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. Without one, or with a value that is
-  not an access key ID, the step fails before the proxy starts, in `audit` too.
+  cannot run there.
+- An access key ID in `AWS_ACCESS_KEY_ID` when the step starts. A value that is not an access key
+  ID fails the same way.
 
 A deploy step often needs Docker too, which no isolated command can use, with the check or without
 ([Inside the sandbox](../README.md#inside-the-sandbox)). `docker push` to ECR and
 `sam build --use-container` fail there; build and push images in a step of their own, or with
 [Buildcage for Docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
-and Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
+and runs Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
 
 Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:
 
@@ -261,20 +270,20 @@ Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:
 
 ### What works unchanged
 
-A step passes the check when:
+These pass the check without changes:
 
-- It calls AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
+- Calling AWS through the AWS CLI v2, a current AWS SDK, or a tool built on them, such as the CDK
   and Terraform.
-- It assumes roles only in accounts in `allowed-aws-role-accounts`, through STS `AssumeRole`, or
+- Assuming roles only in accounts in `allowed-aws-role-accounts`, through STS `AssumeRole`, or
   `AssumeRoleWithWebIdentity` sent as a form (the Query protocol,
   `application/x-www-form-urlencoded`) as an AWS SDK sends it: the CDK's deploy roles, Terraform's
   `assume_role`, or a CLI profile whose `role_arn` starts from `credential_source = Environment` or
   a `web_identity_token_file`.
-- It reaches CodeCommit over Git through CodeCommit's credential helper, or with a static Git
+- Reaching CodeCommit over Git through CodeCommit's credential helper, or with a static Git
   credential of an account in `allowed-aws-role-accounts`.
-- It pulls from or pushes to ECR through the registry API, with a client such as `crane`, `skopeo`
+- Pulling from or pushing to ECR through the registry API, with a client such as `crane`, `skopeo`
   or Jib.
-- It sends unsigned requests, or a token such as CodeArtifact's or an API Gateway authorizer's, to a
+- Sending unsigned requests, or a token such as CodeArtifact's or an API Gateway authorizer's, to a
   host that names its resource, such as a public S3 bucket, or to a public host such as
   `checkip.amazonaws.com`. Only the URL rules decide those.
 
@@ -284,9 +293,9 @@ The ones that come up most in CI are Bedrock API keys and presigned URLs someone
 [Common setups](#common-setups) shows how to arrange each. The rest are rarer:
 
 - S3 Express One Zone directory buckets, and S3 uploads from an HTML form (a POST policy).
-- Calls to APIs that take a form, such as STS, IAM, CloudFormation, SNS, EC2 and SES v1, over about
-  4 MiB or compressed: SES v1 `SendRawEmail` with large attachments, or CloudWatch `PutMetricData`
-  from an older SDK.
+- A form body over about 4 MiB, or a compressed one, sent to an API that takes a form, such as
+  STS, IAM, CloudFormation, SNS, EC2 or SES v1. Examples are SES v1 `SendRawEmail` with large
+  attachments and CloudWatch `PutMetricData` from an older SDK.
 - Old SDKs and hand-written clients signing with Signature Version 2 or 3, and the services that
   take only those, such as Amazon SimpleDB.
 - Unsigned calls to a host that serves every account, such as a Cognito user pool sign-in or the
@@ -299,8 +308,8 @@ The ones that come up most in CI are Bedrock API keys and presigned URLs someone
 
 A blocked request names its reason, such as `aws-key-not-allowed`, under **⚠️ Restrict Would Block**
 in `audit` or **🚫 Blocked Hosts** in `restrict`, and in **Communication details**. After those
-tables, the report links here for each reason they show; in `restrict` it leaves out a reason whose
-every block `known-blocked-rules` expects. Look the reason up below.
+tables, the report links here and names each reason they show. In `restrict`, it leaves out a
+reason when `known-blocked-rules` matches every block with that reason. Look the reason up below.
 
 To accept a block you expect, list its host or URL in `known-blocked-rules` as for any other: it
 then no longer fails `restrict`, though the `audit` preview still counts it. See
@@ -324,8 +333,9 @@ row in **🔑 AWS Keys** has the **Source**:
 
 - `role in <account>`: an assumed role. STS issued the key, but the proxy learns it only for a role
   in an account in `allowed-aws-role-accounts`. Add the account once you have checked it is yours.
-  If it is already there in `audit`, the STS call was itself one `restrict` would block, so its
-  answer taught no key. The line in Communication details ending in `→ issued key N` is that call.
+  If it is already there in `audit`, the STS call was itself one `restrict` would block, so the
+  proxy learned no key from its answer. The line in Communication details ending in
+  `→ issued key N` is that call.
 - `unknown`, from one of:
   - A profile, `~/.aws/credentials` or `credential_process`; see [What it needs](#what-it-needs).
   - `GetSessionToken`, SAML or IAM Identity Center, which the proxy does not learn. Get the
@@ -334,11 +344,12 @@ row in **🔑 AWS Keys** has the **Source**:
     `Accept: application/json`, or it was unusually large. Let the SDK send its default headers to
     STS; shorten a large session policy or tag set.
 - `STS (from key N)`: an STS answer that issued the key without a role account the proxy could
-  read, so it taught no key. Get the credentials before the step and pass them in
+  read, so the proxy did not learn the key. Get the credentials before the step and pass them in
   `AWS_ACCESS_KEY_ID`.
-- `ECR layer URL (from key N)`: a layer's presigned URL from an ECR registry request signed with a
-  key `restrict` would block, which teaches no key. Fix key N first; in `audit`, the **Switch to
-  restrict mode** example's comment names both under the account that lets them through.
+- `ECR layer URL (from key N)`: ECR signed a layer's presigned URL with this key, in answer to a
+  registry request signed with key N. `restrict` would block key N, so the proxy did not learn
+  this key. Fix key N first. In `audit`, the **Switch to restrict mode** example's comment on the
+  account that lets key N through names this key too.
 
 ### `aws-no-credential`
 
@@ -386,9 +397,10 @@ A form body the proxy could not read through (see
 ### `aws-ambiguous-credential`
 
 More than one credential on one request: two `Authorization` headers, a header and a presigned URL
-credential, or one repeated; or an `AssumeRoleWithWebIdentity` form naming its role twice, or naming
-`Action` or `RoleArn` in the query too. Send one credential, and the role in the body only; a
-current SDK does.
+credential, or a credential named twice in one header or in the query string. An
+`AssumeRoleWithWebIdentity` form counts too when it names its role twice, or names `Action` or
+`RoleArn` in the query as well. Send one credential, and the role in the body only; a current SDK
+does.
 
 ## What it does not protect against
 
@@ -448,11 +460,12 @@ them on those, through a customized bootstrap template:
   `aws-no-credential`. `AssumeRoleWithWebIdentity` is judged by the account of its role; see
   [Host and credential](#host-and-credential).
 - Keys are learned only from STS answers and ECR registry redirects received over HTTPS, to a
-  request the key check did not block, so in `audit` mode a request it would block teaches no key. A
-  host that names a resource is never taken for STS, even an S3 bucket named `sts`. A key in an STS
-  answer the proxy cannot read, because the client asked for JSON or it is unusually large, is not
-  learned, and requests signed with it are blocked. Neither such an answer nor one over plain HTTP
-  names an account in the restrict example.
+  request the key check did not block. In `audit` mode, the proxy learns no key from the answer to
+  a request the check would block. A host that names a resource is never taken for STS, even an S3
+  bucket named `sts`.
+- A key in an STS answer the proxy cannot read, because the client asked for JSON or the answer is
+  unusually large, is not learned, and requests signed with it are blocked. Neither such an answer
+  nor one over plain HTTP names an account in the restrict example.
 - A connection `allowed-tls-rules` or `allowed-ip-rules` passes through is never decrypted, so the
   check never sees its requests. Do not pass AWS API hosts through.
 - The starting key ID is handed to the proxy container as an environment variable, so it is visible
