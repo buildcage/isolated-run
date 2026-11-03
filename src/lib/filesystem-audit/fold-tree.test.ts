@@ -171,6 +171,13 @@ describe("Lines", () => {
       expect(printed(l)).toStrictEqual(["R c /home/u/x", "R d /home/u", "R c /**"]);
     });
 
+    it("prints a kept directory's own row beside its loose fold where walked rows show", () => {
+      const l = lines({ limit: 5, keep: [home], showWalked: true });
+      l.add(access("/", BIT.W));
+      for (const p of five) l.add(access(p));
+      expect(printed(l)).toStrictEqual(["W c /", "R c /**"]);
+    });
+
     it("then sends a new child to the fold, the kept directory itself and kept ones past it", () => {
       const l = tight(4);
       for (const p of five) l.add(access(p));

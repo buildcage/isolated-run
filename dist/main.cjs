@@ -72992,7 +72992,10 @@ function commandOf(program, runName, comm) {
 }
 //#endregion
 //#region src/lib/filesystem-audit/fold-tree.ts
-const starred = (path) => path === "/" ? "/**" : `${path}/**`, twin = (kids, name) => name.endsWith("\0 (deleted)") && kids.has(name.slice(0, -11)), another = (kids, name) => !twin(kids, name) && !kids.has(name + "\0 (deleted)"), childCount = (kids) => {
+const starred = (path) => path === "/" ? "/**" : `${path}/**`, twin = (kids, name) => {
+	let live = unmarked(name);
+	return live !== name && kids.has(live);
+}, another = (kids, name) => !twin(kids, name) && !kids.has(name + "\0 (deleted)"), childCount = (kids) => {
 	let n = 0;
 	for (let name of kids.keys()) twin(kids, name) || n++;
 	return n;
@@ -73143,7 +73146,9 @@ var Lines = class {
 		for (let [part, kid] of node.kids) kid.kept || (forEachInSubtree(kid, (n) => {
 			n.own && mergeAgg(agg, n.own), n.folded && mergeAgg(agg, n.folded), this.setBytes(n, 0), this.nodes--;
 		}), node.kids.delete(part));
-		node.folded = agg, this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm));
+		node.folded = agg;
+		let own = this.opts.showWalked && node.own && flagBits(node.own) ? this.opts.rowBytes(spell(parts), comm) : 0;
+		this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm) + own);
 	}
 	addFolded(node, parts, x, settled) {
 		apply(node.folded, x), settled && flagBits(node.folded) && !node.bytes && this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), x.comm));

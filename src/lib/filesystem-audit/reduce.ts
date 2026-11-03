@@ -127,7 +127,8 @@ export interface AuditSummary {
   lost: boolean;
   /** Hooks the kernel skipped anywhere on the host while the step ran. */
   hostMissed: number;
-  /** Each part, or undefined where it was given up (see pathsCut). */
+  /** Each part, or undefined where it was given up (see pathsCut). Under
+   *  rules, which the unexpected table stands in for, paths is empty. */
   paths: PathRow[] | undefined;
   /** With expected-filesystem-rules, only the actions no rule took. */
   details: Row[] | undefined;

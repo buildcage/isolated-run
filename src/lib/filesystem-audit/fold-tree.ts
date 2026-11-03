@@ -1,5 +1,14 @@
 import { apply, flagBits, mergeAgg, newAgg, type Access, type Agg } from "./agg.ts";
-import { components, DELETED, isRunnerFile, MEMFD, MEMFDS, spell, unfoldable } from "./paths.ts";
+import {
+  components,
+  DELETED,
+  isRunnerFile,
+  MEMFD,
+  MEMFDS,
+  spell,
+  unfoldable,
+  unmarked,
+} from "./paths.ts";
 import { BIT } from "./record.ts";
 
 /**
@@ -12,8 +21,10 @@ const LOOSE_FANOUT = 5;
 const starred = (path: string): string => (path === "/" ? "/**" : `${path}/**`);
 
 /** Whether `name` is a deleted file whose live namesake is also in `kids`. */
-const twin = (kids: Map<string, Node>, name: string): boolean =>
-  name.endsWith(DELETED) && kids.has(name.slice(0, -DELETED.length));
+const twin = (kids: Map<string, Node>, name: string): boolean => {
+  const live = unmarked(name);
+  return live !== name && kids.has(live);
+};
 
 /** Whether a new child `name` would be another of `kids`, not a twin of one. */
 const another = (kids: Map<string, Node>, name: string): boolean =>
@@ -372,7 +383,12 @@ export class Lines {
       node.kids!.delete(part);
     }
     node.folded = agg;
-    this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm));
+    // Where walked rows print, its own row prints beside the "dir/**" one.
+    const own =
+      this.opts.showWalked && node.own && flagBits(node.own)
+        ? this.opts.rowBytes(spell(parts), comm)
+        : 0;
+    this.setBytes(node, this.opts.rowBytes(starred(spell(parts)), comm) + own);
   }
 
   private addFolded(node: Node, parts: string[], x: Access, settled: boolean): void {

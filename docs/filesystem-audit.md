@@ -252,7 +252,7 @@ each has rows of its own.
 
 **Folding.** A `dir/**` row does not say which path under it was refused. The details fold each
 command's paths on their own, so they often name it; the artifact always does. A file shown
-`(deleted)` and the file of the same name count as one of the three.
+`(deleted)` and the file of the same name count as one entry toward a fold, here and past 300 KB.
 
 Never folded into a `dir/**` row, nor counted toward its three rows:
 
