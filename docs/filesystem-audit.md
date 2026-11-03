@@ -497,8 +497,8 @@ either when the accesses touched too many distinct paths, when the file could no
 when the artifact could not be prepared or uploaded. The element then says so, and for each failure a
 warning gives the cause.
 
-A file that would pass the Job Summary's size limit stops at the rules that fit and ends with a
-comment saying so; the recording beside it has every access.
+A proposed file that would pass the Job Summary's size limit stops at the rules that fit and ends
+with a comment saying so. The recording beside it has every access.
 
 The traffic report's **Switch to restrict mode** example is a complete step definition with no
 `config-file`: the settings the step read from a config file are written under `with:`, so remove
@@ -842,8 +842,8 @@ it writes to, also fails the step, after the command, with the record cut where 
   left out whole, under a note that says why, when not one row fits, or once it holds more than
   200,000 paths after folding. When the table is left out, the details still show unless they are
   left out too. The Unexpected Accesses table and the proposed rules count paths and bytes the
-  same way, but do not fold more past 300 KB, so with many paths under `/tmp` they can be left out
-  while the details, which do, remain.
+  same way, but do not fold more past 300 KB. With many paths under `/tmp`, they can be left out
+  while the details, which do fold them, remain.
 - **Many libraries.** Once the step's processes have loaded 200,000 files between them, each
   process's counted apart, its program and `/etc/ld.so.cache` included, a file loaded after that
   shows as a read.

@@ -396,7 +396,7 @@ export function rulesNote(
   else {
     const holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
     where = cut
-      ? `${file} in this run's ${artifactLink(proposal)} has ${holds} until it reached the Job Summary's size limit; the record beside it has the rest.`
+      ? `${file} in this run's ${artifactLink(proposal)} has ${holds}, up to the Job Summary's size limit; the recording beside it has every access.`
       : `${file} in this run's ${artifactLink(proposal)} has ${holds}.`;
     steps = true;
   }

@@ -50,7 +50,7 @@ export const RULES_TO_ADD_HEADER = [
 ];
 
 /** The last line of a file cut short for size. */
-export const RULES_CUT_NOTE = `# Cut short: more accesses fell outside ${EXPECTED_RULES_INPUT} than fit here. ${RECORD_FILE} in this artifact has them all.`;
+export const RULES_CUT_NOTE = `# Cut short at the Job Summary's size limit. ${RECORD_FILE} in this artifact has every access.`;
 
 /** The proposed rules under the header, a block per program with its accesses
  *  in a column, so one long program path widens only its own block. `cut`

@@ -309,7 +309,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       "File accesses fell outside expected-filesystem-rules on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first 1.",
     );
     expect(summaries[0]).toContain(
-      "has a rule for each access no rule matches until it reached the Job Summary's size limit; the record beside it has the rest.",
+      "has a rule for each access no rule matches, up to the Job Summary's size limit; the recording beside it has every access.",
     );
     expect(ruleFiles).toStrictEqual([
       {

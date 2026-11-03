@@ -367,16 +367,19 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     const id = ranks[by].ruleId;
     const deletedPath = !x.path.startsWith(MEMFD) && x.path.endsWith(DELETED);
     const path = deletedPath ? unmarked(x.path) : x.path;
+    const full = tally!.full;
     const left = tally!.take(x, deletedPath ? components(path) : parts, id, path, cmd);
-    // Past the tally's limit, only the matching is left to do.
+    // Once the tally gives up, only the matching is left to do.
     if (!left || tally!.givenUp) return left;
     const program = Boolean(ranks[by].shown.deleted);
     const key = keyOf(String(id), path);
     const was = deletedOnly.get(key);
-    deletedOnly.set(key, {
-      program: (was?.program ?? true) && program,
-      path: (was?.path ?? true) && deletedPath,
-    });
+    // Once full, the tally takes no new path, so only the paths it has count.
+    if (was || !full)
+      deletedOnly.set(key, {
+        program: (was?.program ?? true) && program,
+        path: (was?.path ?? true) && deletedPath,
+      });
     programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? true) && program);
     return left;
   };

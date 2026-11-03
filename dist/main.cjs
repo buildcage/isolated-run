@@ -72942,7 +72942,7 @@ const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || 
 	"# A dir/** rule stands for everything the run touched under one directory; check what",
 	"# it covers before adding it. Where the files under it matter, find them in",
 	`# ${RECORD_FILE} in this artifact and list them instead.`
-], RULES_CUT_NOTE = `# Cut short: more accesses fell outside ${EXPECTED_RULES_INPUT} than fit here. ${RECORD_FILE} in this artifact has them all.`;
+], RULES_CUT_NOTE = `# Cut short at the Job Summary's size limit. ${RECORD_FILE} in this artifact has every access.`;
 function rulesToAdd(proposed, cut = !1) {
 	let blocks = [];
 	for (let r of proposed) {
@@ -73147,7 +73147,7 @@ var Lines = class {
 	foldsInto(parent, kids, parts, i) {
 		if (!parent) return !1;
 		let added = +!!another(kids, parts[i]);
-		return parent.kept ? !this.isKept(parts, i + 1) && looseKids(parent) + added >= 5 : childCount(kids) + added >= this.opts.fanout;
+		return parent.kept ? this.loose && !this.isKept(parts, i + 1) && looseKids(parent) + added >= 5 : childCount(kids) + added >= this.opts.fanout;
 	}
 	isKept(parts, depth) {
 		return this.opts.keep.some((k) => k.length >= depth && k.slice(0, depth).every((part, i) => part === parts[i]));
@@ -73210,7 +73210,7 @@ var Lines = class {
 	finish() {
 		if (this.stopped) return;
 		let out = this.within();
-		return !this.loose && (out.cut || out.bytes > this.opts.loose) && (this.loosen(), out = this.within()), this.truncated = this.dropped || out.cut, out.lines;
+		return !this.loose && this.opts.loose !== Infinity && (out.cut || out.bytes > this.opts.loose) && (this.loosen(), out = this.within()), this.truncated = this.dropped || out.cut, out.lines;
 	}
 	within() {
 		let lines = [], bytes = 0;
@@ -73283,6 +73283,9 @@ var Lines = class {
 	}
 	get cut() {
 		return this.lines.cut;
+	}
+	get full() {
+		return this.lines.full;
 	}
 	get givenUp() {
 		return this.lines.stopped !== void 0;
@@ -73435,10 +73438,10 @@ function createAuditSummary(prefixes) {
 		program: (rank) => ranks[rank].ruleNames,
 		path: ruleNames
 	}) : void 0, deletedOnly = new Map(), programDeletedOnly = new Map(), takeForRules = (x, parts, by, cmd) => {
-		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith("\0memfd:") && x.path.endsWith("\0 (deleted)"), path = deletedPath ? unmarked(x.path) : x.path, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
+		let id = ranks[by].ruleId, deletedPath = !x.path.startsWith("\0memfd:") && x.path.endsWith("\0 (deleted)"), path = deletedPath ? unmarked(x.path) : x.path, full = tally.full, left = tally.take(x, deletedPath ? components(path) : parts, id, path, cmd);
 		if (!left || tally.givenUp) return left;
 		let program = !!ranks[by].shown.deleted, key = keyOf(String(id), path), was = deletedOnly.get(key);
-		return deletedOnly.set(key, {
+		return (was || !full) && deletedOnly.set(key, {
 			program: (was?.program ?? !0) && program,
 			path: (was?.path ?? !0) && deletedPath
 		}), programDeletedOnly.set(id, (programDeletedOnly.get(id) ?? !0) && program), left;
@@ -73810,7 +73813,7 @@ function rulesNote(proposal, { fileName, guideUrl, hasRules, cut }) {
 	else if (proposal === "lost" || proposal === "write-failed" || proposal === "not-prepared") where = "The proposed rules could not be saved.";
 	else {
 		let holds = hasRules ? "a rule for each access no rule matches" : "a rule for each access";
-		where = cut ? `${file} in this run's ${artifactLink(proposal)} has ${holds} until it reached the Job Summary's size limit; the record beside it has the rest.` : `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
+		where = cut ? `${file} in this run's ${artifactLink(proposal)} has ${holds}, up to the Job Summary's size limit; the recording beside it has every access.` : `${file} in this run's ${artifactLink(proposal)} has ${holds}.`, steps = !0;
 	}
 	return `<details>
 <summary>📝 Expected filesystem rules</summary>

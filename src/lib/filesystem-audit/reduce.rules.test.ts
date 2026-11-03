@@ -735,6 +735,23 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     expect(summary.proposedCut).toBe("size");
   });
 
+  it("never loosens the proposals, even cut short for size", () => {
+    const { summary } = marked(
+      { propose: true, limits: { bytes: 300 } },
+      { kind: "read", pid: 3, comm: "cat", path: "/home/u/.ssh/id_rsa" },
+      ...Array.from({ length: 40 }, (_, i) => ({
+        kind: "write",
+        pid: 3,
+        comm: "cat",
+        path: `/tmp/f${i}`,
+      })),
+    );
+    expect(summary.proposedCut).toBe("size");
+    const paths = summary.proposed?.map((r) => r.path.path);
+    expect(paths).toContain("~/.ssh/id_rsa");
+    expect(paths).not.toContain("/tmp/**");
+  });
+
   it("cuts the proposals short at the size limit and says so", () => {
     const { summary } = marked(
       { propose: true, limits: { bytes: 60 } },

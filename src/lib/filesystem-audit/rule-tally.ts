@@ -67,6 +67,11 @@ export class RuleTally {
     return this.lines.cut;
   }
 
+  /** Whether it takes no new line, past its size limit. */
+  get full(): boolean {
+    return this.lines.full;
+  }
+
   get givenUp(): boolean {
     return this.lines.stopped !== undefined;
   }
