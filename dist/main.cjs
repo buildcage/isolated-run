@@ -16097,7 +16097,6 @@ function preamble(spec) {
 		"    size 1048576",
 		"    maxlen 16384",
 		"    timeout connect 5s",
-		"    timeout server 1h",
 		"    server log unix@/var/run/haproxy-log/socket",
 		""
 	];
@@ -71077,7 +71076,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 }
 function describeInterruptions({ proxyAnswered, resolverAnswered, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
@@ -71946,17 +71945,18 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time);
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLog === 0,
 		proxyAnswered: droppedLogs.answered,
 		resolverAnswered,
 		restarts: {
 			proxy,
-			resolver
+			resolver,
+			proxyLog: proxyLog ?? 0
 		},
 		startedAt,
 		timeline
@@ -77144,13 +77144,12 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 				hostPath
 			}));
 		},
-		readFileLines(containerId, path) {
+		execLines(containerId, args) {
 			return streamDockerLines(spawnDocker, [
 				"exec",
 				containerId,
-				"cat",
-				path
-			], `docker exec cat ${path}`);
+				...args
+			], `docker exec ${args[0]}`);
 		},
 		readEnv(containerId) {
 			return parseDockerInspectEnv(run([
@@ -77231,13 +77230,22 @@ function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.rando
 	} catch {
 		return {
 			answered: !1,
-			count: void 0
+			count: void 0,
+			logConnections: void 0
 		};
 	}
 	return {
 		answered: !0,
-		count: caughtUp ? parseDroppedLogs(metrics) : void 0
+		count: caughtUp ? parseDroppedLogs(metrics) : void 0,
+		logConnections: readLogConnections(docker, containerId)
 	};
+}
+function readLogConnections(docker, containerId) {
+	try {
+		return docker.exec(containerId, ["cat", "/var/run/haproxy-log/connections"]).split("\n").length - 1;
+	} catch {
+		return;
+	}
 }
 function readResolverAnswered(docker, containerId) {
 	try {
@@ -77254,18 +77262,41 @@ function readResolverAnswered(docker, containerId) {
 }
 //#endregion
 //#region src/core/lib/docker/rotated-log.ts
-const SEGMENT = /^@[0-9a-f]{24}\.[a-z]$/;
-function parseLogSegments(lsOutput) {
-	let entries = lsOutput.split("\n").map((line) => line.trim()).filter(Boolean), segments = entries.filter((name) => SEGMENT.test(name)).sort();
-	return entries.includes("current") && segments.push("current"), segments;
-}
-async function* readRotatedLog(docker, containerId, dir) {
-	let listing = docker.exec(containerId, [
-		"ls",
-		"-1",
+const READ_SCRIPT = [
+	"cd \"$1\" || exit 1",
+	"i=0",
+	"until command exec 3<current; do",
+	"  i=$((i + 1))",
+	"  if [ $i -ge 10 ]; then exec 3</dev/null; break; fi",
+	"  sleep 0.1",
+	"done 2>/dev/null",
+	"last=$(stat -L -c %d:%i /proc/self/fd/3)",
+	"seen=\" \"",
+	"more=1",
+	"while [ $more = 1 ]; do",
+	"  more=0",
+	"  for f in @????????????????????????.? previous; do",
+	"    [ -e \"$f\" ] || continue",
+	"    if ! command exec 4<\"$f\"; then more=1; continue; fi 2>/dev/null",
+	"    id=$(stat -L -c %d:%i /proc/self/fd/4)",
+	"    [ \"$id\" = \"$last\" ] && break",
+	"    case $seen in *\" $id \"*) continue ;; esac",
+	"    seen=\"$seen$id \"",
+	"    cat <&4",
+	"    more=1",
+	"  done",
+	"done",
+	"exec 4<&-",
+	"cat <&3"
+].join("\n");
+function readRotatedLog(docker, containerId, dir) {
+	return docker.execLines(containerId, [
+		"sh",
+		"-c",
+		READ_SCRIPT,
+		"sh",
 		dir
 	]);
-	for (let name of parseLogSegments(listing)) yield* docker.readFileLines(containerId, `${dir}/${name}`);
 }
 //#endregion
 //#region src/core/lib/report/action-version.ts

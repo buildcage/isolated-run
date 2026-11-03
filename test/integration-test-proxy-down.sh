@@ -3,7 +3,8 @@
 # still running, and checks that the command's traffic then fails instead of
 # finding a way around the proxy, and that the step does not pass on a report
 # the stopped proxy can no longer vouch for. A second step stops coredns alone,
-# which leaves the logs reading as whole.
+# which leaves the logs reading as whole, and a third kills the proxy's log
+# writer, which leaves no trace in the log.
 #
 # The command and this driver take turns through marker files in the
 # workspace: the command writes one when it is done with a phase, and waits
@@ -220,6 +221,63 @@ assert_file_has "$STEP_PREFIX.log" "the step's error says the logs are incomplet
   "^::error::buildcage sandbox logs are incomplete"
 assert_file_has "$STEP_PREFIX.log" "the step's error says the resolver did not answer" \
   "The DNS resolver did not answer the report"
+SUMMARY=$(cat "$STEP_PREFIX.md")
+assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
+
+if [ "$FAILURES" -gt "$FAILURES_BEFORE" ]; then
+  echo ""
+  echo "--- step log ---"
+  cat "$STEP_PREFIX.log"
+fi
+
+echo ""
+echo "--- the proxy's log writer killed ---"
+# haproxy hands its next line to a new s6-log, and nothing in the log itself
+# shows the lines the killed one had not written.
+FAILURES_BEFORE=$FAILURES
+STEP_PREFIX="$WORKDIR/writer"
+# shellcheck disable=SC2016 # expanded by the command's shell
+run_step universal "$STEP_PREFIX" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
+  INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
+  INPUT_ALLOWED_IP_RULES="" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN='touch writer.ready
+for _ in $(seq 1 240); do
+  [ -e writer.killed ] && exit 0
+  sleep 0.5
+done
+exit 1' &
+STEP_PID=$!
+
+if wait_for_step_marker writer.ready; then
+  CONTAINER=$(state_container_name "$STEP_PREFIX.state")
+  if docker exec "$CONTAINER" pkill -KILL -f "s6-log .*/var/log/haproxy"; then
+    pass "the proxy's s6-log killed in the proxy container"
+  else
+    fail "could not kill the proxy's s6-log in the proxy container"
+  fi
+else
+  fail "the command never started"
+  cat "$STEP_PREFIX.log"
+  assert_results
+fi
+touch "$WORKDIR/writer.killed"
+
+if wait_step_gone "$STEP_END_TIMEOUT"; then
+  wait "$STEP_PID"
+  STEP_EXIT=$?
+  STEP_PID=""
+else
+  fail "the step did not end within ${STEP_END_TIMEOUT}s of the log writer dying"
+  stop_step
+  STEP_EXIT="timeout"
+fi
+
+check_status "the step passed with fail-on-blocked: false" "$STEP_EXIT" 0
+assert_file_has "$STEP_PREFIX.log" "the step's notice counts the log writer's restart" \
+  "The proxy's log writer restarted 1 time"
 SUMMARY=$(cat "$STEP_PREFIX.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
 
