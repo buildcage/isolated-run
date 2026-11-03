@@ -45,6 +45,7 @@ const mocks = {
   readWorkingDirectory: vi.fn(),
   assertSandboxUserCanSearch: vi.fn(),
   assertSandboxWillShow: vi.fn(),
+  assertOverlayShows: vi.fn(),
   savePinningForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -827,7 +828,7 @@ describe("runSandboxStep", () => {
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
-  it("checks the sandbox will show working-directory against the plan before the proxy starts", async () => {
+  it("checks the sandbox's own mounts leave working-directory shown before the filesystem plan", async () => {
     const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
     mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
     mocks.assertSandboxWillShow.mockImplementation(() => {
@@ -835,7 +836,19 @@ describe("runSandboxStep", () => {
     });
 
     await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("hidden");
-    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(
+    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(workingDirectory, []);
+    expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
+  });
+
+  it("checks the overlay shows working-directory against the plan before the proxy starts", async () => {
+    const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.assertOverlayShows.mockImplementation(() => {
+      throw new SandboxError("not overlaid", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("not overlaid");
+    expect(mocks.assertOverlayShows).toHaveBeenCalledWith(
       workingDirectory,
       mocks.resolveFilesystemPlan.mock.results[0].value,
     );
@@ -847,6 +860,7 @@ describe("runSandboxStep", () => {
 
     expect(mocks.assertSandboxUserCanSearch).not.toHaveBeenCalled();
     expect(mocks.assertSandboxWillShow).not.toHaveBeenCalled();
+    expect(mocks.assertOverlayShows).not.toHaveBeenCalled();
     expect(mocks.runSandboxedCommand.mock.calls[0][0].envOverrides).toStrictEqual({
       PWD: ENV.GITHUB_WORKSPACE,
     });

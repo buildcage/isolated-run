@@ -14,7 +14,7 @@ import { SandboxError } from "../errors.ts";
 import { realHostProbes } from "./host-probes.ts";
 import { resolveSandboxGid } from "./identity.ts";
 import { listHostMounts } from "./mountinfo.ts";
-import { HOST_RUN_DIR, reservedInternalDestinations } from "./oci-mounts.ts";
+import { HOST_RUN_DIR } from "./oci-mounts.ts";
 import { isAtOrUnder, pathAliases } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
@@ -172,51 +172,77 @@ export function assertSandboxUserCanSearch(
 }
 
 /**
- * Why the sandbox will hide the host's `cwd`, as far as the step can tell
- * before the proxy starts, or undefined: a host mount ephemeral cannot
- * overlay, the empty /run, or a mount of the sandbox's own. A write-through
- * entry holding `cwd` brings the host's back over the first two. The CA trust
- * and runner file mounts are known only later, for assertSandboxShows.
+ * Why a mount the sandbox always makes will hide the host's `cwd`, or
+ * undefined: the empty /run, which a write-through entry holding `cwd` brings
+ * back, or the scratch base under any of its names. The CA trust and runner
+ * file mounts are known only later, for assertSandboxShows.
  */
-export function hiddenBeforeStart(
+export function hiddenBySandboxMounts(
   cwd: string,
-  {
-    hiddenMounts = [],
-    writeThroughPaths,
-  }: { hiddenMounts?: string[]; writeThroughPaths: string[] },
+  writeThroughPaths: string[],
   hostMounts: MountinfoEntry[],
   varRunRealPath: string | undefined,
 ): string | undefined {
-  if (!writeThroughPaths.some((w) => isAtOrUnder(cwd, w))) {
-    const mount = hiddenMounts.find((m) => isAtOrUnder(cwd, m));
-    if (mount)
-      return `filesystem-mode: ephemeral cannot overlay the host mount ${mount}, so the sandbox shows the empty directory beneath it`;
-    const run = [HOST_RUN_DIR, ...(varRunRealPath ? [varRunRealPath] : [])].find((d) =>
-      isAtOrUnder(cwd, d),
-    );
-    if (run) return `the sandbox mounts its own ${run}`;
-  }
-  const own = [
-    ...reservedInternalDestinations(),
-    SANDBOX_SCRATCH_BASE,
-    ...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE),
-  ].find((d) => isAtOrUnder(cwd, d));
-  return own && `the sandbox mounts its own ${own}`;
+  const run = [HOST_RUN_DIR, ...(varRunRealPath ? [varRunRealPath] : [])].find((d) =>
+    isAtOrUnder(cwd, d),
+  );
+  if (run && !writeThroughPaths.some((w) => isAtOrUnder(cwd, w)))
+    return `the sandbox mounts its own ${run}`;
+  const scratch = [SANDBOX_SCRATCH_BASE, ...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)].find(
+    (d) => isAtOrUnder(cwd, d),
+  );
+  return scratch && `the sandbox mounts its own ${scratch}`;
 }
 
-/** Throws where hiddenBeforeStart finds the sandbox will hide the working directory. */
+const unusable = (wd: WorkingDirectory, why: string) =>
+  invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
+
+/** Throws where hiddenBySandboxMounts finds the sandbox will hide the working
+ *  directory. Before the write-through targets are made, so a refusal leaves
+ *  none behind. */
 export function assertSandboxWillShow(
   wd: WorkingDirectory,
-  plan: { hiddenMounts?: string[]; writeThroughPaths: string[] },
+  writeThroughPaths: string[],
   {
     hostMounts = listHostMounts,
     varRunRealPath = () => realHostProbes.varRunRealPath(),
   }: { hostMounts?: () => MountinfoEntry[]; varRunRealPath?: () => string | undefined } = {},
 ): void {
-  const hidden = hiddenBeforeStart(wd.path, plan, hostMounts(), varRunRealPath());
-  if (hidden)
-    throw invalid(
-      `working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${hidden}.`,
+  let mounts: MountinfoEntry[];
+  try {
+    mounts = hostMounts();
+  } catch (e) {
+    throw new SandboxError(
+      `Failed to read the host's mount table: ${errorMessage(e)}`,
+      "FILESYSTEM_PLAN_FAILED",
+    );
+  }
+  const hidden = hiddenBySandboxMounts(wd.path, writeThroughPaths, mounts, varRunRealPath());
+  if (hidden) throw unusable(wd, hidden);
+}
+
+/**
+ * Throws where filesystem-mode: ephemeral shows the working directory as the
+ * empty directory beneath a host mount it cannot overlay: where that mount is
+ * the deepest overlay root or hidden mount holding it, and no write-through
+ * entry holding it brings the host's back.
+ */
+export function assertOverlayShows(
+  wd: WorkingDirectory,
+  {
+    overlayRoots,
+    hiddenMounts = [],
+    writeThroughPaths,
+  }: { overlayRoots: string[]; hiddenMounts?: string[]; writeThroughPaths: string[] },
+): void {
+  if (writeThroughPaths.some((w) => isAtOrUnder(wd.path, w))) return;
+  const deepest = [...overlayRoots, ...hiddenMounts]
+    .filter((m) => isAtOrUnder(wd.path, m))
+    .reduce<string | undefined>((a, m) => (a && a.length >= m.length ? a : m), undefined);
+  if (deepest && hiddenMounts.includes(deepest))
+    throw unusable(
+      wd,
+      `filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(deepest)}, so the sandbox shows the empty directory beneath it`,
     );
 }
 

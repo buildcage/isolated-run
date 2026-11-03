@@ -75294,23 +75294,27 @@ function assertSandboxUserCanSearch(wd, env, { uid = process.getuid(), gid = res
 	}, stat);
 	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`);
 }
-function hiddenBeforeStart(cwd, { hiddenMounts = [], writeThroughPaths }, hostMounts, varRunRealPath) {
-	if (!writeThroughPaths.some((w) => isAtOrUnder(cwd, w))) {
-		let mount = hiddenMounts.find((m) => isAtOrUnder(cwd, m));
-		if (mount) return `filesystem-mode: ephemeral cannot overlay the host mount ${mount}, so the sandbox shows the empty directory beneath it`;
-		let run = [HOST_RUN_DIR, ...varRunRealPath ? [varRunRealPath] : []].find((d) => isAtOrUnder(cwd, d));
-		if (run) return `the sandbox mounts its own ${run}`;
-	}
-	let own = [
-		...reservedInternalDestinations(),
-		SANDBOX_SCRATCH_BASE,
-		...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)
-	].find((d) => isAtOrUnder(cwd, d));
-	return own && `the sandbox mounts its own ${own}`;
+function hiddenBySandboxMounts(cwd, writeThroughPaths, hostMounts, varRunRealPath) {
+	let run = [HOST_RUN_DIR, ...varRunRealPath ? [varRunRealPath] : []].find((d) => isAtOrUnder(cwd, d));
+	if (run && !writeThroughPaths.some((w) => isAtOrUnder(cwd, w))) return `the sandbox mounts its own ${run}`;
+	let scratch = [SANDBOX_SCRATCH_BASE, ...pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)].find((d) => isAtOrUnder(cwd, d));
+	return scratch && `the sandbox mounts its own ${scratch}`;
 }
-function assertSandboxWillShow(wd, plan, { hostMounts = listHostMounts, varRunRealPath = () => realHostProbes.varRunRealPath() } = {}) {
-	let hidden = hiddenBeforeStart(wd.path, plan, hostMounts(), varRunRealPath());
-	if (hidden) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${hidden}.`);
+const unusable = (wd, why) => invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
+function assertSandboxWillShow(wd, writeThroughPaths, { hostMounts = listHostMounts, varRunRealPath = () => realHostProbes.varRunRealPath() } = {}) {
+	let mounts;
+	try {
+		mounts = hostMounts();
+	} catch (e) {
+		throw new SandboxError(`Failed to read the host's mount table: ${errorMessage(e)}`, "FILESYSTEM_PLAN_FAILED");
+	}
+	let hidden = hiddenBySandboxMounts(wd.path, writeThroughPaths, mounts, varRunRealPath());
+	if (hidden) throw unusable(wd, hidden);
+}
+function assertOverlayShows(wd, { overlayRoots, hiddenMounts = [], writeThroughPaths }) {
+	if (writeThroughPaths.some((w) => isAtOrUnder(wd.path, w))) return;
+	let deepest = [...overlayRoots, ...hiddenMounts].filter((m) => isAtOrUnder(wd.path, m)).reduce((a, m) => a && a.length >= m.length ? a : m, void 0);
+	if (deepest && hiddenMounts.includes(deepest)) throw unusable(wd, `filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(deepest)}, so the sandbox shows the empty directory beneath it`);
 }
 function assertSandboxShows(wd, spec) {
 	let hidden = hiddenWorkingDirectory(wd.path, spec.mounts, spec.maskedPaths);
@@ -77825,6 +77829,7 @@ const realDeps = {
 	readWorkingDirectory,
 	assertSandboxUserCanSearch,
 	assertSandboxWillShow,
+	assertOverlayShows,
 	savePinningForPost,
 	validateFilesystemInputs,
 	checkScratchBaseParent,
@@ -77953,12 +77958,12 @@ function readStepInputs(env, deps) {
 function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDir, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), workingDirectory && deps.assertSandboxUserCanSearch(workingDirectory, env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), workingDirectory && (deps.assertSandboxUserCanSearch(workingDirectory, env), deps.assertSandboxWillShow(workingDirectory, writeThrough)), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
 	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
 		baseDir,
 		warn: deps.warn
 	});
-	if (workingDirectory && deps.assertSandboxWillShow(workingDirectory, plan), filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
+	if (workingDirectory && deps.assertOverlayShows(workingDirectory, plan), filesystemMode === "ephemeral") for (let line of formatFilesystemPlanLog(filesystemMode, plan.overlayRoots, plan.writeThroughPaths, plan.mediatedVariables)) deps.info(line);
 	return plan;
 }
 async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, deps) {

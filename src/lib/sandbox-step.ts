@@ -85,6 +85,7 @@ import { runSandboxedCommand } from "./sandbox/sandboxed-command.ts";
 import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-dir.ts";
 import { realPathOf } from "./sandbox/symlinks.ts";
 import {
+  assertOverlayShows,
   assertSandboxUserCanSearch,
   assertSandboxWillShow,
   readWorkingDirectory,
@@ -147,6 +148,7 @@ const realDeps = {
   readWorkingDirectory,
   assertSandboxUserCanSearch,
   assertSandboxWillShow,
+  assertOverlayShows,
   savePinningForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -432,7 +434,10 @@ export function preflight(
   );
 
   // Before image verification and the proxy start.
-  if (workingDirectory) deps.assertSandboxUserCanSearch(workingDirectory, env);
+  if (workingDirectory) {
+    deps.assertSandboxUserCanSearch(workingDirectory, env);
+    deps.assertSandboxWillShow(workingDirectory, writeThrough);
+  }
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
@@ -443,7 +448,7 @@ export function preflight(
     baseDir,
     warn: deps.warn,
   });
-  if (workingDirectory) deps.assertSandboxWillShow(workingDirectory, plan);
+  if (workingDirectory) deps.assertOverlayShows(workingDirectory, plan);
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(
       filesystemMode,

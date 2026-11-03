@@ -137,7 +137,8 @@ fi
 step ephemeral-outside INPUT_FILESYSTEM_MODE="ephemeral" INPUT_WORKING_DIRECTORY="$OUTSIDE" \
   INPUT_RUN="touch here"
 CODE=$?
-if [ "$CODE" != "0" ] && [ ! -e "$OUTSIDE/here" ]; then
+if [ "$CODE" != "0" ] && [ ! -e "$OUTSIDE/here" ] &&
+  grep -q "touch: cannot touch 'here': Read-only file system" "$WORKDIR/ephemeral-outside.log"; then
   pass "under ephemeral, a working-directory outside the overlay is read-only"
 else
   fail "expected a write in $OUTSIDE to fail under ephemeral (exit $CODE)"
@@ -149,7 +150,7 @@ step ephemeral-unoverlaid INPUT_FILESYSTEM_MODE="ephemeral" INPUT_WORKING_DIRECT
   INPUT_RUN="touch \"$WORKDIR/unoverlaid-ran\""
 CODE=$?
 if [ "$CODE" != "0" ] && [ ! -e "$WORKDIR/unoverlaid-ran" ] &&
-  grep -qF "ephemeral cannot overlay the host mount $UNOVERLAID, so the sandbox shows the empty directory" "$WORKDIR/ephemeral-unoverlaid.log" &&
+  grep -qF "ephemeral cannot overlay the host mount \"$UNOVERLAID\", so the sandbox shows the empty directory" "$WORKDIR/ephemeral-unoverlaid.log" &&
   ! grep -q "proxy image:" "$WORKDIR/ephemeral-unoverlaid.log"; then
   pass "under ephemeral, a working-directory in a host mount the overlay cannot take fails the step before the proxy starts"
 else
