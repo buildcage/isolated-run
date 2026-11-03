@@ -256,6 +256,9 @@ each has rows of its own.
 - A failed access is shown under the name the command passed, joined to its working directory, or
   the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
   alone, such as `fchmod`, is shown under that file's path.
+- A path through a symlink to the workspace or `$HOME`, as every path through `$GITHUB_WORKSPACE`
+  is when that is a symlink, is shown where the symlink leads, so a file has one row however it
+  was reached.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
@@ -544,10 +547,12 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 - **Path**: written as the table shows it.
   - `./` for the working directory, `$GITHUB_WORKSPACE/` for the rest of the workspace, `~/` for
     `$HOME`, `$GITHUB_OUTPUT`, `memfd:"name"`, and a deleted file without its ` (deleted)`.
-  - A path in the working directory also matches when written under `$GITHUB_WORKSPACE/` or `~/`,
-    or in full. Steps in different working directories can then share a rule. Under
-    `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` matches `./dist/x`, but
-    `./web/dist/**` names `web/web/dist`, since `./` always starts at the working directory.
+  - A path in the working directory also matches when written as it would show without
+    `working-directory`: under `$GITHUB_WORKSPACE/` in the workspace, under `~/` elsewhere in
+    `$HOME`, and in full outside both. Steps in different working directories can then share a
+    rule. Under `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` matches `./dist/x`, but
+    the full path does not, and `./web/dist/**` names `web/web/dist`, since `./` always starts at
+    the working directory.
   - A name a command passed keeps its trailing `/` or `/.`, such as `/missing/` for a failed
     `rmdir /missing/`.
   - `*` matches within one component of a path. `**` as a whole component matches any number of

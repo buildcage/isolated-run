@@ -1014,9 +1014,9 @@ use an expression such as `${{ runner.temp }}` instead. A `..` may only start th
   `config-file: ../x.yml` are in `releases`, where the command's own `cd ..` goes.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
-  a path in the working directory either way, with or without `working-directory`. `./` itself
-  always starts at the working directory: under `working-directory: app`, `./app/dist/**` names
-  `app/app/dist`.
+  a path in the working directory with `./` or as it would show without `working-directory`, such
+  as `$GITHUB_WORKSPACE/app/dist/**`. `./` itself always starts at the working directory: under
+  `working-directory: app`, `./app/dist/**` names `app/app/dist`.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.

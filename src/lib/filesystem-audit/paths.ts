@@ -73,7 +73,8 @@ export function normalize(path: string, self?: number): string {
 /** How a path in the workspace is shown when the working directory is not the workspace. */
 export const WORKSPACE_PREFIX = "$GITHUB_WORKSPACE";
 
-/** The working directory, the workspace and $HOME, each as given and with symlinks resolved. */
+/** The working directory, the workspace and $HOME, each as given and then with
+ *  symlinks resolved, the last spelling being the real path. */
 export interface Prefixes {
   /** What `./` stands for; the workspace when absent. An empty list shows a
    *  path as if there were no working directory. */
@@ -118,35 +119,29 @@ const under = (path: string, prefix: string): boolean =>
   path === prefix || path.startsWith(`${prefix}/`);
 
 /** The path as relativize shows it under `prefixes` and, in the working
- *  directory, as it would show without one through each of `spellings`'
- *  spellings of that directory: a rule may name it any of these ways. */
-export function ruleSpellings(path: string, prefixes: Prefixes, spellings: Prefixes): string[] {
+ *  directory, as it would show without one: a rule may name it either way. */
+export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
   const shown = relativize(path, prefixes);
   if (!under(shown, ".")) return [shown];
-  const tail = shown.slice(1);
-  const bare = { ...spellings, cwd: [] };
-  const others = (spellings.cwd ?? spellings.workspace).map((dir) =>
-    relativize(dir === "/" ? tail || "/" : dir + tail, bare),
-  );
-  return [...new Set([shown, ...others])];
+  return [...new Set([shown, relativize(path, { ...prefixes, cwd: [] })])];
 }
 
 // Each prefix may be reached by two spellings (as given and with symlinks
-// resolved); fold a path onto the first so one file keys once. The order is
-// relativize's: a path in the working directory stays there even where a
-// spelling of the workspace or $HOME holds it.
+// resolved). A path takes the longest spelling of any prefix that holds it and
+// moves onto that prefix's real path, where a successful access already is, so
+// one file keys once however it was reached.
 export function canonical(path: string, prefixes: Prefixes): string {
   const variable = prefixes.runnerFiles?.get(path);
   if (variable) return RUNNER_FILE + variable;
-  for (const [spellings] of shownPrefixes(prefixes)) {
-    for (const spelling of spellings) {
-      const tail = rest(path, spelling);
-      if (tail === undefined) continue;
-      const [first] = spellings;
-      return !tail ? first : first === "/" ? `/${tail}` : `${first}/${tail}`;
-    }
+  let found: { spelling: string; real: string } | undefined;
+  for (const spellings of [prefixes.cwd ?? [], prefixes.workspace, prefixes.home]) {
+    for (const spelling of spellings)
+      if (rest(path, spelling) !== undefined && spelling.length > (found?.spelling.length ?? -1))
+        found = { spelling, real: spellings.at(-1)! };
   }
-  return path;
+  if (!found) return path;
+  const tail = rest(path, found.spelling)!;
+  return !tail ? found.real : found.real === "/" ? `/${tail}` : `${found.real}/${tail}`;
 }
 
 // Paths in the working directory first, then the workspace, $HOME and the rest.

@@ -72664,25 +72664,28 @@ function relativize(path, prefixes) {
 	return path;
 }
 const under = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
-function ruleSpellings(path, prefixes, spellings) {
+function ruleSpellings(path, prefixes) {
 	let shown = relativize(path, prefixes);
-	if (!under(shown, ".")) return [shown];
-	let tail = shown.slice(1), bare = {
-		...spellings,
+	return under(shown, ".") ? [...new Set([shown, relativize(path, {
+		...prefixes,
 		cwd: []
-	}, others = (spellings.cwd ?? spellings.workspace).map((dir) => relativize(dir === "/" ? tail || "/" : dir + tail, bare));
-	return [...new Set([shown, ...others])];
+	})])] : [shown];
 }
 function canonical(path, prefixes) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
-	for (let [spellings] of shownPrefixes(prefixes)) for (let spelling of spellings) {
-		let tail = rest(path, spelling);
-		if (tail === void 0) continue;
-		let [first] = spellings;
-		return tail ? first === "/" ? `/${tail}` : `${first}/${tail}` : first;
-	}
-	return path;
+	let found;
+	for (let spellings of [
+		prefixes.cwd ?? [],
+		prefixes.workspace,
+		prefixes.home
+	]) for (let spelling of spellings) rest(path, spelling) !== void 0 && spelling.length > (found?.spelling.length ?? -1) && (found = {
+		spelling,
+		real: spellings.at(-1)
+	});
+	if (!found) return path;
+	let tail = rest(path, found.spelling);
+	return tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
 function sortKey(path) {
 	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
@@ -72708,6 +72711,7 @@ const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorab
 function escapeForDisplay(name) {
 	return escapeWith(UNSAFE_CHARS, name);
 }
+const escapePath = (path) => path.split("/").map(escapeForDisplay).join("/");
 function escapeCommandName(name) {
 	return escapeWith(UNSAFE_COMMAND_CHARS, name);
 }
@@ -73333,7 +73337,7 @@ const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
 	loose: 307200,
 	nodes: 2e5,
 	loads: 2e5
-}, escapePath = (path) => path.split("/").map(escapeForDisplay).join("/"), recordedNoFileAccess = (summary) => summary.details?.length === 0 && !summary.matched;
+}, recordedNoFileAccess = (summary) => summary.details?.length === 0 && !summary.matched;
 function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
@@ -73353,14 +73357,10 @@ function createAuditSummary(prefixes) {
 			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)));
 			images.delete(proc);
 		}
-	}, spelledPrefixes = {
-		...prefixes.cwd && { cwd: prefixes.cwd.map(escapePath) },
-		workspace: prefixes.workspace.map(escapePath),
-		home: prefixes.home.map(escapePath)
-	}, shownPrefixes = {
-		...spelledPrefixes.cwd && { cwd: spelledPrefixes.cwd.slice(0, 1) },
-		workspace: spelledPrefixes.workspace.slice(0, 1),
-		home: spelledPrefixes.home.slice(0, 1)
+	}, real = (spellings) => spellings.slice(-1).map(escapePath), shownPrefixes = {
+		...prefixes.cwd && { cwd: real(prefixes.cwd) },
+		workspace: real(prefixes.workspace),
+		home: real(prefixes.home)
 	}, fanout = prefixes.fanout ?? 3, keep = [
 		"/",
 		"/home",
@@ -73531,7 +73531,7 @@ function createAuditSummary(prefixes) {
 		return ruleNames(path)[0];
 	}
 	function ruleNames(path) {
-		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), shownPrefixes, spelledPrefixes);
+		return path.startsWith("\0memfd:") ? [`${MEMFD_PREFIX}"${path.slice(MEMFD.length)}"`] : ruleSpellings(unmarked(path), shownPrefixes);
 	}
 	function ruleRowsOf(tally) {
 		return tally.finish()?.map(({ rank, path, agg }) => {
@@ -74312,10 +74312,10 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		runnerFiles: runnerFiles(env, mediated, deps.realpath),
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
-	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath) ? relativize(workingDirectory, {
+	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath) ? escapePath(relativize(workingDirectory, {
 		...options,
 		cwd: []
-	}) : void 0, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	})) : void 0, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
 	try {
 		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
 	} catch (e) {

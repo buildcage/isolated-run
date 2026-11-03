@@ -26,6 +26,7 @@ import {
   uploadFilesystemAuditArtifact,
   type UploadedArtifact,
 } from "./artifact.ts";
+import { escapePath } from "./escape.ts";
 import type { CutCause } from "./fold-tree.ts";
 import { openWriter, readLines } from "./line-file.ts";
 import { relativize } from "./paths.ts";
@@ -262,7 +263,7 @@ export function readStepFilesystemAudit(
   };
   const cwdNamed =
     workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath)
-      ? relativize(workingDirectory, { ...options, cwd: [] })
+      ? escapePath(relativize(workingDirectory, { ...options, cwd: [] }))
       : undefined;
   // What the verdict says of accesses that could not all be checked, which
   // fail the step as unexpected ones would.

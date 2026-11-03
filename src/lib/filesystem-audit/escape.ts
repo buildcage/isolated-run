@@ -34,6 +34,10 @@ export function escapeForDisplay(name: string): string {
   return escapeWith(UNSAFE_CHARS, name);
 }
 
+/** A path for display, each name on its own, so a blank leading or ending
+ *  one is escaped wherever it falls in the path. */
+export const escapePath = (path: string): string => path.split("/").map(escapeForDisplay).join("/");
+
 /** As escapeForDisplay, for a name in a command, brackets included. */
 export function escapeCommandName(name: string): string {
   return escapeWith(UNSAFE_COMMAND_CHARS, name);
