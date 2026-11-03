@@ -838,7 +838,12 @@ describe("runSandboxStep", () => {
     });
 
     await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("hidden");
-    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(workingDirectory, [], HOST_MOUNTS);
+    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(
+      workingDirectory,
+      [],
+      HOST_MOUNTS,
+      ENV,
+    );
     expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
   });
 

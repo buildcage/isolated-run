@@ -73981,227 +73981,6 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
-	};
-}
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
-}
-//#endregion
-//#region src/lib/sandbox/host-probes.ts
-const SETPRIV_CANDIDATE_PATHS = [
-	"/usr/bin/setpriv",
-	"/bin/setpriv",
-	"/usr/sbin/setpriv",
-	"/sbin/setpriv"
-];
-function resolveSetprivPath(exists) {
-	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
-}
-function parseNofileLimit(procLimits, nrOpen) {
-	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
-	if (!line) return;
-	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
-	return soft !== void 0 && hard !== void 0 ? {
-		soft,
-		hard
-	} : void 0;
-}
-function shmSizeFromStatfs({ type, bsize, blocks }) {
-	if (type !== 16914836) return;
-	let size = bsize * blocks;
-	return Number.isFinite(size) && size > 0 ? size : void 0;
-}
-function parseCgroupV2Path(procCgroup) {
-	let lines = procCgroup.split("\n").filter((line) => line !== "");
-	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
-	let path = lines[0].slice(3);
-	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
-}
-function readOptionalFile(path) {
-	try {
-		return (0, node_fs.readFileSync)(path, "utf8");
-	} catch {
-		return;
-	}
-}
-function readNumericFile(path) {
-	let raw = readOptionalFile(path)?.trim();
-	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
-}
-const realHostProbes = {
-	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
-	nofileRlimit: () => {
-		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
-		for (let pid of [process.ppid, "self"]) {
-			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
-			if (parsed) return parsed;
-		}
-	},
-	shmSizeBytes: () => {
-		try {
-			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
-		} catch {
-			return;
-		}
-	},
-	hostname: () => node_os.default.hostname(),
-	varRunRealPath: () => {
-		try {
-			return (0, node_fs.realpathSync)("/var/run");
-		} catch {
-			return;
-		}
-	},
-	realpath: (path) => realPathOf(path),
-	cgroupPath: () => {
-		let procCgroup = readOptionalFile("/proc/self/cgroup");
-		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
-	},
-	kernelBtf: () => {
-		try {
-			return (0, node_fs.statSync)("/sys/kernel/btf/vmlinux").size > 0;
-		} catch {
-			return !1;
-		}
-	}
-}, RUNTIME_SOCKET_PATHS = [
-	"/var/run/docker.sock",
-	"/run/docker.sock",
-	"/run/containerd/containerd.sock",
-	"/var/run/docker/containerd/containerd.sock",
-	"/run/buildkit/buildkitd.sock",
-	"/run/podman/podman.sock",
-	"/var/run/crio/crio.sock",
-	"/run/dbus/system_bus_socket",
-	"/var/run/dbus/system_bus_socket"
-];
-function rootlessRuntimeSocketPaths(env) {
-	let dir = env.XDG_RUNTIME_DIR;
-	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
-}
-//#endregion
-//#region src/lib/sandbox/identity.ts
-function assertNonRootUid(uid) {
-	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
-}
-const PRIVILEGED_GROUP_NAMES = new Set([
-	"root",
-	"docker",
-	"containerd",
-	"podman",
-	"lxd",
-	"libvirt",
-	"libvirt-qemu",
-	"kvm",
-	"sudo",
-	"wheel"
-]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
-	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	lookupGroups: (keys) => {
-		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
-		if (!getent) return { lines: "" };
-		try {
-			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
-				encoding: "utf8",
-				stdio: "pipe",
-				timeout: 5e3
-			}) };
-		} catch (e) {
-			let { status, stdout } = e;
-			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
-		}
-	},
-	gidOf: (path) => (0, node_fs.statSync)(path).gid
-};
-function readGroupNamesByGid(groupFile, nssLines, host) {
-	let sources = [];
-	try {
-		sources.push(host.readGroupFile(groupFile));
-	} catch {}
-	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
-	let map = new Map();
-	for (let line of sources.join("\n").split("\n")) {
-		if (!line || line.startsWith("#")) continue;
-		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
-		if (!name || !Number.isInteger(gid)) continue;
-		let names = map.get(gid);
-		names ? names.push(name) : map.set(gid, [name]);
-	}
-	return map;
-}
-function ownerGids(paths, host) {
-	let gids = new Set();
-	for (let p of paths) try {
-		gids.add(host.gidOf(p));
-	} catch {}
-	return gids;
-}
-function resolveSandboxGid(primaryGid, env, options = {}) {
-	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
-		String(primaryGid),
-		...PRIVILEGED_GROUP_NAMES,
-		...FALLBACK_GROUP_NAMES,
-		"65534"
-	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
-	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
-	let substitute = (gid) => gid === primaryGid ? {
-		gid,
-		...reported
-	} : {
-		gid,
-		substitutedFrom: primaryGid,
-		...reported
-	}, gidForName = (name) => {
-		if (groupNamesByGid) {
-			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
-		}
-	};
-	for (let name of FALLBACK_GROUP_NAMES) {
-		let gid = gidForName(name);
-		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
-	}
-	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
-	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
-}
-//#endregion
 //#region src/core/lib/docker/args.ts
 function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 	return [
@@ -75098,6 +74877,129 @@ function caTrustAdditions(files, env) {
 	};
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/sandbox/host-probes.ts
+const SETPRIV_CANDIDATE_PATHS = [
+	"/usr/bin/setpriv",
+	"/bin/setpriv",
+	"/usr/sbin/setpriv",
+	"/sbin/setpriv"
+];
+function resolveSetprivPath(exists) {
+	return SETPRIV_CANDIDATE_PATHS.find((p) => exists(p)) ?? "setpriv";
+}
+function parseNofileLimit(procLimits, nrOpen) {
+	let line = procLimits.split("\n").find((l) => l.startsWith("Max open files"));
+	if (!line) return;
+	let [soft, hard] = line.slice(14).trim().split(/\s+/).map((c) => /^\d+$/.test(c) ? Number(c) : c === "unlimited" ? nrOpen : void 0);
+	return soft !== void 0 && hard !== void 0 ? {
+		soft,
+		hard
+	} : void 0;
+}
+function shmSizeFromStatfs({ type, bsize, blocks }) {
+	if (type !== 16914836) return;
+	let size = bsize * blocks;
+	return Number.isFinite(size) && size > 0 ? size : void 0;
+}
+function parseCgroupV2Path(procCgroup) {
+	let lines = procCgroup.split("\n").filter((line) => line !== "");
+	if (lines.length !== 1 || !lines[0].startsWith("0::/")) return;
+	let path = lines[0].slice(3);
+	if (!(/\s/.test(path) || path.split("/").includes(".."))) return path;
+}
+function readOptionalFile(path) {
+	try {
+		return (0, node_fs.readFileSync)(path, "utf8");
+	} catch {
+		return;
+	}
+}
+function readNumericFile(path) {
+	let raw = readOptionalFile(path)?.trim();
+	return raw !== void 0 && /^\d+$/.test(raw) ? Number(raw) : void 0;
+}
+const realHostProbes = {
+	setprivPath: () => resolveSetprivPath(node_fs.existsSync),
+	nofileRlimit: () => {
+		let nrOpen = readNumericFile("/proc/sys/fs/nr_open");
+		for (let pid of [process.ppid, "self"]) {
+			let limits = readOptionalFile(`/proc/${pid}/limits`), parsed = limits === void 0 ? void 0 : parseNofileLimit(limits, nrOpen);
+			if (parsed) return parsed;
+		}
+	},
+	shmSizeBytes: () => {
+		try {
+			return shmSizeFromStatfs((0, node_fs.statfsSync)("/dev/shm"));
+		} catch {
+			return;
+		}
+	},
+	hostname: () => node_os.default.hostname(),
+	varRunRealPath: () => {
+		try {
+			return (0, node_fs.realpathSync)("/var/run");
+		} catch {
+			return;
+		}
+	},
+	realpath: (path) => realPathOf(path),
+	cgroupPath: () => {
+		let procCgroup = readOptionalFile("/proc/self/cgroup");
+		return procCgroup === void 0 ? void 0 : parseCgroupV2Path(procCgroup);
+	},
+	kernelBtf: () => {
+		try {
+			return (0, node_fs.statSync)("/sys/kernel/btf/vmlinux").size > 0;
+		} catch {
+			return !1;
+		}
+	}
+};
+//#endregion
 //#region src/lib/sandbox/oci-mounts.ts
 function freshMountDestinationsFrom(baseSpec) {
 	return new Set(baseSpec.mounts.map((m) => m.destination));
@@ -75236,6 +75138,299 @@ function scratchBaseCovers(aliases = []) {
 		]
 	}));
 }
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+const ALLOWED_WRITE_THROUGH_VARS = [
+	"HOME",
+	"GITHUB_WORKSPACE",
+	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], KNOWN_FILE_VARS = [
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+function resolveWriteThroughEntry(rawLine, env, baseDir) {
+	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
+	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
+		let name = braced ?? bare;
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function splitWriteThroughInput(input) {
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+}
+function resolveWriteThroughPaths(input, env, baseDir) {
+	let lines = splitWriteThroughInput(input);
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
+}
+var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
+function defaultExists(path) {
+	try {
+		return (0, node_fs.lstatSync)(path), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultCanWrite(path) {
+	try {
+		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultMkdir(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+	let resolved = resolveHostPath(path, {
+		lstat,
+		readlink
+	}), link = resolved.links[0];
+	if (link === void 0) return;
+	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
+	throw Error(`write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
+}
+function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
+	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+}
+function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
+	let missing = resolvedPaths.filter((path) => !exists(path));
+	for (let path of missing) {
+		let ancestor = (0, node_path.dirname)(path);
+		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
+	}
+	for (let path of missing) try {
+		mkdir(path);
+	} catch (e) {
+		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+//#endregion
+//#region src/lib/sandbox/host-commands.ts
+const PINNED_COMMANDS = ["docker", "sudo"];
+function persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs) {
+	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
+		...defaultDirs,
+		writablePaths: writeThroughPaths
+	});
+}
+const realFindCommandDeps = {
+	...realSymlinkDeps,
+	isExecutable: (path) => {
+		try {
+			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
+		} catch {
+			return !1;
+		}
+	}
+};
+function resolveDefaultWritableDirs(env, realpath = realPathOf) {
+	return {
+		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
+		home: env.HOME ? realpath(env.HOME) : void 0,
+		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
+		tmp: realpath("/tmp")
+	};
+}
+function insideOf(persisting) {
+	return (path) => persisting.some((w) => isAtOrUnder(path, w));
+}
+function reachableFrom(persisting, deps) {
+	let inside = insideOf(persisting);
+	return (path) => {
+		let resolved = resolveHostPath(path, deps);
+		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
+	};
+}
+function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
+	if (persisting.includes("/")) return pathEnv;
+	let reachable = reachableFrom(persisting, deps);
+	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
+}
+function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
+	return searchPath(command, pathEnv, persisting, deps).pinned;
+}
+function searchPath(command, pathEnv, persisting, deps) {
+	let optedOut = persisting.includes("/"), inside = insideOf(persisting), reachable = reachableFrom(persisting, deps), search = { onPath: !1 };
+	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
+		if (!(0, node_path.isAbsolute)(dir)) continue;
+		let candidate = (0, node_path.join)(dir, command);
+		if (!deps.isExecutable(candidate)) continue;
+		if (search.onPath = !0, optedOut || !reachable(candidate)) return {
+			...search,
+			pinned: candidate
+		};
+		if (reachable(dir)) continue;
+		let resolved = resolveHostPath(candidate, deps);
+		if (!("real" in resolved)) continue;
+		let { real } = resolved;
+		if (inside(real)) search.refusal ??= {
+			candidate,
+			real
+		};
+		else {
+			if ((0, node_path.basename)(real) === command) return {
+				...search,
+				pinned: real
+			};
+			search.refusal ??= {
+				candidate,
+				real,
+				link: resolved.links.find((l) => inside(l.at)).at
+			};
+		}
+	}
+	return search;
+}
+function unpinnableMessage(command, refusal, persisting) {
+	let under = (path) => persisting.find((p) => isAtOrUnder(path, p)), tail = "which a sandboxed command can write to. This action runs it outside the sandbox, so";
+	if (refusal?.link) {
+		let { candidate, real, link } = refusal;
+		return `'${command}' on PATH, ${candidate}, leads to ${real} through ${link}, under ${under(link)}, ${tail} through such a symlink it pins only a file named '${command}'.`;
+	}
+	if (refusal) {
+		let { candidate, real } = refusal;
+		return `'${command}' on PATH, ${candidate}, ${real === candidate ? "is" : `leads to ${real},`} under ${under(real)}, ${tail} it has to be a file no sandboxed command can replace.`;
+	}
+	return `'${command}' is on PATH only in directories a sandboxed command can write to or reach through a symlink it can repoint (${persisting.join(", ")}). This action runs it outside the sandbox, so it has to be found in a \$PATH directory outside those paths.`;
+}
+function pinHostCommands(paths, env, deps = realFindCommandDeps) {
+	for (let command of PINNED_COMMANDS) {
+		let { pinned, onPath, refusal } = searchPath(command, env.PATH, paths, deps);
+		if (pinned) pinCommand(command, pinned);
+		else if (onPath) throw new SandboxError(unpinnableMessage(command, refusal, paths), "HOST_COMMAND_UNPINNABLE");
+	}
+	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
+}
+function jvmTools(env, persisting, deps = realFindCommandDeps) {
+	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
+	return {
+		java: findPinnableCommand("java", env.PATH, [], deps),
+		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
+	};
+}
+function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf) {
+	let writeThroughPaths = [];
+	try {
+		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env, baseDir);
+	} catch {}
+	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
+}
+//#endregion
+//#region src/lib/sandbox/runtime-sockets.ts
+const RUNTIME_SOCKET_PATHS = [
+	"/var/run/docker.sock",
+	"/run/docker.sock",
+	"/run/containerd/containerd.sock",
+	"/var/run/docker/containerd/containerd.sock",
+	"/run/buildkit/buildkitd.sock",
+	"/run/podman/podman.sock",
+	"/var/run/crio/crio.sock",
+	"/run/dbus/system_bus_socket",
+	"/var/run/dbus/system_bus_socket"
+];
+function rootlessRuntimeSocketPaths(env) {
+	let dir = env.XDG_RUNTIME_DIR;
+	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
+}
+//#endregion
+//#region src/lib/sandbox/identity.ts
+function assertNonRootUid(uid) {
+	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
+}
+const PRIVILEGED_GROUP_NAMES = new Set([
+	"root",
+	"docker",
+	"containerd",
+	"podman",
+	"lxd",
+	"libvirt",
+	"libvirt-qemu",
+	"kvm",
+	"sudo",
+	"wheel"
+]), FALLBACK_GROUP_NAMES = ["nogroup", "nobody"], FALLBACK_GID = 65534, GETENT_PATHS = ["/usr/bin/getent", "/bin/getent"], realHost = {
+	readGroupFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	lookupGroups: (keys) => {
+		let getent = GETENT_PATHS.find((p) => (0, node_fs.existsSync)(p));
+		if (!getent) return { lines: "" };
+		try {
+			return { lines: (0, node_child_process.execFileSync)(getent, ["group", ...keys], {
+				encoding: "utf8",
+				stdio: "pipe",
+				timeout: 5e3
+			}) };
+		} catch (e) {
+			let { status, stdout } = e;
+			return status === 2 ? { lines: stdout ?? "" } : { error: errorMessage(e) };
+		}
+	},
+	gidOf: (path) => (0, node_fs.statSync)(path).gid
+};
+function readGroupNamesByGid(groupFile, nssLines, host) {
+	let sources = [];
+	try {
+		sources.push(host.readGroupFile(groupFile));
+	} catch {}
+	if (nssLines && sources.push(nssLines), sources.length === 0) return null;
+	let map = new Map();
+	for (let line of sources.join("\n").split("\n")) {
+		if (!line || line.startsWith("#")) continue;
+		let [name, , gidStr] = line.split(":"), gid = Number(gidStr);
+		if (!name || !Number.isInteger(gid)) continue;
+		let names = map.get(gid);
+		names ? names.push(name) : map.set(gid, [name]);
+	}
+	return map;
+}
+function ownerGids(paths, host) {
+	let gids = new Set();
+	for (let p of paths) try {
+		gids.add(host.gidOf(p));
+	} catch {}
+	return gids;
+}
+function resolveSandboxGid(primaryGid, env, options = {}) {
+	let groupFile = options.groupFile ?? "/etc/group", runtimeSocketPaths = options.runtimeSocketPaths ?? [...RUNTIME_SOCKET_PATHS, ...rootlessRuntimeSocketPaths(env)], host = options.host ?? realHost, nss = host.lookupGroups([
+		String(primaryGid),
+		...PRIVILEGED_GROUP_NAMES,
+		...FALLBACK_GROUP_NAMES,
+		"65534"
+	]), nssError = "error" in nss ? nss.error : void 0, groupNamesByGid = readGroupNamesByGid(groupFile, "lines" in nss ? nss.lines : void 0, host), socketOwnerGids = ownerGids(runtimeSocketPaths, host), isPrivileged = (gid) => gid === 0 || socketOwnerGids.has(gid) ? !0 : groupNamesByGid?.get(gid)?.some((name) => PRIVILEGED_GROUP_NAMES.has(name)) ?? !1, reported = nssError === void 0 ? {} : { nssError };
+	if (nssError === void 0 && !isPrivileged(primaryGid)) return { gid: primaryGid };
+	let substitute = (gid) => gid === primaryGid ? {
+		gid,
+		...reported
+	} : {
+		gid,
+		substitutedFrom: primaryGid,
+		...reported
+	}, gidForName = (name) => {
+		if (groupNamesByGid) {
+			for (let [gid, names] of groupNamesByGid) if (names.includes(name)) return gid;
+		}
+	};
+	for (let name of FALLBACK_GROUP_NAMES) {
+		let gid = gidForName(name);
+		if (gid !== void 0 && !isPrivileged(gid)) return substitute(gid);
+	}
+	if (!isPrivileged(FALLBACK_GID)) return substitute(FALLBACK_GID);
+	throw new SandboxError(`The runner's primary GID (${primaryGid}) is a privileged group${nssError === void 0 ? "" : " or couldn't be verified through NSS"}, and no safe substitute GID was found (nogroup/nobody/65534 are all privileged too on this host). Refusing to start the sandbox rather than run it under a privileged primary GID.`, "UNSAFE_PRIMARY_GID");
+}
 function workingDirectoryOf(env, realpath = realPathOf) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
 	if ((0, node_path.isAbsolute)(input) || workspace) return (0, node_path.isAbsolute)(input) ? realpath(input) : realpath(input ? `${workspace}/${input}` : workspace);
@@ -75250,7 +75445,7 @@ function isWorkspace(dir, env, realpath = realPathOf) {
 		return !1;
 	}
 }
-const invalid = (message) => new SandboxError(message, "INVALID_WORKING_DIRECTORY");
+const invalid = (message) => new SandboxError(message, "INVALID_WORKING_DIRECTORY"), unusable = (wd, why) => invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
 function readWorkingDirectory(env, { realpath = realPathOf, stat = node_fs.statSync } = {}) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "";
 	if (!input) return;
@@ -75295,12 +75490,12 @@ function assertSandboxUserCanSearch(wd, env, { uid = process.getuid(), gid = res
 		uid,
 		gid
 	}, stat);
-	if (blocked) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`);
+	if (blocked) throw unusable(wd, `the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}`);
 }
-function hiddenBySandboxMounts(cwd, writeThroughPaths, hostMounts, varRunRealPath) {
+function hiddenBySandboxMounts(cwd, writableDirs, hostMounts, varRunRealPath) {
 	return hiddenWorkingDirectory(cwd, [
 		...hostRunCoverageLayers(varRunRealPath).mounts,
-		...writeThroughPaths.map((p) => ({
+		...writableDirs.map((p) => ({
 			destination: p,
 			type: "none",
 			source: p,
@@ -75309,9 +75504,11 @@ function hiddenBySandboxMounts(cwd, writeThroughPaths, hostMounts, varRunRealPat
 		...scratchBaseCovers(pathAliases(hostMounts, SANDBOX_SCRATCH_BASE))
 	], []);
 }
-const unusable = (wd, why) => invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
-function assertSandboxWillShow(wd, writeThroughPaths, mounts, { varRunRealPath = () => realHostProbes.varRunRealPath(), realpath = realPathOf } = {}) {
-	let entries = writeThroughPaths.map((p) => realpath(p)), hidden = hiddenBySandboxMounts(wd.path, entries, mounts, varRunRealPath());
+function assertSandboxWillShow(wd, writeThroughPaths, mounts, env, { varRunRealPath = () => realHostProbes.varRunRealPath(), realpath = realPathOf } = {}) {
+	let writableDirs = writableDirsOf({
+		...resolveDefaultWritableDirs(env, realpath),
+		writablePaths: writeThroughPaths.map((p) => realpath(p))
+	}), hidden = hiddenBySandboxMounts(wd.path, writableDirs, mounts, varRunRealPath());
 	if (hidden) throw unusable(wd, hidden);
 }
 function assertOverlayShows(wd, { overlayRoots, hiddenMounts, writeThroughPaths }) {
@@ -75321,7 +75518,7 @@ function assertOverlayShows(wd, { overlayRoots, hiddenMounts, writeThroughPaths 
 }
 function assertSandboxShows(wd, spec) {
 	let hidden = hiddenWorkingDirectory(wd.path, spec.mounts, spec.maskedPaths);
-	if (hidden) throw invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${hidden}.`);
+	if (hidden) throw unusable(wd, hidden);
 }
 //#endregion
 //#region src/lib/filesystem-audit/line-file.ts
@@ -75546,87 +75743,6 @@ function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	if (rules.rules.length === 0) return { expected: void 0 };
 	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 	return { expected: rules };
-}
-//#endregion
-//#region src/lib/sandbox/write-through.ts
-const ALLOWED_WRITE_THROUGH_VARS = [
-	"HOME",
-	"GITHUB_WORKSPACE",
-	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], KNOWN_FILE_VARS = [
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir) {
-	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
-	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
-		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
-		let value = env[name];
-		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
-		return value;
-	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
-	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
-	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-}
-function splitWriteThroughInput(input) {
-	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
-}
-function resolveWriteThroughPaths(input, env, baseDir) {
-	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
-}
-var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
-function defaultExists(path) {
-	try {
-		return (0, node_fs.lstatSync)(path), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultCanWrite(path) {
-	try {
-		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultMkdir(path) {
-	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
-	let resolved = resolveHostPath(path, {
-		lstat,
-		readlink
-	}), link = resolved.links[0];
-	if (link === void 0) return;
-	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
-	throw Error(`write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
-}
-function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
-	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
-}
-function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
-	let missing = resolvedPaths.filter((path) => !exists(path));
-	for (let path of missing) {
-		let ancestor = (0, node_path.dirname)(path);
-		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
-		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
-	}
-	for (let path of missing) try {
-		mkdir(path);
-	} catch (e) {
-		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
-	}
 }
 //#endregion
 //#region src/lib/filesystem-example-inputs.ts
@@ -76161,117 +76277,6 @@ function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
 //#endregion
-//#region src/lib/sandbox/host-commands.ts
-const PINNED_COMMANDS = ["docker", "sudo"];
-function persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs) {
-	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
-		...defaultDirs,
-		writablePaths: writeThroughPaths
-	});
-}
-const realFindCommandDeps = {
-	...realSymlinkDeps,
-	isExecutable: (path) => {
-		try {
-			return (0, node_fs.accessSync)(path, node_fs.constants.X_OK), !0;
-		} catch {
-			return !1;
-		}
-	}
-};
-function resolveDefaultWritableDirs(env, realpath = realPathOf) {
-	return {
-		workdir: env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : void 0,
-		home: env.HOME ? realpath(env.HOME) : void 0,
-		runnerTemp: env.RUNNER_TEMP ? realpath(env.RUNNER_TEMP) : void 0,
-		tmp: realpath("/tmp")
-	};
-}
-function insideOf(persisting) {
-	return (path) => persisting.some((w) => isAtOrUnder(path, w));
-}
-function reachableFrom(persisting, deps) {
-	let inside = insideOf(persisting);
-	return (path) => {
-		let resolved = resolveHostPath(path, deps);
-		return "loop" in resolved || resolved.links.some((l) => inside(l.at)) || inside(resolved.real);
-	};
-}
-function pathOutside(pathEnv = "", persisting, deps = realSymlinkDeps) {
-	if (persisting.includes("/")) return pathEnv;
-	let reachable = reachableFrom(persisting, deps);
-	return pathEnv.split(node_path.delimiter).filter((dir) => (0, node_path.isAbsolute)(dir) && !reachable(dir)).join(node_path.delimiter);
-}
-function findPinnableCommand(command, pathEnv, persisting, deps = realFindCommandDeps) {
-	return searchPath(command, pathEnv, persisting, deps).pinned;
-}
-function searchPath(command, pathEnv, persisting, deps) {
-	let optedOut = persisting.includes("/"), inside = insideOf(persisting), reachable = reachableFrom(persisting, deps), search = { onPath: !1 };
-	for (let dir of (pathEnv ?? "").split(node_path.delimiter)) {
-		if (!(0, node_path.isAbsolute)(dir)) continue;
-		let candidate = (0, node_path.join)(dir, command);
-		if (!deps.isExecutable(candidate)) continue;
-		if (search.onPath = !0, optedOut || !reachable(candidate)) return {
-			...search,
-			pinned: candidate
-		};
-		if (reachable(dir)) continue;
-		let resolved = resolveHostPath(candidate, deps);
-		if (!("real" in resolved)) continue;
-		let { real } = resolved;
-		if (inside(real)) search.refusal ??= {
-			candidate,
-			real
-		};
-		else {
-			if ((0, node_path.basename)(real) === command) return {
-				...search,
-				pinned: real
-			};
-			search.refusal ??= {
-				candidate,
-				real,
-				link: resolved.links.find((l) => inside(l.at)).at
-			};
-		}
-	}
-	return search;
-}
-function unpinnableMessage(command, refusal, persisting) {
-	let under = (path) => persisting.find((p) => isAtOrUnder(path, p)), tail = "which a sandboxed command can write to. This action runs it outside the sandbox, so";
-	if (refusal?.link) {
-		let { candidate, real, link } = refusal;
-		return `'${command}' on PATH, ${candidate}, leads to ${real} through ${link}, under ${under(link)}, ${tail} through such a symlink it pins only a file named '${command}'.`;
-	}
-	if (refusal) {
-		let { candidate, real } = refusal;
-		return `'${command}' on PATH, ${candidate}, ${real === candidate ? "is" : `leads to ${real},`} under ${under(real)}, ${tail} it has to be a file no sandboxed command can replace.`;
-	}
-	return `'${command}' is on PATH only in directories a sandboxed command can write to or reach through a symlink it can repoint (${persisting.join(", ")}). This action runs it outside the sandbox, so it has to be found in a \$PATH directory outside those paths.`;
-}
-function pinHostCommands(paths, env, deps = realFindCommandDeps) {
-	for (let command of PINNED_COMMANDS) {
-		let { pinned, onPath, refusal } = searchPath(command, env.PATH, paths, deps);
-		if (pinned) pinCommand(command, pinned);
-		else if (onPath) throw new SandboxError(unpinnableMessage(command, refusal, paths), "HOST_COMMAND_UNPINNABLE");
-	}
-	pinCommandPathEnv("docker", pathOutside(env.PATH, paths, deps)), pinCommandPathEnv("sudo", pathOutside("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", paths, deps));
-}
-function jvmTools(env, persisting, deps = realFindCommandDeps) {
-	let javaHomeBin = env.JAVA_HOME ? (0, node_path.join)(env.JAVA_HOME, "bin") : void 0;
-	return {
-		java: findPinnableCommand("java", env.PATH, [], deps),
-		keytool: findPinnableCommand("keytool", javaHomeBin, persisting, deps) ?? findPinnableCommand("keytool", env.PATH, persisting, deps)
-	};
-}
-function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf) {
-	let writeThroughPaths = [];
-	try {
-		writeThroughPaths = resolveWriteThroughPaths(readWriteThroughInput(), env, baseDir);
-	} catch {}
-	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
-}
-//#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write-through: / drops the read-only restriction wholesale, which has no meaning in filesystem-mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
@@ -76347,9 +76352,10 @@ function planOverlay(env, writeThroughPaths, hostMounts, deps) {
 			runnerTemp,
 			tmp,
 			workdir
-		].filter((p) => !!p), exists = deps.exists ?? node_fs.existsSync, candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, {
+		].filter((p) => !!p), exists = deps.exists ?? node_fs.existsSync, deviceOf = deps.deviceOf ?? ((p) => (0, node_fs.statSync)(p).dev), madeIn = (p) => p === "/" || exists(p) ? p : madeIn((0, node_path.dirname)(p)), candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, {
 			...deps,
-			exists: (c) => exists(c) || writeThroughPaths.some((w) => isAtOrUnder(w, c))
+			exists: (c) => exists(c) || writeThroughPaths.some((w) => isAtOrUnder(w, c)),
+			deviceOf: (c) => deviceOf(madeIn(c))
 		}), nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
 		return {
 			overlayRoots: [...candidateRoots, ...nested.roots],
@@ -77973,9 +77979,9 @@ function readStepInputs(env, deps) {
 function preflight({ filesystemMode, writeThroughInput, workingDirectory, baseDir, filesystemAudit, annotation }, env, deps) {
 	assertNonRootUid(deps.getuid());
 	let writeThrough = resolveWriteThroughInput(writeThroughInput, env, baseDir);
-	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env);
+	deps.validateFilesystemInputs(filesystemMode, writeThrough), writeThrough.includes("/") && annotation.warning("write-through: / is for trusted code only. Against a compromised command it gives up the outbound restriction as well as the read-only one: all of /run and $XDG_RUNTIME_DIR are reachable again, a systemd --user bus included, which starts a process outside the sandbox. The commands this action runs on the host after the command are no longer kept out of writable paths either. See \"The / opt-out\" in docs/reference.md."), deps.pinHostCommands(pinningPaths(() => writeThroughInput, env, baseDir, deps.realPathOf), env), workingDirectory && deps.assertSandboxUserCanSearch(workingDirectory, env), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
 	let hostMounts = workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
-	workingDirectory && (deps.assertSandboxUserCanSearch(workingDirectory, env), deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts)), deps.checkPasswordlessSudo(), filesystemMode === "ephemeral" && deps.checkOverlayfsSupport(), filesystemAudit === "record" && deps.checkFilesystemAuditHost();
+	workingDirectory && deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts, env);
 	let plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
 		baseDir,
 		warn: deps.warn,

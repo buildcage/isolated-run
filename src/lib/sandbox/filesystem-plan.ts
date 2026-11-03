@@ -8,8 +8,8 @@
  * validateFilesystemInputs is here, not beside the input reads, because which
  * paths an entry may name depends on the sandbox's own mounts.
  */
-import { existsSync } from "node:fs";
-import { join, normalize, relative } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, normalize, relative } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
@@ -235,11 +235,15 @@ function planOverlay(
     const overlayCandidates = [home, runnerTemp, tmp, workdir].filter((p): p is string =>
       Boolean(p),
     );
-    // A candidate a write-through entry under it is about to create is there.
+    // A candidate a write-through entry under it is about to create is there,
+    // on the filesystem of the directory it will be made in.
     const exists = deps.exists ?? existsSync;
+    const deviceOf = deps.deviceOf ?? ((p: string) => statSync(p).dev);
+    const madeIn = (p: string): string => (p === "/" || exists(p) ? p : madeIn(dirname(p)));
     const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, {
       ...deps,
       exists: (c) => exists(c) || writeThroughPaths.some((w) => isAtOrUnder(w, c)),
+      deviceOf: (c) => deviceOf(madeIn(c)),
     });
     const nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
     return { overlayRoots: [...candidateRoots, ...nested.roots], hiddenMounts: nested.hidden };

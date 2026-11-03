@@ -494,6 +494,18 @@ describe("resolveFilesystemPlan", () => {
     expect(plan.overlayRoots).toContain("/tmp");
   });
 
+  it("folds a missing candidate by the device of the directory it will be made in", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "/home/runner/work/_temp/out", ENV, {
+      exists: (p) => !p.startsWith("/home/runner/work/_temp"),
+      canWrite: () => true,
+      mkdir: vi.fn(),
+      lstat: notLink,
+      deviceOf: (p) => (p.startsWith("/home/runner/work/_temp") ? 2 : 1),
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).not.toContain("/home/runner/work/_temp");
+  });
+
   it("checks the overlay candidates on the host by default", () => {
     const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
       deviceOf: () => 1,

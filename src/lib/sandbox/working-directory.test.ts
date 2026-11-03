@@ -267,7 +267,7 @@ describe("assertSandboxWillShow", () => {
   const wd = { input: "../run", path: "/run/app", isWorkspace: false };
 
   it("refuses a working directory the sandbox will hide, naming why", () => {
-    expect(() => assertSandboxWillShow(wd, [], [], { varRunRealPath: () => "/run" })).toThrow(
+    expect(() => assertSandboxWillShow(wd, [], [], {}, { varRunRealPath: () => "/run" })).toThrow(
       new SandboxError(
         'working-directory "../run" (/run/app) is unusable: the sandbox mounts its own /run.',
         "INVALID_WORKING_DIRECTORY",
@@ -276,19 +276,31 @@ describe("assertSandboxWillShow", () => {
   });
 
   it("probes /var/run by default", () => {
-    expect(() => assertSandboxWillShow(wd, [], [])).toThrow("the sandbox mounts its own /run");
+    expect(() => assertSandboxWillShow(wd, [], [], {})).toThrow("the sandbox mounts its own /run");
   });
 
   it("compares the write-through entries by their real paths", () => {
     const realpath = (p: string) => p.replace(/^\/srv\/link/, "/run/app");
     expect(() =>
-      assertSandboxWillShow(wd, ["/srv/link"], [], { varRunRealPath: () => "/run", realpath }),
+      assertSandboxWillShow(wd, ["/srv/link"], [], {}, { varRunRealPath: () => "/run", realpath }),
+    ).not.toThrow();
+  });
+
+  it("lets a runner directory either mode brings back over /run hold it", () => {
+    expect(() =>
+      assertSandboxWillShow(
+        { ...wd, path: "/run/runner/tmp/build" },
+        [],
+        [],
+        { RUNNER_TEMP: "/run/runner/tmp" },
+        { varRunRealPath: () => "/run", realpath: (p) => p },
+      ),
     ).not.toThrow();
   });
 
   it("passes one it will show", () => {
     expect(() =>
-      assertSandboxWillShow({ ...wd, path: WS }, [], [], { varRunRealPath: () => undefined }),
+      assertSandboxWillShow({ ...wd, path: WS }, [], [], {}, { varRunRealPath: () => undefined }),
     ).not.toThrow();
   });
 });

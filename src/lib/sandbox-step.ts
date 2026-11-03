@@ -434,16 +434,15 @@ export function preflight(
   );
 
   // Before image verification and the proxy start.
-  // Read once, for the check below and the filesystem plan.
-  const hostMounts =
-    workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
-  if (workingDirectory) {
-    deps.assertSandboxUserCanSearch(workingDirectory, env);
-    deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts);
-  }
+  if (workingDirectory) deps.assertSandboxUserCanSearch(workingDirectory, env);
   deps.checkPasswordlessSudo();
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
+
+  // After the probes, which mount, and once for the check below and the plan.
+  const hostMounts =
+    workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
+  if (workingDirectory) deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts, env);
 
   // Here rather than in runSandboxedCommand, so a bad write-through entry or
   // an uncreatable target fails before the proxy starts.
