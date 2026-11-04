@@ -98,28 +98,68 @@ function fields(line: string, ref: string): string[] {
   return out;
 }
 
-const SPECIAL = /[.*+?^${}()|[\]\\]/g;
 const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
-const ANY_DIRS = "(?:[\\s\\S]*/)?";
+
+// A glob's wildcards: `*`, a `**` inside a component, a leading or inner
+// `**/` (no component or any number of them), and a trailing `/**`.
+const STAR = 0;
+const ANY = 1;
+const DIRS = 2;
+const UNDER = 3;
+
+/** Text matched as written, the glob and the name both escaped as the summary
+ *  escapes them, or a wildcard. */
+type Part = string | typeof STAR | typeof ANY | typeof DIRS | typeof UNDER;
 
 /** A glob compiled. */
-export interface Glob {
-  /** A regular expression over a whole name, the glob and the name both
-   *  escaped as the summary escapes them. */
-  pattern: RegExp;
+export interface Glob extends NameMatcher {
   /** The components every name it takes starts with: all of the glob's
    *  without a wildcard, else those before the component holding the first. */
   start: string[];
 }
 
+// Whether the parts take the whole name. It fills in, part by part from the
+// last, which suffixes the rest takes, so it runs in the parts times the
+// name's length however many `**` there are, where a regular expression
+// backtracks exponentially.
+function takesWhole(parts: readonly Part[], name: string): boolean {
+  const n = name.length;
+  let rest = new Uint8Array(n + 1);
+  let cur = new Uint8Array(n + 1);
+  rest[n] = 1;
+  for (let t = parts.length - 1; t >= 0; t--) {
+    const part = parts[t];
+    if (typeof part === "string") {
+      for (let p = 0; p <= n; p++)
+        cur[p] = rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
+    } else {
+      cur[n] = rest[n];
+      // Whether the rest takes a suffix from p on, and one after a slash from p on.
+      let later = rest[n];
+      let afterSlash = 0;
+      for (let p = n - 1; p >= 0; p--) {
+        const slash = name[p] === "/";
+        later |= rest[p];
+        if (slash) afterSlash |= rest[p + 1];
+        if (part === STAR) cur[p] = rest[p] | (slash ? 0 : cur[p + 1]);
+        else if (part === ANY) cur[p] = rest[p] | cur[p + 1];
+        else if (part === DIRS) cur[p] = rest[p] | afterSlash;
+        else cur[p] = rest[p] | (slash ? later : 0);
+      }
+    }
+    [rest, cur] = [cur, rest];
+  }
+  return rest[0] === 1;
+}
+
 /**
- * A glob compiled in one pass, so its pattern and its start agree on what is
+ * A glob compiled in one pass, so its parts and its start agree on what is
  * a wildcard and what an escape. Undefined when the glob holds an escape the
  * summary never writes: one that stands for no character, such as `\q`, or
  * one for a character it writes otherwise, such as `\u{41}` for `A`.
  */
 export function compileGlob(glob: string): Glob | undefined {
-  let out = "";
+  const parts: Part[] = [];
   let firstStar: number | undefined;
   let i = 0;
   while (i < glob.length) {
@@ -130,17 +170,22 @@ export function compileGlob(glob: string): Glob | undefined {
       if (atStart && i === glob.length) {
         // "a/**" takes a itself too, as a folded row does, and "a/**/**" is
         // "a/**".
-        while (out.endsWith(ANY_DIRS)) out = out.slice(0, -ANY_DIRS.length);
-        out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
+        while (parts.at(-1) === DIRS) parts.pop();
+        const last = parts.at(-1);
+        if (typeof last === "string" && last.endsWith("/")) {
+          if (last === "/") parts.pop();
+          else parts[parts.length - 1] = last.slice(0, -1);
+          parts.push(UNDER);
+        } else parts.push(ANY);
       } else if (atStart && glob[i] === "/") {
-        out += ANY_DIRS;
+        parts.push(DIRS);
         i++;
-      } else out += "[\\s\\S]*";
+      } else parts.push(ANY);
       continue;
     }
     if (glob[i] === "*") {
       firstStar ??= i;
-      out += "[^/]*";
+      parts.push(STAR);
       i++;
       continue;
     }
@@ -152,11 +197,13 @@ export function compileGlob(glob: string): Glob | undefined {
       if (char === undefined || escapeForDisplay(char) !== c) return undefined;
     }
     i += c.length;
-    out += c.replace(SPECIAL, "\\$&");
+    const last = parts.at(-1);
+    if (typeof last === "string") parts[parts.length - 1] = last + c;
+    else parts.push(c);
   }
   const end = firstStar === undefined ? glob.length : glob.lastIndexOf("/", firstStar);
   return {
-    pattern: new RegExp(`^${out}$`),
+    test: (name) => takesWhole(parts, name),
     start: end === -1 ? [] : glob.slice(0, end).split("/"),
   };
 }
@@ -176,15 +223,15 @@ const ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/;
 const OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/;
 const asAnyProcess = (name: string): string | undefined =>
   OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : undefined;
-const anyProcess = (glob: string, pattern: RegExp): NameMatcher =>
+const anyProcess = (glob: string, matcher: NameMatcher): NameMatcher =>
   ANY_PROCESS.test(glob)
     ? {
         test: (name) => {
           const any = asAnyProcess(name);
-          return pattern.test(name) || (any !== undefined && pattern.test(any));
+          return matcher.test(name) || (any !== undefined && matcher.test(any));
         },
       }
-    : pattern;
+    : matcher;
 
 const ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 
@@ -250,8 +297,8 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
       const pathGlob = glob(path);
       rules.push({
         ref,
-        program: programGlob && anyProcess(program, programGlob.pattern),
-        path: anyProcess(path, pathGlob.pattern),
+        program: programGlob && anyProcess(program, programGlob),
+        path: anyProcess(path, pathGlob),
         pathStart: pathGlob.start,
         ...accessBits(access),
       });

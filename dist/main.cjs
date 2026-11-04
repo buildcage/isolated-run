@@ -72799,22 +72799,41 @@ function fields(line, ref) {
 	}
 	return out;
 }
-const SPECIAL = /[.*+?^${}()|[\]\\]/g, ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, ANY_DIRS = "(?:[\\s\\S]*/)?";
+const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
+function takesWhole(parts, name) {
+	let n = name.length, rest = new Uint8Array(n + 1), cur = new Uint8Array(n + 1);
+	rest[n] = 1;
+	for (let t = parts.length - 1; t >= 0; t--) {
+		let part = parts[t];
+		if (typeof part == "string") for (let p = 0; p <= n; p++) cur[p] = rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
+		else {
+			cur[n] = rest[n];
+			let later = rest[n], afterSlash = 0;
+			for (let p = n - 1; p >= 0; p--) {
+				let slash = name[p] === "/";
+				later |= rest[p], slash && (afterSlash |= rest[p + 1]), part === 0 ? cur[p] = rest[p] | (slash ? 0 : cur[p + 1]) : part === 1 ? cur[p] = rest[p] | cur[p + 1] : part === 2 ? cur[p] = rest[p] | afterSlash : cur[p] = rest[p] | (slash ? later : 0);
+			}
+		}
+		[rest, cur] = [cur, rest];
+	}
+	return rest[0] === 1;
+}
 function compileGlob(glob) {
-	let out = "", firstStar, i = 0;
+	let parts = [], firstStar, i = 0;
 	for (; i < glob.length;) {
 		if (glob.startsWith("**", i)) {
 			firstStar ??= i;
 			let atStart = i === 0 || glob[i - 1] === "/";
 			for (; glob[i] === "*";) i++;
 			if (atStart && i === glob.length) {
-				for (; out.endsWith(ANY_DIRS);) out = out.slice(0, -13);
-				out = out.endsWith("/") ? `${out.slice(0, -1)}(?:/[\\s\\S]*)?` : `${out}[\\s\\S]*`;
-			} else atStart && glob[i] === "/" ? (out += ANY_DIRS, i++) : out += "[\\s\\S]*";
+				for (; parts.at(-1) === 2;) parts.pop();
+				let last = parts.at(-1);
+				typeof last == "string" && last.endsWith("/") ? (last === "/" ? parts.pop() : parts[parts.length - 1] = last.slice(0, -1), parts.push(3)) : parts.push(1);
+			} else atStart && glob[i] === "/" ? (parts.push(2), i++) : parts.push(1);
 			continue;
 		}
 		if (glob[i] === "*") {
-			firstStar ??= i, out += "[^/]*", i++;
+			firstStar ??= i, parts.push(0), i++;
 			continue;
 		}
 		let c = glob[i];
@@ -72823,18 +72842,20 @@ function compileGlob(glob) {
 			let char = unescapeDisplay(c);
 			if (char === void 0 || escapeForDisplay(char) !== c) return;
 		}
-		i += c.length, out += c.replace(SPECIAL, "\\$&");
+		i += c.length;
+		let last = parts.at(-1);
+		typeof last == "string" ? parts[parts.length - 1] = last + c : parts.push(c);
 	}
 	let end = firstStar === void 0 ? glob.length : glob.lastIndexOf("/", firstStar);
 	return {
-		pattern: RegExp(`^${out}$`),
+		test: (name) => takesWhole(parts, name),
 		start: end === -1 ? [] : glob.slice(0, end).split("/")
 	};
 }
-const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, asAnyProcess = (name) => OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : void 0, anyProcess = (glob, pattern) => ANY_PROCESS.test(glob) ? { test: (name) => {
+const procByNumber = (name) => unnumbered(name) !== name, UNTIDY = /\/\.?\//, ANY_PROCESS = /^\/proc\/<pid>(?=\/|$)/, OWN_DIRECTORY = /^\/proc\/self(?=\/|$)/, asAnyProcess = (name) => OWN_DIRECTORY.test(name) ? name.replace(OWN_DIRECTORY, "/proc/<pid>") : void 0, anyProcess = (glob, matcher) => ANY_PROCESS.test(glob) ? { test: (name) => {
 	let any = asAnyProcess(name);
-	return pattern.test(name) || any !== void 0 && pattern.test(any);
-} } : pattern, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
+	return matcher.test(name) || any !== void 0 && matcher.test(any);
+} } : matcher, ACCESS = /^(?:[RWXMLDA]|[rwxmlda]!?)+$/;
 function accessBits(access) {
 	let bits = {
 		ok: 0,
@@ -72866,8 +72887,8 @@ function parseExpectedRules(sources) {
 		let programGlob = program === "*" ? void 0 : glob(program), pathGlob = glob(path);
 		rules.push({
 			ref,
-			program: programGlob && anyProcess(program, programGlob.pattern),
-			path: anyProcess(path, pathGlob.pattern),
+			program: programGlob && anyProcess(program, programGlob),
+			path: anyProcess(path, pathGlob),
 			pathStart: pathGlob.start,
 			...accessBits(access)
 		});

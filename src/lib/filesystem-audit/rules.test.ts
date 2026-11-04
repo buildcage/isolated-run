@@ -8,7 +8,7 @@ const inline = (text: string) => [{ text, origin: "input" as const, firstLine: 1
 const parse = (text: string) => parseExpectedRules(inline(text));
 
 describe("compileGlob", () => {
-  const matches = (glob: string, name: string) => compileGlob(glob)!.pattern.test(name);
+  const matches = (glob: string, name: string) => compileGlob(glob)!.test(name);
 
   it("matches a name with no wildcard as itself, its special characters included", () => {
     expect(matches("./a.b(c)+", "./a.b(c)+")).toBe(true);
@@ -68,6 +68,27 @@ describe("compileGlob", () => {
     expect(matches("~/**/.npmrc", "~/.npmrc")).toBe(true);
     expect(matches("~/**/.npmrc", "~/a/b/.npmrc")).toBe(true);
     expect(matches("~/**/.npmrc", "~/a/b/.npmrcx")).toBe(false);
+  });
+
+  it("matches several ** and * in one glob", () => {
+    expect(matches("./**/a/**/b/*.js", "./a/b/x.js")).toBe(true);
+    expect(matches("./**/a/**/b/*.js", "./x/a/y/z/b/c.js")).toBe(true);
+    expect(matches("./**/a/**/b/*.js", "./a/b/c/x.js")).toBe(false);
+    expect(matches("./**/a/**/b/*.js", "./xa/b/x.js")).toBe(false);
+    expect(matches("./a**b**c", "./a/x/b/y/c")).toBe(true);
+    expect(matches("./a**b**c", "./a/x/c/y/b")).toBe(false);
+  });
+
+  it.each([
+    ["./**/a/**/a/**/a/**/*.js", "a/"],
+    ["./**a**a**a**.js", "a/"],
+  ])("matches %j in time linear in the name's length", (glob, unit) => {
+    // A backtracking regular expression took seconds on 200 repeats.
+    const name = `./${unit.repeat(5000)}x.jsx`;
+    const started = performance.now();
+    expect(matches(glob, name)).toBe(false);
+    expect(matches(glob, `./${unit.repeat(5000)}x.js`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it.each([
