@@ -265,6 +265,12 @@ if wait_for_step_marker writer.ready; then
   else
     fail "could not kill the resolver's s6-log in the proxy container"
   fi
+  # pkill returns once the signal is sent; s6-supervise records the death when
+  # it reaps the writer, before restarting it.
+  for _ in $(seq 1 20); do
+    [ -n "$(docker exec "$CONTAINER" s6-svdt /run/service/coredns-log)" ] && break
+    sleep 0.5
+  done
 else
   fail "the command never started"
   cat "$STEP_PREFIX.log"
@@ -285,8 +291,8 @@ fi
 check_status "the step passed with fail-on-blocked: false" "$STEP_EXIT" 0
 assert_file_has "$STEP_PREFIX.log" "the step's notice counts the log writer's restart" \
   "The proxy's log writer restarted 1 time"
-assert_file_has "$STEP_PREFIX.log" "the step's notice counts the resolver's log writer's restart" \
-  "The DNS resolver's log writer restarted 1 time"
+assert_file_has "$STEP_PREFIX.log" "the step's notice counts the resolver's log writer's death" \
+  "The DNS resolver's log writer died 1 time"
 SUMMARY=$(cat "$STEP_PREFIX.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
 

@@ -71088,7 +71088,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 }
 function describeInterruptions({ proxyAnswered, resolverAnswered, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer restarted ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
@@ -71124,7 +71124,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 			message: facts.length ? `${incomplete}. ${facts.join(" ")}` : incomplete
 		};
 	}
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, or the proxy dropped lines it could not write (or the report could not tell whether the proxy or a log writer lost any). A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, the proxy dropped lines it could not write, or the report could not tell whether the proxy or a log writer lost any. A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -71589,8 +71589,8 @@ function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
 	if (top += renderVerdict(report, verdictItems), !report.logLooksPlausible) {
 		let facts = describeInterruptions(report);
-		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the proxy dropped lines it could not write (or the report could not tell whether
-> the proxy or a log writer lost any).
+		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, the proxy dropped lines it could not write, or the report could not tell whether the
+> proxy or a log writer lost any.
 > A missing beginning was either removed or rotated out by traffic heavy enough to fill the
 > 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand
 > made as long as a request can be.
