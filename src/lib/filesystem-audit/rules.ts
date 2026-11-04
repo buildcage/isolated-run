@@ -118,20 +118,30 @@ export interface Glob extends NameMatcher {
   start: string[];
 }
 
+// Rows of takesWhole's table, kept between calls and grown to the longest name.
+let rowA = new Uint8Array(256);
+let rowB = new Uint8Array(256);
+
 // Whether the parts take the whole name. It fills in, part by part from the
 // last, which suffixes the rest takes, so it runs in the parts times the
-// name's length however many `**` there are, where a regular expression
-// backtracks exponentially.
+// name's length however many `**` there are.
 function takesWhole(parts: readonly Part[], name: string): boolean {
+  const first = parts[0];
+  const last = parts.at(-1);
+  if (typeof first === "string" && !name.startsWith(first)) return false;
+  if (typeof last === "string" && !name.endsWith(last)) return false;
   const n = name.length;
-  let rest = new Uint8Array(n + 1);
-  let cur = new Uint8Array(n + 1);
+  if (rowA.length <= n) [rowA, rowB] = [new Uint8Array(2 * n + 2), new Uint8Array(2 * n + 2)];
+  let rest = rowA;
+  let cur = rowB;
+  rest.fill(0, 0, n);
   rest[n] = 1;
   for (let t = parts.length - 1; t >= 0; t--) {
     const part = parts[t];
     if (typeof part === "string") {
+      const fits = n - part.length;
       for (let p = 0; p <= n; p++)
-        cur[p] = rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
+        cur[p] = p <= fits && rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
     } else {
       cur[n] = rest[n];
       // Whether the rest takes a suffix from p on, and one after a slash from p on.
@@ -202,8 +212,9 @@ export function compileGlob(glob: string): Glob | undefined {
     else parts.push(c);
   }
   const end = firstStar === undefined ? glob.length : glob.lastIndexOf("/", firstStar);
+  const text = parts.length === 1 ? parts[0] : undefined;
   return {
-    test: (name) => takesWhole(parts, name),
+    test: typeof text === "string" ? (name) => name === text : (name) => takesWhole(parts, name),
     start: end === -1 ? [] : glob.slice(0, end).split("/"),
   };
 }

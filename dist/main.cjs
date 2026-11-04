@@ -72800,13 +72800,20 @@ function fields(line, ref) {
 	return out;
 }
 const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
+let rowA = new Uint8Array(256), rowB = new Uint8Array(256);
 function takesWhole(parts, name) {
-	let n = name.length, rest = new Uint8Array(n + 1), cur = new Uint8Array(n + 1);
-	rest[n] = 1;
+	let first = parts[0], last = parts.at(-1);
+	if (typeof first == "string" && !name.startsWith(first) || typeof last == "string" && !name.endsWith(last)) return !1;
+	let n = name.length;
+	rowA.length <= n && ([rowA, rowB] = [new Uint8Array(2 * n + 2), new Uint8Array(2 * n + 2)]);
+	let rest = rowA, cur = rowB;
+	rest.fill(0, 0, n), rest[n] = 1;
 	for (let t = parts.length - 1; t >= 0; t--) {
 		let part = parts[t];
-		if (typeof part == "string") for (let p = 0; p <= n; p++) cur[p] = rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
-		else {
+		if (typeof part == "string") {
+			let fits = n - part.length;
+			for (let p = 0; p <= n; p++) cur[p] = p <= fits && rest[p + part.length] && name.startsWith(part, p) ? 1 : 0;
+		} else {
 			cur[n] = rest[n];
 			let later = rest[n], afterSlash = 0;
 			for (let p = n - 1; p >= 0; p--) {
@@ -72846,9 +72853,9 @@ function compileGlob(glob) {
 		let last = parts.at(-1);
 		typeof last == "string" ? parts[parts.length - 1] = last + c : parts.push(c);
 	}
-	let end = firstStar === void 0 ? glob.length : glob.lastIndexOf("/", firstStar);
+	let end = firstStar === void 0 ? glob.length : glob.lastIndexOf("/", firstStar), text = parts.length === 1 ? parts[0] : void 0;
 	return {
-		test: (name) => takesWhole(parts, name),
+		test: typeof text == "string" ? (name) => name === text : (name) => takesWhole(parts, name),
 		start: end === -1 ? [] : glob.slice(0, end).split("/")
 	};
 }

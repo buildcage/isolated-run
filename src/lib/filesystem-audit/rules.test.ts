@@ -83,11 +83,11 @@ describe("compileGlob", () => {
     ["./**/a/**/a/**/a/**/*.js", "a/"],
     ["./**a**a**a**.js", "a/"],
   ])("matches %j in time linear in the name's length", (glob, unit) => {
-    // A backtracking regular expression took seconds on 200 repeats.
-    const name = `./${unit.repeat(5000)}x.jsx`;
+    // Long enough that time quadratic in the name would take seconds too.
     const started = performance.now();
-    expect(matches(glob, name)).toBe(false);
-    expect(matches(glob, `./${unit.repeat(5000)}x.js`)).toBe(true);
+    expect(matches(glob, `./${"b/".repeat(20_000)}x.js`)).toBe(false);
+    expect(matches(glob, `./${unit.repeat(20_000)}x.js`)).toBe(true);
+    expect(matches(glob, `./${unit.repeat(3)}x.jsx`)).toBe(false);
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
