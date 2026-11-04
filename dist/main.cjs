@@ -71088,7 +71088,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 }
 function describeInterruptions({ proxyAnswered, resolverAnswered, droppedLines, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped ${droppedLines} log line(s) during the run because it could not write them.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
@@ -77381,7 +77381,7 @@ function readRotatedLog(docker, containerId, dir) {
 		READ_SCRIPT,
 		"sh",
 		dir
-	], `reading ${dir}`);
+	], `docker exec reading ${dir}`);
 }
 //#endregion
 //#region src/core/lib/report/action-version.ts
