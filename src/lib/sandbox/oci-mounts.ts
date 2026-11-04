@@ -135,7 +135,7 @@ export function reservedInternalDestinations(): string[] {
  */
 export function assertNoFreshMountDestinations(
   writableDirs: string[],
-  freshMountDestinations = new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)),
+  freshMountDestinations: Set<string>,
 ): void {
   for (const dir of writableDirs) {
     const shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));

@@ -15529,8 +15529,8 @@ function parseConfig(text, path, { known, stepOnly = [] }) {
 		if (node.type !== import_dist$5.Scalar.BLOCK_FOLDED) return value.includes("\n") || lineCounter.linePos(end).line !== at ? void 0 : at;
 	}, own = new Set(doc.contents.items.filter(({ key }) => !isMergeKey(key, doc)).map(({ key }) => resolved(key, doc)).filter(import_dist$5.isScalar).map((key) => String(key.value))), keys = new Map();
 	for (let key of Object.keys(js)) {
-		let name = known.find((input) => key === input || key === legacyInputName(input));
-		if (!name) throw invalid(`${stepOnly.some((input) => key === input || key === legacyInputName(input)) ? `${JSON.stringify(key)} can be set only on the step, not in a config-file` : `unknown key ${JSON.stringify(key)}`}. Allowed keys: ${known.join(", ")}.`);
+		let spells = (input) => key === input || key === legacyInputName(input), name = known.find(spells);
+		if (!name) throw invalid(`${stepOnly.some(spells) ? `${JSON.stringify(key)} can be set only on the step` : `unknown key ${JSON.stringify(key)}`}. Allowed keys: ${known.join(", ")}.`);
 		let other = keys.get(name);
 		if (other === void 0 || own.has(key) && !own.has(other)) keys.set(name, key);
 		else if (own.has(key) || !own.has(other)) throw invalid(`${name} is set twice, also as ${legacyInputName(name)}.`);
@@ -74437,77 +74437,76 @@ const LIST_INPUTS = [
 	"fail-on-unexpected-file-access",
 	"label",
 	"working-directory"
-], NOT_IN_CONFIG_FILE = [
+], STEP_ONLY = [
 	"run",
 	"config-file",
-	"writable",
 	"working-directory"
 ], CONFIG_FILE_INPUTS = {
-	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
+	known: ACTION_INPUTS.filter((input) => input !== "writable" && !STEP_ONLY.includes(input)),
 	lists: LIST_INPUTS,
-	stepOnly: NOT_IN_CONFIG_FILE
+	stepOnly: STEP_ONLY
 };
 function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readRunCommand(getInput$2 = getInput) {
-	let runInput = getInput$2("run", { trimWhitespace: !1 });
+function readRunCommand(getInput$10 = getInput) {
+	let runInput = getInput$10("run", { trimWhitespace: !1 });
 	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
 	return runInput;
 }
-function readProxyInputs(getInput$1 = getInput) {
+function readProxyInputs(getInput$9 = getInput) {
 	return {
-		proxyEngine: resolveProxyEngine(getInput$1("proxy-engine")),
-		proxyMode: resolveProxyMode(getInput$1("proxy-mode"))
+		proxyEngine: resolveProxyEngine(getInput$9("proxy-engine")),
+		proxyMode: resolveProxyMode(getInput$9("proxy-mode"))
 	};
 }
-function readFilesystemInputs(notice, getInput$7 = getInput) {
+function readFilesystemInputs(notice, getInput$5 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$7("filesystem-mode")),
+		filesystemMode: resolveFilesystemMode(getInput$5("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$7("write-through"),
-			writable: getInput$7("writable"),
-			allowWrite: getInput$7("allow_write")
+			writeThrough: getInput$5("write-through"),
+			writable: getInput$5("writable"),
+			allowWrite: getInput$5("allow_write")
 		}, notice)
 	};
 }
-function readFilesystemAuditInput(getInput$6 = getInput) {
-	return resolveFilesystemAudit(getInput$6("filesystem-audit"));
+function readFilesystemAuditInput(getInput$4 = getInput) {
+	return resolveFilesystemAudit(getInput$4("filesystem-audit"));
 }
-function readFilesystemAuditArtifactInputs(getInput$9 = getInput) {
-	let days = getInput$9("filesystem-audit-retention-days");
+function readFilesystemAuditArtifactInputs(getInput$7 = getInput) {
+	let days = getInput$7("filesystem-audit-retention-days");
 	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
 	return {
-		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$9),
+		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$7),
 		retentionDays: days === "" ? void 0 : Number(days)
 	};
 }
-function readStepLabel(getInput$10 = getInput) {
-	return getInput$10("label") || void 0;
+function readStepLabel(getInput$8 = getInput) {
+	return getInput$8("label") || void 0;
 }
-function readFailOnCaResidue(getInput$5 = getInput) {
-	return readBooleanInput("fail-on-ca-residue", !0, getInput$5);
+function readFailOnCaResidue(getInput$3 = getInput) {
+	return readBooleanInput("fail-on-ca-residue", !0, getInput$3);
 }
-function readFailOnBlocked(getInput$8 = getInput) {
-	return readBooleanInput("fail-on-blocked", !0, getInput$8);
+function readFailOnBlocked(getInput$6 = getInput) {
+	return readBooleanInput("fail-on-blocked", !0, getInput$6);
 }
-function readFailOnUnexpectedFileAccess(getInput$3 = getInput) {
-	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$3);
+function readFailOnUnexpectedFileAccess(getInput$1 = getInput) {
+	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$1);
 }
 const AWS_KEY_CHECK_OFF = {
 	key: "",
 	roleAccounts: []
 };
-function readAwsKeyInputs({ proxyEngine }, env, getInput$4 = getInput) {
+function readAwsKeyInputs({ proxyEngine }, env, getInput$2 = getInput) {
 	let roleAccounts;
 	try {
-		roleAccounts = parseAwsAccounts(getInput$4("allowed-aws-role-accounts"));
+		roleAccounts = parseAwsAccounts(getInput$2("allowed-aws-role-accounts"));
 	} catch (e) {
 		let { message } = e;
 		throw new SandboxError(`allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
 	}
-	let check = readBooleanInput("aws-key-check", !1, getInput$4);
+	let check = readBooleanInput("aws-key-check", !1, getInput$2);
 	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config-file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
 	if (!check) return AWS_KEY_CHECK_OFF;
 	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check and allowed-aws-role-accounts.`, "INVALID_PROXY_ENGINE");
@@ -75953,7 +75952,7 @@ function emptyRunTmpfs(destination) {
 function reservedInternalDestinations() {
 	return [RESOLV_CONF_DESTINATION, ...reservedCaStorePaths()];
 }
-function assertNoFreshMountDestinations(writableDirs, freshMountDestinations = new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination))) {
+function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
 		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
@@ -76351,7 +76350,7 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRea
 		if (reserved) throw new SandboxError(`write-through entry ${JSON.stringify(path)} is reserved: the sandbox mounts the proxy's DNS and CA trust over ${JSON.stringify(reserved)}, last of all. Which path the CA store goes to depends on the runner, so every one it could be is refused rather than working on one machine and not the next. Name a containing directory instead to persist writes around it.`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 	if (!writeThroughPaths.includes("/")) try {
-		assertNoFreshMountDestinations(writeThroughPaths);
+		assertNoFreshMountDestinations(writeThroughPaths, new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)));
 	} catch (e) {
 		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
 	}
