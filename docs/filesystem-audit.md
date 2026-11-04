@@ -258,7 +258,8 @@ each has rows of its own.
   alone, such as `fchmod`, is shown under that file's path.
 - Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a path through it is
   shown where it leads, so a failed access through the symlink and a successful one share a row.
-  Other symlinks are not followed for this. All three are resolved before the command runs, as are
+  So is a path through the working directory as its input spells it, symlinks and a leading `..`
+  included. Other symlinks are not followed for this. All three are resolved before the command runs, as are
   the tool cache and the runner files, so a command that later swaps one for a symlink does not
   change what `./` or `$GITHUB_WORKSPACE/` stands for.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is

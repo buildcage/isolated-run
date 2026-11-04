@@ -147,8 +147,8 @@ function spellings(value: string | undefined, realpath: (p: string) => string): 
 }
 
 // The working directory as the input spells it, against each spelling of the
-// workspace when relative. A leading `..` stays, as the real path climbed from
-// where this spelling leads.
+// workspace when relative. A leading `..` stays: the real path was resolved
+// through it.
 function inputSpellings(input: string, workspace: string[]): string[] {
   const tidy = (path: string) =>
     `/${path

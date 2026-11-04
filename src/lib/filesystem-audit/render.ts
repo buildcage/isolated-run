@@ -264,7 +264,7 @@ function unexpectedBlock(
   return {
     ...block,
     cut: "lines",
-    // The count of what matched stays when the table is cut.
+    // The line counting what matched stays when the table is cut.
     head: 8,
     text:
       `### ⚠️ Unexpected Accesses${count(proposed, proposedCut)}\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` +
