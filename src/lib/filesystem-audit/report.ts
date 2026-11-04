@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
@@ -18,7 +18,8 @@ import {
   mediatedPathOf,
   type MediatedVariable,
 } from "../sandbox/runner-output-files.ts";
-import { isWorkspace } from "../sandbox/working-directory.ts";
+import { realPathOf } from "../sandbox/symlinks.ts";
+import type { WorkingDirectory } from "../sandbox/working-directory.ts";
 import { FILESYSTEM_PRIORITIES } from "../summary-priorities.ts";
 import {
   filesystemAuditArtifactName,
@@ -68,8 +69,8 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
-  /** What `./` stands for, the working directory's real path: the workspace when absent. */
-  workingDirectory?: string;
+  /** Where paths are shown from, from resolveAuditPrefixes. */
+  prefixes: AuditPrefixes;
   /** The runner files the command wrote through backing copies. */
   mediated: readonly MediatedVariable[];
   /** Where the guide the summary links to is read from. */
@@ -89,7 +90,6 @@ export interface FilesystemAuditReportDeps {
   openWriter: typeof openWriter;
   makeDir: (path: string) => void;
   readFile: (path: string) => string;
-  realpath: (path: string) => string;
   renderBlocks: typeof renderAuditSummaryBlocks;
   uploadArtifact: typeof uploadFilesystemAuditArtifact;
   setOutput: typeof setFilesystemAuditOutput;
@@ -107,7 +107,6 @@ const realDeps: FilesystemAuditReportDeps = {
   // Never recursive: anything already at the path, a symlink included, fails it.
   makeDir: (path) => mkdirSync(path, { mode: 0o700 }),
   readFile: (path) => readFileSync(path, "utf8"),
-  realpath: (path) => realpathSync(path),
   renderBlocks: renderAuditSummaryBlocks,
   uploadArtifact: uploadFilesystemAuditArtifact,
   setOutput: setFilesystemAuditOutput,
@@ -116,33 +115,61 @@ const realDeps: FilesystemAuditReportDeps = {
 };
 /* v8 ignore stop */
 
-// The recorded paths are canonical (symlink-resolved); $GITHUB_WORKSPACE and
-// $HOME may not be, so match against both forms.
-function prefixes(value: string | undefined, realpath: (p: string) => string): string[] {
+/**
+ * The directories paths are shown under, each as given and with symlinks
+ * resolved. Resolved before the command runs, which could otherwise swap a
+ * directory on the way to one for a symlink and have its target shown as `./`.
+ */
+export interface AuditPrefixes {
+  /** What `./` stands for: the working directory's real path. */
+  cwd: string[];
+  /** The working directory the legend names, unset when it is the workspace. */
+  named?: string;
+  workspace: string[];
+  home: string[];
+  toolCache: string[];
+  /** Where each runner file is written when not mediated. */
+  runnerFiles: Record<MediatedVariable, string[]>;
+}
+
+// The recorded paths are canonical, $GITHUB_WORKSPACE and $HOME may not be.
+function spellings(value: string | undefined, realpath: (p: string) => string): string[] {
   if (!value) return [];
-  const out = [value];
-  try {
-    const real = realpath(value);
-    if (real !== value) out.push(real);
-  } catch {
-    // The path does not exist; the raw value is the only prefix to try.
-  }
-  return out;
+  const real = realpath(value);
+  return real === value ? [value] : [value, real];
+}
+
+/** The prefixes for `baseDir`, the working directory's real path. */
+export function resolveAuditPrefixes(
+  env: NodeJS.ProcessEnv,
+  baseDir: string | undefined,
+  workingDirectory: WorkingDirectory | undefined,
+  realpath: (path: string) => string = realPathOf,
+): AuditPrefixes {
+  return {
+    cwd: baseDir ? [baseDir] : [],
+    ...(workingDirectory && !workingDirectory.isWorkspace && { named: workingDirectory.path }),
+    workspace: spellings(env.GITHUB_WORKSPACE, realpath),
+    home: spellings(env.HOME, realpath),
+    toolCache: spellings(env.RUNNER_TOOL_CACHE, realpath),
+    runnerFiles: Object.fromEntries(
+      MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)]),
+    ) as Record<MediatedVariable, string[]>,
+  };
 }
 
 // A mediated runner file is written at its backing copy, its real path masked
 // from the command, so an access there keeps that path. One ephemeral leaves
 // unmediated is written at its real path under the overlay.
 function runnerFiles(
-  env: NodeJS.ProcessEnv,
+  prefixes: AuditPrefixes,
   mediated: readonly MediatedVariable[],
-  realpath: (p: string) => string,
 ): Map<string, string> {
   const out = new Map<string, string>();
   for (const variable of MEDIATED_VARIABLES) {
     const paths = mediated.includes(variable)
       ? [mediatedPathOf(variable)]
-      : prefixes(env[variable], realpath);
+      : prefixes.runnerFiles[variable];
     for (const path of paths) out.set(path, variable);
   }
   return out;
@@ -198,7 +225,7 @@ export function readStepFilesystemAudit(
     containerName,
     annotation,
     env,
-    workingDirectory = env.GITHUB_WORKSPACE,
+    prefixes,
     mediated,
     actionRepo,
     actionRef,
@@ -252,19 +279,17 @@ export function readStepFilesystemAudit(
       prepared = false;
     }
   const options: SummaryOptions = {
-    cwd: prefixes(workingDirectory, deps.realpath),
-    workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-    home: prefixes(env.HOME, deps.realpath),
-    toolCache: prefixes(env.RUNNER_TOOL_CACHE, deps.realpath),
-    runnerFiles: runnerFiles(env, mediated, deps.realpath),
+    cwd: prefixes.cwd,
+    workspace: prefixes.workspace,
+    home: prefixes.home,
+    toolCache: prefixes.toolCache,
+    runnerFiles: runnerFiles(prefixes, mediated),
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     // Only a prepared directory takes the proposed rules.
     propose: prepared,
   };
   const cwdNamed =
-    workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath)
-      ? escapePath(relativize(workingDirectory, { ...options, cwd: [] }))
-      : undefined;
+    prefixes.named && escapePath(relativize(prefixes.named, { ...options, cwd: [] }));
   // What the verdict says of accesses that could not all be checked, which
   // fail the step as unexpected ones would.
   const checkIncomplete: VerdictItems =

@@ -9,10 +9,10 @@ import {
   deps,
   reportStepFilesystemAudit,
   RULES,
+  readAudit,
 } from "../test/filesystem-audit-report.ts";
 import { RULES_CUT_NOTE, RULES_TO_ADD_HEADER } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
-import { readStepFilesystemAudit } from "./report.ts";
 import { parseExpectedRules } from "./rules.ts";
 
 afterEach(() => {
@@ -47,7 +47,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d } = deps({ raw });
 
-    const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
+    const read = readAudit({ ...base, annotation: note, rules: rules("# none") }, d);
 
     expect(read.verdictItems).toStrictEqual({ warning: ["2 unexpected file accesses"] });
     expect(note.warning).toHaveBeenCalledWith(
@@ -59,10 +59,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d, uploads, ruleFiles, writes } = deps({ raw });
 
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("# reads\nnode R ./a") },
-      d,
-    );
+    const read = readAudit({ ...base, annotation: note, rules: rules("# reads\nnode R ./a") }, d);
     const md = joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined));
 
     expect(read.verdictItems).toStrictEqual({ warning: ["1 unexpected file access"] });
@@ -103,7 +100,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d } = deps({ raw });
 
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
       d,
     );
@@ -120,7 +117,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d, ruleFiles } = deps({ raw });
 
-    const read = readStepFilesystemAudit({ ...base, annotation: note, failOnUnexpected: true }, d);
+    const read = readAudit({ ...base, annotation: note, failOnUnexpected: true }, d);
     const md = joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined));
 
     expect(read.verdictItems).toStrictEqual({ caution: ["2 unexpected file accesses"] });
@@ -148,7 +145,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       },
     });
 
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
       d,
     );
@@ -173,13 +170,10 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       }).deps;
     const note = annotation();
 
-    const quiet = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R ./a") },
-      failing(),
-    );
+    const quiet = readAudit({ ...base, annotation: note, rules: rules("node R ./a") }, failing());
     expect(note.error).not.toHaveBeenCalled();
     expect(quiet.verdictItems).toStrictEqual({});
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node R ./a"), failOnUnexpected: true },
       failing(),
     );
@@ -195,11 +189,11 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d } = deps({ raw: raw.replace('"dropped":0', '"dropped":3') });
 
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
       d,
     );
-    const both = readStepFilesystemAudit(
+    const both = readAudit(
       { ...base, annotation: annotation(), rules: rules("node R ./a"), failOnUnexpected: true },
       d,
     );
@@ -222,7 +216,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       },
     });
     const read = (d: typeof early, failOnUnexpected: boolean) =>
-      readStepFilesystemAudit(
+      readAudit(
         { ...base, annotation: annotation(), rules: rules("node RW ./*"), failOnUnexpected },
         d,
       ).verdictItems;
@@ -238,7 +232,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
     });
 
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
       d,
     );
@@ -252,7 +246,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     const note = annotation();
     const { deps: d, ruleFiles, summaries } = deps({ raw });
 
-    const read = readStepFilesystemAudit(
+    const read = readAudit(
       { ...base, annotation: note, rules: rules("node RW ./*"), failOnUnexpected: true },
       d,
     );
@@ -280,7 +274,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       { text: "# reads", origin: "input", firstLine: 1 },
       { text: "node R ./a", origin: "config", firstLine: 1 },
     ]);
-    const read = readStepFilesystemAudit({ ...base, annotation: annotation(), rules: given }, d);
+    const read = readAudit({ ...base, annotation: annotation(), rules: given }, d);
     await read.upload();
 
     expect(ruleFiles.map((f) => f.content)).toStrictEqual([
@@ -299,7 +293,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       createSummary: (options) => createAuditSummary({ ...options, limits: { bytes: 40 } }),
     });
 
-    const read = readStepFilesystemAudit({ ...base, annotation: note, rules: rules("# none") }, d);
+    const read = readAudit({ ...base, annotation: note, rules: rules("# none") }, d);
     summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
 
     expect(read.verdictItems).toStrictEqual({
@@ -330,10 +324,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       createSummary: (options) => createAuditSummary({ ...options, limits: { nodes: 1 } }),
     });
 
-    const read = readStepFilesystemAudit(
-      { ...base, annotation: note, rules: rules("node R /etc/x") },
-      d,
-    );
+    const read = readAudit({ ...base, annotation: note, rules: rules("node R /etc/x") }, d);
     summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
 
     expect(read.verdictItems).toStrictEqual({
@@ -358,7 +349,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       createSummary: (options) => createAuditSummary({ ...options, limits: { nodes: 1 } }),
     });
 
-    readStepFilesystemAudit({ ...base, annotation: note, failOnUnexpected: true }, d);
+    readAudit({ ...base, annotation: note, failOnUnexpected: true }, d);
 
     expect(note.error).toHaveBeenCalledWith(
       "File accesses fell outside expected-filesystem-rules, which is empty, on too many distinct paths to list. " +
