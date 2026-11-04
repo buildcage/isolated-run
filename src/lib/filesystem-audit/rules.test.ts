@@ -201,6 +201,18 @@ describe("parseExpectedRules", () => {
     expect(named.program!.test("a//b")).toBe(true);
   });
 
+  it("reads a program's blanks at the ends of its whole name, as the summary escapes a process's own name", () => {
+    const [slashAfter, slashBefore] = parse('"a /b" R ./x\n"x/ y" R ./x').rules;
+    expect(slashAfter.program!.test("a /b")).toBe(true);
+    expect(slashBefore.program!.test("x/ y")).toBe(true);
+    expect(() => parse('* R "./a /b"')).toThrow(
+      '"./a /b" holds an escape the summary never writes',
+    );
+    expect(() => parse(String.raw`"a /\u{20}b" R ./x`)).toThrow(
+      String.raw`"a /\\u{20}b" holds an escape the summary never writes`,
+    );
+  });
+
   it.each([
     ["* R", "input:1: expected a program, an access and a path, got 2 fields"],
     ["* R ./a b", "input:1: expected a program, an access and a path, got 4 fields"],
