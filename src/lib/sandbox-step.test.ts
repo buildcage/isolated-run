@@ -44,6 +44,8 @@ const mocks = {
   readStepLabel: vi.fn(),
   readWorkingDirectory: vi.fn(),
   assertSandboxUserCanSearch: vi.fn(),
+  assertSandboxWillShow: vi.fn(),
+  readHostMounts: vi.fn(),
   savePinningForPost: vi.fn(),
   validateFilesystemInputs: vi.fn(),
   checkScratchBaseParent: vi.fn(),
@@ -101,6 +103,7 @@ function readAudit<T extends Partial<ReadStepFilesystemAudit>>(over: T = {} as T
   };
 }
 
+const HOST_MOUNTS = [{ mountPoint: "/", fsType: "ext4", device: "8:1", root: "/" }];
 const RUNNER_FILES = ["GITHUB_OUTPUT", "GITHUB_STEP_SUMMARY"] as const;
 
 const ENV = {
@@ -124,6 +127,7 @@ beforeEach(() => {
   // Keeps pinningPaths from resolving the fixture's paths on this machine.
   mocks.realPathOf.mockImplementation((path: string) => path);
   mocks.getuid.mockReturnValue(1001);
+  mocks.readHostMounts.mockReturnValue(HOST_MOUNTS);
   mocks.readRunCommand.mockReturnValue("echo hello");
   mocks.readProxyInputs.mockReturnValue({ proxyEngine: "universal", proxyMode: "restrict" });
   mocks.readFilesystemInputs.mockReturnValue({
@@ -776,7 +780,7 @@ describe("runSandboxStep", () => {
 
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).toBe(mocks.warn);
     expect(mocks.runSandboxedCommand.mock.calls[0][0].warn).not.toBe(annotation.warning);
-    expect(mocks.resolveFilesystemPlan.mock.calls[0][3]).toStrictEqual({
+    expect(mocks.resolveFilesystemPlan.mock.calls[0][3]).toMatchObject({
       baseDir: ENV.GITHUB_WORKSPACE,
       warn: mocks.warn,
     });
@@ -826,10 +830,48 @@ describe("runSandboxStep", () => {
     expect(mocks.startSandboxProxy).not.toHaveBeenCalled();
   });
 
+  it("checks the sandbox's own mounts leave working-directory shown before the filesystem plan", async () => {
+    const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.assertSandboxWillShow.mockImplementation(() => {
+      throw new SandboxError("hidden", "INVALID_WORKING_DIRECTORY");
+    });
+
+    await expect(runSandboxStep({ ...ENV }, deps)).rejects.toThrow("hidden");
+    expect(mocks.assertSandboxWillShow).toHaveBeenCalledWith(
+      workingDirectory,
+      [],
+      HOST_MOUNTS,
+      ENV,
+    );
+    expect(mocks.resolveFilesystemPlan).not.toHaveBeenCalled();
+  });
+
+  it("hands the plan working-directory and the mount table it read once", async () => {
+    const workingDirectory = { input: "app", path: "/w/app", isWorkspace: false };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    mocks.readFilesystemInputs.mockReturnValue({
+      filesystemMode: "ephemeral",
+      writeThroughInput: "",
+    });
+
+    await runSandboxStep({ ...ENV }, deps);
+    expect(mocks.readHostMounts).toHaveBeenCalledOnce();
+    const planDeps = mocks.resolveFilesystemPlan.mock.calls[0][3];
+    expect(planDeps.workingDirectory).toBe(workingDirectory);
+    expect(planDeps.listHostMounts()).toBe(HOST_MOUNTS);
+  });
+
+  it("leaves the mount table unread under persistent without working-directory", async () => {
+    await runSandboxStep({ ...ENV }, deps);
+    expect(mocks.readHostMounts).not.toHaveBeenCalled();
+  });
+
   it("sets PWD to the workspace without working-directory", async () => {
     await runSandboxStep({ ...ENV }, deps);
 
     expect(mocks.assertSandboxUserCanSearch).not.toHaveBeenCalled();
+    expect(mocks.assertSandboxWillShow).not.toHaveBeenCalled();
     expect(mocks.runSandboxedCommand.mock.calls[0][0].envOverrides).toStrictEqual({
       PWD: ENV.GITHUB_WORKSPACE,
     });

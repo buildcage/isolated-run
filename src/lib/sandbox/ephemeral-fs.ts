@@ -115,17 +115,18 @@ function rootCannotRead({ fsType, superOptions = [] }: HostMount): boolean {
  * write-through path is left to that path's rbind, which carries it. A file
  * mount is left hidden: overlayfs takes only a directory as its lowerdir. A
  * mount the overlay would or might fail on is left hidden too, with a warning,
- * rather than failing the step.
+ * rather than failing the step, and returned as hidden.
  */
 export function nestedMountRoots(
   overlayRoots: string[],
   hostMounts: HostMount[],
   writeThroughPaths: string[],
   { isDirectory = defaultIsDirectory, warn }: NestedMountRootsDeps = {},
-): string[] {
+): { roots: string[]; hidden: string[] } {
   // The last mount stacked on a point is the one visible there.
   const visible = new Map(hostMounts.map((m) => [m.mountPoint, m]));
   const roots: string[] = [];
+  const hidden: string[] = [];
   for (const [path, mount] of visible) {
     if (
       overlayRoots.includes(path) ||
@@ -152,11 +153,12 @@ export function nestedMountRoots(
           `command sees the empty directory beneath it: ${reason}. Use filesystem-mode: ` +
           "persistent if the command needs its contents.",
       );
+      hidden.push(path);
       continue;
     }
     roots.push(path);
   }
-  return roots;
+  return { roots, hidden };
 }
 
 /** Subdirectory name for a host path. Hashed so a deep mount point never

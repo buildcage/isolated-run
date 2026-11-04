@@ -1,18 +1,27 @@
 import type { Stats } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SandboxError } from "../errors.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
 import {
   assertSandboxShows,
   assertSandboxUserCanSearch,
+  assertOverlayShows,
+  assertSandboxWillShow,
+  hiddenBySandboxMounts,
   hiddenWorkingDirectory,
   isWorkspace,
   readWorkingDirectory,
   unsearchableAncestor,
   workingDirectoryOf,
 } from "./working-directory.ts";
+
+vi.mock("./host-probes.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./host-probes.ts")>();
+  return { ...actual, realHostProbes: { ...actual.realHostProbes, varRunRealPath: () => "/run" } };
+});
 
 const WS = "/home/runner/work/repo/repo";
 // null leaves $GITHUB_WORKSPACE unset.
@@ -217,6 +226,119 @@ describe("hiddenWorkingDirectory", () => {
     expect(hiddenWorkingDirectory("/proc/acpi/x", [], ["/proc/acpi"])).toBe(
       "/proc/acpi is hidden from the sandbox",
     );
+  });
+});
+
+describe("hiddenBySandboxMounts", () => {
+  it("finds a working directory under the empty /run, or a /var/run elsewhere", () => {
+    expect(hiddenBySandboxMounts("/run/app", [], [], undefined)).toBe(
+      "the sandbox mounts its own /run",
+    );
+    expect(hiddenBySandboxMounts("/srv/run/app", [], [], "/srv/run")).toBe(
+      "the sandbox mounts its own /srv/run",
+    );
+    expect(hiddenBySandboxMounts(WS, [], [], undefined)).toBeUndefined();
+  });
+
+  it("leaves a working directory under /run a write-through entry holds to that entry's mount", () => {
+    expect(hiddenBySandboxMounts("/run/app/x", ["/run/app"], [], undefined)).toBeUndefined();
+    // An entry under it does not.
+    expect(hiddenBySandboxMounts("/run/app", ["/run/app/out"], [], undefined)).toBe(
+      "the sandbox mounts its own /run",
+    );
+  });
+
+  it("finds a working directory under the scratch base or any of its aliases, write-through or not", () => {
+    expect(hiddenBySandboxMounts(`${SANDBOX_SCRATCH_BASE}/x`, ["/var/tmp"], [], undefined)).toBe(
+      `the sandbox mounts its own ${SANDBOX_SCRATCH_BASE}`,
+    );
+    const mounts = [
+      { mountPoint: "/var/tmp", fsType: "ext4", device: "8:1", root: "/var/tmp" },
+      { mountPoint: "/mnt/vt", fsType: "ext4", device: "8:1", root: "/var/tmp" },
+    ];
+    const alias = `/mnt/vt/${SANDBOX_SCRATCH_BASE.slice("/var/tmp/".length)}`;
+    expect(hiddenBySandboxMounts(`${alias}/x`, [], mounts, undefined)).toBe(
+      `the sandbox mounts its own ${alias}`,
+    );
+  });
+});
+
+describe("assertSandboxWillShow", () => {
+  const wd = { input: "../run", path: "/run/app", isWorkspace: false };
+
+  it("refuses a working directory the sandbox will hide, naming why", () => {
+    expect(() => assertSandboxWillShow(wd, [], [], {}, { varRunRealPath: () => "/run" })).toThrow(
+      new SandboxError(
+        'working-directory "../run" (/run/app) is unusable: the sandbox mounts its own /run.',
+        "INVALID_WORKING_DIRECTORY",
+      ),
+    );
+  });
+
+  it("probes /var/run by default", () => {
+    expect(() => assertSandboxWillShow(wd, [], [], {})).toThrow("the sandbox mounts its own /run");
+  });
+
+  it("compares the write-through entries by their real paths", () => {
+    const realpath = (p: string) => p.replace(/^\/srv\/link/, "/run/app");
+    expect(() =>
+      assertSandboxWillShow(wd, ["/srv/link"], [], {}, { varRunRealPath: () => "/run", realpath }),
+    ).not.toThrow();
+  });
+
+  it("lets a runner directory either mode brings back over /run hold it", () => {
+    expect(() =>
+      assertSandboxWillShow(
+        { ...wd, path: "/run/runner/tmp/build" },
+        [],
+        [],
+        { RUNNER_TEMP: "/run/runner/tmp" },
+        { varRunRealPath: () => "/run", realpath: (p) => p },
+      ),
+    ).not.toThrow();
+  });
+
+  it("passes one it will show", () => {
+    expect(() =>
+      assertSandboxWillShow({ ...wd, path: WS }, [], [], {}, { varRunRealPath: () => undefined }),
+    ).not.toThrow();
+  });
+});
+
+describe("assertOverlayShows", () => {
+  const wd = (path: string) => ({ input: "x", path, isWorkspace: false });
+  const plan = (hiddenMounts: string[], writeThroughPaths: string[] = []) => ({
+    overlayRoots: [WS, `${WS}/fuse/sub`],
+    hiddenMounts,
+    writeThroughPaths,
+  });
+
+  it("refuses a working directory in a host mount ephemeral cannot overlay", () => {
+    expect(() => assertOverlayShows(wd(`${WS}/fuse/app`), plan([`${WS}/fuse`]))).toThrow(
+      new SandboxError(
+        `working-directory "x" (${WS}/fuse/app) is unusable: filesystem-mode: ephemeral cannot ` +
+          `overlay the host mount "${WS}/fuse", so the sandbox shows the empty directory beneath it.`,
+        "INVALID_WORKING_DIRECTORY",
+      ),
+    );
+  });
+
+  it("passes one outside the hidden mounts, or in a mount overlaid below one", () => {
+    expect(() => assertOverlayShows(wd(`${WS}/app`), plan([`${WS}/fuse`]))).not.toThrow();
+    expect(() => assertOverlayShows(wd(`${WS}/fuse/sub/app`), plan([`${WS}/fuse`]))).not.toThrow();
+    expect(() =>
+      assertOverlayShows(wd(`${WS}/app`), {
+        overlayRoots: [],
+        hiddenMounts: [],
+        writeThroughPaths: [],
+      }),
+    ).not.toThrow();
+  });
+
+  it("leaves one a write-through entry holds to that entry's mount", () => {
+    expect(() =>
+      assertOverlayShows(wd(`${WS}/fuse/out`), plan([`${WS}/fuse`], [`${WS}/fuse/out`])),
+    ).not.toThrow();
   });
 });
 

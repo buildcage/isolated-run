@@ -64,6 +64,7 @@ import {
   type FilesystemAuditPaths,
 } from "./sandbox/filesystem-audit-paths.ts";
 import {
+  readHostMounts,
   resolveFilesystemPlan,
   resolveWriteThroughInput,
   validateFilesystemInputs,
@@ -86,6 +87,7 @@ import { SANDBOX_SCRATCH_BASE, checkScratchBaseParent } from "./sandbox/scratch-
 import { realPathOf } from "./sandbox/symlinks.ts";
 import {
   assertSandboxUserCanSearch,
+  assertSandboxWillShow,
   readWorkingDirectory,
   workingDirectoryOf,
 } from "./sandbox/working-directory.ts";
@@ -145,6 +147,7 @@ const realDeps = {
   readStepLabel,
   readWorkingDirectory,
   assertSandboxUserCanSearch,
+  assertSandboxWillShow,
   savePinningForPost,
   validateFilesystemInputs,
   checkScratchBaseParent,
@@ -152,6 +155,7 @@ const realDeps = {
   checkOverlayfsSupport,
   checkFilesystemAuditHost,
   createAnnotation,
+  readHostMounts,
   resolveFilesystemPlan,
   pinHostCommands,
   /** Resolves a path on the host for pinningPaths. */
@@ -435,11 +439,18 @@ export function preflight(
   if (filesystemMode === "ephemeral") deps.checkOverlayfsSupport();
   if (filesystemAudit === "record") deps.checkFilesystemAuditHost();
 
+  // After the probes, which mount, and once for the check below and the plan.
+  const hostMounts =
+    workingDirectory || filesystemMode === "ephemeral" ? deps.readHostMounts() : [];
+  if (workingDirectory) deps.assertSandboxWillShow(workingDirectory, writeThrough, hostMounts, env);
+
   // Here rather than in runSandboxedCommand, so a bad write-through entry or
   // an uncreatable target fails before the proxy starts.
   const plan = deps.resolveFilesystemPlan(filesystemMode, writeThroughInput, env, {
     baseDir,
     warn: deps.warn,
+    listHostMounts: () => hostMounts,
+    workingDirectory,
   });
   if (filesystemMode === "ephemeral") {
     for (const line of formatFilesystemPlanLog(

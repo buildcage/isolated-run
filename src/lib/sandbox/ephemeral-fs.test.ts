@@ -235,7 +235,7 @@ describe("nestedMountRoots", () => {
 
   function warned(hostMounts: HostMount[], isDirectory: (path: string) => boolean = () => true) {
     const warnings: string[] = [];
-    const roots = nestedMountRoots(["/home/runner"], hostMounts, [], {
+    const { roots } = nestedMountRoots(["/home/runner"], hostMounts, [], {
       isDirectory,
       warn: (message) => warnings.push(message),
     });
@@ -256,7 +256,7 @@ describe("nestedMountRoots", () => {
         ),
         [],
         { isDirectory: () => true },
-      ),
+      ).roots,
     ).toStrictEqual(["/home/runner/_tool", "/home/runner/_tool/node", "/tmp/x"]);
   });
 
@@ -265,14 +265,14 @@ describe("nestedMountRoots", () => {
       nestedMountRoots(["/home/runner"], ext4("/home/runner/out", "/home/runner/out/cache"), [
         "/home/runner/out",
       ]),
-    ).toStrictEqual([]);
+    ).toStrictEqual({ roots: [], hidden: [] });
   });
 
   it("lists a mount point stacked more than once only once", () => {
     expect(
       nestedMountRoots(["/home/runner"], ext4("/home/runner/_tool", "/home/runner/_tool"), [], {
         isDirectory: () => true,
-      }),
+      }).roots,
     ).toStrictEqual(["/home/runner/_tool"]);
   });
 
@@ -303,6 +303,21 @@ describe("nestedMountRoots", () => {
       expect.stringContaining('"/home/runner/ntfs"'),
       expect.stringContaining('"/home/runner/plain"'),
     ]);
+  });
+
+  it("returns each mount it leaves hidden with a warning, but not a file mount", () => {
+    expect(
+      nestedMountRoots(
+        ["/home/runner"],
+        [
+          { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs" },
+          { mountPoint: "/home/runner/a,b", fsType: "ext4" },
+          { mountPoint: "/home/runner/.gitconfig", fsType: "ext4" },
+        ],
+        [],
+        { isDirectory: (p) => p !== "/home/runner/.gitconfig", warn: () => {} },
+      ).hidden,
+    ).toStrictEqual(["/home/runner/remote", "/home/runner/a,b"]);
   });
 
   it("overlays a FUSE mount made with allow_other", () => {

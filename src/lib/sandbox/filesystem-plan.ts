@@ -8,7 +8,8 @@
  * validateFilesystemInputs is here, not beside the input reads, because which
  * paths an entry may name depends on the sandbox's own mounts.
  */
-import { join, normalize, relative } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, normalize, relative } from "node:path";
 
 import { errorMessage } from "#core/lib/errors.ts";
 
@@ -23,6 +24,7 @@ import { assertScratchBaseNotWritable, isAtOrUnder, pathAliases } from "./paths.
 import { MEDIATED_VARIABLES, type MediatedVariable } from "./runner-output-files.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
 import type { MountinfoEntry } from "./types.ts";
+import { assertOverlayShows, type WorkingDirectory } from "./working-directory.ts";
 import {
   resolveWriteThroughPaths,
   assertNoSymlinkInWriteThrough,
@@ -71,6 +73,9 @@ export interface FilesystemPlan {
   /** filesystem-mode: ephemeral only; already folded (determineOverlayRoots), plus the host
    *  mounts nested under them (nestedMountRoots). [] in persistent mode. */
   overlayRoots: string[];
+  /** The host mounts under an overlay root that ephemeral cannot overlay, so
+   *  the command sees the empty directory beneath each. */
+  hiddenMounts: string[];
   /** Normalized, free of symlinks and pre-created, in either filesystem mode.
    *  An entry naming a mediated runner file is left out: the mediation writes
    *  that file back instead of a bind. */
@@ -83,7 +88,8 @@ export interface FilesystemPlan {
   mediatedVariables: MediatedVariable[];
 }
 
-/** `warn` aside, a test-only seam onto the filesystem dependencies of
+/** Apart from `baseDir`, `warn`, `listHostMounts` and `workingDirectory`, a
+ *  test-only seam onto the filesystem dependencies of
  *  assertNoSymlinkInWriteThrough, ensureWriteThroughTargetsExist and determineOverlayRoots. */
 export interface ResolveFilesystemPlanDeps {
   /** What a relative write-through entry joins to; see resolveWriteThroughEntry. */
@@ -98,6 +104,8 @@ export interface ResolveFilesystemPlanDeps {
   realpath?: (path: string) => string;
   listHostMounts?: () => MountinfoEntry[];
   isDirectory?: (path: string) => boolean;
+  /** Refused under ephemeral when it is in a host mount the overlay cannot take. */
+  workingDirectory?: WorkingDirectory;
 }
 
 /** Parse and resolve write-through: input, with no I/O, so the step can reject
@@ -169,7 +177,7 @@ export function resolveFilesystemPlan(
   // the same reason. Only a literal `/` opts out: an entry that a symlinked
   // runner directory turns into `/` still meets that guard.
   if (written.includes(WRITE_THROUGH_ALL)) {
-    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
+    return { overlayRoots: [], hiddenMounts: [], writeThroughPaths, mediatedVariables };
   }
 
   try {
@@ -195,29 +203,50 @@ export function resolveFilesystemPlan(
     throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
   }
 
+  // Before the targets are made, so a working directory this refuses leaves
+  // none behind.
+  const overlay =
+    filesystemMode === "ephemeral"
+      ? planOverlay(env, writeThroughPaths, hostMounts, deps)
+      : { overlayRoots: [], hiddenMounts: [] };
+  if (filesystemMode === "ephemeral" && deps.workingDirectory)
+    assertOverlayShows(deps.workingDirectory, { ...overlay, writeThroughPaths });
+
   try {
     ensureWriteThroughTargetsExist(writeThroughPaths, deps);
   } catch (e) {
     throw new SandboxError(errorMessage(e), "WRITE_THROUGH_TARGET_UNCREATABLE");
   }
 
-  if (filesystemMode !== "ephemeral")
-    return { overlayRoots: [], writeThroughPaths, mediatedVariables };
+  return { ...overlay, writeThroughPaths, mediatedVariables };
+}
 
-  // Its own code: a failure reading the fixed candidates or the mount table is
-  // not a write-through input problem.
+function planOverlay(
+  env: NodeJS.ProcessEnv,
+  writeThroughPaths: string[],
+  hostMounts: MountinfoEntry[],
+  deps: ResolveFilesystemPlanDeps,
+): Pick<FilesystemPlan, "overlayRoots" | "hiddenMounts"> {
+  // Its own code: a failure reading the fixed candidates is not a
+  // write-through input problem.
   try {
     // Real paths, as write-through's are, so the two compare.
     const { home, runnerTemp, tmp, workdir } = resolveDefaultWritableDirs(env, deps.realpath);
     const overlayCandidates = [home, runnerTemp, tmp, workdir].filter((p): p is string =>
       Boolean(p),
     );
-    const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, deps);
-    const overlayRoots = [
-      ...candidateRoots,
-      ...nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps),
-    ];
-    return { overlayRoots, writeThroughPaths, mediatedVariables };
+    // A candidate a write-through entry under it is about to create is there,
+    // on the filesystem of the directory it will be made in.
+    const exists = deps.exists ?? existsSync;
+    const deviceOf = deps.deviceOf ?? ((p: string) => statSync(p).dev);
+    const madeIn = (p: string): string => (p === "/" || exists(p) ? p : madeIn(dirname(p)));
+    const candidateRoots = determineOverlayRoots(overlayCandidates, writeThroughPaths, {
+      ...deps,
+      exists: (c) => exists(c) || writeThroughPaths.some((w) => isAtOrUnder(w, c)),
+      deviceOf: (c) => deviceOf(madeIn(c)),
+    });
+    const nested = nestedMountRoots(candidateRoots, hostMounts, writeThroughPaths, deps);
+    return { overlayRoots: [...candidateRoots, ...nested.roots], hiddenMounts: nested.hidden };
   } catch (e) {
     throw new SandboxError(
       `Failed to determine filesystem-mode: ephemeral's overlay roots: ${errorMessage(e)}`,
@@ -226,7 +255,11 @@ export function resolveFilesystemPlan(
   }
 }
 
-function readHostMounts(deps: ResolveFilesystemPlanDeps): MountinfoEntry[] {
+/** The host's mount table, failing with FILESYSTEM_PLAN_FAILED when it cannot
+ *  be read. */
+export function readHostMounts(
+  deps: { listHostMounts?: () => MountinfoEntry[] } = {},
+): MountinfoEntry[] {
   try {
     return (deps.listHostMounts ?? listHostMounts)();
   } catch (e) {

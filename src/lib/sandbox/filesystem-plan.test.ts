@@ -30,7 +30,12 @@ describe("resolveFilesystemPlan", () => {
   it("returns an empty plan for persistent mode with no write-through:, without touching the filesystem", () => {
     const exists = vi.fn(alwaysExists);
     const plan = resolveFilesystemPlan("persistent", "", ENV, { exists });
-    expect(plan).toStrictEqual({ overlayRoots: [], writeThroughPaths: [], mediatedVariables: [] });
+    expect(plan).toStrictEqual({
+      overlayRoots: [],
+      hiddenMounts: [],
+      writeThroughPaths: [],
+      mediatedVariables: [],
+    });
     expect(exists).not.toHaveBeenCalled();
   });
 
@@ -77,6 +82,7 @@ describe("resolveFilesystemPlan", () => {
     const plan = resolveFilesystemPlan("persistent", "/", ENV, { exists });
     expect(plan).toStrictEqual({
       overlayRoots: [],
+      hiddenMounts: [],
       writeThroughPaths: ["/"],
       mediatedVariables: [],
     });
@@ -407,6 +413,7 @@ describe("resolveFilesystemPlan", () => {
       isDirectory: () => true,
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/home/runner/_tool", "/tmp"]);
+    expect(plan.hiddenMounts).toStrictEqual([]);
   });
 
   it("warns about a host mount it leaves out rather than failing", () => {
@@ -422,6 +429,89 @@ describe("resolveFilesystemPlan", () => {
     });
     expect(plan.overlayRoots.sort()).toStrictEqual(["/home/runner", "/tmp"]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('"/home/runner/remote"'));
+    expect(plan.hiddenMounts).toStrictEqual(["/home/runner/remote"]);
+  });
+
+  describe("with working-directory", () => {
+    const fuse = [
+      { mountPoint: "/home/runner/remote", fsType: "fuse.sshfs", device: "0:50", root: "/" },
+    ];
+    const wd = (path: string) => ({ input: "x", path, isWorkspace: false });
+
+    it("refuses one in a host mount it leaves out, before any write-through target is made", () => {
+      const mkdir = vi.fn();
+      expect(() =>
+        resolveFilesystemPlan("ephemeral", "/home/runner/new", ENV, {
+          exists: (p) => p !== "/home/runner/new",
+          canWrite: () => true,
+          mkdir,
+          lstat: notLink,
+          deviceOf: () => 1,
+          realpath: (p) => p,
+          listHostMounts: () => fuse,
+          workingDirectory: wd("/home/runner/remote/app"),
+        }),
+      ).toThrow(
+        'cannot overlay the host mount "/home/runner/remote", so the sandbox shows the empty directory',
+      );
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("passes one elsewhere, and leaves persistent mode alone", () => {
+      const deps = {
+        exists: alwaysExists,
+        deviceOf: () => 1,
+        realpath: (p: string) => p,
+        listHostMounts: () => fuse,
+      };
+      expect(() =>
+        resolveFilesystemPlan("ephemeral", "", ENV, {
+          ...deps,
+          workingDirectory: wd("/home/runner/app"),
+        }),
+      ).not.toThrow();
+      expect(() =>
+        resolveFilesystemPlan("persistent", "", ENV, {
+          ...deps,
+          workingDirectory: wd("/home/runner/remote/app"),
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  it("overlays a missing candidate a write-through entry under it is about to create", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "/tmp/out", ENV, {
+      exists: (p) => p !== "/tmp" && p !== "/tmp/out",
+      canWrite: () => true,
+      mkdir: vi.fn(),
+      lstat: notLink,
+      deviceOf: (p) => {
+        if (p === "/tmp") throw new Error("ENOENT");
+        return 1;
+      },
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).toContain("/tmp");
+  });
+
+  it("folds a missing candidate by the device of the directory it will be made in", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "/home/runner/work/_temp/out", ENV, {
+      exists: (p) => !p.startsWith("/home/runner/work/_temp"),
+      canWrite: () => true,
+      mkdir: vi.fn(),
+      lstat: notLink,
+      deviceOf: (p) => (p.startsWith("/home/runner/work/_temp") ? 2 : 1),
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).not.toContain("/home/runner/work/_temp");
+  });
+
+  it("checks the overlay candidates on the host by default", () => {
+    const plan = resolveFilesystemPlan("ephemeral", "", ENV, {
+      deviceOf: () => 1,
+      realpath: (p) => p,
+    });
+    expect(plan.overlayRoots).toContain("/tmp");
   });
 
   it("reads the host mount table by default", () => {

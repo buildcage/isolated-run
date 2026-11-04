@@ -11,10 +11,14 @@ import { inputEnvName } from "#core/lib/actions/input-names.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 
 import { SandboxError } from "../errors.ts";
+import { resolveDefaultWritableDirs } from "./host-commands.ts";
+import { realHostProbes } from "./host-probes.ts";
 import { resolveSandboxGid } from "./identity.ts";
-import { isAtOrUnder } from "./paths.ts";
+import { hostRunCoverageLayers, scratchBaseCovers, writableDirsOf } from "./oci-mounts.ts";
+import { isAtOrUnder, pathAliases } from "./paths.ts";
+import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
-import type { MountEntry } from "./types.ts";
+import type { MountEntry, MountinfoEntry } from "./types.ts";
 
 export const WORKING_DIRECTORY_INPUT = "working-directory";
 
@@ -68,6 +72,9 @@ export interface ReadWorkingDirectoryDeps {
 }
 
 const invalid = (message: string) => new SandboxError(message, "INVALID_WORKING_DIRECTORY");
+
+const unusable = (wd: WorkingDirectory, why: string) =>
+  invalid(`working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${why}.`);
 
 /**
  * The working-directory input, checked to be a directory on the host.
@@ -161,9 +168,83 @@ export function assertSandboxUserCanSearch(
 ): void {
   const blocked = unsearchableAncestor(wd.path, { uid, gid }, stat);
   if (blocked)
-    throw invalid(
-      `working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: the sandbox's user ` +
-        `(uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}.`,
+    throw unusable(
+      wd,
+      `the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}`,
+    );
+}
+
+/**
+ * Why the mounts the sandbox makes for every plan hide the host's `cwd`, or
+ * undefined. In buildOciConfig's order: the empty /run, the `writableDirs`
+ * that either mode brings back on top of it, then the scratch base's cover.
+ * The CA trust and runner file mounts are known only later, for
+ * assertSandboxShows.
+ */
+export function hiddenBySandboxMounts(
+  cwd: string,
+  writableDirs: string[],
+  hostMounts: MountinfoEntry[],
+  varRunRealPath: string | undefined,
+): string | undefined {
+  const mounts = [
+    ...hostRunCoverageLayers(varRunRealPath).mounts,
+    ...writableDirs.map((p) => ({
+      destination: p,
+      type: "none",
+      source: p,
+      options: ["rbind"],
+    })),
+    ...scratchBaseCovers(pathAliases(hostMounts, SANDBOX_SCRATCH_BASE)),
+  ];
+  return hiddenWorkingDirectory(cwd, mounts, []);
+}
+
+/** Throws where hiddenBySandboxMounts finds the sandbox will hide the working
+ *  directory. Before the write-through targets are made, so a refusal leaves
+ *  none behind. */
+export function assertSandboxWillShow(
+  wd: WorkingDirectory,
+  writeThroughPaths: string[],
+  mounts: MountinfoEntry[],
+  env: NodeJS.ProcessEnv,
+  {
+    varRunRealPath = () => realHostProbes.varRunRealPath(),
+    realpath = realPathOf,
+  }: { varRunRealPath?: () => string | undefined; realpath?: (path: string) => string } = {},
+): void {
+  // Resolved in full, so an entry through a symlinked runner directory holds
+  // the working directory; the plan refuses one through any other symlink.
+  const writableDirs = writableDirsOf({
+    ...resolveDefaultWritableDirs(env, realpath),
+    writablePaths: writeThroughPaths.map((p) => realpath(p)),
+  });
+  const hidden = hiddenBySandboxMounts(wd.path, writableDirs, mounts, varRunRealPath());
+  if (hidden) throw unusable(wd, hidden);
+}
+
+/**
+ * Throws where filesystem-mode: ephemeral shows the working directory as the
+ * empty directory beneath a host mount it cannot overlay: where that mount is
+ * the deepest overlay root or hidden mount holding it, and no write-through
+ * entry holding it brings the host's back.
+ */
+export function assertOverlayShows(
+  wd: WorkingDirectory,
+  {
+    overlayRoots,
+    hiddenMounts,
+    writeThroughPaths,
+  }: { overlayRoots: string[]; hiddenMounts: string[]; writeThroughPaths: string[] },
+): void {
+  if (writeThroughPaths.some((w) => isAtOrUnder(wd.path, w))) return;
+  const deepest = [...overlayRoots, ...hiddenMounts]
+    .filter((m) => isAtOrUnder(wd.path, m))
+    .reduce<string | undefined>((a, m) => (a && a.length >= m.length ? a : m), undefined);
+  if (deepest && hiddenMounts.includes(deepest))
+    throw unusable(
+      wd,
+      `filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(deepest)}, so the sandbox shows the empty directory beneath it`,
     );
 }
 
@@ -173,8 +254,5 @@ export function assertSandboxShows(
   spec: { mounts: MountEntry[]; maskedPaths: string[] },
 ): void {
   const hidden = hiddenWorkingDirectory(wd.path, spec.mounts, spec.maskedPaths);
-  if (hidden)
-    throw invalid(
-      `working-directory ${JSON.stringify(wd.input)} (${wd.path}) is unusable: ${hidden}.`,
-    );
+  if (hidden) throw unusable(wd, hidden);
 }
