@@ -7,8 +7,7 @@
  * escapes included (see reduce.ts's ruleNames): `./` the working directory,
  * `$GITHUB_WORKSPACE/` the workspace outside it, `~/` $HOME, `$GITHUB_OUTPUT`
  * the runner file, `memfd:"name"` a file in memory. A path in the working
- * directory also matches as it would be shown without one, from the
- * directory as written or its real path.
+ * directory also matches as it would be shown without one.
  * `*` matches within one path component and `**` across components. A `**`
  * that is a whole component also matches no component, so `./x/**` takes
  * `./x` itself. `*` as the whole program matches any program, and `\*` is a
@@ -99,6 +98,22 @@ function fields(line: string, ref: string): string[] {
 }
 
 const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
+const SPACE = escapeForDisplay(" ");
+const SPACES = `(?:${SPACE.replace(/[\\{}]/g, "\\$&")})*`;
+// Escaped spaces alone, and with wildcards, which may match nothing.
+const ONLY_SPACES = new RegExp(`^${SPACES}$`);
+const SPACES_OR_STARS = new RegExp(`^(?:${SPACES}|\\*)*$`);
+
+// Whether the space at `i`, `length` long as written, may be at an end of its
+// name, where the summary escapes every space: a memfd's quoted name, else a
+// path component.
+function atEdge(glob: string, i: number, length: number, edge: RegExp): boolean {
+  const memfd = glob.startsWith(`${MEMFD_PREFIX}"`) && glob.endsWith('"');
+  const start = memfd ? MEMFD_PREFIX.length + 1 : glob.lastIndexOf("/", i - 1) + 1;
+  const slash = glob.indexOf("/", i);
+  const end = memfd ? glob.length - 1 : slash === -1 ? glob.length : slash;
+  return edge.test(glob.slice(start, i)) || edge.test(glob.slice(i + length, end));
+}
 
 // A glob's wildcards: `*`, a `**` inside a component, a leading or inner
 // `**/` (no component or any number of them), and a trailing `/**`.
@@ -165,8 +180,9 @@ function takesWhole(parts: readonly Part[], name: string): boolean {
 /**
  * A glob compiled in one pass, so its parts and its start agree on what is
  * a wildcard and what an escape. Undefined when the glob holds an escape the
- * summary never writes: one that stands for no character, such as `\q`, or
- * one for a character it writes otherwise, such as `\u{41}` for `A`.
+ * summary never writes: one that stands for no character, such as `\q`, one
+ * for a character it writes otherwise, such as `\u{41}` for `A`, or a space
+ * escaped inside a name or left as is at either end.
  */
 export function compileGlob(glob: string): Glob | undefined {
   const parts: Part[] = [];
@@ -205,7 +221,8 @@ export function compileGlob(glob: string): Glob | undefined {
       c = ESCAPE.exec(glob)![0];
       const char = unescapeDisplay(c);
       if (char === undefined || escapeForDisplay(char) !== c) return undefined;
-    }
+      if (c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS)) return undefined;
+    } else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES)) return undefined;
     i += c.length;
     const last = parts.at(-1);
     if (typeof last === "string") parts[parts.length - 1] = last + c;
@@ -288,7 +305,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
         if (!compiled)
           throw invalidRules(
             ref,
-            `${JSON.stringify(field)} holds an escape the summary never writes`,
+            `${JSON.stringify(field)} holds an escape the summary never writes, or a space where it escapes one`,
           );
         return compiled;
       };

@@ -72801,7 +72801,11 @@ function fields(line, ref) {
 	}
 	return out;
 }
-const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y;
+const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, SPACE = escapeForDisplay(" "), SPACES = `(?:${SPACE.replace(/[\\{}]/g, "\\$&")})*`, ONLY_SPACES = RegExp(`^${SPACES}$`), SPACES_OR_STARS = RegExp(`^(?:${SPACES}|\\*)*$`);
+function atEdge(glob, i, length, edge) {
+	let memfd = glob.startsWith("memfd:\"") && glob.endsWith("\""), start = memfd ? 7 : glob.lastIndexOf("/", i - 1) + 1, slash = glob.indexOf("/", i), end = memfd ? glob.length - 1 : slash === -1 ? glob.length : slash;
+	return edge.test(glob.slice(start, i)) || edge.test(glob.slice(i + length, end));
+}
 let rowA = new Uint8Array(256), rowB = new Uint8Array(256);
 function takesWhole(parts, name) {
 	let first = parts[0], last = parts.at(-1);
@@ -72849,8 +72853,8 @@ function compileGlob(glob) {
 		if (c === "\\") {
 			ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0];
 			let char = unescapeDisplay(c);
-			if (char === void 0 || escapeForDisplay(char) !== c) return;
-		}
+			if (char === void 0 || escapeForDisplay(char) !== c || c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS)) return;
+		} else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES)) return;
 		i += c.length;
 		let last = parts.at(-1);
 		typeof last == "string" ? parts[parts.length - 1] = last + c : parts.push(c);
@@ -72888,7 +72892,7 @@ function parseExpectedRules(sources) {
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
 		let glob = (field) => {
 			let compiled = compileGlob(field);
-			if (!compiled) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes`);
+			if (!compiled) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes, or a space where it escapes one`);
 			return compiled;
 		};
 		if (!path.startsWith("memfd:") && UNTIDY.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`);
@@ -76290,10 +76294,29 @@ function assertSandboxUserCanSearch(wd, env, { uid = process.getuid(), gid = res
 	}, stat);
 	if (blocked) throw unusable(wd, `the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}`);
 }
+const RUNC_FRESH_MOUNTS = [
+	{
+		destination: "/proc",
+		type: "proc",
+		source: "proc"
+	},
+	{
+		destination: "/dev",
+		type: "tmpfs",
+		source: "tmpfs"
+	},
+	{
+		destination: "/sys",
+		type: "sysfs",
+		source: "sysfs"
+	}
+];
 function hiddenBySandboxMounts(cwd, writableDirs, hostMounts, varRunRealPath) {
+	let all = writableDirs.includes("/");
 	return hiddenWorkingDirectory(cwd, [
-		...hostRunCoverageLayers(varRunRealPath).mounts,
-		...writableDirs.map((p) => ({
+		...RUNC_FRESH_MOUNTS,
+		...all ? [] : hostRunCoverageLayers(varRunRealPath).mounts,
+		...(all ? [] : writableDirs).map((p) => ({
 			destination: p,
 			type: "none",
 			source: p,

@@ -230,6 +230,19 @@ describe("hiddenWorkingDirectory", () => {
 });
 
 describe("hiddenBySandboxMounts", () => {
+  it("finds a working directory under a filesystem runc mounts fresh", () => {
+    for (const fresh of ["/dev", "/proc", "/sys"])
+      expect(hiddenBySandboxMounts(`${fresh}/x`, [], [], undefined)).toBe(
+        `the sandbox mounts its own ${fresh}`,
+      );
+    expect(hiddenBySandboxMounts("/devices", [], [], undefined)).toBeUndefined();
+    // write-through: / brings no host mount back over them, nor covers /run.
+    expect(hiddenBySandboxMounts("/dev/shm/x", ["/"], [], undefined)).toBe(
+      "the sandbox mounts its own /dev",
+    );
+    expect(hiddenBySandboxMounts("/run/app", ["/"], [], undefined)).toBeUndefined();
+  });
+
   it("finds a working directory under the empty /run, or a /var/run elsewhere", () => {
     expect(hiddenBySandboxMounts("/run/app", [], [], undefined)).toBe(
       "the sandbox mounts its own /run",

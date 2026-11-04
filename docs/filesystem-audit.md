@@ -256,11 +256,11 @@ each has rows of its own.
 - A failed access is shown under the name the command passed, joined to its working directory, or
   the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
   alone, such as `fchmod`, is shown under that file's path.
-- Where `$GITHUB_WORKSPACE` or `$HOME` is a symlink, a path through it is shown where it leads, so
-  a failed access through the variable and a successful one share a row. Other symlinks are not
-  followed for this. Both are resolved before the command runs, as are the working directory, the
-  tool cache and the runner files, so a command that later swaps one for a symlink does not change
-  what `./` or `$GITHUB_WORKSPACE/` stands for.
+- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a path through it is
+  shown where it leads, so a failed access through the symlink and a successful one share a row.
+  Other symlinks are not followed for this. All three are resolved before the command runs, as are
+  the tool cache and the runner files, so a command that later swaps one for a symlink does not
+  change what `./` or `$GITHUB_WORKSPACE/` stands for.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
@@ -583,9 +583,10 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
 
 The step fails before the command runs when the rules are set without `filesystem-audit: record`,
 and on a line that is not a rule, with `Invalid expected-filesystem-rules at <where>: <reason>`:
-other than three fields, a quote not closed or not ending its field, an access of other letters,
-an escape the summary never writes (such as `\u{41}` for `A`), an empty or `.` component between
-two slashes in a path (`a//b`, `a/./b`, `a//`), or a number or `thread-self` in a `/proc` path.
+other than three fields, a quote not closed or not ending its field, an access of other letters, an
+escape the summary never writes (such as `\u{41}` for `A`, or `\u{20}` inside a name), a space left
+unescaped at either end of a name, an empty or `.` component between two slashes in a path (`a//b`,
+`a/./b`, `a//`), or a number or `thread-self` in a `/proc` path.
 `<where>` is `input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of
 the config file, or `config` where YAML may have joined the value's lines, such as outside a `|`
 block.

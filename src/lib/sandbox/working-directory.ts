@@ -174,10 +174,19 @@ export function assertSandboxUserCanSearch(
     );
 }
 
+// Where runc's own spec mounts fresh filesystems: every mount it makes, /dev/shm
+// included, lies under one of these.
+const RUNC_FRESH_MOUNTS: MountEntry[] = [
+  { destination: "/proc", type: "proc", source: "proc" },
+  { destination: "/dev", type: "tmpfs", source: "tmpfs" },
+  { destination: "/sys", type: "sysfs", source: "sysfs" },
+];
+
 /**
  * Why the mounts the sandbox makes for every plan hide the host's `cwd`, or
- * undefined. In buildOciConfig's order: the empty /run, the `writableDirs`
- * that either mode brings back on top of it, then the scratch base's cover.
+ * undefined. In buildOciConfig's order: runc's own, the empty /run, the
+ * `writableDirs` that either mode brings back on top of it, then the scratch
+ * base's cover. `write-through: /` mounts neither /run nor a writable layer.
  * The CA trust and runner file mounts are known only later, for
  * assertSandboxShows.
  */
@@ -187,9 +196,11 @@ export function hiddenBySandboxMounts(
   hostMounts: MountinfoEntry[],
   varRunRealPath: string | undefined,
 ): string | undefined {
+  const all = writableDirs.includes("/");
   const mounts = [
-    ...hostRunCoverageLayers(varRunRealPath).mounts,
-    ...writableDirs.map((p) => ({
+    ...RUNC_FRESH_MOUNTS,
+    ...(all ? [] : hostRunCoverageLayers(varRunRealPath).mounts),
+    ...(all ? [] : writableDirs).map((p) => ({
       destination: p,
       type: "none",
       source: p,
