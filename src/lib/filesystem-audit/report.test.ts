@@ -14,9 +14,11 @@ import {
   uploadedBlocks,
   readAudit,
 } from "../test/filesystem-audit-report.ts";
+import { canonical, relativize } from "./paths.ts";
 import { UPLOAD_NOTE } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
+import { resolveAuditPrefixes } from "./report.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -1078,5 +1080,41 @@ describe("readStepFilesystemAudit: rendering apart from the upload", () => {
     await expect(read.upload()).resolves.toBe("not-requested");
     expect(uploads).toEqual([]);
     expect(outputs).toEqual([""]);
+  });
+});
+
+describe("resolveAuditPrefixes", () => {
+  const env = { GITHUB_WORKSPACE: "/sym/work", HOME: "/home/u" };
+  const realpath = (p: string) => p.replace(/^\/sym\/work(?=\/|$)/, "/real/work");
+  const prefixesOf = (input: string, baseDir: string) =>
+    resolveAuditPrefixes(env, baseDir, { input, path: baseDir, isWorkspace: false }, realpath);
+  const cwdOf = (input: string, baseDir: string) => prefixesOf(input, baseDir).cwd;
+
+  it("takes the working directory as the input spells it under each workspace spelling, the real path last", () => {
+    expect(cwdOf("current", "/real/work/releases/v2")).toStrictEqual([
+      "/sym/work/current",
+      "/real/work/current",
+      "/real/work/releases/v2",
+    ]);
+    expect(cwdOf("./current/", "/real/work/releases/v2")).toStrictEqual(
+      cwdOf("current", "/real/work/releases/v2"),
+    );
+    expect(cwdOf("/tmp//link/", "/tmp/target")).toStrictEqual(["/tmp/link", "/tmp/target"]);
+    expect(cwdOf("../other", "/real/other")).toStrictEqual([
+      "/sym/work/../other",
+      "/real/work/../other",
+      "/real/other",
+    ]);
+    expect(cwdOf("app", "/real/work/app")).toStrictEqual(["/sym/work/app", "/real/work/app"]);
+    expect(resolveAuditPrefixes(env, "/real/work", undefined, realpath).cwd).toStrictEqual([
+      "/real/work",
+    ]);
+  });
+
+  it("shows a failed access through the input's symlink under ./, as the access that reached it", () => {
+    const { cwd, workspace, home } = prefixesOf("current", "/real/work/releases/v2");
+    const prefixes = { cwd, workspace, home };
+    for (const path of ["/sym/work/current/missing", "/real/work/releases/v2/missing"])
+      expect(relativize(canonical(path, prefixes), prefixes)).toBe("./missing");
   });
 });

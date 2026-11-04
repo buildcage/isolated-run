@@ -167,10 +167,14 @@ function pathsBlock(
     // The blank line ends the </details>, which would otherwise take in the
     // note or a note printed in place of the details.
     text:
-      `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n` +
+      `<details>\n<summary>📂 Accessed Paths${count(rows, cause)}</summary>\n\n` +
       `<sub>${LEGEND}</sub>\n\n${md}\n\n${DETAILS_CLOSE}\n${cause ? cutNote(cause) : ""}`,
   };
 }
+
+// A table cut short lists only its first rows, so its heading counts none.
+const count = (rows: readonly unknown[], cut: CutCause | undefined): string =>
+  cut ? "" : ` (${rows.length})`;
 
 // A memfd's name is quoted already, and a killed syscall's row names no path.
 const shownField = (r: Row): string => (r.memfd || "syscall" in r ? r.path : field(r.path));
@@ -263,7 +267,7 @@ function unexpectedBlock(
     // The count of what matched stays when the table is cut.
     head: 8,
     text:
-      `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` +
+      `### ⚠️ Unexpected Accesses${count(proposed, proposedCut)}\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` +
       (proposedCut ? cutNote(proposedCut) : ""),
   };
 }

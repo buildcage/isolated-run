@@ -73749,10 +73749,10 @@ function pathsBlock(rows, cause, { priorities, cutNote }) {
 	return {
 		...block,
 		cut: "atomic",
-		text: `<details>\n<summary>📂 Accessed Paths (${rows.length})</summary>\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${DETAILS_CLOSE}\n${cause ? cutNote(cause) : ""}`
+		text: `<details>\n<summary>📂 Accessed Paths${count(rows, cause)}</summary>\n\n<sub>${LEGEND}</sub>\n\n${md}\n\n${DETAILS_CLOSE}\n${cause ? cutNote(cause) : ""}`
 	};
 }
-const shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
+const count = (rows, cut) => cut ? "" : ` (${rows.length})`, shownField = (r) => r.memfd || "syscall" in r ? r.path : field(r.path);
 function detailsBlock({ details, killed, detailsCut }, { startedAt, priorities, cutNote, expected }) {
 	let log = {
 		id: FILESYSTEM_BLOCK.log,
@@ -73801,7 +73801,7 @@ function unexpectedBlock(summary, { priorities, expected, cutNote }) {
 		...block,
 		cut: "lines",
 		head: 8,
-		text: `### ⚠️ Unexpected Accesses (${proposed.length})\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` + (proposedCut ? cutNote(proposedCut) : "")
+		text: `### ⚠️ Unexpected Accesses${count(proposed, proposedCut)}\n\n${took}<sub>${LEGEND}</sub>\n\n${md}\n\n` + (proposedCut ? cutNote(proposedCut) : "")
 	};
 }
 const operations = (n) => `${n.toLocaleString("en-US")} recorded ${n === 1 ? "operation" : "operations"}`;
@@ -74120,11 +74120,16 @@ function spellings(value, realpath) {
 	}
 	return real === value ? [value] : [value, real];
 }
+function inputSpellings(input, workspace) {
+	let tidy = (path) => `/${path.split("/").filter((c) => c && c !== ".").join("/")}`;
+	return (0, node_path.isAbsolute)(input) ? [tidy(input)] : workspace.map((w) => tidy(`${w}/${input}`));
+}
 function resolveAuditPrefixes(env, baseDir, workingDirectory, realpath = realPathOf) {
+	let workspace = spellings(env.GITHUB_WORKSPACE, realpath), given = workingDirectory ? inputSpellings(workingDirectory.input, workspace) : [];
 	return {
-		cwd: baseDir ? [baseDir] : [],
+		cwd: baseDir ? [...new Set([...given.filter((g) => g !== baseDir), baseDir])] : [],
 		...workingDirectory && !workingDirectory.isWorkspace && { named: workingDirectory.path },
-		workspace: spellings(env.GITHUB_WORKSPACE, realpath),
+		workspace,
 		home: spellings(env.HOME, realpath),
 		toolCache: spellings(env.RUNNER_TOOL_CACHE, realpath),
 		runnerFiles: Object.fromEntries(MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)]))

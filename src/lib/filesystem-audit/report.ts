@@ -1,5 +1,5 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -122,7 +122,7 @@ const realDeps: FilesystemAuditReportDeps = {
  * target shown as `./`.
  */
 export interface AuditPrefixes {
-  /** What `./` stands for: the working directory's real path. */
+  /** What `./` stands for: the working directory as given, the real path last. */
   cwd: string[];
   /** The working directory the legend names, unset when it is the workspace. */
   named?: string;
@@ -146,6 +146,18 @@ function spellings(value: string | undefined, realpath: (p: string) => string): 
   return real === value ? [value] : [value, real];
 }
 
+// The working directory as the input spells it, against each spelling of the
+// workspace when relative. A leading `..` stays, as the real path climbed from
+// where this spelling leads.
+function inputSpellings(input: string, workspace: string[]): string[] {
+  const tidy = (path: string) =>
+    `/${path
+      .split("/")
+      .filter((c) => c && c !== ".")
+      .join("/")}`;
+  return isAbsolute(input) ? [tidy(input)] : workspace.map((w) => tidy(`${w}/${input}`));
+}
+
 /** The prefixes for `baseDir`, the working directory's real path. */
 export function resolveAuditPrefixes(
   env: NodeJS.ProcessEnv,
@@ -153,10 +165,12 @@ export function resolveAuditPrefixes(
   workingDirectory: WorkingDirectory | undefined,
   realpath: (path: string) => string = realPathOf,
 ): AuditPrefixes {
+  const workspace = spellings(env.GITHUB_WORKSPACE, realpath);
+  const given = workingDirectory ? inputSpellings(workingDirectory.input, workspace) : [];
   return {
-    cwd: baseDir ? [baseDir] : [],
+    cwd: baseDir ? [...new Set([...given.filter((g) => g !== baseDir), baseDir])] : [],
     ...(workingDirectory && !workingDirectory.isWorkspace && { named: workingDirectory.path }),
-    workspace: spellings(env.GITHUB_WORKSPACE, realpath),
+    workspace,
     home: spellings(env.HOME, realpath),
     toolCache: spellings(env.RUNNER_TOOL_CACHE, realpath),
     runnerFiles: Object.fromEntries(

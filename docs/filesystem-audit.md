@@ -842,10 +842,10 @@ it writes to, also fails the step, after the command, with the record cut where 
   not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
-  keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is
-  left out whole, under a note that says why, when not one row fits, or once it holds more than
-  200,000 paths after folding. When the table is left out, the details still show unless they are
-  left out too. The Unexpected Accesses table and the proposed rules count paths and bytes the
+  keeps the rows that fit in it, in the order they were first touched, and ends with a note; its
+  heading then gives no count. It is left out whole, under a note that says why, when not one row
+  fits, or once it holds more than 200,000 paths after folding. When the table is left out, the
+  details still show unless they are left out too. The Unexpected Accesses table and the proposed rules count paths and bytes the
   same way, but do not fold more past 300 KB. With many paths under `/tmp`, they can be left out
   while the details, which do fold them, remain.
 - **Many libraries.** Once the step's processes have loaded 200,000 files between them, each

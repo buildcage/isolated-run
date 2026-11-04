@@ -76,7 +76,8 @@ describe("createAuditSummary: limits", () => {
       ...["a", "b", "c", "d"].map((d) => ({ kind: "read", comm: "c", path: `/${d}/../f` })),
     );
     expect(tableRows(md)).toEqual(["| `/a/../f` | R |"]);
-    expect(md).toContain("<summary>📂 Accessed Paths (1)</summary>");
+    // Its first rows only, so the heading counts none.
+    expect(md).toContain("<summary>📂 Accessed Paths</summary>");
     // Outside the folded element, so it shows with the summary line.
     expect(section(md, "<summary>📂 Accessed Paths", "🔍")).toContain(`</details>\n\n${CUT}`);
     expect(lines(md)).toEqual(["R c /a/../f", "R c /b/../f", "R c /c/../f"]);

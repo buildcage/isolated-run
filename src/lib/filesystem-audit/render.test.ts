@@ -598,6 +598,8 @@ describe("renderAuditSummaryBlocks: unexpected accesses", () => {
   it("notes a table cut short for size after it", () => {
     const md = renderGiven({ ...strays([stray]), proposedCut: "size" }, noted);
     expect(md).toMatch(/\| `\.\/b` \|\n\ncut:size/);
+    // Its first rows only, so the heading counts none.
+    expect(md).toContain("### ⚠️ Unexpected Accesses\n\n");
   });
 
   const stray = {
