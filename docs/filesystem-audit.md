@@ -585,9 +585,9 @@ The step fails before the command runs when the rules are set without `filesyste
 and on a line that is not a rule, with `Invalid expected-filesystem-rules at <where>: <reason>`:
 other than three fields, a quote not closed or not ending its field, an access of other letters, an
 escape the summary never writes (such as `\u{41}` for `A`, or `\u{20}` inside a name), a space left
-unescaped at either end of a name (a process's own name counts as one, `/` included), an empty or
-`.` component between two slashes in a path (`a//b`, `a/./b`, `a//`), or a number or `thread-self`
-in a `/proc` path.
+unescaped at either end of a name, an empty or `.` component between two slashes in a path
+(`a//b`, `a/./b`, `a//`), or a number or `thread-self` in a `/proc` path. A program passes when it
+reads as a path, a name per component, or as a process's own name, one name `/` included.
 `<where>` is `input:<n>` for the `n`th line of the workflow's value, `config:<n>` for line `n` of
 the config file, or `config` where YAML may have joined the value's lines, such as outside a `|`
 block.

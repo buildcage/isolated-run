@@ -302,8 +302,8 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
           `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`,
         );
       // A program is a path or, for one that ran nothing, a name escaped as a whole.
-      const glob = (field: string, program = false): Glob => {
-        const compiled = compileGlob(field) ?? (program ? compileGlob(field, true) : undefined);
+      const glob = (field: string, asProgram = false): Glob => {
+        const compiled = compileGlob(field) ?? (asProgram ? compileGlob(field, true) : undefined);
         if (!compiled)
           throw invalidRules(
             ref,

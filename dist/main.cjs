@@ -72890,8 +72890,8 @@ function parseExpectedRules(sources) {
 		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
-		let glob = (field, program = !1) => {
-			let compiled = compileGlob(field) ?? (program ? compileGlob(field, !0) : void 0);
+		let glob = (field, asProgram = !1) => {
+			let compiled = compileGlob(field) ?? (asProgram ? compileGlob(field, !0) : void 0);
 			if (!compiled) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes, or a space where it escapes one`);
 			return compiled;
 		};
