@@ -321,19 +321,20 @@ const LIST_INPUTS = [
 	"working-directory"
 ], CONFIG_FILE_INPUTS = {
 	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
-	lists: LIST_INPUTS
+	lists: LIST_INPUTS,
+	stepOnly: NOT_IN_CONFIG_FILE
 };
 function resolveWriteThroughInput({ writeThrough, writable, allowWrite }, notice) {
 	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
 	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
 }
-function readFilesystemInputs(notice, getInput$10 = getInput) {
+function readFilesystemInputs(notice, getInput$7 = getInput) {
 	return {
-		filesystemMode: resolveFilesystemMode(getInput$10("filesystem-mode")),
+		filesystemMode: resolveFilesystemMode(getInput$7("filesystem-mode")),
 		writeThroughInput: resolveWriteThroughInput({
-			writeThrough: getInput$10("write-through"),
-			writable: getInput$10("writable"),
-			allowWrite: getInput$10("allow_write")
+			writeThrough: getInput$7("write-through"),
+			writable: getInput$7("writable"),
+			allowWrite: getInput$7("allow_write")
 		}, notice)
 	};
 }

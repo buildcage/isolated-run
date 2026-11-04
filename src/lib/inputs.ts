@@ -77,6 +77,7 @@ export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
   // Marked pure so post.cjs, which uses other parts of this module, leaves it out.
   known: /* @__PURE__ */ ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
   lists: LIST_INPUTS,
+  stepOnly: NOT_IN_CONFIG_FILE,
 };
 
 /** Narrowed to what this module needs, so a test can pass a plain lookup. */

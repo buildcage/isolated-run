@@ -1264,8 +1264,9 @@ reserved where it leads as well, as a CA store is. Naming a keystore's directory
 parent of a CA directory, is fine, and naming `~/.pki/nssdb` itself has the command's changes to it
 written back.
 
-Naming a reserved path, or anything under one, fails the step; it is not quietly ignored. So does
-naming a filesystem the sandbox mounts fresh, such as `/proc` and `/dev`, or anything under one.
+Naming a reserved path, or anything under one, fails the step before the proxy starts; it is not
+quietly ignored. So does naming `/proc`, `/dev` or `/sys`, which the sandbox mounts fresh, or
+anything under one.
 Naming a directory that contains reserved paths (`write-through: /etc`) is fine: writes elsewhere
 under it reach the host, and only the reserved paths themselves stay read-only.
 

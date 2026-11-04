@@ -14,7 +14,12 @@ import { SandboxError } from "../errors.ts";
 import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { realHostProbes } from "./host-probes.ts";
 import { resolveSandboxGid } from "./identity.ts";
-import { hostRunCoverageLayers, scratchBaseCovers, writableDirsOf } from "./oci-mounts.ts";
+import {
+  hostRunCoverageLayers,
+  RUNC_FRESH_MOUNTS,
+  scratchBaseCovers,
+  writableDirsOf,
+} from "./oci-mounts.ts";
 import { isAtOrUnder, pathAliases } from "./paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./scratch-dir.ts";
 import { realPathOf } from "./symlinks.ts";
@@ -173,14 +178,6 @@ export function assertSandboxUserCanSearch(
       `the sandbox's user (uid ${uid}, gid ${gid}, no supplementary groups) cannot search ${blocked}`,
     );
 }
-
-// Where runc's own spec mounts fresh filesystems: every mount it makes, /dev/shm
-// included, lies under one of these.
-const RUNC_FRESH_MOUNTS: MountEntry[] = [
-  { destination: "/proc", type: "proc", source: "proc" },
-  { destination: "/dev", type: "tmpfs", source: "tmpfs" },
-  { destination: "/sys", type: "sysfs", source: "sysfs" },
-];
 
 /**
  * Why the mounts the sandbox makes for every plan hide the host's `cwd`, or

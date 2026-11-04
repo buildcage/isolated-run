@@ -43,6 +43,15 @@ describe("CONFIG_FILE_INPUTS", () => {
     expect([...CONFIG_FILE_INPUTS.known].sort()).toEqual(inputs.sort());
   });
 
+  it("names the inputs it leaves out as the step's own", () => {
+    expect([...(CONFIG_FILE_INPUTS.stepOnly ?? [])].sort()).toEqual([
+      "config-file",
+      "run",
+      "working-directory",
+      "writable",
+    ]);
+  });
+
   it("merges only inputs it knows", () => {
     expect(CONFIG_FILE_INPUTS.known).toEqual(expect.arrayContaining([...CONFIG_FILE_INPUTS.lists]));
   });
