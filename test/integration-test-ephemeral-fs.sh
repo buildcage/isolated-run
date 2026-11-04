@@ -84,7 +84,11 @@ echo deep >"$NONE/$DEEP/present"
 echo bound >"$BIND_SRC/present"
 sudo -n mount --bind "$BIND_SRC" "$NONE/bound"
 SCRATCH_BASE="/var/tmp/buildcage-$(id -u)"
-BEFORE=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
+# Without pinning-*, which the main step leaves for the post step.
+scratch_listing() {
+  sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 ! -name 'pinning-*' 2>/dev/null | sort
+}
+BEFORE=$(scratch_listing)
 # shellcheck disable=SC2016 # expands in the sandbox
 BC_DEEP="$DEEP" BC_HOST_ATTRS="$HOST_ATTRS" BC_TMP_MARKER="$TMP_MARKER" \
   run_ephemeral "$NONE" "" 'rc=0
@@ -99,7 +103,7 @@ attrs="$(stat -c "%u:%g %a" /tmp) $(stat -c "%u:%g %a" "$HOME")"
 echo x >"$BC_TMP_MARKER"
 exit $rc'
 CODE_NONE=$(cat "$NONE/exit_code")
-AFTER=$(sudo -n find "$SCRATCH_BASE" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
+AFTER=$(scratch_listing)
 LOG_NONE="$NONE/out.log"
 FAILURES_BEFORE_NONE=$FAILURES
 # The leak checks below need the command to have run, or an absent marker

@@ -391,6 +391,28 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toContain("W node ./a.txt");
   });
 
+  it("falls back to the raw prefix when a symlink on the way cannot be read", async () => {
+    const { deps: d, summaries } = deps({
+      raw: JSON.stringify({ kind: "write", comm: "node", path: "/home/u/a.txt" }),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", HOME: "/home/u" },
+        realpath: (p) => {
+          if (p === "/home/u") throw new Error("EACCES");
+          return p;
+        },
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain("W node ~/a.txt");
+  });
+
   it("shows ./ as the working directory, and names it in the legend", async () => {
     const { deps: d, summaries } = deps({
       raw: [

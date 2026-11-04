@@ -69,7 +69,7 @@ export interface FilesystemAuditReportOptions {
   containerName: string;
   annotation: Annotation;
   env: NodeJS.ProcessEnv;
-  /** Where paths are shown from, from resolveAuditPrefixes. */
+  /** Where the shown prefixes lead; see resolveAuditPrefixes. */
   prefixes: AuditPrefixes;
   /** The runner files the command wrote through backing copies. */
   mediated: readonly MediatedVariable[];
@@ -116,9 +116,10 @@ const realDeps: FilesystemAuditReportDeps = {
 /* v8 ignore stop */
 
 /**
- * The directories paths are shown under, each as given and with symlinks
- * resolved. Resolved before the command runs, which could otherwise swap a
- * directory on the way to one for a symlink and have its target shown as `./`.
+ * Where `./`, `$GITHUB_WORKSPACE/`, `~/` and the runner files lead, each as
+ * given and with symlinks resolved. The step resolves them before the command
+ * runs, which could swap a directory on the way for a symlink and have its
+ * target shown as `./`.
  */
 export interface AuditPrefixes {
   /** What `./` stands for: the working directory's real path. */
@@ -132,10 +133,16 @@ export interface AuditPrefixes {
   runnerFiles: Record<MediatedVariable, string[]>;
 }
 
-// The recorded paths are canonical, $GITHUB_WORKSPACE and $HOME may not be.
+// The recorded paths are canonical; $GITHUB_WORKSPACE and $HOME may not be.
 function spellings(value: string | undefined, realpath: (p: string) => string): string[] {
   if (!value) return [];
-  const real = realpath(value);
+  let real: string;
+  try {
+    real = realpath(value);
+  } catch {
+    // A symlink on the way could not be read; the raw value is all there is.
+    return [value];
+  }
   return real === value ? [value] : [value, real];
 }
 

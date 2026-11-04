@@ -337,7 +337,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     ...(baseDir && { baseDir }),
     ...(configFile && { writeThrough: writeThroughInput }),
   });
-  // Before the command runs too, which may swap a directory on the way to one.
+  // Before the command runs, which could swap the workspace or $HOME for a symlink.
   const auditPrefixes = resolveAuditPrefixes(env, baseDir, workingDirectory, deps.realPathOf);
   // Needed only later, but read here so a typo fails before any setup.
   const failOnCaResidue = deps.readFailOnCaResidue();

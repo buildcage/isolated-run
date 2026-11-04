@@ -74078,7 +74078,12 @@ const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
 };
 function spellings(value, realpath) {
 	if (!value) return [];
-	let real = realpath(value);
+	let real;
+	try {
+		real = realpath(value);
+	} catch {
+		return [value];
+	}
 	return real === value ? [value] : [value, real];
 }
 function resolveAuditPrefixes(env, baseDir, workingDirectory, realpath = realPathOf) {

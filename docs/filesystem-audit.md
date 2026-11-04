@@ -258,9 +258,9 @@ each has rows of its own.
   alone, such as `fchmod`, is shown under that file's path.
 - Where `$GITHUB_WORKSPACE` or `$HOME` is a symlink, a path through it is shown where it leads, so
   a failed access through the variable and a successful one share a row. Other symlinks are not
-  followed for this. Where each of these and the working directory leads is read before the command
-  runs, so a command that swaps one for a symlink does not change what `./` or `$GITHUB_WORKSPACE/`
-  stands for.
+  followed for this. Both are resolved before the command runs, as are the working directory, the
+  tool cache and the runner files, so a command that later swaps one for a symlink does not change
+  what `./` or `$GITHUB_WORKSPACE/` stands for.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of

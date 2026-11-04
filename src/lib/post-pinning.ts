@@ -49,7 +49,7 @@ export function savePinningForPost(
 
 /**
  * The saved values, removed once read. Undefined when the main step saved
- * none, having failed before reading the inputs.
+ * none.
  */
 export function takePinningForPost(
   env: NodeJS.ProcessEnv,
