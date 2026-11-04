@@ -63,10 +63,6 @@ function readHealth(docker: Docker, containerName: string): ServiceHealth {
   };
 }
 
-function servicesAnswered(health: ServiceHealth): boolean {
-  return health.droppedLogs.answered && health.resolverAnswered;
-}
-
 /** Whether both services still answer, without logging another barrier. */
 function servicesAnswer(docker: Docker, containerName: string): boolean {
   return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
@@ -99,8 +95,8 @@ export async function readReport(
       health,
     );
   } catch (e) {
-    // Asked again, as the container can stop after the first answer.
-    if (!servicesAnswered(health) || !servicesAnswer(docker, containerName)) {
+    // Asked again without a barrier, as the container can stop after the first answer.
+    if (!servicesAnswer(docker, containerName)) {
       throw new ProxyStoppedError(
         `the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`,
       );
