@@ -71086,14 +71086,14 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
 	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known-blocked-rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known-blocked-rules)`;
 }
-function describeInterruptions({ proxyAnswered, resolverAnswered, restarts }) {
+function describeInterruptions({ proxyAnswered, resolverAnswered, droppedLines, restarts }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
 }
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered, restarts, engineLabel }) {
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered, droppedLines, restarts, engineLabel }) {
 	let outcome = determineBlockedOutcome({
 		isAudit,
 		failOnBlocked,
@@ -71115,6 +71115,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 	let facts = describeInterruptions({
 		proxyAnswered,
 		resolverAnswered,
+		droppedLines,
 		restarts
 	});
 	if (isAudit && proxyAnswered && resolverAnswered) {
@@ -71124,7 +71125,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 			message: facts.length ? `${incomplete}. ${facts.join(" ")}` : incomplete
 		};
 	}
-	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, the proxy dropped lines it could not write, or the report could not tell whether the proxy or a log writer lost any. A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
+	let incomplete = `buildcage ${engineLabel} logs are incomplete, so this report is not a full record of what ran`, message = `${blockedCount ? `${incomplete} (${blockedCount} blocked ${COUNT_NOUN} still recorded)` : incomplete}. ${facts.map((fact) => `${fact} `).join("")}${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line the report cannot read, or the report could not tell whether the proxy or a log writer lost any. A missing beginning was either removed or rotated out by traffic heavy enough to fill the 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand made as long as a request can be: the report's own tables still count what survived, per host.`;
 	return {
 		...outcome,
 		message
@@ -71141,6 +71142,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 		logLooksPlausible: report.logLooksPlausible,
 		proxyAnswered: report.proxyAnswered,
 		resolverAnswered: report.resolverAnswered,
+		droppedLines: report.droppedLines,
 		restarts: report.restarts,
 		engineLabel
 	})], undecided = describeUndecidedRequests(report, engineLabel);
@@ -71589,8 +71591,7 @@ function trafficHeadingBlock(report, title, verdictItems) {
 	let top = reportHeading(title, report.parameters.mode === "audit");
 	if (top += renderVerdict(report, verdictItems), !report.logLooksPlausible) {
 		let facts = describeInterruptions(report);
-		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, the proxy dropped lines it could not write, or the report could not tell whether the
-> proxy or a log writer lost any.
+		top += "> ❗ **This report is incomplete**, so the tables below are not a full record of this run.\n" + facts.map((fact) => `> ${fact}\n`).join("") + `> ${possibleCauses(facts)} the logs don't begin where a real run does, one carries a line that cannot be\n> read, or the report could not tell whether the proxy or a log writer lost any.
 > A missing beginning was either removed or rotated out by traffic heavy enough to fill the
 > 100 MB of log kept, which takes a few hundred thousand ordinary requests or a few thousand
 > made as long as a request can be.
@@ -71964,6 +71965,7 @@ async function assembleReportData(engine, proxyScan, dnsScan, parameters, { drop
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
 		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLog === 0 && resolverLog === 0,
+		droppedLines: (droppedLogs.count ?? 0) + ringDroppedLines,
 		proxyAnswered: droppedLogs.answered,
 		resolverAnswered,
 		restarts: {
@@ -77241,12 +77243,12 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 				hostPath
 			}));
 		},
-		execLines(containerId, args) {
+		execLines(containerId, args, operation) {
 			return streamDockerLines(spawnDocker, [
 				"exec",
 				containerId,
 				...args
-			], `docker exec ${args[0]}`);
+			], operation);
 		},
 		readEnv(containerId) {
 			return parseDockerInspectEnv(run([
@@ -77379,7 +77381,7 @@ function readRotatedLog(docker, containerId, dir) {
 		READ_SCRIPT,
 		"sh",
 		dir
-	]);
+	], `docker exec reading ${dir}`);
 }
 //#endregion
 //#region src/core/lib/report/action-version.ts
@@ -77703,9 +77705,6 @@ function readHealth(docker, containerName) {
 		resolverLogDeaths: readResolverLogDeaths(docker, containerName)
 	};
 }
-function servicesAnswered(health) {
-	return health.droppedLogs.answered && health.resolverAnswered;
-}
 function servicesAnswer(docker, containerName) {
 	return readProxyAnswered(docker, containerName) && readResolverAnswered(docker, containerName);
 }
@@ -77722,7 +77721,7 @@ async function readReport(docker, containerName, parameters, proxyEngine) {
 	try {
 		return await build(readLog(docker, containerName, "/var/log/haproxy"), readLog(docker, containerName, "/var/log/coredns"), parameters, health);
 	} catch (e) {
-		throw !servicesAnswered(health) || !servicesAnswer(docker, containerName) ? new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`) : e instanceof LogReadError ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${e.message}`) : e;
+		throw servicesAnswer(docker, containerName) ? e instanceof LogReadError ? new LogsUnreadableError(`the proxy and the DNS resolver answered but the logs could not be read: ${e.message}`) : e : new ProxyStoppedError(`the proxy or the DNS resolver did not answer and the logs could not be read: ${errorMessage(e)}`);
 	}
 }
 function readActionVersion(containerName, proxyEngine, docker) {

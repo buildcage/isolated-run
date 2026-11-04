@@ -123,6 +123,29 @@ describe("readReport", () => {
     );
   });
 
+  it("names the unreadable logs when the services answer only when asked again", async () => {
+    let healthChecks = 0;
+    const exec = vi.fn((_id: string, args: string[]) => {
+      if (args[0] === "curl" && ++healthChecks > 2) return "haproxy_process_dropped_logs_total 0\n";
+      return gone();
+    });
+
+    const result = readReport(
+      {
+        exec,
+        execLines: unreadable(() => {
+          throw new Error("read failed");
+        }),
+      } as unknown as Docker,
+      containerName,
+      reportParams(),
+      "inspect",
+    );
+
+    await expect(result).rejects.toThrow(LogsUnreadableError);
+    await expect(result).rejects.not.toThrow(ProxyStoppedError);
+  });
+
   it("passes any other error on as it is while both services answer", async () => {
     const exec = vi.fn((_id: string, args: string[]) => {
       if (args[0] === "curl") return "haproxy_process_dropped_logs_total 0\n";
