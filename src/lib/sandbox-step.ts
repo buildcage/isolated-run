@@ -32,7 +32,11 @@ import { readLocalImageOverride, resolveComposeFiles } from "./compose-file.ts";
 import { generateContainerName, getContainerNetns } from "./container.ts";
 import { SandboxError } from "./errors.ts";
 import { setFilesystemAuditOutput } from "./filesystem-audit/artifact.ts";
-import { filesystemAuditGuide, readStepFilesystemAudit } from "./filesystem-audit/report.ts";
+import {
+  filesystemAuditGuide,
+  readStepFilesystemAudit,
+  resolveAuditPrefixes,
+} from "./filesystem-audit/report.ts";
 import { EXPECTED_RULES_ENV, readExpectedFilesystemRules } from "./filesystem-audit/rules-input.ts";
 import { EXPECTED_RULES_INPUT } from "./filesystem-audit/rules.ts";
 import { filesystemExampleInputs } from "./filesystem-example-inputs.ts";
@@ -329,11 +333,12 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
   // Before savePinningForPost, the first write under the scratch base.
   deps.checkScratchBaseParent();
   // Before the command runs, for the post step's pinning; see post-pinning.ts.
-  if (workingDirectory || configFile)
-    deps.savePinningForPost(env, {
-      ...(workingDirectory && { baseDir }),
-      ...(configFile && { writeThrough: writeThroughInput }),
-    });
+  deps.savePinningForPost(env, {
+    ...(baseDir && { baseDir }),
+    ...(configFile && { writeThrough: writeThroughInput }),
+  });
+  // Before the command runs, which could swap the workspace or $HOME for a symlink.
+  const auditPrefixes = resolveAuditPrefixes(env, baseDir, workingDirectory, deps.realPathOf);
   // Needed only later, but read here so a typo fails before any setup.
   const failOnCaResidue = deps.readFailOnCaResidue();
   const failOnBlocked = deps.readFailOnBlocked();
@@ -383,6 +388,7 @@ export function readStepInputs(env: NodeJS.ProcessEnv, deps: SandboxStepDeps) {
     runInput,
     workingDirectory,
     baseDir,
+    auditPrefixes,
     proxyEngine,
     proxyMode,
     filesystemMode,
@@ -554,7 +560,7 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     containerName,
     annotation,
     env,
-    workingDirectory: inputs.baseDir,
+    prefixes: inputs.auditPrefixes,
     mediated: mediation?.files.map((f) => f.variable) ?? [],
     actionRepo,
     actionRef: reportActionRef,

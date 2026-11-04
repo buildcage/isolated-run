@@ -73983,6 +73983,618 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
 //#endregion
+//#region src/lib/sandbox/symlinks.ts
+const realSymlinkDeps = {
+	lstat: (path) => {
+		try {
+			return (0, node_fs.lstatSync)(path);
+		} catch {
+			return;
+		}
+	},
+	readlink: (path) => (0, node_fs.readlinkSync)(path)
+};
+function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
+	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
+	for (; pending.length > 0;) {
+		let name = pending.shift();
+		if (name === "..") {
+			current = (0, node_path.dirname)(current);
+			continue;
+		}
+		let next = (0, node_path.join)(current, name);
+		if (!lstat(next)?.isSymbolicLink()) {
+			current = next;
+			continue;
+		}
+		let target = readlink(next);
+		if (links.push({
+			at: next,
+			target
+		}), links.length > 40) return {
+			loop: !0,
+			links
+		};
+		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
+	}
+	return {
+		real: current,
+		links
+	};
+}
+function realPathOf(path, deps = realSymlinkDeps) {
+	let resolved = resolveHostPath(path, deps);
+	return "real" in resolved ? resolved.real : path;
+}
+//#endregion
+//#region src/lib/filesystem-audit/line-file.ts
+const CHUNK_BYTES = 1 << 20;
+function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "r");
+	try {
+		let buf = Buffer.alloc(chunkBytes), carry = [];
+		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
+			let chunk = buf.subarray(0, n), start = 0;
+			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
+			start < n && carry.push(Buffer.from(chunk.subarray(start)));
+		}
+		onLine(Buffer.concat(carry).toString("utf8"));
+	} finally {
+		(0, node_fs.closeSync)(fd);
+	}
+}
+function openWriter(path, chunkBytes = CHUNK_BYTES) {
+	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
+		let data = Buffer.from(pending.join(""));
+		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
+		pending = [], size = 0;
+	};
+	return {
+		write: (line) => {
+			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
+		},
+		close: () => {
+			try {
+				flush();
+			} finally {
+				(0, node_fs.closeSync)(fd);
+			}
+		}
+	};
+}
+//#endregion
+//#region src/lib/filesystem-audit/report.ts
+const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
+	readLines,
+	createSummary: createAuditSummary,
+	openWriter,
+	makeDir: (path) => (0, node_fs.mkdirSync)(path, { mode: 448 }),
+	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
+	renderBlocks: renderAuditSummaryBlocks,
+	uploadArtifact: uploadFilesystemAuditArtifact,
+	setOutput: setFilesystemAuditOutput,
+	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content),
+	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content, { flag: "wx" })
+};
+function spellings(value, realpath) {
+	if (!value) return [];
+	let real;
+	try {
+		real = realpath(value);
+	} catch {
+		return [value];
+	}
+	return real === value ? [value] : [value, real];
+}
+function resolveAuditPrefixes(env, baseDir, workingDirectory, realpath = realPathOf) {
+	return {
+		cwd: baseDir ? [baseDir] : [],
+		...workingDirectory && !workingDirectory.isWorkspace && { named: workingDirectory.path },
+		workspace: spellings(env.GITHUB_WORKSPACE, realpath),
+		home: spellings(env.HOME, realpath),
+		toolCache: spellings(env.RUNNER_TOOL_CACHE, realpath),
+		runnerFiles: Object.fromEntries(MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)]))
+	};
+}
+function runnerFiles(prefixes, mediated) {
+	let out = new Map();
+	for (let variable of MEDIATED_VARIABLES) {
+		let paths = mediated.includes(variable) ? [mediatedPathOf(variable)] : prefixes.runnerFiles[variable];
+		for (let path of paths) out.set(path, variable);
+	}
+	return out;
+}
+const NONE = { blocks: () => [] }, NO_RULES = { rules: [] }, filesystemAuditGuide = (actionRepo, actionRef) => `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, prefixes, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
+	let deps = {
+		...realDeps$3,
+		...overrides
+	}, rules = givenRules ?? (failOnUnexpected ? NO_RULES : void 0), setOutput = (artifactName) => {
+		try {
+			deps.setOutput(artifactName);
+		} catch (e) {
+			failOrWarn(annotation, failClosed)(`Failed to set the filesystem-audit-artifact-name output: ${errorMessage(e)}`);
+		}
+	}, settled = (result, verdictItems = {}) => ({
+		expected: "not-requested",
+		verdictItems,
+		upload: async () => (setOutput(""), "not-requested"),
+		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
+	});
+	if (!audit || !attached) return settled(NONE);
+	let cleanPath = audit.stepPath, prepared = upload;
+	if (upload) try {
+		deps.makeDir(audit.uploadDir);
+	} catch (e) {
+		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), prepared = !1;
+	}
+	let options = {
+		cwd: prefixes.cwd,
+		workspace: prefixes.workspace,
+		home: prefixes.home,
+		toolCache: prefixes.toolCache,
+		runnerFiles: runnerFiles(prefixes, mediated),
+		...rules && { rules: new RuleMatcher(rules.rules) },
+		propose: prepared
+	}, cwdNamed = prefixes.named && escapePath(relativize(prefixes.named, {
+		...options,
+		cwd: []
+	})), checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
+	try {
+		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
+	} catch (e) {
+		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`));
+	}
+	if (!reduced) return annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete);
+	let { summary, summaryError, ended, written } = reduced, incomplete = {};
+	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
+	let given = rules !== void 0, hasRules = givenRules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
+	return {
+		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
+		verdictItems,
+		upload: async () => {
+			let uploaded;
+			try {
+				written && (uploaded = await deps.uploadArtifact(proposed === "written" ? [cleanPath, audit.rulesPath] : [cleanPath], containerName, retentionDays, annotation));
+			} catch (e) {
+				annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
+			}
+			return setOutput(uploaded?.name ?? ""), artifactOf(uploaded);
+		},
+		blocks: (startedAt, artifact, stepLabel) => {
+			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
+			try {
+				if (!summary) throw summaryError;
+				rendered = deps.renderBlocks(summary, {
+					title: reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE),
+					startedAt,
+					priorities: FILESYSTEM_PRIORITIES,
+					cutNote,
+					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`, cwdNamed),
+					skippedHooksUrl: `${guide}#skipped-hooks`,
+					...given && { expected: hasRules ? "given" : "empty" },
+					rulesNote: rulesNote(proposalOf(proposed, artifact), {
+						fileName: (0, node_path.basename)(audit.rulesPath),
+						guideUrl: `${guide}#expected-accesses`,
+						hasRules,
+						cut: summary?.proposedCut === "size"
+					})
+				});
+			} catch (e) {
+				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
+			}
+			audit.outPath;
+			let notice = cutNote();
+			return withNotices(rendered, () => notice);
+		}
+	};
+}
+function reportUnexpected(summary, failOnUnexpected, annotation, empty) {
+	if (!summary?.unexpected) return {};
+	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 || summary.proposedCut ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, fellOutside = `File accesses fell outside ${outside}${empty ? "," : ""}`, message = n === void 0 ? `${fellOutside} on too many distinct paths to list.` : summary.proposedCut ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first ${n}.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
+	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
+}
+function reduce(outPath, cleanPath, options, annotation, deps) {
+	let writer, written = !1, dropCopy = (e) => {
+		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
+		let open = writer;
+		writer = void 0, written = !1;
+		try {
+			open?.close();
+		} catch {}
+	}, openSink = () => {
+		try {
+			cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
+		} catch (e) {
+			dropCopy(e);
+		}
+		return (line) => {
+			if (writer) try {
+				writer.write(line), written = !0;
+			} catch (e) {
+				dropCopy(e);
+			}
+		};
+	}, readOnce = !1, reduced;
+	try {
+		reduced = reduceRecording((onLine) => {
+			deps.readLines(outPath, onLine), readOnce = !0;
+		}, (0, node_path.dirname)(outPath), options, openSink, deps.createSummary);
+	} catch (e) {
+		if (!readOnce && e.code === "ENOENT") return;
+		throw e;
+	} finally {
+		let open = writer;
+		writer = void 0;
+		try {
+			open?.close();
+		} catch (e) {
+			dropCopy(e);
+		}
+	}
+	return {
+		...reduced,
+		written
+	};
+}
+//#endregion
+//#region src/lib/filesystem-audit/rules-input.ts
+function ruleSources(value, config) {
+	let lines = value.split("\n"), at = config?.offset ?? lines.length;
+	return [{
+		text: lines.slice(0, at).join("\n"),
+		origin: "input",
+		firstLine: 1
+	}, {
+		text: lines.slice(at).join("\n"),
+		origin: "config",
+		firstLine: config?.line
+	}].filter((source) => source.text.trim());
+}
+const EXPECTED_RULES_ENV = inputEnvName(EXPECTED_RULES_INPUT);
+function readExpectedFilesystemRules(value, config, filesystemAudit) {
+	let sources = ruleSources(value, config);
+	if (sources.length === 0) return;
+	let rules = parseExpectedRules(sources);
+	if (rules.rules.length === 0) return { expected: void 0 };
+	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
+	return { expected: rules };
+}
+//#endregion
+//#region src/lib/sandbox/write-through.ts
+const ALLOWED_WRITE_THROUGH_VARS = [
+	"HOME",
+	"GITHUB_WORKSPACE",
+	"RUNNER_TEMP",
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], KNOWN_FILE_VARS = [
+	"GITHUB_OUTPUT",
+	"GITHUB_ENV",
+	"GITHUB_PATH",
+	"GITHUB_STEP_SUMMARY"
+], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+function resolveWriteThroughEntry(rawLine, env, baseDir) {
+	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
+	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
+		let name = braced ?? bare;
+		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
+		let value = env[name];
+		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
+		return value;
+	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
+	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
+	let normalized = (0, node_path.normalize)(resolved);
+	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
+	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function splitWriteThroughInput(input) {
+	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
+}
+function resolveWriteThroughPaths(input, env, baseDir) {
+	let lines = splitWriteThroughInput(input);
+	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
+}
+var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
+function defaultExists(path) {
+	try {
+		return (0, node_fs.lstatSync)(path), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultCanWrite(path) {
+	try {
+		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
+	} catch {
+		return !1;
+	}
+}
+function defaultMkdir$1(path) {
+	(0, node_fs.mkdirSync)(path, { recursive: !0 });
+}
+function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
+	let resolved = resolveHostPath(path, {
+		lstat,
+		readlink
+	}), link = resolved.links[0];
+	if (link === void 0) return;
+	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
+	throw Error(`write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
+}
+function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
+	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
+	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
+}
+function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir$1 } = {}) {
+	let missing = resolvedPaths.filter((path) => !exists(path));
+	for (let path of missing) {
+		let ancestor = (0, node_path.dirname)(path);
+		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
+		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
+	}
+	for (let path of missing) try {
+		mkdir(path);
+	} catch (e) {
+		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+//#endregion
+//#region src/lib/filesystem-example-inputs.ts
+function yamlScalar(text) {
+	try {
+		if ((0, import_dist$5.parse)(text) === text) return text;
+	} catch {}
+	return JSON.stringify(text);
+}
+function filesystemExampleInputs({ workingDirectory, filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
+	let lines = [];
+	workingDirectory && !workingDirectory.isWorkspace && lines.push(`working-directory: ${yamlScalar(workingDirectory.input)}`), filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
+	let paths = splitWriteThroughInput(writeThroughInput);
+	return paths.length > 0 && lines.push("write-through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem-audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config-file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail-on-unexpected-file-access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail-on-unexpected-file-access: true"), lines;
+}
+//#endregion
+//#region src/lib/filesystem-audit/mode.ts
+const FILESYSTEM_AUDIT = ["off", "record"];
+function resolveFilesystemAudit(input) {
+	let trimmed = input?.trim() || "off";
+	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem-audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/filesystem-mode.ts
+const FILESYSTEM_MODES = ["persistent", "ephemeral"];
+function resolveFilesystemMode(input) {
+	let trimmed = input?.trim() || "persistent";
+	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
+	return trimmed;
+}
+//#endregion
+//#region src/lib/inputs.ts
+init_core();
+const LIST_INPUTS = [
+	"allowed-https-rules",
+	"allowed-http-rules",
+	"allowed-ip-rules",
+	"allowed-url-rules",
+	"allowed-tls-rules",
+	"known-blocked-rules",
+	"write-through",
+	"expected-filesystem-rules"
+], ACTION_INPUTS = [
+	"run",
+	"config-file",
+	"proxy-mode",
+	"proxy-engine",
+	...LIST_INPUTS,
+	"writable",
+	"aws-key-check",
+	"allowed-aws-role-accounts",
+	"upload-traffic-artifact",
+	"traffic-artifact-retention-days",
+	"fail-on-blocked",
+	"fail-on-ca-residue",
+	"filesystem-mode",
+	"filesystem-audit",
+	"upload-filesystem-audit-artifact",
+	"filesystem-audit-retention-days",
+	"fail-on-unexpected-file-access",
+	"label",
+	"working-directory"
+], NOT_IN_CONFIG_FILE = [
+	"run",
+	"config-file",
+	"writable",
+	"working-directory"
+], CONFIG_FILE_INPUTS = {
+	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
+	lists: LIST_INPUTS
+};
+function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
+	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
+	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
+}
+function readRunCommand(getInput$5 = getInput) {
+	let runInput = getInput$5("run", { trimWhitespace: !1 });
+	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
+	return runInput;
+}
+function readProxyInputs(getInput$4 = getInput) {
+	return {
+		proxyEngine: resolveProxyEngine(getInput$4("proxy-engine")),
+		proxyMode: resolveProxyMode(getInput$4("proxy-mode"))
+	};
+}
+function readFilesystemInputs(notice, getInput$10 = getInput) {
+	return {
+		filesystemMode: resolveFilesystemMode(getInput$10("filesystem-mode")),
+		writeThroughInput: resolveWriteThroughInput$1({
+			writeThrough: getInput$10("write-through"),
+			writable: getInput$10("writable"),
+			allowWrite: getInput$10("allow_write")
+		}, notice)
+	};
+}
+function readFilesystemAuditInput(getInput$8 = getInput) {
+	return resolveFilesystemAudit(getInput$8("filesystem-audit"));
+}
+function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
+	let days = getInput$2("filesystem-audit-retention-days");
+	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
+	return {
+		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$2),
+		retentionDays: days === "" ? void 0 : Number(days)
+	};
+}
+function readStepLabel(getInput$3 = getInput) {
+	return getInput$3("label") || void 0;
+}
+function readFailOnCaResidue(getInput$9 = getInput) {
+	return readBooleanInput("fail-on-ca-residue", !0, getInput$9);
+}
+function readFailOnBlocked(getInput$1 = getInput) {
+	return readBooleanInput("fail-on-blocked", !0, getInput$1);
+}
+function readFailOnUnexpectedFileAccess(getInput$6 = getInput) {
+	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$6);
+}
+const AWS_KEY_CHECK_OFF = {
+	key: "",
+	roleAccounts: []
+};
+function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
+	let roleAccounts;
+	try {
+		roleAccounts = parseAwsAccounts(getInput$7("allowed-aws-role-accounts"));
+	} catch (e) {
+		let { message } = e;
+		throw new SandboxError(`allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
+	}
+	let check = readBooleanInput("aws-key-check", !1, getInput$7);
+	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config-file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
+	if (!check) return AWS_KEY_CHECK_OFF;
+	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check and allowed-aws-role-accounts.`, "INVALID_PROXY_ENGINE");
+	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
+	return {
+		key,
+		roleAccounts
+	};
+}
+const NO_CREDENTIAL = "aws-no-credential", ROLE_NOT_ALLOWED = "aws-role-not-allowed";
+function awsExampleInputs({ key, roleAccounts }, timeline = []) {
+	if (!key) return [];
+	let lines = ["aws-key-check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), known = awsKeys(timeline), passes = (e, account, seen) => {
+		let { keyRef, roleAccount } = awsFieldsOf(e);
+		switch (e.wouldBlock) {
+			case void 0: return !0;
+			case NO_CREDENTIAL:
+			case ROLE_NOT_ALLOWED: return !keyRef && roleAccount === account;
+			case KEY_NOT_ALLOWED: {
+				let key = keyRef && known.get(keyRef);
+				return !!key && learned(key, account, seen);
+			}
+			default: return !1;
+		}
+	}, teaches = (issuer, account, seen) => {
+		let { assumedAccount } = awsFieldsOf(issuer);
+		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host) && issuer.wouldBlock !== void 0) && passes(issuer, account, seen);
+	}, learned = (key, account, seen) => {
+		if (seen.has(key)) return !1;
+		let next = new Set(seen).add(key);
+		return key.issuers.some((issuer) => teaches(issuer, account, next));
+	}, keys = [...blockedKeys(timeline, known).values()], mark = (a) => {
+		let names = keys.filter(({ key }) => learned(key, a, new Set())).map(({ key }) => key.name);
+		timeline.some((e) => (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) && passes(e, a, new Set())) && names.push("its AssumeRoleWithWebIdentity call");
+		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
+		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
+	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
+	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed-aws-role-accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed-aws-role-accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed-aws-role-accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
+}
+//#endregion
+//#region src/lib/overlayfs-preflight.ts
+const REQUIREMENT$1 = `filesystem-mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem-mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
+function describeOverlayFailure(e) {
+	let captured = capturedStderr(e);
+	return `overlayfs probe mount failed. ${REQUIREMENT$1}${captured ? ` (${captured})` : ""}`;
+}
+function describeProbeCleanupFailure(dir, e) {
+	let captured = capturedStderr(e);
+	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem-mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem-mode: persistent instead.${captured ? ` (${captured})` : ""}`;
+}
+function removeProbeDir(dir, exec) {
+	retryBriefly(() => exec(hostCommand("sudo"), [
+		"-n",
+		"rm",
+		"-rf",
+		dir
+	], {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	}));
+}
+function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
+	ensureOwnScratchBase(base);
+	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(base, "overlay-probe-")), probeFailure = null;
+	try {
+		probeOverlayMount(probeDir, exec);
+	} catch (error) {
+		probeFailure = { error };
+	}
+	try {
+		removeProbeDir(probeDir, exec);
+	} catch (e) {
+		if (!probeFailure) throw new SandboxError(describeProbeCleanupFailure(probeDir, e), "OVERLAY_PROBE_CLEANUP_FAILED");
+	}
+	if (probeFailure) throw new SandboxError(describeOverlayFailure(probeFailure.error), "OVERLAYFS_UNSUPPORTED");
+}
+function probeOverlayMount(probeDir, exec) {
+	let lower = (0, node_path.join)(probeDir, "lower"), upper = (0, node_path.join)(probeDir, "upper"), work = (0, node_path.join)(probeDir, "work"), merged = (0, node_path.join)(probeDir, "merged");
+	for (let dir of [
+		lower,
+		upper,
+		work,
+		merged
+	]) (0, node_fs.mkdirSync)(dir);
+	exec(hostCommand("sudo"), [
+		"-n",
+		"unshare",
+		"--mount",
+		"--propagation",
+		"private",
+		"--",
+		"sh",
+		"-c",
+		`mount -t overlay overlay -o lowerdir=${lower},upperdir=${upper},workdir=${work} ${merged}`
+	], {
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv("sudo")
+	});
+}
+//#endregion
+//#region src/lib/post-pinning.ts
+function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let owner = ownerToken(env);
+	if (!owner) return;
+	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
+	return (0, node_path.join)(scratchBase, `pinning-${id}`);
+}
+function savePinningForPost(env, pinning, scratchBase = SANDBOX_SCRATCH_BASE) {
+	let path = postPinningPath(env, scratchBase);
+	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, JSON.stringify(pinning), { mode: 384 }));
+}
+//#endregion
 //#region src/core/lib/docker/args.ts
 function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 	return [
@@ -74036,9 +74648,122 @@ function buildComposeDownArgs({ composeFiles, projectName }) {
 	];
 }
 //#endregion
+//#region src/core/lib/docker/health.ts
+function buildDockerInspectStateArgs(containerName) {
+	return [
+		"inspect",
+		"--format",
+		"{{json .State}}",
+		containerName
+	];
+}
+function parseContainerState(inspectOutput) {
+	let raw;
+	try {
+		raw = JSON.parse(inspectOutput);
+	} catch {
+		return null;
+	}
+	if (!raw || typeof raw != "object" || typeof raw.Status != "string") return null;
+	let log = Array.isArray(raw.Health?.Log) ? raw.Health.Log : [], lastOutput = log.length > 0 ? log[log.length - 1]?.Output : void 0;
+	return {
+		status: raw.Status,
+		exitCode: typeof raw.ExitCode == "number" ? raw.ExitCode : null,
+		health: typeof raw.Health?.Status == "string" ? raw.Health.Status : null,
+		lastHealthOutput: typeof lastOutput == "string" && lastOutput.trim() || null
+	};
+}
+function isContainerReady(state) {
+	return state.status === "running" && state.health !== "unhealthy" && state.health !== "starting";
+}
+function describeContainerStartFailure(state, { role, containerName }) {
+	let subject = `Buildcage's ${role} container (${containerName})`, probe = state.lastHealthOutput ? ` Last health check output: ${JSON.stringify(state.lastHealthOutput)}.` : "", evidence = " Its log is printed above.";
+	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
+}
+//#endregion
+//#region src/lib/proxy-lifecycle.ts
+const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+	encoding: "utf8",
+	env: hostCommandEnv("docker", env),
+	stdio: [
+		"ignore",
+		"pipe",
+		"pipe"
+	]
+}), printDockerViaExec = (args, env) => {
+	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
+		stdio: "inherit",
+		env: hostCommandEnv("docker", env)
+	});
+};
+async function startSandboxProxy({ composeFiles, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
+	let { printDocker = printDockerViaExec } = deps;
+	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
+		try {
+			printDocker(buildComposeUpArgs({
+				composeFiles,
+				projectName,
+				pullPolicy
+			}), composeEnv);
+		} catch (e) {
+			throw proxyStartError(e, {
+				composeFiles,
+				projectName,
+				containerName,
+				composeEnv
+			}, deps);
+		}
+	});
+}
+function proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps) {
+	let state = readProxyState(containerName, composeEnv, deps);
+	return state ? (printProxyLog({
+		composeFiles,
+		projectName,
+		composeEnv
+	}, deps), new SandboxError(describeContainerStartFailure(state, {
+		role: "sandbox proxy",
+		containerName
+	}), "PROXY_NOT_READY")) : new SandboxError(describeDockerFailure(e, { operation: "docker compose up" }), "DOCKER_UNAVAILABLE");
+}
+function readProxyState(containerName, composeEnv, { captureDocker = captureDockerViaExec }) {
+	try {
+		return parseContainerState(captureDocker(buildDockerInspectStateArgs(containerName), composeEnv));
+	} catch (e) {
+		return reportInspectFailure(e), null;
+	}
+}
+function reportInspectFailure(e) {
+	let stderr = capturedStderr(e);
+	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
+}
+function printProxyLog({ composeFiles, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
+	try {
+		printDocker(buildComposeLogsArgs({
+			composeFiles,
+			projectName,
+			tail: 100
+		}), composeEnv);
+	} catch {
+		console.log("The sandbox proxy container's log could not be read.");
+	}
+}
+async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
+	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
+		try {
+			printDocker(buildComposeDownArgs({
+				composeFiles,
+				projectName
+			}), composeEnv);
+		} catch (e) {
+			annotation.warning(`Failed to stop the sandbox proxy container: ${describeDockerFailure(e, { operation: "docker compose down" })}`);
+		}
+	});
+}
+//#endregion
 //#region src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
-function defaultMkdir$1(path, mode) {
+function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
 }
 function defaultLstat$1(path) {
@@ -74201,7 +74926,7 @@ function removeUnusedDirs(ledger, deps) {
 	}
 }
 function claimNssDb(name, destination, dirs, deps = {}) {
-	let { mkdir = defaultMkdir$1, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
+	let { mkdir = defaultMkdir, lstat = defaultLstat$1, now = () => new Date(), warn } = deps;
 	return withLedger((ledger) => {
 		let undo = () => {
 			typeof ledger != "string" && removeUnusedDirs(ledger, deps);
@@ -74879,48 +75604,144 @@ function caTrustAdditions(files, env) {
 	};
 }
 //#endregion
-//#region src/lib/sandbox/symlinks.ts
-const realSymlinkDeps = {
-	lstat: (path) => {
-		try {
-			return (0, node_fs.lstatSync)(path);
-		} catch {
-			return;
-		}
-	},
-	readlink: (path) => (0, node_fs.readlinkSync)(path)
-};
-function resolveHostPath(path, { lstat, readlink } = realSymlinkDeps) {
-	let pending = path.split("/").filter((c) => c !== "" && c !== "."), links = [], current = "/";
-	for (; pending.length > 0;) {
-		let name = pending.shift();
-		if (name === "..") {
-			current = (0, node_path.dirname)(current);
-			continue;
-		}
-		let next = (0, node_path.join)(current, name);
-		if (!lstat(next)?.isSymbolicLink()) {
-			current = next;
-			continue;
-		}
-		let target = readlink(next);
-		if (links.push({
-			at: next,
-			target
-		}), links.length > 40) return {
-			loop: !0,
-			links
-		};
-		pending.unshift(...target.split("/").filter((c) => c !== "" && c !== ".")), (0, node_path.isAbsolute)(target) && (current = "/");
-	}
-	return {
-		real: current,
-		links
+//#region src/lib/sandbox/env-loader.ts
+const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
+	"ACTIONS_RUNTIME_URL",
+	"ACTIONS_RUNTIME_TOKEN",
+	"ACTIONS_CACHE_URL",
+	"ACTIONS_RESULTS_URL",
+	"ACTIONS_CACHE_SERVICE_V2",
+	"ACTIONS_CACHE_MODE"
+]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.flatMap((input) => [inputEnvName(input), inputEnvName(legacyInputName(input))]));
+function isRunnerOnly(key) {
+	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
+}
+function resolveSandboxEnv(env, caTrust, warn, overrides = {}) {
+	let merged = {
+		...env,
+		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
+	}, resolved = {}, skipped = [];
+	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
+	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), {
+		...resolved,
+		...overrides
 	};
 }
-function realPathOf(path, deps = realSymlinkDeps) {
-	let resolved = resolveHostPath(path, deps);
-	return "real" in resolved ? resolved.real : path;
+function buildEnvBlob(resolved) {
+	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
+	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
+}
+const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ENV_LOADER_SOURCE = (0, node_path.join)(__dirname$2, "..", "scripts", "buildcage-init.sh");
+function writeEnvLoader(execDir, source = ENV_LOADER_SOURCE) {
+	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
+	return (0, node_fs.writeFileSync)(loaderPath, (0, node_fs.readFileSync)(source), { mode: 448 }), loaderPath;
+}
+function envLoaderArgs(loaderPath, scriptPath) {
+	return [
+		loaderPath,
+		ENV_BLOB_TERMINATOR,
+		scriptPath
+	];
+}
+//#endregion
+//#region src/lib/sandbox/ephemeral-fs.ts
+function defaultDeviceOf(path) {
+	return (0, node_fs.statSync)(path).dev;
+}
+function defaultIsDirectory(path) {
+	return (0, node_fs.statSync)(path).isDirectory();
+}
+function defaultStat(path) {
+	let { uid, gid, mode } = (0, node_fs.statSync)(path);
+	return {
+		uid,
+		gid,
+		mode
+	};
+}
+function defaultExecFile(command, args) {
+	(0, node_child_process.execFileSync)(hostCommand(command), args, {
+		stdio: [
+			"ignore",
+			"ignore",
+			"pipe"
+		],
+		env: hostCommandEnv(command)
+	});
+}
+function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
+	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
+	return notCoveredByWriteThrough.filter((c) => {
+		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
+		if (!nestingParent) return !0;
+		try {
+			return deviceOf(c) !== deviceOf(nestingParent);
+		} catch {
+			return !0;
+		}
+	});
+}
+function rootCannotRead({ fsType, superOptions = [] }) {
+	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
+}
+function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory, warn } = {}) {
+	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [], hidden = [];
+	for (let [path, mount] of visible) {
+		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
+		let reason;
+		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
+		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
+		else try {
+			if (!isDirectory(path)) continue;
+		} catch (e) {
+			reason = `the runner cannot stat it (${errorMessage(e)})`;
+		}
+		reason === void 0 ? roots.push(path) : (warn?.(`filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem-mode: persistent if the command needs its contents.`), hidden.push(path));
+	}
+	return {
+		roots,
+		hidden
+	};
+}
+function slugify(path) {
+	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
+}
+function overlayUpperFor(scratchDir, root) {
+	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
+}
+function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat, execFile = defaultExecFile, self = {
+	uid: process.getuid(),
+	gid: process.getgid()
+} } = {}) {
+	return roots.map((path) => {
+		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
+		mkdir(work, { recursive: !0 });
+		let { uid, gid, mode } = stat(path), perm = mode & 4095;
+		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
+			"install",
+			"-d",
+			"-o",
+			String(uid),
+			"-g",
+			String(gid),
+			"-m",
+			perm.toString(8),
+			"--",
+			upper
+		]), {
+			path,
+			upper,
+			work
+		};
+	});
+}
+function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
+	if (mode !== "ephemeral") return [];
+	let lines = ["Filesystem mode: ephemeral"];
+	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
+	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
+	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
+	return lines;
 }
 //#endregion
 //#region src/lib/sandbox/host-probes.ts
@@ -75001,6 +75822,32 @@ const realHostProbes = {
 		}
 	}
 };
+function auditUnavailable(reason) {
+	return new SandboxError(`filesystem-audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
+}
+function hostCannotAudit(reason) {
+	let e = auditUnavailable(reason);
+	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
+}
+const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2", NATIVE_ARCH = {
+	x64: "SCMP_ARCH_X86_64",
+	arm64: "SCMP_ARCH_AARCH64"
+};
+function withoutCompatSyscalls(profile, arch = process.arch) {
+	let p = profile, native = NATIVE_ARCH[arch];
+	return !p || !Array.isArray(p.architectures) || !native ? profile : {
+		...p,
+		architectures: p.architectures.filter((a) => a === native)
+	};
+}
+function allowedSyscalls(profile) {
+	let p = profile;
+	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
+}
+function checkFilesystemAuditHost(probes = realHostProbes) {
+	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
+	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
+}
 //#endregion
 //#region src/lib/sandbox/oci-mounts.ts
 function freshMountDestinationsFrom(baseSpec) {
@@ -75139,87 +75986,6 @@ function scratchBaseCovers(aliases = []) {
 			"mode=0555"
 		]
 	}));
-}
-//#endregion
-//#region src/lib/sandbox/write-through.ts
-const ALLOWED_WRITE_THROUGH_VARS = [
-	"HOME",
-	"GITHUB_WORKSPACE",
-	"RUNNER_TEMP",
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], KNOWN_FILE_VARS = [
-	"GITHUB_OUTPUT",
-	"GITHUB_ENV",
-	"GITHUB_PATH",
-	"GITHUB_STEP_SUMMARY"
-], VAR_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-function resolveWriteThroughEntry(rawLine, env, baseDir) {
-	if (hasDotDotAfterStart(rawLine)) throw Error(`write-through entry ${JSON.stringify(rawLine)} ${DOT_DOT_AFTER_START}`);
-	let expanded = rawLine.replace(VAR_PATTERN, (_match, braced, bare) => {
-		let name = braced ?? bare;
-		if (!ALLOWED_WRITE_THROUGH_VARS.includes(name)) throw Error(`write-through entry ${JSON.stringify(rawLine)} references unsupported variable $${name}; only ${ALLOWED_WRITE_THROUGH_VARS.join(", ")} may be used.`);
-		let value = env[name];
-		if (!value) throw Error(`write-through entry ${JSON.stringify(rawLine)} references $${name}, which is not set.`);
-		return value;
-	}), under = (base, rest) => base ? `${base}/${rest}` : rest, tildeExpanded = expanded.startsWith("~/") ? under(env.HOME, expanded.slice(2)) : expanded, resolved = (0, node_path.isAbsolute)(tildeExpanded) ? tildeExpanded : under(baseDir, tildeExpanded);
-	if (!(0, node_path.isAbsolute)(resolved)) throw Error(`write-through entry ${JSON.stringify(rawLine)} is relative and $GITHUB_WORKSPACE is not set, so it can't be resolved to a host path.`);
-	let normalized = (0, node_path.normalize)(resolved);
-	if (normalized === "/" && rawLine.trim() !== "/") throw Error(`write-through entry ${JSON.stringify(rawLine)} resolves to "/", the sentinel for dropping the read-only restriction entirely. Write it as a literal "/" if that is what you meant; otherwise check the "../" count.`);
-	return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
-}
-function splitWriteThroughInput(input) {
-	return input?.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#")) ?? [];
-}
-function resolveWriteThroughPaths(input, env, baseDir) {
-	let lines = splitWriteThroughInput(input);
-	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
-}
-var WriteThroughTargetMissingError = class extends Error {}, WriteThroughTargetUncreatableError = class extends Error {};
-function defaultExists(path) {
-	try {
-		return (0, node_fs.lstatSync)(path), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultCanWrite(path) {
-	try {
-		return (0, node_fs.accessSync)(path, node_fs.constants.W_OK | node_fs.constants.X_OK), !0;
-	} catch {
-		return !1;
-	}
-}
-function defaultMkdir(path) {
-	(0, node_fs.mkdirSync)(path, { recursive: !0 });
-}
-function assertNoSymlinkInWriteThrough(path, { lstat = realSymlinkDeps.lstat, readlink = realSymlinkDeps.readlink } = {}) {
-	let resolved = resolveHostPath(path, {
-		lstat,
-		readlink
-	}), link = resolved.links[0];
-	if (link === void 0) return;
-	let hint = "real" in resolved && resolved.real !== "/" ? ` Name the path it leads to instead: ${JSON.stringify(resolved.real)}.` : "";
-	throw Error(`write-through entry ${JSON.stringify(path)} goes through ${JSON.stringify(link.at)}, a symlink to ${JSON.stringify(link.target)}, and symlinks are not followed.${hint}`);
-}
-function assertKnownFilesExist(paths, env, { exists = defaultExists } = {}) {
-	let knownFileValues = new Set(KNOWN_FILE_VARS.map((name) => env[name]).filter((v) => !!v)), missing = paths.find((p) => knownFileValues.has(p) && !exists(p));
-	if (missing !== void 0) throw new WriteThroughTargetMissingError(`write-through: ${JSON.stringify(missing)} doesn't exist. This path is one of the runner's own generated files (GITHUB_OUTPUT/GITHUB_ENV/GITHUB_PATH/GITHUB_STEP_SUMMARY) and should already be present -- something is wrong with the environment.`);
-}
-function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists, canWrite = defaultCanWrite, mkdir = defaultMkdir } = {}) {
-	let missing = resolvedPaths.filter((path) => !exists(path));
-	for (let path of missing) {
-		let ancestor = (0, node_path.dirname)(path);
-		for (; ancestor !== "/" && !exists(ancestor);) ancestor = (0, node_path.dirname)(ancestor);
-		if (!canWrite(ancestor)) throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist, and the runner can't create it under ${JSON.stringify(ancestor)}. Create it in an earlier step and make it writable by the runner, e.g. sudo install -d -o "$(id -u)" -g "$(id -g)" ${JSON.stringify(path)}`);
-	}
-	for (let path of missing) try {
-		mkdir(path);
-	} catch (e) {
-		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
-	}
 }
 //#endregion
 //#region src/lib/sandbox/host-commands.ts
@@ -75521,762 +76287,6 @@ function assertOverlayShows(wd, { overlayRoots, hiddenMounts, writeThroughPaths 
 function assertSandboxShows(wd, spec) {
 	let hidden = hiddenWorkingDirectory(wd.path, spec.mounts, spec.maskedPaths);
 	if (hidden) throw unusable(wd, hidden);
-}
-//#endregion
-//#region src/lib/filesystem-audit/line-file.ts
-const CHUNK_BYTES = 1 << 20;
-function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "r");
-	try {
-		let buf = Buffer.alloc(chunkBytes), carry = [];
-		for (let n; (n = (0, node_fs.readSync)(fd, buf, 0, buf.length, null)) > 0;) {
-			let chunk = buf.subarray(0, n), start = 0;
-			for (let nl; (nl = chunk.indexOf(10, start)) !== -1; start = nl + 1) carry.length === 0 ? onLine(chunk.toString("utf8", start, nl)) : onLine(Buffer.concat([...carry, chunk.subarray(start, nl)]).toString("utf8")), carry = [];
-			start < n && carry.push(Buffer.from(chunk.subarray(start)));
-		}
-		onLine(Buffer.concat(carry).toString("utf8"));
-	} finally {
-		(0, node_fs.closeSync)(fd);
-	}
-}
-function openWriter(path, chunkBytes = CHUNK_BYTES) {
-	let fd = (0, node_fs.openSync)(path, "w"), pending = [], size = 0, first = !0, flush = () => {
-		let data = Buffer.from(pending.join(""));
-		for (let off = 0; off < data.length;) off += (0, node_fs.writeSync)(fd, data, off);
-		pending = [], size = 0;
-	};
-	return {
-		write: (line) => {
-			pending.push(first ? line : `\n${line}`), first = !1, size += line.length + 1, size >= chunkBytes && flush();
-		},
-		close: () => {
-			try {
-				flush();
-			} finally {
-				(0, node_fs.closeSync)(fd);
-			}
-		}
-	};
-}
-//#endregion
-//#region src/lib/filesystem-audit/report.ts
-const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
-	readLines,
-	createSummary: createAuditSummary,
-	openWriter,
-	makeDir: (path) => (0, node_fs.mkdirSync)(path, { mode: 448 }),
-	readFile: (path) => (0, node_fs.readFileSync)(path, "utf8"),
-	realpath: (path) => (0, node_fs.realpathSync)(path),
-	renderBlocks: renderAuditSummaryBlocks,
-	uploadArtifact: uploadFilesystemAuditArtifact,
-	setOutput: setFilesystemAuditOutput,
-	appendFile: (path, content) => (0, node_fs.appendFileSync)(path, content),
-	writeFile: (path, content) => (0, node_fs.writeFileSync)(path, content, { flag: "wx" })
-};
-function prefixes(value, realpath) {
-	if (!value) return [];
-	let out = [value];
-	try {
-		let real = realpath(value);
-		real !== value && out.push(real);
-	} catch {}
-	return out;
-}
-function runnerFiles(env, mediated, realpath) {
-	let out = new Map();
-	for (let variable of MEDIATED_VARIABLES) {
-		let paths = mediated.includes(variable) ? [mediatedPathOf(variable)] : prefixes(env[variable], realpath);
-		for (let path of paths) out.set(path, variable);
-	}
-	return out;
-}
-const NONE = { blocks: () => [] }, NO_RULES = { rules: [] }, filesystemAuditGuide = (actionRepo, actionRef) => `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, workingDirectory = env.GITHUB_WORKSPACE, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
-	let deps = {
-		...realDeps$3,
-		...overrides
-	}, rules = givenRules ?? (failOnUnexpected ? NO_RULES : void 0), setOutput = (artifactName) => {
-		try {
-			deps.setOutput(artifactName);
-		} catch (e) {
-			failOrWarn(annotation, failClosed)(`Failed to set the filesystem-audit-artifact-name output: ${errorMessage(e)}`);
-		}
-	}, settled = (result, verdictItems = {}) => ({
-		expected: "not-requested",
-		verdictItems,
-		upload: async () => (setOutput(""), "not-requested"),
-		blocks: (startedAt, _artifact, stepLabel) => result.blocks(startedAt, reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE))
-	});
-	if (!audit || !attached) return settled(NONE);
-	let cleanPath = audit.stepPath, prepared = upload;
-	if (upload) try {
-		deps.makeDir(audit.uploadDir);
-	} catch (e) {
-		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`), prepared = !1;
-	}
-	let options = {
-		cwd: prefixes(workingDirectory, deps.realpath),
-		workspace: prefixes(env.GITHUB_WORKSPACE, deps.realpath),
-		home: prefixes(env.HOME, deps.realpath),
-		toolCache: prefixes(env.RUNNER_TOOL_CACHE, deps.realpath),
-		runnerFiles: runnerFiles(env, mediated, deps.realpath),
-		...rules && { rules: new RuleMatcher(rules.rules) },
-		propose: prepared
-	}, cwdNamed = workingDirectory && !isWorkspace(workingDirectory, env, deps.realpath) ? escapePath(relativize(workingDirectory, {
-		...options,
-		cwd: []
-	})) : void 0, checkIncomplete = rules && failOnUnexpected ? { caution: ["file access check incomplete"] } : {}, unchecked = (what) => checkIncomplete.caution ? (annotation.error(`${what}; failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, checkIncomplete) : {}, reduced;
-	try {
-		reduced = reduce(audit.outPath, prepared ? cleanPath : void 0, options, annotation, deps);
-	} catch (e) {
-		return annotation.warning(`Failed to read the filesystem audit recording: ${errorMessage(e)}`), settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as the recording could not be read`));
-	}
-	if (!reduced) return annotation.error("The filesystem audit recording is gone: something removed it after the tracer started; failing the step"), process.exitCode = 1, settled({ blocks: (_startedAt, title) => unreadableSummaryBlocks(title) }, checkIncomplete);
-	let { summary, summaryError, ended, written } = reduced, incomplete = {};
-	summary ? summary.lost && (incomplete = unchecked(`Not every file access was checked against ${EXPECTED_RULES_INPUT}, as the recording misses some`)) : incomplete = unchecked(`The file accesses could not be checked against ${EXPECTED_RULES_INPUT}, as summarizing the recording failed`), !ended && !cancelled && (annotation.error("The filesystem audit tracer did not finish its record, so the record may miss part of the step; failing the step. Any reason it gave is in the step log, on a line starting with filesystem-audit: fatal:, or in the buildcage: filesystem audit totals group, on a line starting with filesystem-audit: read loss counters:"), process.exitCode = 1, incomplete = checkIncomplete);
-	let given = rules !== void 0, hasRules = givenRules !== void 0, proposed = summary !== void 0 && (recordedNoFileAccess(summary) || given && summary.unexpected === 0) ? "nothing-to-add" : upload ? prepared ? writeProposedRules(summary, audit.rulesPath, annotation, deps.writeFile) : "not-prepared" : "not-requested", unexpected = given ? reportUnexpected(summary, failOnUnexpected, annotation, !hasRules) : {}, verdictItems = incomplete.caution ? { caution: [...unexpected.caution ?? [], ...incomplete.caution] } : unexpected, artifactOf = (uploaded) => upload ? uploaded || "upload-failed" : "not-requested", guide = filesystemAuditGuide(actionRepo, actionRef);
-	return {
-		expected: artifactOf(written ? { name: filesystemAuditArtifactName(containerName) } : void 0),
-		verdictItems,
-		upload: async () => {
-			let uploaded;
-			try {
-				written && (uploaded = await deps.uploadArtifact(proposed === "written" ? [cleanPath, audit.rulesPath] : [cleanPath], containerName, retentionDays, annotation));
-			} catch (e) {
-				annotation.warning(`Could not upload the filesystem audit artifact: ${errorMessage(e)}`);
-			}
-			return setOutput(uploaded?.name ?? ""), artifactOf(uploaded);
-		},
-		blocks: (startedAt, artifact, stepLabel) => {
-			let cutNote = (cause) => filesystemTruncationNote(artifact, cause), rendered;
-			try {
-				if (!summary) throw summaryError;
-				rendered = deps.renderBlocks(summary, {
-					title: reportTitle(stepLabel, FILESYSTEM_ACTIVITY_TITLE),
-					startedAt,
-					priorities: FILESYSTEM_PRIORITIES,
-					cutNote,
-					legendNote: filesystemLegendNote(artifact, `${guide}#reading-the-summary`, cwdNamed),
-					skippedHooksUrl: `${guide}#skipped-hooks`,
-					...given && { expected: hasRules ? "given" : "empty" },
-					rulesNote: rulesNote(proposalOf(proposed, artifact), {
-						fileName: (0, node_path.basename)(audit.rulesPath),
-						guideUrl: `${guide}#expected-accesses`,
-						hasRules,
-						cut: summary?.proposedCut === "size"
-					})
-				});
-			} catch (e) {
-				return annotation.warning(`Failed to render the filesystem audit summary: ${errorMessage(e)}`), [];
-			}
-			audit.outPath;
-			let notice = cutNote();
-			return withNotices(rendered, () => notice);
-		}
-	};
-}
-function reportUnexpected(summary, failOnUnexpected, annotation, empty) {
-	if (!summary?.unexpected) return {};
-	let n = summary.proposed?.length, es = n === 1 ? "" : "es", what = n === void 0 || summary.proposedCut ? "unexpected file accesses (too many to list)" : `${n} unexpected file access${es}`, outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT, fellOutside = `File accesses fell outside ${outside}${empty ? "," : ""}`, message = n === void 0 ? `${fellOutside} on too many distinct paths to list.` : summary.proposedCut ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first ${n}.` : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
-	return failOnUnexpected ? (annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`), process.exitCode = 1, { caution: [what] }) : (annotation.warning(message), { warning: [what] });
-}
-function reduce(outPath, cleanPath, options, annotation, deps) {
-	let writer, written = !1, dropCopy = (e) => {
-		annotation.warning(`Failed to prepare the filesystem audit artifact: ${errorMessage(e)}`);
-		let open = writer;
-		writer = void 0, written = !1;
-		try {
-			open?.close();
-		} catch {}
-	}, openSink = () => {
-		try {
-			cleanPath !== void 0 && (writer = deps.openWriter(cleanPath));
-		} catch (e) {
-			dropCopy(e);
-		}
-		return (line) => {
-			if (writer) try {
-				writer.write(line), written = !0;
-			} catch (e) {
-				dropCopy(e);
-			}
-		};
-	}, readOnce = !1, reduced;
-	try {
-		reduced = reduceRecording((onLine) => {
-			deps.readLines(outPath, onLine), readOnce = !0;
-		}, (0, node_path.dirname)(outPath), options, openSink, deps.createSummary);
-	} catch (e) {
-		if (!readOnce && e.code === "ENOENT") return;
-		throw e;
-	} finally {
-		let open = writer;
-		writer = void 0;
-		try {
-			open?.close();
-		} catch (e) {
-			dropCopy(e);
-		}
-	}
-	return {
-		...reduced,
-		written
-	};
-}
-//#endregion
-//#region src/lib/filesystem-audit/rules-input.ts
-function ruleSources(value, config) {
-	let lines = value.split("\n"), at = config?.offset ?? lines.length;
-	return [{
-		text: lines.slice(0, at).join("\n"),
-		origin: "input",
-		firstLine: 1
-	}, {
-		text: lines.slice(at).join("\n"),
-		origin: "config",
-		firstLine: config?.line
-	}].filter((source) => source.text.trim());
-}
-const EXPECTED_RULES_ENV = inputEnvName(EXPECTED_RULES_INPUT);
-function readExpectedFilesystemRules(value, config, filesystemAudit) {
-	let sources = ruleSources(value, config);
-	if (sources.length === 0) return;
-	let rules = parseExpectedRules(sources);
-	if (rules.rules.length === 0) return { expected: void 0 };
-	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
-	return { expected: rules };
-}
-//#endregion
-//#region src/lib/filesystem-example-inputs.ts
-function yamlScalar(text) {
-	try {
-		if ((0, import_dist$5.parse)(text) === text) return text;
-	} catch {}
-	return JSON.stringify(text);
-}
-function filesystemExampleInputs({ workingDirectory, filesystemMode, writeThroughInput, filesystemAudit, expectedFilesystemRules, failOnUnexpectedFileAccess }, guideUrl) {
-	let lines = [];
-	workingDirectory && !workingDirectory.isWorkspace && lines.push(`working-directory: ${yamlScalar(workingDirectory.input)}`), filesystemMode !== "persistent" && lines.push(`filesystem-mode: ${filesystemMode}`);
-	let paths = splitWriteThroughInput(writeThroughInput);
-	return paths.length > 0 && lines.push("write-through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem-audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config-file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail-on-unexpected-file-access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail-on-unexpected-file-access: true"), lines;
-}
-//#endregion
-//#region src/lib/filesystem-audit/mode.ts
-const FILESYSTEM_AUDIT = ["off", "record"];
-function resolveFilesystemAudit(input) {
-	let trimmed = input?.trim() || "off";
-	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem-audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/filesystem-mode.ts
-const FILESYSTEM_MODES = ["persistent", "ephemeral"];
-function resolveFilesystemMode(input) {
-	let trimmed = input?.trim() || "persistent";
-	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
-	return trimmed;
-}
-//#endregion
-//#region src/lib/inputs.ts
-init_core();
-const LIST_INPUTS = [
-	"allowed-https-rules",
-	"allowed-http-rules",
-	"allowed-ip-rules",
-	"allowed-url-rules",
-	"allowed-tls-rules",
-	"known-blocked-rules",
-	"write-through",
-	"expected-filesystem-rules"
-], ACTION_INPUTS = [
-	"run",
-	"config-file",
-	"proxy-mode",
-	"proxy-engine",
-	...LIST_INPUTS,
-	"writable",
-	"aws-key-check",
-	"allowed-aws-role-accounts",
-	"upload-traffic-artifact",
-	"traffic-artifact-retention-days",
-	"fail-on-blocked",
-	"fail-on-ca-residue",
-	"filesystem-mode",
-	"filesystem-audit",
-	"upload-filesystem-audit-artifact",
-	"filesystem-audit-retention-days",
-	"fail-on-unexpected-file-access",
-	"label",
-	"working-directory"
-], NOT_IN_CONFIG_FILE = [
-	"run",
-	"config-file",
-	"writable",
-	"working-directory"
-], CONFIG_FILE_INPUTS = {
-	known: ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
-	lists: LIST_INPUTS
-};
-function resolveWriteThroughInput$1({ writeThrough, writable, allowWrite }, notice) {
-	if (allowWrite.trim()) throw new SandboxError("allow_write: has been replaced by write-through:, which covers both filesystem modes. Rename the input; the path syntax is unchanged.", "ALLOW_WRITE_REMOVED");
-	return writable.trim() ? (notice("writable: is now called write-through:; writable: still works, but consider updating to write-through:."), writeThrough.trim() ? `${writeThrough}\n${writable}` : writable) : writeThrough;
-}
-function readRunCommand(getInput$5 = getInput) {
-	let runInput = getInput$5("run", { trimWhitespace: !1 });
-	if (!runInput.trim()) throw new SandboxError("Input 'run' is required.", "MISSING_RUN");
-	return runInput;
-}
-function readProxyInputs(getInput$4 = getInput) {
-	return {
-		proxyEngine: resolveProxyEngine(getInput$4("proxy-engine")),
-		proxyMode: resolveProxyMode(getInput$4("proxy-mode"))
-	};
-}
-function readFilesystemInputs(notice, getInput$10 = getInput) {
-	return {
-		filesystemMode: resolveFilesystemMode(getInput$10("filesystem-mode")),
-		writeThroughInput: resolveWriteThroughInput$1({
-			writeThrough: getInput$10("write-through"),
-			writable: getInput$10("writable"),
-			allowWrite: getInput$10("allow_write")
-		}, notice)
-	};
-}
-function readFilesystemAuditInput(getInput$8 = getInput) {
-	return resolveFilesystemAudit(getInput$8("filesystem-audit"));
-}
-function readFilesystemAuditArtifactInputs(getInput$2 = getInput) {
-	let days = getInput$2("filesystem-audit-retention-days");
-	if (days !== "" && !/^[1-9]\d*$/.test(days)) throw new SandboxError(`Invalid filesystem-audit-retention-days: ${JSON.stringify(days)}. Must be a whole number of days above zero.`, "INVALID_FILESYSTEM_AUDIT_RETENTION_DAYS");
-	return {
-		upload: readBooleanInput("upload-filesystem-audit-artifact", !1, getInput$2),
-		retentionDays: days === "" ? void 0 : Number(days)
-	};
-}
-function readStepLabel(getInput$3 = getInput) {
-	return getInput$3("label") || void 0;
-}
-function readFailOnCaResidue(getInput$9 = getInput) {
-	return readBooleanInput("fail-on-ca-residue", !0, getInput$9);
-}
-function readFailOnBlocked(getInput$1 = getInput) {
-	return readBooleanInput("fail-on-blocked", !0, getInput$1);
-}
-function readFailOnUnexpectedFileAccess(getInput$6 = getInput) {
-	return readBooleanInput("fail-on-unexpected-file-access", !1, getInput$6);
-}
-const AWS_KEY_CHECK_OFF = {
-	key: "",
-	roleAccounts: []
-};
-function readAwsKeyInputs({ proxyEngine }, env, getInput$7 = getInput) {
-	let roleAccounts;
-	try {
-		roleAccounts = parseAwsAccounts(getInput$7("allowed-aws-role-accounts"));
-	} catch (e) {
-		let { message } = e;
-		throw new SandboxError(`allowed-aws-role-accounts: ${message}. Each entry must be a 12-digit AWS account ID.${/"\d{11}"/.test(message) ? " Quote an ID that begins with 0, which YAML otherwise reads as a number." : ""}`, "INVALID_AWS_ACCOUNTS");
-	}
-	let check = readBooleanInput("aws-key-check", !1, getInput$7);
-	if (roleAccounts.length > 0 && !check) throw new SandboxError("allowed-aws-role-accounts needs aws-key-check: true. Set it, or remove the accounts. A workflow cannot clear accounts its config-file names: use a file without them.", "AWS_KEY_CHECK_NOT_SET");
-	if (!check) return AWS_KEY_CHECK_OFF;
-	if (proxyEngine !== "inspect") throw new InvalidInputError(`The AWS access key check has no effect with proxy-engine: ${proxyEngine}, which never sees a request's headers. Switch to proxy-engine: inspect, or remove aws-key-check and allowed-aws-role-accounts.`, "INVALID_PROXY_ENGINE");
-	let key = env.AWS_ACCESS_KEY_ID?.trim() ?? "";
-	if (!isAwsAccessKeyId(key)) throw new SandboxError("The AWS access key check is on, but AWS_ACCESS_KEY_ID is unset or is not an access key ID. The check starts from that variable alone, never from a profile, a credentials file or any other credential source. Put the key to check there in an earlier step, for example with aws-actions/configure-aws-credentials, or run the AWS commands in a step without the check.", "AWS_ACCESS_KEY_MISSING");
-	return {
-		key,
-		roleAccounts
-	};
-}
-const NO_CREDENTIAL = "aws-no-credential", ROLE_NOT_ALLOWED = "aws-role-not-allowed";
-function awsExampleInputs({ key, roleAccounts }, timeline = []) {
-	if (!key) return [];
-	let lines = ["aws-key-check: true"], assumed = timeline.flatMap((e) => awsFieldsOf(e).assumedAccount ?? []).filter(isAwsAccountId), added = new Set(assumed.filter((a) => !roleAccounts.includes(a))), accounts = [...roleAccounts, ...added].sort(), known = awsKeys(timeline), passes = (e, account, seen) => {
-		let { keyRef, roleAccount } = awsFieldsOf(e);
-		switch (e.wouldBlock) {
-			case void 0: return !0;
-			case NO_CREDENTIAL:
-			case ROLE_NOT_ALLOWED: return !keyRef && roleAccount === account;
-			case KEY_NOT_ALLOWED: {
-				let key = keyRef && known.get(keyRef);
-				return !!key && learned(key, account, seen);
-			}
-			default: return !1;
-		}
-	}, teaches = (issuer, account, seen) => {
-		let { assumedAccount } = awsFieldsOf(issuer);
-		return (assumedAccount ? assumedAccount === account : isEcrRegistry(issuer.host) && issuer.wouldBlock !== void 0) && passes(issuer, account, seen);
-	}, learned = (key, account, seen) => {
-		if (seen.has(key)) return !1;
-		let next = new Set(seen).add(key);
-		return key.issuers.some((issuer) => teaches(issuer, account, next));
-	}, keys = [...blockedKeys(timeline, known).values()], mark = (a) => {
-		let names = keys.filter(({ key }) => learned(key, a, new Set())).map(({ key }) => key.name);
-		timeline.some((e) => (e.wouldBlock === NO_CREDENTIAL || e.wouldBlock === ROLE_NOT_ALLOWED) && passes(e, a, new Set())) && names.push("its AssumeRoleWithWebIdentity call");
-		let last = names.pop(), list = names.length > 0 ? `${names.join(", ")} and ${last}` : last;
-		return ` # ${list ? `lets ${list} through; ` : ""}assumed in this run, check it is yours`;
-	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
-	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed-aws-role-accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed-aws-role-accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed-aws-role-accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
-}
-//#endregion
-//#region src/lib/overlayfs-preflight.ts
-const REQUIREMENT$1 = `filesystem-mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem-mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
-function describeOverlayFailure(e) {
-	let captured = capturedStderr(e);
-	return `overlayfs probe mount failed. ${REQUIREMENT$1}${captured ? ` (${captured})` : ""}`;
-}
-function describeProbeCleanupFailure(dir, e) {
-	let captured = capturedStderr(e);
-	return `Failed to remove the overlayfs probe directory ${dir}. The probe mount itself succeeded, so this runner does support overlayfs; what failed is removing the probe directory afterwards. That needs \`sudo rm -rf\`, because the kernel writes root-owned overlayfs bookkeeping into workdir while the mount is live (see removeProbeDir), and filesystem-mode: ephemeral's real cleanup discards its overlay work dirs exactly the same way, so a run would fail on this runner anyway, later and with less to go on. This is usually a sudoers config scoped to specific commands rather than a blanket NOPASSWD:ALL, which checkPasswordlessSudo's own \`sudo -n true\` probe cannot detect. Grant the runner user passwordless sudo for \`rm\`, or use filesystem-mode: persistent instead.${captured ? ` (${captured})` : ""}`;
-}
-function removeProbeDir(dir, exec) {
-	retryBriefly(() => exec(hostCommand("sudo"), [
-		"-n",
-		"rm",
-		"-rf",
-		dir
-	], {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	}));
-}
-function checkOverlayfsSupport({ base = SANDBOX_SCRATCH_BASE, exec = node_child_process.execFileSync } = {}) {
-	ensureOwnScratchBase(base);
-	let probeDir = (0, node_fs.mkdtempSync)((0, node_path.join)(base, "overlay-probe-")), probeFailure = null;
-	try {
-		probeOverlayMount(probeDir, exec);
-	} catch (error) {
-		probeFailure = { error };
-	}
-	try {
-		removeProbeDir(probeDir, exec);
-	} catch (e) {
-		if (!probeFailure) throw new SandboxError(describeProbeCleanupFailure(probeDir, e), "OVERLAY_PROBE_CLEANUP_FAILED");
-	}
-	if (probeFailure) throw new SandboxError(describeOverlayFailure(probeFailure.error), "OVERLAYFS_UNSUPPORTED");
-}
-function probeOverlayMount(probeDir, exec) {
-	let lower = (0, node_path.join)(probeDir, "lower"), upper = (0, node_path.join)(probeDir, "upper"), work = (0, node_path.join)(probeDir, "work"), merged = (0, node_path.join)(probeDir, "merged");
-	for (let dir of [
-		lower,
-		upper,
-		work,
-		merged
-	]) (0, node_fs.mkdirSync)(dir);
-	exec(hostCommand("sudo"), [
-		"-n",
-		"unshare",
-		"--mount",
-		"--propagation",
-		"private",
-		"--",
-		"sh",
-		"-c",
-		`mount -t overlay overlay -o lowerdir=${lower},upperdir=${upper},workdir=${work} ${merged}`
-	], {
-		encoding: "utf8",
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv("sudo")
-	});
-}
-//#endregion
-//#region src/lib/post-pinning.ts
-function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let owner = ownerToken(env);
-	if (!owner) return;
-	let id = (0, node_crypto.createHash)("sha256").update(owner).digest("hex").slice(0, 16);
-	return (0, node_path.join)(scratchBase, `pinning-${id}`);
-}
-function savePinningForPost(env, pinning, scratchBase = SANDBOX_SCRATCH_BASE) {
-	let path = postPinningPath(env, scratchBase);
-	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, JSON.stringify(pinning), { mode: 384 }));
-}
-//#endregion
-//#region src/core/lib/docker/health.ts
-function buildDockerInspectStateArgs(containerName) {
-	return [
-		"inspect",
-		"--format",
-		"{{json .State}}",
-		containerName
-	];
-}
-function parseContainerState(inspectOutput) {
-	let raw;
-	try {
-		raw = JSON.parse(inspectOutput);
-	} catch {
-		return null;
-	}
-	if (!raw || typeof raw != "object" || typeof raw.Status != "string") return null;
-	let log = Array.isArray(raw.Health?.Log) ? raw.Health.Log : [], lastOutput = log.length > 0 ? log[log.length - 1]?.Output : void 0;
-	return {
-		status: raw.Status,
-		exitCode: typeof raw.ExitCode == "number" ? raw.ExitCode : null,
-		health: typeof raw.Health?.Status == "string" ? raw.Health.Status : null,
-		lastHealthOutput: typeof lastOutput == "string" && lastOutput.trim() || null
-	};
-}
-function isContainerReady(state) {
-	return state.status === "running" && state.health !== "unhealthy" && state.health !== "starting";
-}
-function describeContainerStartFailure(state, { role, containerName }) {
-	let subject = `Buildcage's ${role} container (${containerName})`, probe = state.lastHealthOutput ? ` Last health check output: ${JSON.stringify(state.lastHealthOutput)}.` : "", evidence = " Its log is printed above.";
-	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
-}
-//#endregion
-//#region src/lib/proxy-lifecycle.ts
-const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-	encoding: "utf8",
-	env: hostCommandEnv("docker", env),
-	stdio: [
-		"ignore",
-		"pipe",
-		"pipe"
-	]
-}), printDockerViaExec = (args, env) => {
-	(0, node_child_process.execFileSync)(hostCommand("docker"), args, {
-		stdio: "inherit",
-		env: hostCommandEnv("docker", env)
-	});
-};
-async function startSandboxProxy({ composeFiles, projectName, containerName, pullPolicy, composeEnv }, deps = {}) {
-	let { printDocker = printDockerViaExec } = deps;
-	await withLogGroupAsync("buildcage: starting sandbox proxy", () => {
-		try {
-			printDocker(buildComposeUpArgs({
-				composeFiles,
-				projectName,
-				pullPolicy
-			}), composeEnv);
-		} catch (e) {
-			throw proxyStartError(e, {
-				composeFiles,
-				projectName,
-				containerName,
-				composeEnv
-			}, deps);
-		}
-	});
-}
-function proxyStartError(e, { composeFiles, projectName, containerName, composeEnv }, deps) {
-	let state = readProxyState(containerName, composeEnv, deps);
-	return state ? (printProxyLog({
-		composeFiles,
-		projectName,
-		composeEnv
-	}, deps), new SandboxError(describeContainerStartFailure(state, {
-		role: "sandbox proxy",
-		containerName
-	}), "PROXY_NOT_READY")) : new SandboxError(describeDockerFailure(e, { operation: "docker compose up" }), "DOCKER_UNAVAILABLE");
-}
-function readProxyState(containerName, composeEnv, { captureDocker = captureDockerViaExec }) {
-	try {
-		return parseContainerState(captureDocker(buildDockerInspectStateArgs(containerName), composeEnv));
-	} catch (e) {
-		return reportInspectFailure(e), null;
-	}
-}
-function reportInspectFailure(e) {
-	let stderr = capturedStderr(e);
-	stderr && !/no such object/i.test(stderr) && console.log(`buildcage: could not read the sandbox proxy container's state: ${stderr}`);
-}
-function printProxyLog({ composeFiles, projectName, composeEnv }, { printDocker = printDockerViaExec }) {
-	try {
-		printDocker(buildComposeLogsArgs({
-			composeFiles,
-			projectName,
-			tail: 100
-		}), composeEnv);
-	} catch {
-		console.log("The sandbox proxy container's log could not be read.");
-	}
-}
-async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotation }, { printDocker = printDockerViaExec } = {}) {
-	await withLogGroupAsync("buildcage: stopping sandbox proxy", () => {
-		try {
-			printDocker(buildComposeDownArgs({
-				composeFiles,
-				projectName
-			}), composeEnv);
-		} catch (e) {
-			annotation.warning(`Failed to stop the sandbox proxy container: ${describeDockerFailure(e, { operation: "docker compose down" })}`);
-		}
-	});
-}
-//#endregion
-//#region src/lib/sandbox/env-loader.ts
-const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
-	"ACTIONS_RUNTIME_URL",
-	"ACTIONS_RUNTIME_TOKEN",
-	"ACTIONS_CACHE_URL",
-	"ACTIONS_RESULTS_URL",
-	"ACTIONS_CACHE_SERVICE_V2",
-	"ACTIONS_CACHE_MODE"
-]), ACTION_INPUT_ENV_KEYS = new Set(ACTION_INPUTS.flatMap((input) => [inputEnvName(input), inputEnvName(legacyInputName(input))]));
-function isRunnerOnly(key) {
-	return RUNNER_ONLY_ENV_KEYS.has(key) || ACTION_INPUT_ENV_KEYS.has(key);
-}
-function resolveSandboxEnv(env, caTrust, warn, overrides = {}) {
-	let merged = {
-		...env,
-		...caTrust ? caTrustAdditions(caTrust, env).env : void 0
-	}, resolved = {}, skipped = [];
-	for (let [key, value] of Object.entries(merged)) value !== void 0 && (isRunnerOnly(key) || (ENV_KEY.test(key) ? resolved[key] = value : skipped.push(key)));
-	return skipped.length > 0 && warn?.(`Not passing environment variables whose names a shell cannot export: ${skipped.join(", ")}`), {
-		...resolved,
-		...overrides
-	};
-}
-function buildEnvBlob(resolved) {
-	let records = [...Object.entries(resolved).map(([k, v]) => `${k}=${v}`), ENV_BLOB_TERMINATOR];
-	return Buffer.from(records.map((record) => `${record}\0`).join(""), "utf8");
-}
-const __dirname$2 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), ENV_LOADER_SOURCE = (0, node_path.join)(__dirname$2, "..", "scripts", "buildcage-init.sh");
-function writeEnvLoader(execDir, source = ENV_LOADER_SOURCE) {
-	let loaderPath = (0, node_path.join)(execDir, "buildcage-init");
-	return (0, node_fs.writeFileSync)(loaderPath, (0, node_fs.readFileSync)(source), { mode: 448 }), loaderPath;
-}
-function envLoaderArgs(loaderPath, scriptPath) {
-	return [
-		loaderPath,
-		ENV_BLOB_TERMINATOR,
-		scriptPath
-	];
-}
-//#endregion
-//#region src/lib/sandbox/ephemeral-fs.ts
-function defaultDeviceOf(path) {
-	return (0, node_fs.statSync)(path).dev;
-}
-function defaultIsDirectory(path) {
-	return (0, node_fs.statSync)(path).isDirectory();
-}
-function defaultStat(path) {
-	let { uid, gid, mode } = (0, node_fs.statSync)(path);
-	return {
-		uid,
-		gid,
-		mode
-	};
-}
-function defaultExecFile(command, args) {
-	(0, node_child_process.execFileSync)(hostCommand(command), args, {
-		stdio: [
-			"ignore",
-			"ignore",
-			"pipe"
-		],
-		env: hostCommandEnv(command)
-	});
-}
-function determineOverlayRoots(candidates, writeThroughPaths, { exists = node_fs.existsSync, deviceOf = defaultDeviceOf } = {}) {
-	let notCoveredByWriteThrough = [...new Set(candidates)].filter((c) => exists(c)).filter((c) => !writeThroughPaths.some((a) => isAtOrUnder(c, a)));
-	return notCoveredByWriteThrough.filter((c) => {
-		let nestingParent = notCoveredByWriteThrough.find((p) => p !== c && isAtOrUnder(c, p));
-		if (!nestingParent) return !0;
-		try {
-			return deviceOf(c) !== deviceOf(nestingParent);
-		} catch {
-			return !0;
-		}
-	});
-}
-function rootCannotRead({ fsType, superOptions = [] }) {
-	return (fsType === "fuse" || fsType === "fuseblk" || fsType.startsWith("fuse.")) && !superOptions.includes("allow_other");
-}
-function nestedMountRoots(overlayRoots, hostMounts, writeThroughPaths, { isDirectory = defaultIsDirectory, warn } = {}) {
-	let visible = new Map(hostMounts.map((m) => [m.mountPoint, m])), roots = [], hidden = [];
-	for (let [path, mount] of visible) {
-		if (overlayRoots.includes(path) || !overlayRoots.some((r) => isAtOrUnder(path, r)) || writeThroughPaths.some((w) => isAtOrUnder(path, w))) continue;
-		let reason;
-		if (path.includes(",") || path.includes(":")) reason = "an overlay mount option cannot contain \",\" or \":\"";
-		else if (rootCannotRead(mount)) reason = `it is a FUSE mount (${mount.fsType}) without allow_other, which root cannot read`;
-		else try {
-			if (!isDirectory(path)) continue;
-		} catch (e) {
-			reason = `the runner cannot stat it (${errorMessage(e)})`;
-		}
-		reason === void 0 ? roots.push(path) : (warn?.(`filesystem-mode: ephemeral cannot overlay the host mount ${JSON.stringify(path)}, so the command sees the empty directory beneath it: ${reason}. Use filesystem-mode: persistent if the command needs its contents.`), hidden.push(path));
-	}
-	return {
-		roots,
-		hidden
-	};
-}
-function slugify(path) {
-	return (0, node_crypto.createHash)("sha256").update(path).digest("hex").slice(0, 16);
-}
-function overlayUpperFor(scratchDir, root) {
-	return (0, node_path.join)(scratchDir, "ephemeral", slugify(root), "upper");
-}
-function createOverlayScratchDirs(scratchDir, roots, { mkdir = node_fs.mkdirSync, chmod = node_fs.chmodSync, stat = defaultStat, execFile = defaultExecFile, self = {
-	uid: process.getuid(),
-	gid: process.getgid()
-} } = {}) {
-	return roots.map((path) => {
-		let upper = overlayUpperFor(scratchDir, path), work = (0, node_path.join)((0, node_path.dirname)(upper), "work");
-		mkdir(work, { recursive: !0 });
-		let { uid, gid, mode } = stat(path), perm = mode & 4095;
-		return uid === self.uid && gid === self.gid ? (mkdir(upper, { recursive: !0 }), chmod(upper, perm)) : execFile("sudo", [
-			"install",
-			"-d",
-			"-o",
-			String(uid),
-			"-g",
-			String(gid),
-			"-m",
-			perm.toString(8),
-			"--",
-			upper
-		]), {
-			path,
-			upper,
-			work
-		};
-	});
-}
-function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVariables) {
-	if (mode !== "ephemeral") return [];
-	let lines = ["Filesystem mode: ephemeral"];
-	for (let root of overlayRoots) lines.push(`Ephemeral (writes discarded at step end): ${root}`);
-	for (let entry of writeThrough) lines.push(`Writable (persisted):                    ${entry}`);
-	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
-	return lines;
-}
-function auditUnavailable(reason) {
-	return new SandboxError(`filesystem-audit could not start (${reason}); the command was not run.`, "FILESYSTEM_AUDIT_UNAVAILABLE");
-}
-function hostCannotAudit(reason) {
-	let e = auditUnavailable(reason);
-	return new SandboxError(`${e.message} It needs a cgroup v2 host running Linux 6.1 or newer (6.4 on arm64) with kernel BTF: https://github.com/buildcage/isolated-run/blob/main/docs/filesystem-audit.md#troubleshooting`, e.code);
-}
-const NO_CGROUP_V2_REASON = "the runner is not on cgroup v2", NATIVE_ARCH = {
-	x64: "SCMP_ARCH_X86_64",
-	arm64: "SCMP_ARCH_AARCH64"
-};
-function withoutCompatSyscalls(profile, arch = process.arch) {
-	let p = profile, native = NATIVE_ARCH[arch];
-	return !p || !Array.isArray(p.architectures) || !native ? profile : {
-		...p,
-		architectures: p.architectures.filter((a) => a === native)
-	};
-}
-function allowedSyscalls(profile) {
-	let p = profile;
-	return !p || !Array.isArray(p.syscalls) ? [] : p.syscalls.flatMap((s) => s.action === "SCMP_ACT_ALLOW" && Array.isArray(s.names) ? s.names.filter((n) => typeof n == "string") : []);
-}
-function checkFilesystemAuditHost(probes = realHostProbes) {
-	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
-	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
 //#endregion
 //#region src/lib/sandbox/filesystem-plan.ts
@@ -77946,11 +77956,11 @@ function readStepInputs(env, deps) {
 	log(`Proxy engine: ${proxyEngine}`);
 	let { filesystemMode, writeThroughInput } = deps.readFilesystemInputs(notice), filesystemAudit = deps.readFilesystemAuditInput(), filesystemAuditArtifact = deps.readFilesystemAuditArtifactInputs(), givenRules = deps.readExpectedFilesystemRules(env[EXPECTED_RULES_ENV] ?? "", configFile?.origins.get(EXPECTED_RULES_INPUT), filesystemAudit), expectedFilesystemRules = givenRules?.expected, failOnUnexpectedFileAccess = deps.readFailOnUnexpectedFileAccess();
 	if (failOnUnexpectedFileAccess && filesystemAudit !== "record") throw new SandboxError("fail-on-unexpected-file-access needs filesystem-audit: record, which records the accesses it checks.", "INVALID_EXPECTED_FILESYSTEM_RULES");
-	deps.checkScratchBaseParent(), (workingDirectory || configFile) && deps.savePinningForPost(env, {
-		...workingDirectory && { baseDir },
+	deps.checkScratchBaseParent(), deps.savePinningForPost(env, {
+		...baseDir && { baseDir },
 		...configFile && { writeThrough: writeThroughInput }
 	});
-	let failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
+	let auditPrefixes = resolveAuditPrefixes(env, baseDir, workingDirectory, deps.realPathOf), failOnCaResidue = deps.readFailOnCaResidue(), failOnBlocked = deps.readFailOnBlocked(), trafficArtifact = deps.readTrafficArtifactInputs(), rules = deps.readRuleInputs(), stepLabel = deps.readStepLabel(), annotation = deps.createAnnotation(!!env.GITHUB_STEP_SUMMARY);
 	filesystemAudit === "record" && annotation.warning("filesystem-audit is experimental and may change."), givenRules && !expectedFilesystemRules && annotation.warning("expected-filesystem-rules holds only comments and blank lines, so the step runs as if it were not set" + (failOnUnexpectedFileAccess ? ", and fail-on-unexpected-file-access fails it on every file access." : "."));
 	let { urlRules, tlsRules, knownBlockedRules } = rules;
 	return deps.checkUrlAndTlsRuleSupport({
@@ -77969,6 +77979,7 @@ function readStepInputs(env, deps) {
 		runInput,
 		workingDirectory,
 		baseDir,
+		auditPrefixes,
 		proxyEngine,
 		proxyMode,
 		filesystemMode,
@@ -78043,7 +78054,7 @@ async function finalizeStep(run, deps) {
 		containerName,
 		annotation,
 		env,
-		workingDirectory: inputs.baseDir,
+		prefixes: inputs.auditPrefixes,
 		mediated: mediation?.files.map((f) => f.variable) ?? [],
 		actionRepo,
 		actionRef: reportActionRef,

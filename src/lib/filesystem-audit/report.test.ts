@@ -12,11 +12,11 @@ import {
   RULES,
   UPLOAD_DIR,
   uploadedBlocks,
+  readAudit,
 } from "../test/filesystem-audit-report.ts";
 import { UPLOAD_NOTE } from "./proposed-rules.ts";
 import { createAuditSummary } from "./reduce.ts";
 import { renderAuditSummaryBlocks } from "./render.ts";
-import { readStepFilesystemAudit } from "./report.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -375,15 +375,42 @@ describe("readStepFilesystemAudit", () => {
   it("matches a recorded canonical path against the realpath of the workspace", async () => {
     const { deps: d, summaries } = deps({
       raw: JSON.stringify({ kind: "write", comm: "node", path: "/real/work/a.txt" }),
-      realpath: (p) => (p === "/sym/work" ? "/real/work" : p),
     });
 
     await reportStepFilesystemAudit(
-      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/sym/work" } },
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/sym/work" },
+        realpath: (p) => (p === "/sym/work" ? "/real/work" : p),
+      },
       { ...d, summaries },
     );
 
     expect(summaries[0]).toContain("W node ./a.txt");
+  });
+
+  it("falls back to the raw prefix when a symlink on the way cannot be read", async () => {
+    const { deps: d, summaries } = deps({
+      raw: JSON.stringify({ kind: "write", comm: "node", path: "/home/u/a.txt" }),
+    });
+
+    await reportStepFilesystemAudit(
+      {
+        ...base,
+        audit: AUDIT,
+        annotation: annotation(),
+        env: { GITHUB_WORKSPACE: "/work", HOME: "/home/u" },
+        realpath: (p) => {
+          if (p === "/home/u") throw new Error("EACCES");
+          return p;
+        },
+      },
+      { ...d, summaries },
+    );
+
+    expect(summaries[0]).toContain("W node ~/a.txt");
   });
 
   it("shows ./ as the working directory, and names it in the legend", async () => {
@@ -458,7 +485,6 @@ describe("readStepFilesystemAudit", () => {
     );
     const { deps: d, summaries } = deps({
       raw: reads.join("\n"),
-      realpath: (p) => (p === "/sym/tool" ? "/real/tool" : p),
     });
 
     await reportStepFilesystemAudit(
@@ -467,6 +493,7 @@ describe("readStepFilesystemAudit", () => {
         audit: AUDIT,
         annotation: annotation(),
         env: { GITHUB_WORKSPACE: "/work", RUNNER_TOOL_CACHE: "/sym/tool" },
+        realpath: (p) => (p === "/sym/tool" ? "/real/tool" : p),
       },
       { ...d, summaries },
     );
@@ -486,7 +513,6 @@ describe("readStepFilesystemAudit", () => {
       ]
         .map((r) => JSON.stringify(r))
         .join("\n"),
-      realpath: (p) => (p === "/sym/temp/summary" ? "/real/temp/summary" : p),
     });
 
     await reportStepFilesystemAudit(
@@ -500,6 +526,7 @@ describe("readStepFilesystemAudit", () => {
           GITHUB_STEP_SUMMARY: "/sym/temp/summary",
         },
         mediated: ["GITHUB_OUTPUT"],
+        realpath: (p) => (p === "/sym/temp/summary" ? "/real/temp/summary" : p),
       },
       { ...d, summaries },
     );
@@ -508,21 +535,6 @@ describe("readStepFilesystemAudit", () => {
     expect(summaries[0]).toMatch(/W +bash +\$GITHUB_STEP_SUMMARY\n/);
     expect(summaries[0]).toMatch(/W +sh +\/real\/temp\/output\n/);
     expect(summaries[0]).toMatch(/W +sh +\/dev\/buildcage-runner-files\/step-summary\n/);
-  });
-
-  it("falls back to the raw prefix when the realpath cannot be resolved", async () => {
-    const { deps: d, summaries } = deps({
-      realpath: () => {
-        throw new Error("ENOENT");
-      },
-    });
-
-    await reportStepFilesystemAudit(
-      { ...base, audit: AUDIT, annotation: annotation(), env: { GITHUB_WORKSPACE: "/work" } },
-      { ...d, summaries },
-    );
-
-    expect(summaries[0]).toContain("W node ./a.txt");
   });
 
   it("fails the step on an empty recording, and uploads nothing", async () => {
@@ -1019,7 +1031,7 @@ describe("readStepFilesystemAudit: rendering apart from the upload", () => {
   // A cancelled step writes the summary first and uploads after it.
   it("renders before the upload, naming the artifact the upload is to make", async () => {
     const { deps: d, uploads, outputs } = deps();
-    const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
+    const read = readAudit({ ...options, annotation: annotation() }, d);
 
     expect(read.expected).toStrictEqual({ name: "buildcage-filesystem-audit-deadbeef" });
     const text = joinSummaryBlocks(read.blocks(undefined, read.expected, "build"));
@@ -1037,7 +1049,7 @@ describe("readStepFilesystemAudit: rendering apart from the upload", () => {
 
   it("titles the section with the step's label, escaped", () => {
     const { deps: d } = deps();
-    const read = readStepFilesystemAudit({ ...options, annotation: annotation() }, d);
+    const read = readAudit({ ...options, annotation: annotation() }, d);
     expect(joinSummaryBlocks(read.blocks(undefined, read.expected, "a|b"))).toMatch(
       /^\n## Filesystem Activity Report — a\\\|b\n\n/,
     );
@@ -1048,21 +1060,18 @@ describe("readStepFilesystemAudit: rendering apart from the upload", () => {
 
   it("expects no artifact when none was asked for, or there is no copy to upload", () => {
     const { deps: d } = deps();
-    expect(
-      readStepFilesystemAudit({ ...options, upload: false, annotation: annotation() }, d).expected,
-    ).toBe("not-requested");
+    expect(readAudit({ ...options, upload: false, annotation: annotation() }, d).expected).toBe(
+      "not-requested",
+    );
     const { deps: empty } = deps({ raw: "" });
-    expect(readStepFilesystemAudit({ ...options, annotation: annotation() }, empty).expected).toBe(
+    expect(readAudit({ ...options, annotation: annotation() }, empty).expected).toBe(
       "upload-failed",
     );
   });
 
   it("uploads nothing and sets the output empty when there is no recording to read", async () => {
     const { deps: d, uploads, outputs } = deps();
-    const read = readStepFilesystemAudit(
-      { ...options, audit: undefined, annotation: annotation() },
-      d,
-    );
+    const read = readAudit({ ...options, audit: undefined, annotation: annotation() }, d);
 
     expect(read.expected).toBe("not-requested");
     expect(read.blocks(undefined, read.expected, undefined)).toStrictEqual([]);

@@ -5,9 +5,12 @@ import { joinSummaryBlocks, type SummaryBlock } from "#core/lib/report/render/fi
 
 import {
   readStepFilesystemAudit,
+  resolveAuditPrefixes,
   type FilesystemAuditReportDeps,
   type FilesystemAuditReportOptions,
+  type ReadStepFilesystemAudit,
 } from "../filesystem-audit/report.ts";
+import { isWorkspace } from "../sandbox/working-directory.ts";
 
 // The step's own directory, uploaded as is.
 export const UPLOAD_DIR = "/var/tmp/buildcage-0/filesystem-audit-deadbeef";
@@ -72,7 +75,6 @@ export function deps(overrides: Partial<FilesystemAuditReportDeps> & { raw?: str
           close: () => void writes.push({ path, content: lines.join("\n") }),
         };
       },
-      realpath: (p) => p,
       uploadArtifact: async (files) => {
         uploads.push(files);
         return { name: "buildcage-filesystem-audit-deadbeef" };
@@ -85,10 +87,42 @@ export function deps(overrides: Partial<FilesystemAuditReportDeps> & { raw?: str
   };
 }
 
+export type TestReportOptions = Omit<FilesystemAuditReportOptions, "prefixes"> & {
+  /** The working-directory input's real path; the workspace when unset. */
+  workingDirectory?: string;
+  /** How the step resolved symlinks before the command ran. */
+  realpath?: (path: string) => string;
+};
+
+/** The options with the prefixes the step would have resolved from them. */
+export function withPrefixes({
+  workingDirectory,
+  realpath = (p) => p,
+  ...options
+}: TestReportOptions): FilesystemAuditReportOptions {
+  const { env } = options;
+  const baseDir =
+    workingDirectory ?? (env.GITHUB_WORKSPACE ? realpath(env.GITHUB_WORKSPACE) : undefined);
+  const given = workingDirectory !== undefined && {
+    input: workingDirectory,
+    path: workingDirectory,
+    isWorkspace: isWorkspace(workingDirectory, env, realpath),
+  };
+  return {
+    ...options,
+    prefixes: resolveAuditPrefixes(env, baseDir, given || undefined, realpath),
+  };
+}
+
+export const readAudit = (
+  options: TestReportOptions,
+  overrides: Partial<FilesystemAuditReportDeps>,
+): ReadStepFilesystemAudit => readStepFilesystemAudit(withPrefixes(options), overrides);
+
 // Prepares the audit and renders its blocks as the report step would,
 // collecting their text.
 export async function reportStepFilesystemAudit(
-  options: FilesystemAuditReportOptions & { startedAt?: number },
+  options: TestReportOptions & { startedAt?: number },
   d: Partial<FilesystemAuditReportDeps> & { summaries?: string[] },
 ): Promise<void> {
   const { summaries = [], ...overrides } = d;
@@ -98,9 +132,9 @@ export async function reportStepFilesystemAudit(
 
 // Uploads first, as a step that ran to the end does, then renders.
 export async function uploadedBlocks(
-  options: FilesystemAuditReportOptions & { startedAt?: number },
+  options: TestReportOptions & { startedAt?: number },
   overrides: Partial<FilesystemAuditReportDeps>,
 ): Promise<SummaryBlock[]> {
-  const read = readStepFilesystemAudit(options, overrides);
+  const read = readAudit(options, overrides);
   return read.blocks(options.startedAt, await read.upload(), undefined);
 }

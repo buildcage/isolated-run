@@ -269,14 +269,46 @@ describe("runSandboxStep", () => {
 
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, { writeThrough: "/opt/cache" });
+    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, {
+      baseDir: ENV.GITHUB_WORKSPACE,
+      writeThrough: "/opt/cache",
+    });
     expect(orderOf(mocks.savePinningForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
   });
 
-  it("saves nothing without config-file or working-directory, leaving post the workflow's own inputs", async () => {
+  it("saves the workspace's real path for the post step without config-file or working-directory", async () => {
+    mocks.realPathOf.mockImplementation((path: string) =>
+      path === ENV.GITHUB_WORKSPACE ? "/real/repo" : path,
+    );
+
     await runSandboxStep(ENV, deps);
 
-    expect(mocks.savePinningForPost).not.toHaveBeenCalled();
+    expect(mocks.savePinningForPost).toHaveBeenCalledWith(ENV, { baseDir: "/real/repo" });
+    expect(orderOf(mocks.savePinningForPost)).toBeLessThan(orderOf(mocks.runSandboxedCommand));
+  });
+
+  it("resolves the audit's prefixes before the command runs, which may swap them for symlinks", async () => {
+    const workingDirectory = {
+      input: "sub",
+      path: `${ENV.GITHUB_WORKSPACE}/sub`,
+      isWorkspace: false,
+    };
+    mocks.readWorkingDirectory.mockReturnValue(workingDirectory);
+    let swapped = false;
+    mocks.realPathOf.mockImplementation((path: string) => (swapped ? "/etc" : path));
+    mocks.runSandboxedCommand.mockImplementation(async () => {
+      swapped = true;
+      return 0;
+    });
+
+    await runSandboxStep({ ...ENV }, deps);
+
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].prefixes).toMatchObject({
+      cwd: [workingDirectory.path],
+      named: workingDirectory.path,
+      workspace: [ENV.GITHUB_WORKSPACE],
+      home: [ENV.HOME],
+    });
   });
 
   it("returns the isolated command's own exit code", async () => {
@@ -812,9 +844,10 @@ describe("runSandboxStep", () => {
       workingDirectory,
       envOverrides: { PWD: workingDirectory.path },
     });
-    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].workingDirectory).toBe(
-      workingDirectory.path,
-    );
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].prefixes).toMatchObject({
+      cwd: [workingDirectory.path],
+      named: workingDirectory.path,
+    });
   });
 
   it("checks the sandbox's user can enter working-directory before the proxy starts", async () => {

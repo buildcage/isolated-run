@@ -1,6 +1,6 @@
 /**
- * What the post step pins against when working-directory or config-file set
- * it: the working directory's real path and the merged write-through.
+ * What the post step pins against: the working directory's real path and,
+ * when config-file set it, the merged write-through.
  *
  * The post step cannot work either out again: by the end of the job the
  * command may have moved a symlink on the way to the working directory, or a
@@ -49,7 +49,7 @@ export function savePinningForPost(
 
 /**
  * The saved values, removed once read. Undefined when the main step saved
- * none: neither input was set, or the step failed before reading them.
+ * none.
  */
 export function takePinningForPost(
   env: NodeJS.ProcessEnv,
