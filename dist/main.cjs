@@ -72802,8 +72802,8 @@ function fields(line, ref) {
 	return out;
 }
 const ESCAPE = /\\(?:u\{[0-9a-f]{1,6}\}|x[0-9a-f]{2}|.?)/y, SPACE = escapeForDisplay(" "), SPACES = `(?:${SPACE.replace(/[\\{}]/g, "\\$&")})*`, ONLY_SPACES = RegExp(`^${SPACES}$`), SPACES_OR_STARS = RegExp(`^(?:${SPACES}|\\*)*$`);
-function atEdge(glob, i, length, edge) {
-	let memfd = glob.startsWith("memfd:\"") && glob.endsWith("\""), start = memfd ? 7 : glob.lastIndexOf("/", i - 1) + 1, slash = glob.indexOf("/", i), end = memfd ? glob.length - 1 : slash === -1 ? glob.length : slash;
+function atEdge(glob, i, length, edge, whole) {
+	let memfd = glob.startsWith("memfd:\"") && glob.endsWith("\""), start = memfd ? 7 : whole ? 0 : glob.lastIndexOf("/", i - 1) + 1, slash = glob.indexOf("/", i), end = memfd ? glob.length - 1 : whole || slash === -1 ? glob.length : slash;
 	return edge.test(glob.slice(start, i)) || edge.test(glob.slice(i + length, end));
 }
 let rowA = new Uint8Array(256), rowB = new Uint8Array(256);
@@ -72831,7 +72831,7 @@ function takesWhole(parts, name) {
 	}
 	return rest[0] === 1;
 }
-function compileGlob(glob) {
+function compileGlob(glob, whole = !1) {
 	let parts = [], firstStar, i = 0;
 	for (; i < glob.length;) {
 		if (glob.startsWith("**", i)) {
@@ -72853,8 +72853,8 @@ function compileGlob(glob) {
 		if (c === "\\") {
 			ESCAPE.lastIndex = i, c = ESCAPE.exec(glob)[0];
 			let char = unescapeDisplay(c);
-			if (char === void 0 || escapeForDisplay(char) !== c || c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS)) return;
-		} else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES)) return;
+			if (char === void 0 || escapeForDisplay(char) !== c || c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS, whole)) return;
+		} else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES, whole)) return;
 		i += c.length;
 		let last = parts.at(-1);
 		typeof last == "string" ? parts[parts.length - 1] = last + c : parts.push(c);
@@ -72890,14 +72890,14 @@ function parseExpectedRules(sources) {
 		if (parts.length !== 3) throw invalidRules(ref, `expected a program, an access and a path, got ${parts.length} fields`);
 		let [program, access, path] = parts;
 		if (!ACCESS.test(access)) throw invalidRules(ref, `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`);
-		let glob = (field) => {
-			let compiled = compileGlob(field);
+		let glob = (field, program = !1) => {
+			let compiled = compileGlob(field) ?? (program ? compileGlob(field, !0) : void 0);
 			if (!compiled) throw invalidRules(ref, `${JSON.stringify(field)} holds an escape the summary never writes, or a space where it escapes one`);
 			return compiled;
 		};
 		if (!path.startsWith("memfd:") && UNTIDY.test(path)) throw invalidRules(ref, `${JSON.stringify(path)} holds an empty or "." component, which the summary never shows`);
 		for (let name of [program, path]) if (procByNumber(name)) throw invalidRules(ref, `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`);
-		let programGlob = program === "*" ? void 0 : glob(program), pathGlob = glob(path);
+		let programGlob = program === "*" ? void 0 : glob(program, !0), pathGlob = glob(path);
 		rules.push({
 			ref,
 			program: programGlob && anyProcess(program, programGlob),

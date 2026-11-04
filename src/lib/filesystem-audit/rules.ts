@@ -105,13 +105,13 @@ const ONLY_SPACES = new RegExp(`^${SPACES}$`);
 const SPACES_OR_STARS = new RegExp(`^(?:${SPACES}|\\*)*$`);
 
 // Whether the space at `i`, `length` long as written, may be at an end of its
-// name, where the summary escapes every space: a memfd's quoted name, else a
-// path component.
-function atEdge(glob: string, i: number, length: number, edge: RegExp): boolean {
+// name, where the summary escapes every space: a memfd's quoted name, the
+// whole glob when `whole`, else a path component.
+function atEdge(glob: string, i: number, length: number, edge: RegExp, whole: boolean): boolean {
   const memfd = glob.startsWith(`${MEMFD_PREFIX}"`) && glob.endsWith('"');
-  const start = memfd ? MEMFD_PREFIX.length + 1 : glob.lastIndexOf("/", i - 1) + 1;
+  const start = memfd ? MEMFD_PREFIX.length + 1 : whole ? 0 : glob.lastIndexOf("/", i - 1) + 1;
   const slash = glob.indexOf("/", i);
-  const end = memfd ? glob.length - 1 : slash === -1 ? glob.length : slash;
+  const end = memfd ? glob.length - 1 : whole || slash === -1 ? glob.length : slash;
   return edge.test(glob.slice(start, i)) || edge.test(glob.slice(i + length, end));
 }
 
@@ -182,9 +182,10 @@ function takesWhole(parts: readonly Part[], name: string): boolean {
  * a wildcard and what an escape. Undefined when the glob holds an escape the
  * summary never writes: one that stands for no character, such as `\q`, one
  * for a character it writes otherwise, such as `\u{41}` for `A`, or a space
- * escaped inside a name or left as is at either end.
+ * escaped inside a name or left as is at either end. A name is a path
+ * component, or the whole glob when `whole`.
  */
-export function compileGlob(glob: string): Glob | undefined {
+export function compileGlob(glob: string, whole = false): Glob | undefined {
   const parts: Part[] = [];
   let firstStar: number | undefined;
   let i = 0;
@@ -221,8 +222,8 @@ export function compileGlob(glob: string): Glob | undefined {
       c = ESCAPE.exec(glob)![0];
       const char = unescapeDisplay(c);
       if (char === undefined || escapeForDisplay(char) !== c) return undefined;
-      if (c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS)) return undefined;
-    } else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES)) return undefined;
+      if (c === SPACE && !atEdge(glob, i, c.length, SPACES_OR_STARS, whole)) return undefined;
+    } else if (c === " " && atEdge(glob, i, 1, ONLY_SPACES, whole)) return undefined;
     i += c.length;
     const last = parts.at(-1);
     if (typeof last === "string") parts[parts.length - 1] = last + c;
@@ -300,8 +301,9 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
           ref,
           `the access ${JSON.stringify(access)} must be letters of ${ORDER}, lowercase for a failure, with ! after one for a refusal`,
         );
-      const glob = (field: string): Glob => {
-        const compiled = compileGlob(field);
+      // A program is a path or, for one that ran nothing, a name escaped as a whole.
+      const glob = (field: string, program = false): Glob => {
+        const compiled = compileGlob(field) ?? (program ? compileGlob(field, true) : undefined);
         if (!compiled)
           throw invalidRules(
             ref,
@@ -321,7 +323,7 @@ export function parseExpectedRules(sources: RuleSource[]): ExpectedRules {
             ref,
             `${JSON.stringify(name)} names a process or a thread in /proc by a number or as thread-self, which the summary never shows; write <pid> or self for the process and <tid> for the thread`,
           );
-      const programGlob = program === "*" ? undefined : glob(program);
+      const programGlob = program === "*" ? undefined : glob(program, true);
       const pathGlob = glob(path);
       rules.push({
         ref,
