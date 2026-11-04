@@ -380,7 +380,7 @@ default (`443`/`80`), exactly as in the allow inputs.
 Under `proxy-engine: universal`, which never sees a method or a path, a URL line is handled like any
 other [rule the engine can't act on](#rule-inputs): `restrict` refuses it and `audit` warns.
 
-> **Migrating from v1.** `known-blocked-rules` was whitespace-separated, so several host rules could
+> **Migrating from v1.** `known_blocked_rules` was whitespace-separated, so several host rules could
 > share a line. It is now newline-separated: put each rule on its own line.
 
 <a id="ip-addresses-allowed_ip_rules"></a>
@@ -588,7 +588,7 @@ When the report itself, with its Filesystem Activity section if the filesystem a
 pass the limit, its parts give way in this order:
 
 1. the file access details
-2. the timeline
+2. the Communication details timeline
 3. the known blocked hosts table
 4. the Filesystem Activity table
 5. the AWS keys table
@@ -600,9 +600,9 @@ pass the limit, its parts give way in this order:
 A part that does not fit is cut at a line boundary, with a note after what is kept. When nothing of
 it fits, the note replaces it. The known blocked hosts table, the Filesystem Activity section's
 accessed paths table and the example are never cut partway: each is kept whole or replaced by its
-note. Once one of the other traffic tables is cut, the timeline and the known blocked hosts table
-are left out under the same note. Likewise, once the Filesystem Activity table is cut, the file
-access details are left out under its note.
+note. Once one of the other traffic tables is cut, the Communication details timeline and the known
+blocked hosts table are left out under the same note. Likewise, once the Filesystem Activity table
+is cut, the file access details are left out under its note.
 
 The report is written to the Job Summary only, so what was cut is recovered from the
 [traffic artifact](#traffic-artifact), or the filesystem audit's own artifact for its section; when

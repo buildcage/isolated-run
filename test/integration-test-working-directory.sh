@@ -127,10 +127,11 @@ fi
 
 step shm INPUT_WORKING_DIRECTORY="$SHM" INPUT_RUN="true"
 CODE=$?
-if [ "$CODE" != "0" ] && grep -q "the sandbox mounts its own /dev/shm" "$WORKDIR/shm.log"; then
-  pass "a working-directory the sandbox mounts over fails the step"
+if [ "$CODE" != "0" ] && grep -q "the sandbox mounts its own /dev" "$WORKDIR/shm.log" &&
+  ! grep -q "proxy image:" "$WORKDIR/shm.log"; then
+  pass "a working-directory the sandbox mounts over fails the step before the proxy starts"
 else
-  fail "expected a working-directory under /dev/shm to fail (exit $CODE)"
+  fail "expected a working-directory under /dev/shm to fail before the proxy starts (exit $CODE)"
   cat "$WORKDIR/shm.log"
 fi
 

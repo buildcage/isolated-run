@@ -26,8 +26,35 @@ describe("compileGlob", () => {
   it("matches an escape as written, \\* as a star", () => {
     expect(matches(String.raw`./out/\*.tmp`, String.raw`./out/\*.tmp`)).toBe(true);
     expect(matches(String.raw`./out/\*.tmp`, "./out/a.tmp")).toBe(false);
-    expect(matches(String.raw`./a\u{20}\x80\n\\`, String.raw`./a\u{20}\x80\n\\`)).toBe(true);
+    expect(matches(String.raw`./a\x80\n\\\u{20}`, String.raw`./a\x80\n\\\u{20}`)).toBe(true);
     expect(matches("./*", String.raw`./a\*b`)).toBe(true);
+  });
+
+  it("takes an escaped space only at an end of a name, as the summary writes one", () => {
+    for (const glob of [
+      String.raw`./\u{20}\u{20}a/b`,
+      String.raw`./a\u{20}/b`,
+      String.raw`./*\u{20}`,
+      String.raw`./a\u{20}*`,
+      String.raw`./\u{20}`,
+      String.raw`memfd:"\u{20}a/b"`,
+      String.raw`memfd:"a/b\u{20}"`,
+      "./a b",
+      "./* a",
+      "./a *",
+    ])
+      expect(compileGlob(glob), glob).toBeDefined();
+    for (const glob of [
+      String.raw`./c\u{20}d`,
+      String.raw`./\u{20}c\u{20}d`,
+      String.raw`./\*\u{20}x`,
+      String.raw`memfd:"a/\u{20}b"`,
+      String.raw`./\u{20} a`,
+      "./ a",
+      "./a ",
+      'memfd:" a"',
+    ])
+      expect(compileGlob(glob), glob).toBeUndefined();
   });
 
   it("refuses an escape the summary never writes", () => {
@@ -183,10 +210,13 @@ describe("parseExpectedRules", () => {
     [String.raw`* R memfd:"a\"`, "input:1: a quote is not closed"],
     ['* R memfd:"a"b', "input:1: a closing quote must end its field"],
     ['* R "./a"b', "input:1: a closing quote must end its field"],
-    [String.raw`* R ./a\q`, String.raw`input:1: "./a\\q" holds an escape the summary never writes`],
+    [
+      String.raw`* R ./a\q`,
+      String.raw`input:1: "./a\\q" holds an escape the summary never writes, or a space where it escapes one`,
+    ],
     [
       String.raw`\u{41} R ./a`,
-      String.raw`input:1: "\\u{41}" holds an escape the summary never writes`,
+      String.raw`input:1: "\\u{41}" holds an escape the summary never writes, or a space where it escapes one`,
     ],
     ["* R ./a//b", 'input:1: "./a//b" holds an empty or "." component'],
     ["* R /a/./b", 'input:1: "/a/./b" holds an empty or "." component'],
