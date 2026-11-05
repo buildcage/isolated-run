@@ -71961,18 +71961,18 @@ function reduceTimeline(timeline, knownBlockedRules) {
 	};
 }
 async function assembleReportData(engine, proxyScan, dnsScan, parameters, { proxy: proxyHealth, resolverAnswered, resolverLogDeaths }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLogDeaths = proxyHealth.logConnections === void 0 ? void 0 : Math.max(0, proxyHealth.logConnections - 1 - proxy);
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxyRestarts, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolverRestarts }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLogDeaths = proxyHealth.logConnections === void 0 ? void 0 : Math.max(0, proxyHealth.logConnections - 1 - proxyRestarts);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && proxyHealth.droppedLines === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLogDeaths === 0 && resolverLogDeaths === 0,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && proxyHealth.droppedLines === 0 && ringDroppedLines === 0 && resolverAnswered && proxyRestarts === 0 && resolverRestarts === 0 && proxyLogDeaths === 0 && resolverLogDeaths === 0,
 		droppedLines: (proxyHealth.droppedLines ?? 0) + ringDroppedLines,
 		proxyAnswered: proxyHealth.answered,
 		resolverAnswered,
 		restarts: {
-			proxy,
-			resolver
+			proxy: proxyRestarts,
+			resolver: resolverRestarts
 		},
 		logWriterDeaths: {
 			proxy: proxyLogDeaths ?? 0,
@@ -77333,7 +77333,7 @@ const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/l
 	"done",
 	`grep -rqsF "$2" ${LOG_DIR}`
 ].join("\n");
-function parseDroppedLogs(metrics) {
+function parseDroppedLines(metrics) {
 	let match = COUNTER.exec(metrics);
 	return match ? Number(match[1]) : void 0;
 }
@@ -77359,7 +77359,7 @@ function readProxyHealth(docker, containerId, token = (0, node_crypto.randomByte
 		logConnections: void 0
 	} : {
 		answered: !0,
-		droppedLines: caughtUp ? parseDroppedLogs(metrics) : void 0,
+		droppedLines: caughtUp ? parseDroppedLines(metrics) : void 0,
 		logConnections: readLogConnections(docker, containerId)
 	};
 }
