@@ -16,7 +16,7 @@ import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
-import { fetchReport, LogsUnreadableError, readActionVersion } from "./report-fetch.ts";
+import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
   COMMAND_SUMMARY_CUT_MESSAGE,
   missingReportFrame,
@@ -133,13 +133,11 @@ export async function reportStepTraffic(
   try {
     report = await fetchReport(containerName, parameters, proxyEngine);
   } catch (e) {
-    const message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-    if (e instanceof LogsUnreadableError) {
-      annotation.error(`${message}; failing the step whatever the mode`);
-      process.exitCode = 1;
-    } else {
-      fail(message);
-    }
+    // Without a report the step has nothing to show for its traffic.
+    annotation.error(
+      `Failed to fetch sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
+    );
+    process.exitCode = 1;
   }
 
   // Written alone when there is no report or its write failed, so the report

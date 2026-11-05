@@ -276,40 +276,15 @@ describe("reportStepTraffic", () => {
   );
 
   it.each([
-    { mode: "restrict", failOnBlocked: true, fails: true },
-    { mode: "restrict", failOnBlocked: false, fails: false },
-    { mode: "audit", failOnBlocked: true, fails: false },
-  ])(
-    "fails the step when the report cannot be fetched only under restrict with fail-on-blocked ($mode, fail-on-blocked=$failOnBlocked)",
-    async ({ mode, failOnBlocked, fails }) => {
-      mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
-
-      await expect(
-        reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
-      ).resolves.toBeUndefined();
-
-      expect(mocks.writeReportSummary).not.toHaveBeenCalled();
-      if (fails) {
-        expect(annotation.error).toHaveBeenCalledWith(
-          "Failed to fetch sandbox report: container is gone; failing the step under restrict with fail-on-blocked",
-        );
-        expect(process.exitCode).toBe(1);
-      } else {
-        expect(annotation.warning).toHaveBeenCalledWith(
-          "Failed to fetch sandbox report: container is gone",
-        );
-        expect(process.exitCode).toBe(exitCode);
-      }
-    },
-  );
-
-  it.each([
     { mode: "restrict", failOnBlocked: false, error: ProxyStoppedError },
     { mode: "audit", failOnBlocked: true, error: ProxyStoppedError },
     { mode: "restrict", failOnBlocked: false, error: LogsUnreadableError },
     { mode: "audit", failOnBlocked: true, error: LogsUnreadableError },
+    { mode: "restrict", failOnBlocked: true, error: Error },
+    { mode: "restrict", failOnBlocked: false, error: Error },
+    { mode: "audit", failOnBlocked: true, error: Error },
   ])(
-    "fails the step when the logs could not be read ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
+    "fails the step when the report cannot be fetched ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
     async ({ mode, failOnBlocked, error }) => {
       mocks.fetchReport.mockRejectedValue(new error("no logs"));
 
@@ -321,6 +296,7 @@ describe("reportStepTraffic", () => {
         "Failed to fetch sandbox report: no logs; failing the step whatever the mode",
       );
       expect(annotation.warning).not.toHaveBeenCalled();
+      expect(mocks.writeReportSummary).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
     },
   );
