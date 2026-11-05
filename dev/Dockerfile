@@ -22,7 +22,7 @@ ARG RUNC_SHA256_AMD64=599f6f94ff8c5057241eff0d54c3c74f95c34935b6457b33fe545defc6
 # renovate: datasource=github-release-attachments depName=opencontainers/runc digestVersion=v1.5.2
 ARG RUNC_SHA256_ARM64=d10ecae898361832a059be2089bab92d158aec54661b18ed7346ed79628b46b0
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS deps
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS deps
 ARG RUNC_VERSION
 ARG RUNC_SHA256_AMD64
 ARG RUNC_SHA256_ARM64
@@ -59,7 +59,7 @@ COPY docker/filesystem-audit/ ./
 RUN go generate ./... && \
     CGO_ENABLED=0 GOARCH="${TARGETARCH}" go build -trimpath -ldflags="-s -w" -o /out/filesystem-audit .
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 RUN apk add --no-cache bash util-linux iproute2 findutils jq
 
