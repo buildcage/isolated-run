@@ -3,8 +3,9 @@
 # still running, and checks that the command's traffic then fails instead of
 # finding a way around the proxy, and that the step does not pass on a report
 # the stopped proxy can no longer vouch for. A second step stops coredns alone,
-# which leaves the logs reading as whole, and a third kills the proxy's log
-# writer, which leaves no trace in the log.
+# which leaves the logs reading as whole, a third kills the proxy's log
+# writer, which leaves no trace in the log, and a fourth overflows the proxy's
+# log ring.
 #
 # The command and this driver take turns through marker files in the
 # workspace: the command writes one when it is done with a phase, and waits
@@ -293,6 +294,77 @@ assert_file_has "$STEP_PREFIX.log" "the step's notice counts the proxy's log wri
   "The proxy's log writer died 1 time"
 assert_file_has "$STEP_PREFIX.log" "the step's notice counts the resolver's log writer's death" \
   "The DNS resolver's log writer died 1 time"
+SUMMARY=$(cat "$STEP_PREFIX.md")
+assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
+
+if [ "$FAILURES" -gt "$FAILURES_BEFORE" ]; then
+  echo ""
+  echo "--- step log ---"
+  cat "$STEP_PREFIX.log"
+fi
+
+echo ""
+echo "--- the proxy's log ring overflowed ---"
+# Only haproxy's own notice in the log tells of lines a full ring dropped, so
+# this checks the report still reads the notice haproxy actually writes.
+FAILURES_BEFORE=$FAILURES
+STEP_PREFIX="$WORKDIR/ring"
+# shellcheck disable=SC2016 # expanded by the command's shell
+run_step universal "$STEP_PREFIX" \
+  INPUT_PROXY_MODE="restrict" \
+  INPUT_ALLOWED_HTTPS_RULES="allowed.example.com:443" \
+  INPUT_ALLOWED_HTTP_RULES="allowed.example.com:80" \
+  INPUT_ALLOWED_IP_RULES="" \
+  INPUT_FAIL_ON_BLOCKED="false" \
+  INPUT_RUN='touch ring.ready
+for _ in $(seq 1 240); do
+  [ -e ring.overflowed ] && exit 0
+  sleep 0.5
+done
+exit 1' &
+STEP_PID=$!
+
+if wait_for_step_marker ring.ready; then
+  CONTAINER=$(state_container_name "$STEP_PREFIX.state")
+  # The stopped s6-log leaves the ring full, and each barrier request logs a
+  # line of about 1KB, where haproxy cuts the URI, 3MB in all against the 1MB
+  # ring.
+  # shellcheck disable=SC2016 # expanded inside the proxy container
+  if docker exec "$CONTAINER" sh -c '
+    pkill -STOP -f "^s6-log .*/var/log/haproxy" || exit 1
+    pad=$(head -c 1000 /dev/zero | tr "\0" x)
+    i=0
+    status=0
+    while [ $i -lt 3000 ]; do
+      curl -sf --unix-socket /var/run/haproxy-barrier.sock "http://localhost/?$i-$pad" >/dev/null || status=1
+      i=$((i + 1))
+    done
+    pkill -CONT -f "^s6-log .*/var/log/haproxy"
+    exit $status'; then
+    pass "the proxy's log ring overflowed in the proxy container"
+  else
+    fail "could not overflow the proxy's log ring in the proxy container"
+  fi
+else
+  fail "the command never started"
+  cat "$STEP_PREFIX.log"
+  assert_results
+fi
+touch "$WORKDIR/ring.overflowed"
+
+if wait_step_gone "$STEP_END_TIMEOUT"; then
+  wait "$STEP_PID"
+  STEP_EXIT=$?
+  STEP_PID=""
+else
+  fail "the step did not end within ${STEP_END_TIMEOUT}s of the ring overflowing"
+  stop_step
+  STEP_EXIT="timeout"
+fi
+
+check_status "the step passed with fail-on-blocked: false" "$STEP_EXIT" 0
+assert_file_has "$STEP_PREFIX.log" "the step's notice counts the lines the ring dropped" \
+  "The proxy dropped at least [1-9][0-9]* log line(s) during the run"
 SUMMARY=$(cat "$STEP_PREFIX.md")
 assert_summary_contains "This report is incomplete" "the report marks itself incomplete"
 
