@@ -355,7 +355,7 @@ In `restrict` mode a blocked connection fails the step, and so does a report tha
 written, since it can't show that nothing was blocked. Set `fail-on-blocked: false` to report
 without failing, or list what you expect to stay blocked in `known-blocked-rules`. In `audit` mode
 a blocked connection or an incomplete report does not fail the step. A proxy or resolver that
-stopped answering, or a log the report could not fetch, fails it in either mode. How the alert and
+stopped answering, or a report that could not be built, fails it in either mode. How the alert and
 the tables are made up, and what a `dns-service-not-allowed` row means, is in
 [Report details](./docs/reference.md#report-details).
 

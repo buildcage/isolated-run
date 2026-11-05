@@ -77836,8 +77836,7 @@ async function reportStepTraffic({ containerName, proxyEngine, parameters, annot
 	try {
 		report = await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
-		let message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-		e instanceof LogsUnreadableError ? (annotation.error(`${message}; failing the step whatever the mode`), process.exitCode = 1) : fail(message);
+		annotation.error(`Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`), process.exitCode = 1;
 	}
 	let rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),

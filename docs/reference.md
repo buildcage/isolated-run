@@ -557,7 +557,8 @@ down or because it hung, fails the step in both modes, regardless of `fail-on-bl
 lookups made while it was down failed instead of going around it, but nothing recorded them.
 
 A log the report cannot fetch at all fails the step in both modes too, even while the proxy and the
-resolver answer, since there is then no report.
+resolver answer, since there is then no report. So does a report that cannot be built from logs it
+did read.
 
 Matching is per request, so a row that counts several requests to one host counts as expected only
 when a rule accounts for every one of them: a URL rule that names one endpoint leaves the host's

@@ -16,7 +16,7 @@ import type { VerdictItems } from "#core/lib/report/render/verdict.ts";
 import type { GenReportParameters } from "#core/lib/report/types.ts";
 
 import { failOrWarn } from "./fail-or-warn.ts";
-import { fetchReport, LogsUnreadableError, readActionVersion } from "./report-fetch.ts";
+import { fetchReport, readActionVersion } from "./report-fetch.ts";
 import {
   COMMAND_SUMMARY_CUT_MESSAGE,
   missingReportFrame,
@@ -92,10 +92,10 @@ export interface ReportStepOptions {
  * written with the report, or under a title of its own when there is no report
  * to write.
  *
- * Never throws. A failure here is a warning naming the step that failed, and
- * under `restrict` with fail-on-blocked it also fails the step: a report that
- * could not be read or recorded cannot vouch that nothing was blocked. A log
- * it could not fetch fails it in any mode.
+ * Never throws. A report it could not build fails the step in any mode. A
+ * later failure is a warning naming the step that failed, and under `restrict`
+ * with fail-on-blocked it also fails the step: a report that could not be
+ * recorded cannot vouch that nothing was blocked.
  */
 export async function reportStepTraffic(
   {
@@ -133,13 +133,11 @@ export async function reportStepTraffic(
   try {
     report = await fetchReport(containerName, parameters, proxyEngine);
   } catch (e) {
-    const message = `Failed to fetch sandbox report: ${errorMessage(e)}`;
-    if (e instanceof LogsUnreadableError) {
-      annotation.error(`${message}; failing the step whatever the mode`);
-      process.exitCode = 1;
-    } else {
-      fail(message);
-    }
+    // Without a report the step has nothing to show for its traffic.
+    annotation.error(
+      `Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
+    );
+    process.exitCode = 1;
   }
 
   // Written alone when there is no report or its write failed, so the report
