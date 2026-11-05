@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
-import { readProxyAnswered, readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
+import { readProxyAnswered, readProxyHealth } from "#core/lib/docker/proxy-health.ts";
 import { readResolverAnswered, readResolverLogDeaths } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -57,7 +57,7 @@ export class ProxyStoppedError extends LogsUnreadableError {}
 
 function readHealth(docker: Docker, containerName: string): ServiceHealth {
   return {
-    droppedLogs: readProxyDroppedLogs(docker, containerName),
+    proxy: readProxyHealth(docker, containerName),
     resolverAnswered: readResolverAnswered(docker, containerName),
     resolverLogDeaths: readResolverLogDeaths(docker, containerName),
   };
