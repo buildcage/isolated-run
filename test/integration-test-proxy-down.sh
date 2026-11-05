@@ -253,7 +253,9 @@ STEP_PID=$!
 
 if wait_for_step_marker writer.ready; then
   CONTAINER=$(state_container_name "$STEP_PREFIX.state")
-  if docker exec "$CONTAINER" pkill -KILL -f "s6-log .*/var/log/haproxy"; then
+  # Anchored, as the listener that starts each s6-log carries its command line
+  # too.
+  if docker exec "$CONTAINER" pkill -KILL -f "^s6-log .*/var/log/haproxy"; then
     pass "the proxy's s6-log killed in the proxy container"
   else
     fail "could not kill the proxy's s6-log in the proxy container"
