@@ -46,7 +46,7 @@ RUN apk add --no-cache curl libcap-utils && \
 # build time; see gen-seccomp-profile/main.go for why. Pure Go
 # (CGO_ENABLED=0), so this cross-compiles natively via BUILDPLATFORM
 # without needing QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS gen-seccomp-profile-build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS gen-seccomp-profile-build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
@@ -63,7 +63,7 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" collect-go-licenses.
 # docker/filesystem-audit/main.go. bpf2go compiles its eBPF object with clang
 # (architecture-independent, -target bpfel) and embeds it, so the Go loader
 # cross-compiles via BUILDPLATFORM without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS filesystem-audit-build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS filesystem-audit-build
 # The toolchain is not pinned: an Alpine branch serves only the latest build of
 # each package, so a pinned version would stop the build at its next fix. The
 # digest above picks the branch, so a digest bump can bring a newer clang; the
