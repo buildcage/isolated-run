@@ -71086,14 +71086,14 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 	let unexpected = blockedRows.filter((row) => !row.expected).length;
 	return unexpected === blockedRows.length ? base : unexpected === 0 ? `${base}, all matched known-blocked-rules (expected)` : `${base} (${unexpected} of ${blockedRows.length} distinct blocked host(s) unmatched by known-blocked-rules)`;
 }
-function describeInterruptions({ proxyAnswered, resolverAnswered, droppedLines, restarts }) {
+function describeInterruptions({ proxyAnswered, resolverAnswered, droppedLines, restarts, logWriterDeaths }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), restarts.proxyLog && facts.push(`The proxy's log writer restarted ${restarts.proxyLog} time(s) during the run, losing the lines it had been sent but not yet written.`), restarts.resolverLog && facts.push(`The DNS resolver's log writer died ${restarts.resolverLog} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), logWriterDeaths.proxy && facts.push(`The proxy's log writer died ${logWriterDeaths.proxy} time(s) during the run, losing the lines it had been sent but not yet written.`), logWriterDeaths.resolver && facts.push(`The DNS resolver's log writer died ${logWriterDeaths.resolver} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
 }
-function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered, droppedLines, restarts, engineLabel }) {
+function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered, droppedLines, restarts, logWriterDeaths, engineLabel }) {
 	let outcome = determineBlockedOutcome({
 		isAudit,
 		failOnBlocked,
@@ -71116,7 +71116,8 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		proxyAnswered,
 		resolverAnswered,
 		droppedLines,
-		restarts
+		restarts,
+		logWriterDeaths
 	});
 	if (isAudit && proxyAnswered && resolverAnswered) {
 		let incomplete = `${base}, but the logs are incomplete and this is not a full record`;
@@ -71144,6 +71145,7 @@ function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 		resolverAnswered: report.resolverAnswered,
 		droppedLines: report.droppedLines,
 		restarts: report.restarts,
+		logWriterDeaths: report.logWriterDeaths,
 		engineLabel
 	})], undecided = describeUndecidedRequests(report, engineLabel);
 	undecided && emissions.push(undecided);
@@ -71958,21 +71960,23 @@ function reduceTimeline(timeline, knownBlockedRules) {
 		blockedCount: blockedEvents.length
 	};
 }
-async function assembleReportData(engine, proxyScan, dnsScan, parameters, { droppedLogs, resolverAnswered, resolverLogDeaths: resolverLog }) {
-	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxy, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolver }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLog = droppedLogs.logConnections === void 0 ? void 0 : Math.max(0, droppedLogs.logConnections - 1 - proxy);
+async function assembleReportData(engine, proxyScan, dnsScan, parameters, { proxy: proxyHealth, resolverAnswered, resolverLogDeaths }) {
+	let [{ events: proxyEvents, startedAt, headIntact: proxyHeadIntact, unparsed, restarts: proxyRestarts, dropped: ringDroppedLines }, { events: dnsEvents, headIntact: dnsHeadIntact, unparsed: dnsUnparsed, restarts: resolverRestarts }] = await Promise.all([proxyScan, dnsScan]), timeline = [...proxyEvents, ...dnsEvents].sort((a, b) => a.time - b.time), proxyLogDeaths = proxyHealth.logConnections === void 0 ? void 0 : Math.max(0, proxyHealth.logConnections - 1 - proxyRestarts);
 	return {
 		engine,
 		parameters,
 		...reduceTimeline(timeline, parameters.knownBlockedRules),
-		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && droppedLogs.count === 0 && ringDroppedLines === 0 && resolverAnswered && proxy === 0 && resolver === 0 && proxyLog === 0 && resolverLog === 0,
-		droppedLines: (droppedLogs.count ?? 0) + ringDroppedLines,
-		proxyAnswered: droppedLogs.answered,
+		logLooksPlausible: proxyHeadIntact && dnsHeadIntact && unparsed === 0 && dnsUnparsed === 0 && proxyHealth.droppedLines === 0 && ringDroppedLines === 0 && resolverAnswered && proxyRestarts === 0 && resolverRestarts === 0 && proxyLogDeaths === 0 && resolverLogDeaths === 0,
+		droppedLines: (proxyHealth.droppedLines ?? 0) + ringDroppedLines,
+		proxyAnswered: proxyHealth.answered,
 		resolverAnswered,
 		restarts: {
-			proxy,
-			resolver,
-			proxyLog: proxyLog ?? 0,
-			resolverLog: resolverLog ?? 0
+			proxy: proxyRestarts,
+			resolver: resolverRestarts
+		},
+		logWriterDeaths: {
+			proxy: proxyLogDeaths ?? 0,
+			resolver: resolverLogDeaths ?? 0
 		},
 		startedAt,
 		timeline
@@ -77309,7 +77313,7 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 	};
 }
 //#endregion
-//#region src/core/lib/docker/proxy-dropped-logs.ts
+//#region src/core/lib/docker/proxy-health.ts
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
 	"i=0",
 	"still=0",
@@ -77329,7 +77333,7 @@ const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/l
 	"done",
 	`grep -rqsF "$2" ${LOG_DIR}`
 ].join("\n");
-function parseDroppedLogs(metrics) {
+function parseDroppedLines(metrics) {
 	let match = COUNTER.exec(metrics);
 	return match ? Number(match[1]) : void 0;
 }
@@ -77347,15 +77351,15 @@ function awaitProxyLog(docker, containerId, token) {
 		return !1;
 	}
 }
-function readProxyDroppedLogs(docker, containerId, token = (0, node_crypto.randomBytes)(16).toString("hex")) {
+function readProxyHealth(docker, containerId, token = (0, node_crypto.randomBytes)(16).toString("hex")) {
 	let caughtUp = awaitProxyLog(docker, containerId, token), metrics = readMetrics(docker, containerId);
 	return metrics === void 0 ? {
 		answered: !1,
-		count: void 0,
+		droppedLines: void 0,
 		logConnections: void 0
 	} : {
 		answered: !0,
-		count: caughtUp ? parseDroppedLogs(metrics) : void 0,
+		droppedLines: caughtUp ? parseDroppedLines(metrics) : void 0,
 		logConnections: readLogConnections(docker, containerId)
 	};
 }
@@ -77518,7 +77522,7 @@ function createProxyLogTally() {
 				return;
 			}
 			let start = START.exec(trimmed);
-			start && headIntact !== void 0 && restarts++, headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !trimmed.startsWith("buildcage haproxy starting") && !trimmed.startsWith("buildcage log barrier") && unparsed++;
+			start && headIntact !== void 0 && restarts++, headIntact ??= start !== null, start && startedAt === void 0 && (startedAt = Number(start[1]) / 1e3), trimmed.startsWith("buildcage ") && !start && !trimmed.startsWith("buildcage log barrier") && unparsed++;
 		},
 		result() {
 			return {
@@ -77733,7 +77737,7 @@ function fetchReport(containerName, parameters, proxyEngine) {
 var LogsUnreadableError = class extends Error {}, ProxyStoppedError = class extends LogsUnreadableError {};
 function readHealth(docker, containerName) {
 	return {
-		droppedLogs: readProxyDroppedLogs(docker, containerName),
+		proxy: readProxyHealth(docker, containerName),
 		resolverAnswered: readResolverAnswered(docker, containerName),
 		resolverLogDeaths: readResolverLogDeaths(docker, containerName)
 	};

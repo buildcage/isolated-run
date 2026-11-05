@@ -289,8 +289,8 @@ else
 fi
 
 check_status "the step passed with fail-on-blocked: false" "$STEP_EXIT" 0
-assert_file_has "$STEP_PREFIX.log" "the step's notice counts the log writer's restart" \
-  "The proxy's log writer restarted 1 time"
+assert_file_has "$STEP_PREFIX.log" "the step's notice counts the proxy's log writer's death" \
+  "The proxy's log writer died 1 time"
 assert_file_has "$STEP_PREFIX.log" "the step's notice counts the resolver's log writer's death" \
   "The DNS resolver's log writer died 1 time"
 SUMMARY=$(cat "$STEP_PREFIX.md")

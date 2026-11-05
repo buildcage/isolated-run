@@ -2,14 +2,15 @@ import { execFileSync, spawn } from "node:child_process";
 
 import type { ProxyEngine } from "#core/lib/actions/inputs.ts";
 import { createDocker, type Docker } from "#core/lib/docker/client.ts";
-import { readProxyAnswered, readProxyDroppedLogs } from "#core/lib/docker/proxy-dropped-logs.ts";
+import { readProxyAnswered, readProxyHealth } from "#core/lib/docker/proxy-health.ts";
 import { readResolverAnswered, readResolverLogDeaths } from "#core/lib/docker/resolver-health.ts";
 import { readRotatedLog } from "#core/lib/docker/rotated-log.ts";
 import { errorMessage } from "#core/lib/errors.ts";
+import type { ServiceHealth } from "#core/lib/log/service-health.ts";
 import { readActionVersion as readImageActionVersion } from "#core/lib/report/action-version.ts";
 import { buildInspectReportData } from "#core/lib/report/build/inspect.ts";
 import { buildUniversalReportData } from "#core/lib/report/build/universal.ts";
-import type { GenReportParameters, ReportData, ServiceHealth } from "#core/lib/report/types.ts";
+import type { GenReportParameters, ReportData } from "#core/lib/report/types.ts";
 
 import { hostCommand, hostCommandEnv } from "./sandbox/pinned-commands.ts";
 
@@ -57,7 +58,7 @@ export class ProxyStoppedError extends LogsUnreadableError {}
 
 function readHealth(docker: Docker, containerName: string): ServiceHealth {
   return {
-    droppedLogs: readProxyDroppedLogs(docker, containerName),
+    proxy: readProxyHealth(docker, containerName),
     resolverAnswered: readResolverAnswered(docker, containerName),
     resolverLogDeaths: readResolverLogDeaths(docker, containerName),
   };
