@@ -106,7 +106,12 @@ LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
 
 # apk add leaves an installed package alone, so without this the CA bundle
 # stays as old as the base image and keeps trusting roots since withdrawn.
-RUN apk add --no-cache --upgrade ca-certificates-bundle
+# A builder that adds its own CA to the bundle during the step makes apk keep
+# the old file and install the new one as .apk-new, so move it into place.
+RUN apk add --no-cache --upgrade ca-certificates-bundle && \
+    if [ -e /etc/ssl/certs/ca-certificates.crt.apk-new ]; then \
+      mv /etc/ssl/certs/ca-certificates.crt.apk-new /etc/ssl/certs/ca-certificates.crt; \
+    fi
 
 # haproxy carries what this engine needs in one binary: it tells a TLS
 # handshake from a plain request by its first bytes, generates certificates
@@ -184,6 +189,12 @@ COPY docker/inspect/files/s6-scripts/ /etc/s6-overlay/scripts/
 # build.
 ARG BUILDCAGE_TEST_HOOKS=""
 RUN if [ -n "$BUILDCAGE_TEST_HOOKS" ]; then touch /opt/buildcage/.test-hooks; fi
+
+# A .apk-new is a new version apk left beside a file it found changed, so the
+# image would ship the old one.
+RUN if find /etc -name '*.apk-new' | grep .; then \
+      echo "apk did not install the new versions listed above" >&2; exit 1; \
+    fi
 
 # Last, so that it sees every package the image ends up with.
 RUN --mount=type=bind,source=docker/check-alpine-licenses.sh,target=/tmp/check-alpine-licenses.sh \
