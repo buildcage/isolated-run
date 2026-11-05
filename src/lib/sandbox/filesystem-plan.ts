@@ -19,7 +19,11 @@ import { reservedCaStorePaths } from "./ca-trust.ts";
 import { determineOverlayRoots, nestedMountRoots } from "./ephemeral-fs.ts";
 import { resolveDefaultWritableDirs } from "./host-commands.ts";
 import { listHostMounts } from "./mountinfo.ts";
-import { reservedInternalDestinations } from "./oci-mounts.ts";
+import {
+  assertNoFreshMountDestinations,
+  RUNC_FRESH_MOUNTS,
+  reservedInternalDestinations,
+} from "./oci-mounts.ts";
 import { assertScratchBaseNotWritable, isAtOrUnder, pathAliases } from "./paths.ts";
 import { MEDIATED_VARIABLES, type MediatedVariable } from "./runner-output-files.ts";
 import { realPathOf, realSymlinkDeps, type SymlinkDeps } from "./symlinks.ts";
@@ -65,6 +69,18 @@ export function validateFilesystemInputs(
           "machine and not the next. Name a containing directory instead to persist writes around it.",
         "FILESYSTEM_INPUT_CONFLICT",
       );
+    }
+  }
+
+  // Early copy of the layers' check; like theirs, it skips write-through: /.
+  if (!writeThroughPaths.includes(WRITE_THROUGH_ALL)) {
+    try {
+      assertNoFreshMountDestinations(
+        writeThroughPaths,
+        new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)),
+      );
+    } catch (e) {
+      throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
     }
   }
 }

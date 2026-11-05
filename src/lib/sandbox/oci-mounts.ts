@@ -30,6 +30,14 @@ export function freshMountDestinationsFrom(baseSpec: HasMounts): Set<string> {
   return new Set(baseSpec.mounts.map((m) => m.destination));
 }
 
+// Where runc's own spec mounts fresh filesystems: every mount it makes, /dev/shm
+// included, lies under one of these.
+export const RUNC_FRESH_MOUNTS: MountEntry[] = [
+  { destination: "/proc", type: "proc", source: "proc" },
+  { destination: "/dev", type: "tmpfs", source: "tmpfs" },
+  { destination: "/sys", type: "sysfs", source: "sysfs" },
+];
+
 /**
  * Pure: rewrite runc's 64MB /dev/shm cap to the host's own size, so a step
  * gets the shared memory it would have unwrapped. Chromium, and so Playwright
@@ -125,7 +133,7 @@ export function reservedInternalDestinations(): string[] {
  * `write-through: /proc` would hand the sandbox the host's real procfs and
  * undo the PID-namespace separation.
  */
-function assertNoFreshMountDestinations(
+export function assertNoFreshMountDestinations(
   writableDirs: string[],
   freshMountDestinations: Set<string>,
 ): void {

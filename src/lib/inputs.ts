@@ -45,7 +45,7 @@ const LIST_INPUTS = [
 ];
 
 /** Every input action.yml declares. config-file takes these less
- *  NOT_IN_CONFIG_FILE, and its error lists them in this order. */
+ *  writable and STEP_ONLY, and its error lists them in this order. */
 export const ACTION_INPUTS = [
   "run",
   "config-file",
@@ -69,14 +69,18 @@ export const ACTION_INPUTS = [
   "working-directory",
 ];
 
-// The step itself, the file itself, the deprecated spelling of write-through,
-// and the directory the file's own path is relative to.
-const NOT_IN_CONFIG_FILE = ["run", "config-file", "writable", "working-directory"];
+// The step itself, the file itself, and the directory the file's own path is
+// relative to.
+const STEP_ONLY = ["run", "config-file", "working-directory"];
 
 export const CONFIG_FILE_INPUTS: ConfigFileInputs = {
   // Marked pure so post.cjs, which uses other parts of this module, leaves it out.
-  known: /* @__PURE__ */ ACTION_INPUTS.filter((input) => !NOT_IN_CONFIG_FILE.includes(input)),
+  // writable, the deprecated spelling of write-through, stays an unknown key.
+  known: /* @__PURE__ */ ACTION_INPUTS.filter(
+    (input) => input !== "writable" && !STEP_ONLY.includes(input),
+  ),
   lists: LIST_INPUTS,
+  stepOnly: STEP_ONLY,
 };
 
 /** Narrowed to what this module needs, so a test can pass a plain lookup. */

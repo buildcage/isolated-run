@@ -122,6 +122,27 @@ describe("resolveFilesystemPlan", () => {
     expect(mkdir).not.toHaveBeenCalled();
   });
 
+  it.each(["persistent", "ephemeral"] as const)(
+    "rejects a path under a filesystem runc mounts fresh before creating anything, in %s mode",
+    (mode) => {
+      const mkdir = vi.fn();
+      expect(() =>
+        resolveFilesystemPlan(mode, "/dev/shm/x", ENV, {
+          exists: () => false,
+          lstat: notLink,
+          mkdir,
+          listHostMounts: () => [],
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: "FILESYSTEM_INPUT_CONFLICT",
+          message: expect.stringContaining('"/dev/shm/x" is inside "/dev"'),
+        }),
+      );
+      expect(mkdir).not.toHaveBeenCalled();
+    },
+  );
+
   describe("the file a CA store candidate really is", () => {
     const REAL_STORE = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem";
     // As on Fedora, where the candidates are symlinks into ca-trust.
@@ -633,6 +654,25 @@ describe("validateFilesystemInputs", () => {
 
   it("finds the / sentinel among other entries, not just on its own", () => {
     expect(() => validateFilesystemInputs("ephemeral", ["./dist", "/"])).toThrow(SandboxError);
+  });
+
+  it("rejects a path at or under /proc, /dev or /sys in either mode", () => {
+    for (const path of ["/proc", "/dev/shm/x", "/sys/fs/cgroup"])
+      for (const mode of ["persistent", "ephemeral"] as const) {
+        expect
+          .soft(() => validateFilesystemInputs(mode, [path]))
+          .toThrow(
+            expect.objectContaining({
+              code: "FILESYSTEM_INPUT_CONFLICT",
+              message: expect.stringContaining("which the sandbox mounts itself"),
+            }),
+          );
+      }
+    expect(() => validateFilesystemInputs("persistent", ["/devices", "/system"])).not.toThrow();
+  });
+
+  it("leaves a path under /dev to write-through: /, which binds none of them", () => {
+    expect(() => validateFilesystemInputs("persistent", ["/", "/dev/shm/x"])).not.toThrow();
   });
 
   it("allows the / sentinel in persistent mode, and ordinary paths in either", () => {
