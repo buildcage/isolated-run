@@ -46,7 +46,7 @@ export function fetchReport(
 }
 /* v8 ignore stop */
 
-/** The logs could not be read, so the step fails whatever the mode. */
+/** The logs could not be read, told apart from a fault in building the report from them. */
 export class LogsUnreadableError extends Error {}
 
 /**

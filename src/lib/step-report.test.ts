@@ -284,7 +284,7 @@ describe("reportStepTraffic", () => {
     { mode: "restrict", failOnBlocked: false, error: Error },
     { mode: "audit", failOnBlocked: true, error: Error },
   ])(
-    "fails the step when the report cannot be fetched ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
+    "fails the step when the report cannot be built ($error.name, $mode, fail-on-blocked=$failOnBlocked)",
     async ({ mode, failOnBlocked, error }) => {
       mocks.fetchReport.mockRejectedValue(new error("no logs"));
 
@@ -293,7 +293,7 @@ describe("reportStepTraffic", () => {
       ).resolves.toBeUndefined();
 
       expect(annotation.error).toHaveBeenCalledWith(
-        "Failed to fetch sandbox report: no logs; failing the step whatever the mode",
+        "Failed to build the sandbox report: no logs; failing the step whatever the mode",
       );
       expect(annotation.warning).not.toHaveBeenCalled();
       expect(mocks.writeReportSummary).not.toHaveBeenCalled();

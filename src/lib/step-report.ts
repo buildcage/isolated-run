@@ -92,10 +92,10 @@ export interface ReportStepOptions {
  * written with the report, or under a title of its own when there is no report
  * to write.
  *
- * Never throws. A failure here is a warning naming the step that failed, and
- * under `restrict` with fail-on-blocked it also fails the step: a report that
- * could not be read or recorded cannot vouch that nothing was blocked. A log
- * it could not fetch fails it in any mode.
+ * Never throws. A report it could not build fails the step in any mode. A
+ * later failure is a warning naming the step that failed, and under `restrict`
+ * with fail-on-blocked it also fails the step: a report that could not be
+ * recorded cannot vouch that nothing was blocked.
  */
 export async function reportStepTraffic(
   {
@@ -135,7 +135,7 @@ export async function reportStepTraffic(
   } catch (e) {
     // Without a report the step has nothing to show for its traffic.
     annotation.error(
-      `Failed to fetch sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
+      `Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
     );
     process.exitCode = 1;
   }
