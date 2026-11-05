@@ -845,7 +845,7 @@ describe("runSandboxStep", () => {
       envOverrides: { PWD: workingDirectory.path },
     });
     expect(mocks.readStepFilesystemAudit.mock.calls[0][0].prefixes).toMatchObject({
-      cwd: [workingDirectory.path],
+      cwd: [`${ENV.GITHUB_WORKSPACE}/app`, workingDirectory.path],
       named: workingDirectory.path,
     });
   });

@@ -258,7 +258,8 @@ each has rows of its own.
   alone, such as `fchmod`, is shown under that file's path.
 - Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a path through it is
   shown where it leads, so a failed access through the symlink and a successful one share a row.
-  Other symlinks are not followed for this. All three are resolved before the command runs, as are
+  So is a path through the working directory as its input spells it, symlinks and a leading `..`
+  included. Other symlinks are not followed for this. All three are resolved before the command runs, as are
   the tool cache and the runner files, so a command that later swaps one for a symlink does not
   change what `./` or `$GITHUB_WORKSPACE/` stands for.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
@@ -842,10 +843,10 @@ it writes to, also fails the step, after the command, with the record cut where 
   not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds
   more, as [How rows are grouped](#how-rows-are-grouped) says. One that would pass 1 MiB even so
-  keeps the rows that fit in it, in the order they were first touched, and ends with a note. It is
-  left out whole, under a note that says why, when not one row fits, or once it holds more than
-  200,000 paths after folding. When the table is left out, the details still show unless they are
-  left out too. The Unexpected Accesses table and the proposed rules count paths and bytes the
+  keeps the rows that fit in it, in the order they were first touched, and ends with a note; its
+  heading then gives no count. It is left out whole, under a note that says why, when not one row
+  fits, or once it holds more than 200,000 paths after folding. When the table is left out, the
+  details still show unless they are left out too. The Unexpected Accesses table and the proposed rules count paths and bytes the
   same way, but do not fold more past 300 KB. With many paths under `/tmp`, they can be left out
   while the details, which do fold them, remain.
 - **Many libraries.** Once the step's processes have loaded 200,000 files between them, each
