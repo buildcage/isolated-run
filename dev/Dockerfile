@@ -35,7 +35,7 @@ RUN apk add --no-cache curl && \
     echo "${EXPECTED_SHA256}  /opt/buildcage/bin/runc" | sha256sum -c && \
     chmod +x /opt/buildcage/bin/runc
 
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS gen-seccomp-profile-build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS gen-seccomp-profile-build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
@@ -49,7 +49,7 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" go build -trimpath -
 # docker/filesystem-audit/main.go. bpf2go compiles its eBPF object with clang
 # (architecture-independent, -target bpfel) and embeds it, so the Go loader
 # cross-compiles via BUILDPLATFORM without QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:4cb7ac979db5fcc41cae44b2227ba5ab8a51e8807f40d9ba4dee20a0ad960b5b AS filesystem-audit-build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS filesystem-audit-build
 RUN apk add --no-cache clang llvm libbpf-dev linux-headers
 ARG TARGETARCH
 WORKDIR /src
