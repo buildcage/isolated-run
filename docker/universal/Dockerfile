@@ -19,7 +19,7 @@ ARG HAPROXY_BRANCH=3.4
 # Prepare dependencies: runc's official release binaries are already
 # statically linked (including libseccomp), so no compilation is needed,
 # only a checksum-pinned download (see docs/development.md).
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS deps
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS deps
 ARG RUNC_VERSION
 ARG RUNC_SHA256_AMD64
 ARG RUNC_SHA256_ARM64
@@ -96,11 +96,11 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 # The final image's qjs alone, for make test_unit_qjs, so the tests skip the
 # builds above. The final image does not build from it.
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS qjs-test
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS qjs-test
 RUN apk add --no-cache quickjs-ng
 
 # Final image
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 
 LABEL org.opencontainers.image.title="isolated-run-proxy" \
       org.opencontainers.image.description="Network-isolated proxy for arbitrary GitHub Actions commands" \

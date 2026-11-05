@@ -18,7 +18,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 # The probe containers below. Pinned like every fixture Dockerfile, so a
 # moving tag can't fail a run for a reason the sandbox had no part in.
 # renovate: datasource=docker depName=alpine
-ALPINE_IMAGE="alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
+ALPINE_IMAGE="alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
 
 # A UDP nc -z probe can't tell a DROPped packet apart from an unopened port:
 # both look like silence, since neither sends back an ICMP rejection.
