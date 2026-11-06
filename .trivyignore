@@ -35,6 +35,35 @@ CVE-2026-25681
 # into it and the kernel's own BTF from /sys/kernel/btf.
 CVE-2026-10722
 
+# Go stdlib and golang.org/x/net: HTTP/1 and HTTP/2 client and server bugs,
+# a CA denylist in crypto/x509, html/template escaping, HTML parsing, a TLS
+# server's ECH parsing, and a Windows-only os.Root bug. govulncheck finds no
+# call path to any of them from runc's code, and runc here makes no network
+# connection.
+CVE-2026-111943
+CVE-2026-56857
+CVE-2026-56866
+CVE-2026-78659
+CVE-2026-78660
+CVE-2026-78661
+CVE-2026-78663
+CVE-2026-78667
+CVE-2026-78669
+CVE-2026-94439
+CVE-2026-94440
+CVE-2026-94448
+CVE-2026-97030
+CVE-2026-97031
+CVE-2026-97032
+CVE-2026-97045
+
+# github.com/moby/sys/user: unbounded entries when parsing /etc/passwd- or
+# /etc/group-style files. govulncheck finds no call path to the affected
+# functions. The only such file runc reads is the container's /etc/passwd, to
+# fill in HOME, and here that is the host's own file mounted read-only, which
+# a step cannot rewrite.
+CVE-2026-61801
+
 # --- opt/buildcage/bin/gen-seccomp-profile ---
 # Same class of Go stdlib CVEs. This binary (docker/gen-seccomp-profile/main.go)
 # takes no input at all: it just prints a hardcoded seccomp profile as JSON.
@@ -95,6 +124,13 @@ CVE-2026-56864
 CVE-2026-84304
 CVE-2026-84445
 CVE-2026-84303
+
+# golang.org/x/net/html parser bugs on crafted HTML, and the deprecated
+# golang.org/x/crypto/openpgp package. CoreDNS links both, but no code path
+# reaches either (govulncheck), and it serves only DNS.
+CVE-2026-78661
+CVE-2026-97045
+GO-2026-5932
 
 # --- library/isolated-run-universal ---
 # OpenSSL: QUIC/CMP/CMS/DTLS/RPK bugs and direct EVP_Cipher() misuse.
