@@ -253,14 +253,17 @@ STEP_PID=$!
 
 if wait_for_step_marker writer.ready; then
   CONTAINER=$(state_container_name "$STEP_PREFIX.state")
-  if docker exec "$CONTAINER" pkill -KILL -f "s6-log .*/var/log/haproxy"; then
+  # Anchored, as the listener that starts each s6-log carries its command line
+  # too.
+  if docker exec "$CONTAINER" pkill -KILL -f "^s6-log .*/var/log/haproxy"; then
     pass "the proxy's s6-log killed in the proxy container"
   else
     fail "could not kill the proxy's s6-log in the proxy container"
   fi
   # CoreDNS keeps writing into the pipe the new s6-log reads, so nothing in the
   # resolver's log shows the lines the killed one had not written either.
-  if docker exec "$CONTAINER" pkill -KILL -f "s6-log .*/var/log/coredns"; then
+  # Anchored like the proxy's, though no listener starts this one.
+  if docker exec "$CONTAINER" pkill -KILL -f "^s6-log .*/var/log/coredns"; then
     pass "the resolver's s6-log killed in the proxy container"
   else
     fail "could not kill the resolver's s6-log in the proxy container"
