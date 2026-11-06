@@ -1,6 +1,6 @@
 # Security Details
 
-This document is the threat model behind Buildcage for `run:` steps: what the sandbox confines, how
+This document is the threat model behind buildcage/isolated-run: what the sandbox confines, how
 a command is kept to its allowlist, and where it stops short. For how to configure the action, see
 the [README](../README.md); for working on isolated-run itself, see the
 [Development Guide](./development.md).

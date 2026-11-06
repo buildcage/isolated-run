@@ -250,7 +250,7 @@ Without either of these, the step fails before the proxy starts, in `audit` too:
 A deploy step often needs Docker too, which no isolated command can use, with the check or without
 ([Inside the sandbox](../README.md#inside-the-sandbox)). `docker push` to ECR and
 `sam build --use-container` fail there; build and push images in a step of their own, or with
-[Buildcage for Docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
+[buildcage/docker](https://github.com/buildcage/docker). `cdk deploy` builds Docker image assets
 and runs Docker bundling itself, so a CDK app that has them cannot deploy in an isolated step.
 
 Only `AWS_ACCESS_KEY_ID` gives the key the step starts with. None of these does:

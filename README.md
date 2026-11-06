@@ -24,7 +24,7 @@ and anything else is blocked and reported.
 
 See [buildcage.github.io](https://buildcage.github.io/) for what it does and why. To isolate a
 Docker build's `RUN` steps rather than a workflow step, use
-[Buildcage for Docker](https://github.com/buildcage/docker).
+[buildcage/docker](https://github.com/buildcage/docker).
 
 ## Contents
 
