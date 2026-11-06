@@ -1,4 +1,4 @@
-# Buildcage for `run:` Steps
+# buildcage/isolated-run
 
 ![Buildcage](./assets/banner.png)
 
