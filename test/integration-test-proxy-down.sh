@@ -262,7 +262,7 @@ if wait_for_step_marker writer.ready; then
   fi
   # CoreDNS keeps writing into the pipe the new s6-log reads, so nothing in the
   # resolver's log shows the lines the killed one had not written either.
-  # Anchored the same way.
+  # Anchored like the proxy's, though no listener starts this one.
   if docker exec "$CONTAINER" pkill -KILL -f "^s6-log .*/var/log/coredns"; then
     pass "the resolver's s6-log killed in the proxy container"
   else
