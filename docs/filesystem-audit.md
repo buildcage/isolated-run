@@ -520,12 +520,11 @@ in these ways:
   collapsed; the artifact still has every access. Each row is one rule the proposed file adds.
 - **Unexpected access details**, collapsed after the table, lists the File access details rows of
   those accesses, each with only the actions no rule matched, and a directory row wherever the
-  table keeps one. Past 300 KB they group more rows into one than the table does, as
-  [Limits](#limits) says.
+  table keeps one. Past 300 KB they fold more than the table does, as [Limits](#limits) says.
 - The verdict, the GitHub alert at the top of the traffic report that lists what needs a look,
-  counts the table's rows as `N unexpected file accesses`. When the table was cut short for size it
-  says `more than N`, N being the rows it kept, and when it was left out it says there were too
-  many to list. A warning annotation says the same.
+  counts the table's rows as `N unexpected file accesses`. When the table alone would pass 1 MiB
+  and keeps only the rows that fit, it says `more than N`, and when it is left out, that there were
+  too many to list. A warning annotation says the same.
 - `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too. The
   annotation is then an error, and the verdict lists the count as a caution, which makes it a
   `CAUTION` alert rather than a `WARNING` one.

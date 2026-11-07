@@ -467,7 +467,7 @@ function reportUnexpected(
     n === undefined
       ? `${fellOutside} on too many distinct paths to list.`
       : summary.proposedCut
-        ? `${fellOutside} on more than ${n} path${n === 1 ? "" : "s"}, more than the Job Summary can hold; the Unexpected Accesses table lists part of them.`
+        ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists part of them.`
         : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`);

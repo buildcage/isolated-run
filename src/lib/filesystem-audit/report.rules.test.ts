@@ -300,7 +300,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       warning: ["more than 1 unexpected file access"],
     });
     expect(note.warning).toHaveBeenCalledWith(
-      "File accesses fell outside expected-filesystem-rules on more than 1 path, more than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
+      "File accesses fell outside expected-filesystem-rules on more paths than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
     );
     expect(summaries[0]).toContain(
       "has a rule for each access no rule matches, up to the Job Summary's size limit; the recording beside it has every access.",
@@ -331,7 +331,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
       warning: ["more than 2 unexpected file accesses"],
     });
     expect(note.warning).toHaveBeenCalledWith(
-      "File accesses fell outside expected-filesystem-rules on more than 2 paths, more than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
+      "File accesses fell outside expected-filesystem-rules on more paths than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
     );
   });
 
