@@ -179,7 +179,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const observed = new Map<number | undefined, number>();
   const load = (proc: string, path: string, library: boolean): void => {
     if (loaded.size >= limits.loads) return;
-    loaded.add(keyOf(proc, canonical(path, prefixes)));
+    loaded.add(keyOf(proc, canonical(path, prefixes, true)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
   // A memfd's or deleted file's name proves nothing about what it holds.
@@ -465,7 +465,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     // The exec maps its image under the name it gives, before its own record.
     if (!r.image) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
-      const p = walk(normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
+      const p = walk(
+        normalize(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)),
+      );
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
     } else if (r.kind === "exec") {
@@ -476,7 +478,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (isLibraryMap(r)) return undefined;
     for (const c of classify(r)) {
       // Marked after, so a runner file deleted while open still keys by name.
-      const own = canonical(c.path, prefixes);
+      const own = canonical(c.path, prefixes, !c.failed);
       const path = c.path === r.path ? marked(r, own) : own;
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target;
