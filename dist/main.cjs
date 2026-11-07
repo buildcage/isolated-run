@@ -76075,7 +76075,7 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRea
 	if (!writeThroughPaths.includes("/")) try {
 		assertNoFreshMountDestinations(writeThroughPaths, new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)));
 	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
 function resolveWriteThroughInput(writeThroughInput, env, baseDir) {
@@ -76117,7 +76117,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 	let overlay = filesystemMode === "ephemeral" ? planOverlay(env, writeThroughPaths, hostMounts, deps) : {
 		overlayRoots: [],

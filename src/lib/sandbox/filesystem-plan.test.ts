@@ -108,7 +108,7 @@ describe("resolveFilesystemPlan", () => {
 
   it("rejects a path overlapping the sandbox's own scratch base before creating anything", () => {
     const mkdir = vi.fn();
-    expect.assertions(3);
+    expect.assertions(4);
     try {
       resolveFilesystemPlan("persistent", `${SANDBOX_SCRATCH_BASE}/x`, ENV, {
         exists: () => false,
@@ -118,6 +118,9 @@ describe("resolveFilesystemPlan", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(SandboxError);
       expect((err as SandboxError).code).toBe("FILESYSTEM_INPUT_CONFLICT");
+      expect((err as SandboxError).message).toMatch(
+        new RegExp(`^Invalid write-through: path "${SANDBOX_SCRATCH_BASE}/x" overlaps`),
+      );
     }
     expect(mkdir).not.toHaveBeenCalled();
   });
@@ -136,7 +139,9 @@ describe("resolveFilesystemPlan", () => {
       ).toThrow(
         expect.objectContaining({
           code: "FILESYSTEM_INPUT_CONFLICT",
-          message: expect.stringMatching(/^path "\/dev\/shm\/x" is inside "\/dev"/),
+          message: expect.stringMatching(
+            /^Invalid write-through: path "\/dev\/shm\/x" is inside "\/dev"/,
+          ),
         }),
       );
       expect(mkdir).not.toHaveBeenCalled();
