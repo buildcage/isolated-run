@@ -261,7 +261,10 @@ each has rows of its own.
   So is a path through the working directory as its input spells it, symlinks and a leading `..`
   included. Other symlinks are not followed for this. All three are resolved before the command runs, as are
   the tool cache and the runner files, so a command that later swaps one for a symlink does not
-  change what `./` or `$GITHUB_WORKSPACE/` stands for.
+  change what `./` or `$GITHUB_WORKSPACE/` stands for. The symlink itself, removed, moved or made
+  by a command that succeeds, shows under its own path: `rm` of a `working-directory` link shows
+  `$GITHUB_WORKSPACE/<link>`, not `.`. A failed one still shows where the link leads, since the
+  recording cannot tell whether it followed the link.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of

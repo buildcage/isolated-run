@@ -198,6 +198,37 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["R node ./x"]);
   });
 
+  it("shows a symlinked prefix removed or replaced under its own path, not where it led", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "symlink", comm: "ln", path: "/work/link", to: "real" },
+        { kind: "rename", comm: "mv", path: "/home/u-link", to: "/home/old" },
+        { kind: "read", comm: "cat", path: "/work/real/a" },
+      ),
+      {
+        cwd: ["/work/link", "/work/real"],
+        workspace: ["/work"],
+        home: ["/home/u-link", "/home/u"],
+      },
+    );
+    expect(lines(md)).toEqual([
+      "R cat ./a",
+      "W ln $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "W mv /home/old",
+      "M mv /home/u-link",
+    ]);
+  });
+
+  it("still shows a failed access at a symlinked prefix where the link leads", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "unlink", comm: "rm", path: "/work/link", failed: true, err: 13 }),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["d! rm ."]);
+  });
+
   it("takes / as a working directory like any other", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(

@@ -72430,7 +72430,7 @@ function ruleSpellings(path, prefixes) {
 		cwd: []
 	})])] : [shown];
 }
-function canonical(path, prefixes) {
+function canonical(path, prefixes, succeeded = !1) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
 	let found;
@@ -72444,7 +72444,7 @@ function canonical(path, prefixes) {
 	});
 	if (!found) return path;
 	let tail = rest(path, found.spelling);
-	return tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
+	return !tail && succeeded && found.spelling !== found.real ? path : tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
 function sortKey(path) {
 	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
@@ -73276,7 +73276,7 @@ function createAuditSummary(prefixes) {
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
-				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
+				let own = canonical(c.path, prefixes, !c.failed), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),

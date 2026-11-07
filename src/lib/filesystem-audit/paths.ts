@@ -129,8 +129,9 @@ export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
 // Each prefix may be reached by two spellings (as given and with symlinks
 // resolved). A path takes the longest spelling of any prefix that holds it and
 // moves onto that prefix's real path, where a successful access already is, so
-// one file keys once however it was reached.
-export function canonical(path: string, prefixes: Prefixes): string {
+// one file keys once however it was reached. A successful access recorded at a
+// symlink spelling itself acted on the link, as `rm` of it does, and keeps it.
+export function canonical(path: string, prefixes: Prefixes, succeeded = false): string {
   const variable = prefixes.runnerFiles?.get(path);
   if (variable) return RUNNER_FILE + variable;
   let found: { spelling: string; real: string } | undefined;
@@ -141,6 +142,7 @@ export function canonical(path: string, prefixes: Prefixes): string {
   }
   if (!found) return path;
   const tail = rest(path, found.spelling)!;
+  if (!tail && succeeded && found.spelling !== found.real) return path;
   return !tail ? found.real : found.real === "/" ? `/${tail}` : `${found.real}/${tail}`;
 }
 

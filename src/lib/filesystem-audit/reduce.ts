@@ -476,7 +476,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (isLibraryMap(r)) return undefined;
     for (const c of classify(r)) {
       // Marked after, so a runner file deleted while open still keys by name.
-      const own = canonical(c.path, prefixes);
+      const own = canonical(c.path, prefixes, !c.failed);
       const path = c.path === r.path ? marked(r, own) : own;
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target;
