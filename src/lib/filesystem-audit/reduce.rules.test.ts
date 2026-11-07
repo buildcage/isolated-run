@@ -94,8 +94,8 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
   });
 
   it.each([
-    ["outside the workspace, into it", ["/tmp/link", "/work/app"], "/tmp/link/a"],
-    ["outside the workspace, to the workspace itself", ["/tmp/link", "/work"], "/tmp/link/a"],
+    ["outside the workspace, into it", ["/tmp/link", "/work/app"], "/work/app/a"],
+    ["outside the workspace, to the workspace itself", ["/tmp/link", "/work"], "/work/a"],
     ["inside the workspace", ["/work/link", "/work/app"], "/work/app/a"],
   ])(
     "matches a path under a working directory reached through a symlink %s by its real path",

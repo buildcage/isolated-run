@@ -179,7 +179,7 @@ describe("createAuditSummary: path names", () => {
   it("keys a file once when the working directory holds the workspace's symlink and its target", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { kind: "read", comm: "node", path: "/h/work/r/a" },
+        { kind: "open", comm: "node", path: "/h/work/r/a", access: "r", failed: true, err: 2 },
         { kind: "read", comm: "node", path: "/h/ws-real/a" },
       ),
       { cwd: ["/h"], workspace: ["/h/work/r", "/h/ws-real"], home: ["/h"] },
@@ -196,6 +196,75 @@ describe("createAuditSummary: path names", () => {
       { cwd: ["/real/work/app"], workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
     );
     expect(lines(md)).toEqual(["R node ./x"]);
+  });
+
+  it("shows a symlinked prefix removed or replaced under its own path, not where it led", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "symlink", comm: "ln", path: "/work/link", to: "real" },
+        { kind: "rename", comm: "mv", path: "/home/u-link", to: "/home/old" },
+        { kind: "read", comm: "cat", path: "/work/real/a" },
+      ),
+      {
+        cwd: ["/work/link", "/work/real"],
+        workspace: ["/work"],
+        home: ["/home/u-link", "/home/u"],
+      },
+    );
+    expect(lines(md)).toEqual([
+      "R cat ./a",
+      "W ln $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "W mv /home/old",
+      "M mv /home/u-link",
+    ]);
+  });
+
+  it("shows a directory made where the working directory's symlink was, and what is in it, under its own path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "mkdir", comm: "mkdir", path: "/work/link" },
+        { kind: "write", comm: "touch", path: "/work/link/x" },
+      ),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual([
+      "W mkdir $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "W touch $GITHUB_WORKSPACE/link/x",
+    ]);
+  });
+
+  it("shows a symlinked workspace removed under its own path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/sym/work" },
+        { kind: "read", comm: "cat", path: "/real/work/a" },
+      ),
+      { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["R cat ./a", "D rm /sym/work"]);
+  });
+
+  it("still shows a failed access at a symlinked prefix where the link leads", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl({ kind: "unlink", comm: "rm", path: "/work/link", failed: true, err: 13 }),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["d! rm ."]);
+  });
+
+  it("hides the kernel's read of a file a failed exec through a symlinked prefix ran", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "read", pid: 2, comm: "a", path: "/real/work/bin" },
+        { kind: "exec", pid: 2, comm: "a", path: "/sym/work/bin", failed: true, err: 8 },
+      ),
+      { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["x a ./bin"]);
   });
 
   it("takes / as a working directory like any other", () => {

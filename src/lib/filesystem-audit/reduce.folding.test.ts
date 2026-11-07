@@ -121,19 +121,19 @@ describe("createAuditSummary: folding", () => {
   it("folds an install tree only a level down, so a rule never takes everything installed", () => {
     const reads = (dir: string) =>
       ["a", "b", "c"].map((leaf) => ({ kind: "read", comm: "c", path: `${dir}/${leaf}` }));
-    // The tool cache under either spelling, and under $HOME's real path as
-    // the paths spell it.
+    // The tool cache under either spelling, and given through $HOME's
+    // symlink while the paths are recorded by its real path.
     const options = {
       ...PREFIXES,
       home: ["/home/u", "/var/home/u"],
-      toolCache: ["/runner/_tool", "/srv/_tool", "/var/home/u/_tool"],
+      toolCache: ["/runner/_tool", "/srv/_tool", "/home/u/_tool"],
     };
-    for (const dir of ["/usr", "/usr/local", "/runner/_tool", "/srv/_tool", "/home/u/_tool"])
+    for (const dir of ["/usr", "/usr/local", "/runner/_tool", "/srv/_tool", "/var/home/u/_tool"])
       expect(detailRows(summarize([...reads(dir), ...reads(`${dir}/lib`)], options))).toEqual([
-        `R c ${dir.replace("/home/u", "~")}/a`,
-        `R c ${dir.replace("/home/u", "~")}/b`,
-        `R c ${dir.replace("/home/u", "~")}/c`,
-        `R c ${dir.replace("/home/u", "~")}/lib/**`,
+        `R c ${dir.replace("/var/home/u", "~")}/a`,
+        `R c ${dir.replace("/var/home/u", "~")}/b`,
+        `R c ${dir.replace("/var/home/u", "~")}/c`,
+        `R c ${dir.replace("/var/home/u", "~")}/lib/**`,
       ]);
     // Nor does the directory above one.
     expect(
@@ -148,22 +148,31 @@ describe("createAuditSummary: folding", () => {
   });
 
   it("keeps the workspace and $HOME whole under any spelling, but not the symlink's parents", () => {
+    // Only a failed access keeps the symlink's spelling.
+    const failedRead = (path: string) => ({
+      kind: "open",
+      comm: "c",
+      path,
+      access: "r",
+      failed: true,
+      err: 2,
+    });
     const md = renderFilesystemAuditSummary(
       jsonl(
-        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/sym/work/${f}` })),
-        ...["a", "b", "c"].map((f) => ({ kind: "read", comm: "c", path: `/hu/u/.ssh/${f}` })),
+        ...["a", "b", "c"].map((f) => failedRead(`/sym/work/${f}`)),
+        ...["a", "b", "c"].map((f) => failedRead(`/hu/u/.ssh/${f}`)),
         ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/hu/${f}` })),
         ...["x", "y", "z"].map((f) => ({ kind: "read", comm: "c", path: `/sym/${f}` })),
       ),
       { workspace: ["/sym/work", "/real/work"], home: ["/hu/u", "/data/u"] },
     );
     expect(lines(md)).toEqual([
-      "R c ./a",
-      "R c ./b",
-      "R c ./c",
-      "R c ~/.ssh/a",
-      "R c ~/.ssh/b",
-      "R c ~/.ssh/c",
+      "r c ./a",
+      "r c ./b",
+      "r c ./c",
+      "r c ~/.ssh/a",
+      "r c ~/.ssh/b",
+      "r c ~/.ssh/c",
       "R c /hu/**",
       "R c /sym/**",
     ]);

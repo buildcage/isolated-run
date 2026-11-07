@@ -72430,7 +72430,7 @@ function ruleSpellings(path, prefixes) {
 		cwd: []
 	})])] : [shown];
 }
-function canonical(path, prefixes) {
+function canonical(path, prefixes, succeeded = !1) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
 	let found;
@@ -72442,7 +72442,7 @@ function canonical(path, prefixes) {
 		spelling,
 		real: spellings.at(-1)
 	});
-	if (!found) return path;
+	if (!found || succeeded && found.spelling !== found.real) return path;
 	let tail = rest(path, found.spelling);
 	return tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
@@ -73132,8 +73132,8 @@ function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
 		...prefixes.limits
-	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
-		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library, succeeded = !0) => {
+		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes, succeeded))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
 	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(observed, r);
@@ -73143,8 +73143,14 @@ function createAuditSummary(prefixes) {
 				paths || images.set(proc, paths = []), paths.push(marked(r, r.path));
 			} else load(proc, r.path, !0);
 		} else if (r.kind === "exec") {
-			let next = `${r.pid}/${observed.get(r.pid)}`;
-			for (let path of [...images.get(proc) ?? [], ...r.path ? [marked(r, r.path)] : []]) load(proc, path, !1), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)));
+			let next = `${r.pid}/${observed.get(r.pid)}`, ran = r.path ? [{
+				path: marked(r, r.path),
+				succeeded: !r.failed
+			}] : [];
+			for (let { path, succeeded } of [...(images.get(proc) ?? []).map((path) => ({
+				path,
+				succeeded: !0
+			})), ...ran]) load(proc, path, !1, succeeded), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)), succeeded);
 			images.delete(proc);
 		}
 	}, real = (spellings) => spellings.slice(-1).map(escapePath), shownPrefixes = {
@@ -73271,12 +73277,12 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
 		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
+			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
-				let own = canonical(c.path, prefixes), path = c.path === r.path ? marked(r, own) : own;
+				let own = canonical(c.path, prefixes, !c.failed), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
