@@ -141,7 +141,7 @@ export function assertNoFreshMountDestinations(
     const shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
     if (shadowed) {
       throw new WritablePathConflictError(
-        `write-through entry ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; ` +
+        `path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; ` +
           "bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.",
       );
     }
