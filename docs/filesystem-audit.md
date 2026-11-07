@@ -130,7 +130,7 @@ From the top:
 
 - A **🚫 Killed for a 32-bit system call** note names the commands the sandbox killed that way, if
   any; see [What changes in the step](#what-changes-in-the-step).
-- **Accessed Paths**, folded, has one row per program and path, with a [flag](#flags) for each
+- **Accessed Paths**, collapsed, has one row per program and path, with a [flag](#flags) for each
   action. Running a program is an `X` row under the program that ran it. Programs are in the order
   they first ran, and each one's paths in path order: the working directory, then the rest of the
   workspace, then `$HOME`, then the rest. A `dir/**` row combines several paths under one directory;
@@ -138,12 +138,12 @@ From the top:
   order they first did. When there are more than three, it shows the first two followed by a
   count, such as `and 2 more`; see [Which command](#how-rows-are-grouped). A table that does not
   fit in the Job Summary leaves only its note; see [Limits](#limits).
-- **File access details**, folded, has one row per command and path, in the order the rows were
+- **File access details**, collapsed, has one row per command and path, in the order the rows were
   first touched, with when that command first and last touched the path. A program run (`X`) is on
   the row of the command that started it, as in the table. Times count from the start of the
   step's proxy, on the same clock as the traffic report's Communication details, so a file access
   can be matched to a request.
-- **Expected filesystem rules**, folded, says where this run's proposed rules are, or how to get
+- **Expected filesystem rules**, collapsed, says where this run's proposed rules are, or how to get
   them. It shows only when the run recorded at least one file access and, when rules are set, at
   least one access that no rule matches; see [Expected accesses](#expected-accesses).
 - The closing line:
@@ -517,13 +517,15 @@ in these ways:
 ### What the summary shows
 
 - **Unexpected Accesses** takes the place of Accessed Paths, with the same columns, and is not
-  folded; the artifact still has every access. Each row is one rule the proposed file adds.
-- **Unexpected access details**, folded after the table, lists the File access details rows of
+  collapsed; the artifact still has every access. Each row is one rule the proposed file adds.
+- **Unexpected access details**, collapsed after the table, lists the File access details rows of
   those accesses, each with only the actions no rule matched, and a directory row wherever the
-  table keeps one. Past 300 KB they fold more than the table does, as [Limits](#limits) says.
+  table keeps one. Past 300 KB they group more rows into one than the table does, as
+  [Limits](#limits) says.
 - The verdict, the GitHub alert at the top of the traffic report that lists what needs a look,
-  counts the table's rows as `N unexpected file accesses`, or says there were too many to list. A
-  warning annotation says the same.
+  counts the table's rows as `N unexpected file accesses`. When the table was cut short for size it
+  says `more than N`, N being the rows it kept, and when it was left out it says there were too
+  many to list. A warning annotation says the same.
 - `fail-on-unexpected-file-access: true` fails the step instead, in `audit` mode too. The
   annotation is then an error, and the verdict lists the count as a caution, which makes it a
   `CAUTION` alert rather than a `WARNING` one.
@@ -557,8 +559,10 @@ Each rule is one line of three fields, the Program, Access and Path columns of A
     `$GITHUB_WORKSPACE/` in the workspace, under `~/` elsewhere in `$HOME`, and in full outside
     both. Steps in different working directories can then share a rule. Under
     `working-directory: web`, `$GITHUB_WORKSPACE/web/dist/**` matches `./dist/x`, but the same
-    path written in full does not. `./web/dist/**` names `web/web/dist`, since `./` always starts at the working
-    directory.
+    path written in full does not. Where the working directory is a symlink, write the path where
+    it leads: under `working-directory: current`, linking to `releases/v2`, that is
+    `$GITHUB_WORKSPACE/releases/v2/dist/**`. `./web/dist/**` names `web/web/dist`, since `./`
+    always starts at the working directory.
   - A name a command passed keeps its trailing `/` or `/.`, such as `/missing/` for a failed
     `rmdir /missing/`.
   - `*` matches within one component of a path. `**` as a whole component matches any number of
@@ -838,7 +842,7 @@ it writes to, also fails the step, after the command, with the record cut where 
   and known blocked hosts; [The Job Summary size cap](./reference.md#the-job-summary-size-cap) has
   the full order. A part that does not fit is cut at a line, with a note after what is kept, or
   replaced by the note when none of it fits. The accessed paths table is only ever replaced whole,
-  so its note is not hidden in its folded element. The note names the artifact, which still
+  so its note is not hidden in its collapsed element. The note names the artifact, which still
   holds every access, or says how to ask for one, or, when the upload failed, that the record was
   not kept.
 - **One part too large.** The accessed paths table or the details that alone would pass 300 KB folds

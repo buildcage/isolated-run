@@ -164,8 +164,9 @@ known-blocked-rules: |
   wins.
 - An input the workflow sets wins over the file. The rule inputs, `expected-filesystem-rules`
   among them, and `write-through` are the exception: the file's lines are added to the workflow's.
-- A relative path is relative to the [working directory](#working-directory), `$GITHUB_WORKSPACE`
-  unless `working-directory` is set. An absolute path, such as
+- A relative path is relative to the real path of the [working directory](#working-directory),
+  `$GITHUB_WORKSPACE` unless `working-directory` is set, so with a symlinked workspace `../x.yml`
+  is beside where the link leads. An absolute path, such as
   `${{ github.workspace }}/buildcage.yml`, is taken as it is. Either way the file, with its
   symlinks resolved, must be inside `$GITHUB_WORKSPACE`, and a `..` may only start a relative
   path. The repository has to be checked out by an earlier step.
@@ -1022,9 +1023,12 @@ use an expression such as `${{ runner.temp }}` instead. A `..` may only start th
   `config-file: ../x.yml` are in `releases`, where the command's own `cd ..` goes.
 - In the [filesystem audit](./filesystem-audit.md#paths), `./` is the working directory, and the
   rest of the workspace shows as `$GITHUB_WORKSPACE/`. An `expected-filesystem-rules` rule may name
-  a path in the working directory with `./` or without it, from the workspace, `$HOME` or `/`, such
-  as `$GITHUB_WORKSPACE/app/dist/**`. `./` itself always starts at the working directory: under
-  `working-directory: app`, `./app/dist/**` names `app/app/dist`.
+  a path in the working directory with `./`, or without it as the summary would show it without a
+  working directory: `$GITHUB_WORKSPACE/app/dist/**` in the workspace, `~/` elsewhere in `$HOME`,
+  and in full only outside both. Without `./` the path is spelled where a symlinked working
+  directory leads: with `current` linking to `releases/v2`, `$GITHUB_WORKSPACE/releases/v2/dist/**`
+  matches and `$GITHUB_WORKSPACE/current/dist/**` does not. `./` itself always starts at the
+  working directory: under `working-directory: app`, `./app/dist/**` names `app/app/dist`.
 - The directory is writable only when it is somewhere the step can write anyway: the workspace,
   `$HOME`, `$RUNNER_TEMP`, `/tmp` or a `write-through` path. A command starting elsewhere can read
   there but not write.

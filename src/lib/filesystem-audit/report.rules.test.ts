@@ -297,10 +297,10 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
     summaries.push(joinSummaryBlocks(read.blocks(undefined, await read.upload(), undefined)));
 
     expect(read.verdictItems).toStrictEqual({
-      warning: ["unexpected file accesses (too many to list)"],
+      warning: ["more than 1 unexpected file access"],
     });
     expect(note.warning).toHaveBeenCalledWith(
-      "File accesses fell outside expected-filesystem-rules on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first 1.",
+      "File accesses fell outside expected-filesystem-rules on more than 1 path, more than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
     );
     expect(summaries[0]).toContain(
       "has a rule for each access no rule matches, up to the Job Summary's size limit; the recording beside it has every access.",
@@ -311,6 +311,28 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
         content: [...RULES_TO_ADD_HEADER, "", "node  R  ./a", "", RULES_CUT_NOTE, ""].join("\n"),
       },
     ]);
+  });
+
+  it("counts the rows a cut table kept as a lower bound", () => {
+    const note = annotation();
+    const { deps: d } = deps({
+      raw: [
+        JSON.stringify({ kind: "read", comm: "node", path: "/work/a" }),
+        JSON.stringify({ kind: "read", comm: "node", path: "/work/b" }),
+        JSON.stringify({ kind: "read", comm: "node", path: "/work/c" }),
+        JSON.stringify({ kind: "end", dropped: 0, untracked: 0 }),
+      ].join("\n"),
+      createSummary: (options) => createAuditSummary({ ...options, limits: { bytes: 80 } }),
+    });
+
+    const read = readAudit({ ...base, annotation: note, rules: rules("# none") }, d);
+
+    expect(read.verdictItems).toStrictEqual({
+      warning: ["more than 2 unexpected file accesses"],
+    });
+    expect(note.warning).toHaveBeenCalledWith(
+      "File accesses fell outside expected-filesystem-rules on more than 2 paths, more than the Job Summary can hold; the Unexpected Accesses table lists part of them.",
+    );
   });
 
   it("counts no unexpected access when their paths were too many to list", async () => {
