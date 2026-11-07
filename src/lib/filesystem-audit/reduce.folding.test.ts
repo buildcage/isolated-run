@@ -148,7 +148,8 @@ describe("createAuditSummary: folding", () => {
   });
 
   it("keeps the workspace and $HOME whole under any spelling, but not the symlink's parents", () => {
-    // Only a failed access keeps the symlink's spelling.
+    // A successful access is recorded by its real path, so only a failed one
+    // comes in under the symlink's spelling.
     const failedRead = (path: string) => ({
       kind: "open",
       comm: "c",

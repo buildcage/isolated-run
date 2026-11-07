@@ -115,7 +115,7 @@ export function relativize(path: string, prefixes: Prefixes): string {
   return path;
 }
 
-const under = (path: string, prefix: string): boolean =>
+export const under = (path: string, prefix: string): boolean =>
   path === prefix || path.startsWith(`${prefix}/`);
 
 /** The path as relativize shows it under `prefixes` and, in the working
@@ -129,10 +129,13 @@ export function ruleSpellings(path: string, prefixes: Prefixes): string[] {
 // Each prefix may be reached by two spellings (as given and with symlinks
 // resolved). A path takes the longest spelling of any prefix that holds it and
 // moves onto that prefix's real path, where a successful access already is, so
-// one file keys once however it was reached. A successful access is recorded
-// with symlinks resolved, so one under a symlink spelling met the link itself,
-// as `rm` of it does, or what replaced it, and keeps its path.
-export function canonical(path: string, prefixes: Prefixes, succeeded = false): string {
+// one file keys once however it was reached. It stays under a symlink spelling
+// where keep says the access did not go through the link.
+export function canonical(
+  path: string,
+  prefixes: Prefixes,
+  keep?: (spelling: string, tail: string) => boolean,
+): string {
   const variable = prefixes.runnerFiles?.get(path);
   if (variable) return RUNNER_FILE + variable;
   let found: { spelling: string; real: string } | undefined;
@@ -141,8 +144,9 @@ export function canonical(path: string, prefixes: Prefixes, succeeded = false): 
       if (rest(path, spelling) !== undefined && spelling.length > (found?.spelling.length ?? -1))
         found = { spelling, real: spellings.at(-1)! };
   }
-  if (!found || (succeeded && found.spelling !== found.real)) return path;
+  if (!found) return path;
   const tail = rest(path, found.spelling)!;
+  if (found.spelling !== found.real && keep?.(found.spelling, tail)) return path;
   return !tail ? found.real : found.real === "/" ? `/${tail}` : `${found.real}/${tail}`;
 }
 

@@ -28,6 +28,7 @@ import {
   relativize,
   ruleSpellings,
   sortKey,
+  under,
   unmarked,
   type Prefixes,
   type Shown,
@@ -39,12 +40,19 @@ import { createStripper } from "./strip.ts";
 
 // A shared object or a Node.js addon, by file name.
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/;
+
+// A successful record's path has its symlinks resolved, but a run whose file
+// the tracer did not see keeps the name it was given.
+const resolved = (r: AuditRecord): boolean =>
+  !r.failed && (r.kind !== "exec" || r.name !== undefined);
 const DEFAULT_FANOUT = 3;
 const SENSITIVE_IN_HOME = [".ssh", ".aws", ".config", ".docker", ".kube", ".gnupg"];
 // A killed syscall's details row names it where a path would be.
 const SYSCALL_PREFIX = "syscall:";
 
 export interface SummaryOptions extends Prefixes {
+  /** The prefix spellings whose last component is itself a symlink. */
+  links?: readonly string[];
   /** The proxy's start, in epoch seconds. */
   startedAt?: number;
   /** expected-filesystem-rules, when given: each access is matched against them. */
@@ -177,9 +185,16 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const loaded = new Set<string>();
   const images = new Map<string, string[]>();
   const observed = new Map<number | undefined, number>();
-  const load = (proc: string, path: string, library: boolean, succeeded = true): void => {
+  const load = (proc: string, path: string, library: boolean, resolved = true): void => {
     if (loaded.size >= limits.loads) return;
-    loaded.add(keyOf(proc, canonical(path, prefixes, succeeded)));
+    loaded.add(
+      keyOf(
+        proc,
+        canonical(path, prefixes, () => resolved),
+      ),
+    );
+    // A name as given stays under the link's own path once the step replaced it.
+    if (!resolved) loaded.add(keyOf(proc, path));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
   // A memfd's or deleted file's name proves nothing about what it holds.
@@ -202,14 +217,13 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       // The kernel reads these before the exec record, so they count as
       // loaded on both sides of it.
       const next = `${r.pid}/${observed.get(r.pid)}`;
-      // A failed exec's path is the name it was given, not where it led.
-      const ran = r.path ? [{ path: marked(r, r.path), succeeded: !r.failed }] : [];
-      for (const { path, succeeded } of [
-        ...(images.get(proc) ?? []).map((path) => ({ path, succeeded: true })),
+      const ran = r.path ? [{ path: marked(r, r.path), resolved: resolved(r) }] : [];
+      for (const { path, resolved } of [
+        ...(images.get(proc) ?? []).map((path) => ({ path, resolved: true })),
         ...ran,
       ]) {
-        load(proc, path, false, succeeded);
-        load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)), succeeded);
+        load(proc, path, false, resolved);
+        load(next, path, !path.startsWith(MEMFD) && LIBRARY_NAME.test(unmarked(path)), resolved);
       }
       images.delete(proc);
     }
@@ -406,6 +420,23 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   // Each pid's number in its own PID namespace, which its /proc directory
   // goes by in the sandbox.
   const nsPids = new Map<number | undefined, number>();
+  // Symlink spellings the step removed or replaced. A resolved path below a
+  // spelling, or one that makes or removes its name, means no symlink is left
+  // on it or on any spelling it lies under or holds. Until then a failed access
+  // there went through the link, unless it acted on the link itself.
+  const replaced: string[] = [];
+  const links = new Set(prefixes.links);
+  const through =
+    (resolved: boolean, named = false) =>
+    (spelling: string, tail: string): boolean => {
+      if (!resolved)
+        return (
+          replaced.some((s) => under(spelling, s) || under(s, spelling)) ||
+          (!tail && named && links.has(spelling))
+        );
+      if ((tail || named) && !replaced.includes(spelling)) replaced.push(spelling);
+      return true;
+    };
   let ended = false;
   let lost = false;
   let hostMissed = 0;
@@ -471,7 +502,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (!r.image) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
       const p = walk(
-        normalize(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)),
+        normalize(marked(r, canonical(r.path, prefixes, through(resolved(r)))), nsPids.get(r.pid)),
       );
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
@@ -483,7 +514,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (isLibraryMap(r)) return undefined;
     for (const c of classify(r)) {
       // Marked after, so a runner file deleted while open still keys by name.
-      const own = canonical(c.path, prefixes, !c.failed);
+      const own = canonical(c.path, prefixes, through(!c.failed && resolved(r), c.named));
       const path = c.path === r.path ? marked(r, own) : own;
       // A succeeding record resolves to an absolute path or a "…/" walk, so a
       // relative one there is d_path's pipe:, socket: or anon_inode: target;

@@ -15472,7 +15472,7 @@ function resolveConfigPath(path, env, baseDir) {
 	if (isOutside(realWorkspace, real)) throw outside(real);
 	return real;
 }
-const resolved = (node, doc) => (0, import_dist$5.isAlias)(node) ? node.resolve(doc) : node;
+const resolved$1 = (node, doc) => (0, import_dist$5.isAlias)(node) ? node.resolve(doc) : node;
 function isMergeKey(key, doc) {
 	if (!(0, import_dist$5.isScalar)(key) || key.type && key.type !== import_dist$5.Scalar.PLAIN) return !1;
 	let { value } = key;
@@ -15484,13 +15484,13 @@ function valueNodes(doc) {
 		if (done) return done;
 		let nodes = new Map(), merged = [];
 		for (let { key, value } of map.items) if (isMergeKey(key, doc)) {
-			let source = resolved(value, doc);
+			let source = resolved$1(value, doc);
 			merged.push(...(0, import_dist$5.isSeq)(source) ? source.items : [source]);
 		} else {
-			let name = resolved(key, doc);
+			let name = resolved$1(key, doc);
 			(0, import_dist$5.isScalar)(name) && nodes.set(String(name.value), value);
 		}
-		for (let source of merged.map((node) => resolved(node, doc))) for (let [key, value] of nodesOf(source)) nodes.has(key) || nodes.set(key, value);
+		for (let source of merged.map((node) => resolved$1(node, doc))) for (let [key, value] of nodesOf(source)) nodes.has(key) || nodes.set(key, value);
 		return read.set(map, nodes), nodes;
 	};
 	return nodesOf(doc.contents);
@@ -15508,10 +15508,10 @@ function parseConfig(text, path, { known, stepOnly = [] }) {
 	if (js == null) return new Map();
 	if (typeof js != "object" || Array.isArray(js)) throw invalid("the top level must be a mapping of input names to values.");
 	let nodes = valueNodes(doc), lineOf = (key, value) => {
-		let node = resolved(nodes.get(key), doc), [start, end] = node.range, at = lineCounter.linePos(start).line;
+		let node = resolved$1(nodes.get(key), doc), [start, end] = node.range, at = lineCounter.linePos(start).line;
 		if (node.type === import_dist$5.Scalar.BLOCK_LITERAL) return at + 1;
 		if (node.type !== import_dist$5.Scalar.BLOCK_FOLDED) return value.includes("\n") || lineCounter.linePos(end).line !== at ? void 0 : at;
-	}, own = new Set(doc.contents.items.filter(({ key }) => !isMergeKey(key, doc)).map(({ key }) => resolved(key, doc)).filter(import_dist$5.isScalar).map((key) => String(key.value))), keys = new Map();
+	}, own = new Set(doc.contents.items.filter(({ key }) => !isMergeKey(key, doc)).map(({ key }) => resolved$1(key, doc)).filter(import_dist$5.isScalar).map((key) => String(key.value))), keys = new Map();
 	for (let key of Object.keys(js)) {
 		let spells = (input) => key === input || key === legacyInputName(input), name = known.find(spells);
 		if (!name) throw invalid(`${stepOnly.some(spells) ? `${JSON.stringify(key)} can be set only on the step` : `unknown key ${JSON.stringify(key)}`}. Allowed keys: ${known.join(", ")}.`);
@@ -72306,6 +72306,13 @@ const LETTER = {
 	1,
 	13,
 	30
+]), NAMED = new Set([
+	"mkdir",
+	"mknod",
+	"symlink",
+	"rename",
+	"unlink",
+	"rmdir"
 ]);
 function classify(r) {
 	let letter, failed = !1;
@@ -72316,17 +72323,19 @@ function classify(r) {
 	if (!letter) return [];
 	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
 	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-	let out = r.path ? [{
+	let named = NAMED.has(r.kind), out = r.path ? [{
 		letter,
 		path: r.path,
 		failed,
-		perm
+		perm,
+		named
 	}] : [];
 	return r.kind === "rename" && r.to && out.push({
 		letter: r.exchange ? letter : "W",
 		path: r.to,
 		failed,
-		perm
+		perm,
+		named
 	}), out;
 }
 function classifyLink(r, letter, failed, perm) {
@@ -72335,12 +72344,14 @@ function classifyLink(r, letter, failed, perm) {
 		letter,
 		path: r.to,
 		failed,
-		perm: perm && !fileRefused
+		perm: perm && !fileRefused,
+		named: !0
 	}), file && out.push({
 		letter: "L",
 		path: file,
 		failed,
-		perm: fileRefused
+		perm: fileRefused,
+		named: !1
 	}), out;
 }
 const BIT = Object.fromEntries(ORDER.split("").map((c, i) => [c, 1 << i])), letterBits = new Map();
@@ -72430,7 +72441,7 @@ function ruleSpellings(path, prefixes) {
 		cwd: []
 	})])] : [shown];
 }
-function canonical(path, prefixes, succeeded = !1) {
+function canonical(path, prefixes, keep) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
 	let found;
@@ -72442,9 +72453,9 @@ function canonical(path, prefixes, succeeded = !1) {
 		spelling,
 		real: spellings.at(-1)
 	});
-	if (!found || succeeded && found.spelling !== found.real) return path;
+	if (!found) return path;
 	let tail = rest(path, found.spelling);
-	return tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
+	return found.spelling !== found.real && keep?.(found.spelling, tail) ? path : tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
 function sortKey(path) {
 	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
@@ -73115,7 +73126,7 @@ function createStripper(scratchBase) {
 	};
 }
 // src/lib/filesystem-audit/reduce.ts
-const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
+const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, resolved = (r) => !r.failed && (r.kind !== "exec" || r.name !== void 0), SENSITIVE_IN_HOME = [
 	".ssh",
 	".aws",
 	".config",
@@ -73132,8 +73143,8 @@ function createAuditSummary(prefixes) {
 	let limits = {
 		...LIMITS,
 		...prefixes.limits
-	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library, succeeded = !0) => {
-		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes, succeeded))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library, resolved = !0) => {
+		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes, () => resolved))), resolved || loaded.add(keyOf(proc, path)), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
 	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(observed, r);
@@ -73145,12 +73156,12 @@ function createAuditSummary(prefixes) {
 		} else if (r.kind === "exec") {
 			let next = `${r.pid}/${observed.get(r.pid)}`, ran = r.path ? [{
 				path: marked(r, r.path),
-				succeeded: !r.failed
+				resolved: resolved(r)
 			}] : [];
-			for (let { path, succeeded } of [...(images.get(proc) ?? []).map((path) => ({
+			for (let { path, resolved } of [...(images.get(proc) ?? []).map((path) => ({
 				path,
-				succeeded: !0
-			})), ...ran]) load(proc, path, !1, succeeded), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)), succeeded);
+				resolved: !0
+			})), ...ran]) load(proc, path, !1, resolved), load(next, path, !path.startsWith("\0memfd:") && LIBRARY_NAME.test(unmarked(path)), resolved);
 			images.delete(proc);
 		}
 	}, real = (spellings) => spellings.slice(-1).map(escapePath), shownPrefixes = {
@@ -73245,7 +73256,7 @@ function createAuditSummary(prefixes) {
 			program: programOf(r.pid, comm),
 			cmd: commandKey(r.pid, before ?? comm)
 		};
-	}, nsPids = new Map(), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
+	}, nsPids = new Map(), replaced = [], links = new Set(prefixes.links), through = (resolved, named = !1) => (spelling, tail) => resolved ? ((tail || named) && !replaced.includes(spelling) && replaced.push(spelling), !0) : replaced.some((s) => under(spelling, s) || under(s, spelling)) || !tail && named && links.has(spelling), ended = !1, lost = !1, hostMissed = 0, seq = 0, added = new Map(), killed = new Map(), add = (r, counted = !0) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(added, r);
 		if ((r.kind === "fork" || r.kind === "exec") && (r.nspid ? nsPids.set(r.pid, r.nspid) : nsPids.delete(r.pid)), !counted) return;
@@ -73277,12 +73288,12 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
 		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)));
+			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes, through(resolved(r)))), nsPids.get(r.pid)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {
 			for (let c of classify(r)) {
-				let own = canonical(c.path, prefixes, !c.failed), path = c.path === r.path ? marked(r, own) : own;
+				let own = canonical(c.path, prefixes, through(!c.failed && resolved(r), c.named)), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
 				let t = Date.parse(r.t ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
@@ -73871,15 +73882,24 @@ function inputSpellings(input, workspace) {
 	let tidy = (path) => `/${path.split("/").filter((c) => c && c !== ".").join("/")}`;
 	return (0, node_path.isAbsolute)(input) ? [tidy(input)] : workspace.map((w) => tidy(`${w}/${input}`));
 }
+function links(spellings, realpath) {
+	let real = spellings.at(-1);
+	return spellings.slice(0, -1).filter((s) => (0, node_path.basename)(s) !== ".." && (0, node_path.join)(realpath((0, node_path.dirname)(s)), (0, node_path.basename)(s)) !== real);
+}
 function resolveAuditPrefixes(env, baseDir, workingDirectory, realpath = realPathOf) {
-	let workspace = spellings(env.GITHUB_WORKSPACE, realpath), given = workingDirectory ? inputSpellings(workingDirectory.input, workspace) : [];
+	let workspace = spellings(env.GITHUB_WORKSPACE, realpath), given = workingDirectory ? inputSpellings(workingDirectory.input, workspace) : [], cwd = baseDir ? [...new Set([...given.filter((g) => g !== baseDir), baseDir])] : [], home = spellings(env.HOME, realpath);
 	return {
-		cwd: baseDir ? [...new Set([...given.filter((g) => g !== baseDir), baseDir])] : [],
+		cwd,
 		...workingDirectory && !workingDirectory.isWorkspace && { named: workingDirectory.path },
 		workspace,
-		home: spellings(env.HOME, realpath),
+		home,
 		toolCache: spellings(env.RUNNER_TOOL_CACHE, realpath),
-		runnerFiles: Object.fromEntries(MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)]))
+		runnerFiles: Object.fromEntries(MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)])),
+		links: [
+			cwd,
+			workspace,
+			home
+		].flatMap((s) => links(s, realpath))
 	};
 }
 function runnerFiles(prefixes, mediated) {
@@ -73920,6 +73940,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		home: prefixes.home,
 		toolCache: prefixes.toolCache,
 		runnerFiles: runnerFiles(prefixes, mediated),
+		links: prefixes.links,
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
 	}, cwdNamed = prefixes.named && escapePath(relativize(prefixes.named, {
