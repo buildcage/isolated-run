@@ -845,13 +845,13 @@ describe("runSandboxedCommand", () => {
   // early one in resolveFilesystemPlan, or buildOciConfig's authoritative one.
   it("reports a writable-path conflict as FILESYSTEM_INPUT_CONFLICT", async () => {
     mocks.buildOciConfig.mockImplementation(() => {
-      throw new WritablePathConflictError('writable path "/proc" is inside "/proc"');
+      throw new WritablePathConflictError('write-through entry "/proc" is inside "/proc"');
     });
 
     const error = await failureFrom();
 
     expect(error!.code).toBe("FILESYSTEM_INPUT_CONFLICT");
-    expect(error!.message).toBe('writable path "/proc" is inside "/proc"');
+    expect(error!.message).toBe('write-through entry "/proc" is inside "/proc"');
   });
 });
 

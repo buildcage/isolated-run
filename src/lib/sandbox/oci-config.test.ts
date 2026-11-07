@@ -488,7 +488,7 @@ describe("buildOciConfig", () => {
           ...baseArgs,
           writable: { ...baseArgs.writable, writablePaths: [SANDBOX_SCRATCH_BASE] },
         }),
-      ).toThrow(/overlaps the sandbox's own scratch directory/);
+      ).toThrow(/^write-through entry "[^"]+" overlaps the sandbox's own scratch directory/);
     });
 
     it("fails closed when $HOME or RUNNER_TEMP itself overlaps the scratch base", () => {
@@ -678,7 +678,7 @@ describe("buildOciConfig: ephemeral mode", () => {
         ...baseArgs,
         ephemeral: { overlayRoots: [], allowWrite: [SANDBOX_SCRATCH_BASE] },
       }),
-    ).toThrow(/overlaps the sandbox's own scratch directory/);
+    ).toThrow(/^write-through entry "[^"]+" overlaps the sandbox's own scratch directory/);
   });
 });
 

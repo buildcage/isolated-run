@@ -85,8 +85,8 @@ export function assertScratchBaseNotWritable(writableDirs: string[]): void {
   const overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
   if (overlapping) {
     throw new WritablePathConflictError(
-      `writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); ` +
-        `this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`,
+      `write-through entry ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); ` +
+        `this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a path outside ${SANDBOX_SCRATCH_BASE}.`,
     );
   }
 }

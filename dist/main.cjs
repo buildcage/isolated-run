@@ -75143,7 +75143,7 @@ function mountAt(mounts, path) {
 var WritablePathConflictError = class extends Error {};
 function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+	if (overlapping) throw new WritablePathConflictError(`write-through entry ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 // src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
@@ -75682,7 +75682,7 @@ function reservedInternalDestinations() {
 function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
-		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
+		if (shadowed) throw new WritablePathConflictError(`write-through entry ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
 	}
 }
 function assertOverlayPathsAreOptionSafe(roots) {

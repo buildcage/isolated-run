@@ -86,7 +86,7 @@ jobs:
         include:
           - { runner: ubuntu-22.04-arm, filesystem_mode: ephemeral, concurrency: true }
           - runner: ubuntu-24.04
-            filesystem-mode: persistent
+            filesystem_mode: persistent
             audit_mode: true
             runner_read_only: true
             enforcement: true
