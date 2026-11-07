@@ -136,7 +136,7 @@ describe("resolveFilesystemPlan", () => {
       ).toThrow(
         expect.objectContaining({
           code: "FILESYSTEM_INPUT_CONFLICT",
-          message: expect.stringContaining('path "/dev/shm/x" is inside "/dev"'),
+          message: expect.stringMatching(/^path "\/dev\/shm\/x" is inside "\/dev"/),
         }),
       );
       expect(mkdir).not.toHaveBeenCalled();

@@ -62,9 +62,10 @@ function mountAt(mounts: MountinfoEntry[], path: string): MountinfoEntry | undef
 
 /**
  * Thrown by the guards that reject a writable path conflicting with something
- * the sandbox needs for itself. assertScratchBaseNotWritable also runs early
- * over the write-through input, so the early and the bundle-time callers both
- * turn it into FILESYSTEM_INPUT_CONFLICT.
+ * the sandbox needs for itself. assertScratchBaseNotWritable and
+ * assertNoFreshMountDestinations also run early over the write-through input,
+ * so the early and the bundle-time callers both turn it into
+ * FILESYSTEM_INPUT_CONFLICT.
  */
 export class WritablePathConflictError extends Error {}
 

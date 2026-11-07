@@ -497,7 +497,7 @@ describe("buildOciConfig", () => {
           ...baseArgs,
           writable: { ...baseArgs.writable, home: SANDBOX_SCRATCH_BASE, writablePaths: [] },
         }),
-      ).toThrow(`path ${JSON.stringify(SANDBOX_SCRATCH_BASE)} overlaps`);
+      ).toThrow(new RegExp(`^path "${SANDBOX_SCRATCH_BASE}" overlaps`));
     });
 
     it("does not fail closed for an unrelated sibling under /var/tmp", () => {
