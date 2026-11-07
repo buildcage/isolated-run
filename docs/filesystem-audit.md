@@ -256,12 +256,22 @@ each has rows of its own.
 - A failed access is shown under the name the command passed, joined to its working directory, or
   the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
   alone, such as `fchmod`, is shown under that file's path.
-- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a path through it is
-  shown where it leads, so a failed access through the symlink and a successful one share a row.
-  So is a path through the working directory as its input spells it, symlinks and a leading `..`
-  included. Other symlinks are not followed for this. All three are resolved before the command runs, as are
-  the tool cache and the runner files, so a command that later swaps one for a symlink does not
-  change what `./` or `$GITHUB_WORKSPACE/` stands for.
+- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, an access through it
+  is shown where it leads, and so is one through the working directory as its input spells it,
+  symlinks and a leading `..` included. Other symlinks are not followed for this. A successful
+  access is recorded with symlinks resolved, so a failed access through the symlink and a
+  successful one to the same file share a row.
+  All three are resolved before the command runs, as are the tool cache and the runner files.
+  `./` stays the directory the step started in, whatever the command does with `cd`, and swapping
+  one of them for a symlink later does not change what `./` or `$GITHUB_WORKSPACE/` stands for.
+- Once the step removes or replaces such a symlink, an access at or below the symlink's path is
+  shown under that path instead of where the link led, even if the step makes a symlink there
+  again. An `rm`, `rmdir`, `mv` or `mkdir` of the symlink's own path, or an `ln` that makes it,
+  is shown there even before that, failed or not, since these never follow it. A call that
+  follows a symlink unless told not to, such as `chown` or `open`, is taken as following it.
+  After `rm` of a `working-directory` link in the workspace and a `mkdir` of the same name, the
+  `rm`, the `mkdir` and what is done in the new directory all show under
+  `$GITHUB_WORKSPACE/<link>`, not `./`.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of

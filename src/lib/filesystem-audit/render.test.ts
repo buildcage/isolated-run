@@ -390,12 +390,12 @@ describe("renderAuditSummaryBlocks: tables", () => {
       jsonl(
         { kind: "open", failed: true, pid: 1, comm: "a", path: "/sym/work/x", err: 2 },
         { kind: "read", pid: 1, comm: "a", path: "/real/work/x" },
-        { kind: "exec", pid: 2, ppid: 1, comm: "a", path: "/sym/work/bin" },
+        { kind: "exec", pid: 2, ppid: 1, comm: "a", path: "/sym/work/bin", failed: true, err: 13 },
         { kind: "exec", pid: 3, ppid: 1, comm: "a", path: "/real/work/bin" },
       ),
       { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
     );
-    expect(tableRows(md)).toEqual(["| `./bin` | X |", "| `./x` | R |"]);
+    expect(tableRows(md)).toEqual(["| `./bin` | Xx! |", "| `./x` | R |"]);
   });
 
   it("folds the per-command record into a details element after the table", () => {

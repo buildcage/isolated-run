@@ -50,7 +50,12 @@ interface Classified {
   failed: boolean;
   /** Failed for want of permission. */
   perm: boolean;
+  /** Acts on the path's last component, not on where a symlink there leads. */
+  named: boolean;
 }
+
+// Kinds that never follow a symlink in the last component of their path.
+const NAMED = new Set(["mkdir", "mknod", "symlink", "rename", "unlink", "rmdir"]);
 
 // The actions a record counts as, each with the path it acts on. open counts
 // only when it creates or truncates; a plain read/write of an open file comes
@@ -77,11 +82,12 @@ export function classify(r: AuditRecord): Classified[] {
   if (!letter) return [];
   const perm = failed && PERM_ERRNO.has(r.err ?? 0);
   if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm }] : [];
+  const named = NAMED.has(r.kind);
+  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm, named }] : [];
   // An exchange moves each path to the other; any other rename writes its
   // new name, as a link does, so a file moved somewhere shows up there.
   if (r.kind === "rename" && r.to)
-    out.push({ letter: r.exchange ? letter : "W", path: r.to, failed, perm });
+    out.push({ letter: r.exchange ? letter : "W", path: r.to, failed, perm, named });
   return out;
 }
 
@@ -99,8 +105,8 @@ function classifyLink(
   const file = !r.deleted && !r.memfd ? r.path : undefined;
   const fileRefused = Boolean(file) && failed && r.err === 1;
   const out: Classified[] = [];
-  if (r.to) out.push({ letter, path: r.to, failed, perm: perm && !fileRefused });
-  if (file) out.push({ letter: "L", path: file, failed, perm: fileRefused });
+  if (r.to) out.push({ letter, path: r.to, failed, perm: perm && !fileRefused, named: true });
+  if (file) out.push({ letter: "L", path: file, failed, perm: fileRefused, named: false });
   return out;
 }
 

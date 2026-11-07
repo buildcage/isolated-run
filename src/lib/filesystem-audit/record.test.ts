@@ -4,26 +4,32 @@ import { describe, it, expect } from "vitest";
 
 import { classify, type AuditRecord } from "./record.ts";
 
-const ok = (letter: string, path: string) => ({ letter, path, failed: false, perm: false });
+const ok = (letter: string, path: string, named = false) => ({
+  letter,
+  path,
+  failed: false,
+  perm: false,
+  named,
+});
 
 describe("classify", () => {
   it.each([
-    ["read", "R"],
-    ["write", "W"],
-    ["exec", "X"],
-    ["mkdir", "W"],
-    ["mknod", "W"],
-    ["truncate", "W"],
-    ["symlink", "W"],
-    ["unlink", "D"],
-    ["rmdir", "D"],
-    ["chmod", "A"],
-    ["chown", "A"],
-    ["attr", "A"],
-  ])("names %s by %s, done or failed", (kind, letter) => {
-    expect(classify({ kind, path: "/a" })).toStrictEqual([ok(letter, "/a")]);
+    ["read", "R", false],
+    ["write", "W", false],
+    ["exec", "X", false],
+    ["mkdir", "W", true],
+    ["mknod", "W", true],
+    ["truncate", "W", false],
+    ["symlink", "W", true],
+    ["unlink", "D", true],
+    ["rmdir", "D", true],
+    ["chmod", "A", false],
+    ["chown", "A", false],
+    ["attr", "A", false],
+  ])("names %s by %s, done or failed", (kind, letter, named) => {
+    expect(classify({ kind, path: "/a" })).toStrictEqual([ok(letter, "/a", named)]);
     expect(classify({ kind, path: "/a", failed: true, err: 2 })).toStrictEqual([
-      { letter, path: "/a", failed: true, perm: false },
+      { letter, path: "/a", failed: true, perm: false, named },
     ]);
   });
 
@@ -37,14 +43,18 @@ describe("classify", () => {
   it("names a failed open by what it asked for, refused or not", () => {
     const failed = (access: string | undefined, err: number) =>
       classify({ kind: "open", path: "/a", access, failed: true, err });
-    expect(failed("r", 2)).toStrictEqual([{ letter: "R", path: "/a", failed: true, perm: false }]);
+    expect(failed("r", 2)).toStrictEqual([
+      { letter: "R", path: "/a", failed: true, perm: false, named: false },
+    ]);
     expect(failed(undefined, 2)).toStrictEqual([
-      { letter: "R", path: "/a", failed: true, perm: false },
+      { letter: "R", path: "/a", failed: true, perm: false, named: false },
     ]);
     expect(failed("rw", 13)).toStrictEqual([
-      { letter: "RW", path: "/a", failed: true, perm: true },
+      { letter: "RW", path: "/a", failed: true, perm: true, named: false },
     ]);
-    expect(failed("wc", 30)).toStrictEqual([{ letter: "W", path: "/a", failed: true, perm: true }]);
+    expect(failed("wc", 30)).toStrictEqual([
+      { letter: "W", path: "/a", failed: true, perm: true, named: false },
+    ]);
   });
 
   it("reads a mapping unless it maps for writing", () => {
@@ -54,35 +64,35 @@ describe("classify", () => {
 
   it("moves a rename's source and writes its new name, and moves both paths of an exchange", () => {
     expect(classify({ kind: "rename", path: "/a", to: "/b" })).toStrictEqual([
-      ok("M", "/a"),
-      ok("W", "/b"),
+      ok("M", "/a", true),
+      ok("W", "/b", true),
     ]);
     expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 30 })).toStrictEqual(
       [
-        { letter: "M", path: "/a", failed: true, perm: true },
-        { letter: "W", path: "/b", failed: true, perm: true },
+        { letter: "M", path: "/a", failed: true, perm: true, named: true },
+        { letter: "W", path: "/b", failed: true, perm: true, named: true },
       ],
     );
     // Across mounts, which mv then copies instead.
     expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 18 })).toStrictEqual(
       [
-        { letter: "M", path: "/a", failed: true, perm: false },
-        { letter: "W", path: "/b", failed: true, perm: false },
+        { letter: "M", path: "/a", failed: true, perm: false, named: true },
+        { letter: "W", path: "/b", failed: true, perm: false, named: true },
       ],
     );
     expect(classify({ kind: "rename", path: "/a", to: "/b", exchange: true })).toStrictEqual([
-      ok("M", "/a"),
-      ok("M", "/b"),
+      ok("M", "/a", true),
+      ok("M", "/b", true),
     ]);
   });
 
   it("writes a hard link's new name and links the file it names", () => {
     expect(classify({ kind: "link", path: "/a", to: "/b" })).toStrictEqual([
-      ok("W", "/b"),
+      ok("W", "/b", true),
       ok("L", "/a"),
     ]);
     expect(classify({ kind: "link", path: "/a", to: "/b", memfd: true })).toStrictEqual([
-      ok("W", "/b"),
+      ok("W", "/b", true),
     ]);
   });
 
@@ -90,12 +100,12 @@ describe("classify", () => {
     const link = (err: number) =>
       classify({ kind: "link", path: "/a", to: "/b", failed: true, err });
     expect(link(1)).toStrictEqual([
-      { letter: "W", path: "/b", failed: true, perm: false },
-      { letter: "L", path: "/a", failed: true, perm: true },
+      { letter: "W", path: "/b", failed: true, perm: false, named: true },
+      { letter: "L", path: "/a", failed: true, perm: true, named: false },
     ]);
     expect(link(13)).toStrictEqual([
-      { letter: "W", path: "/b", failed: true, perm: true },
-      { letter: "L", path: "/a", failed: true, perm: false },
+      { letter: "W", path: "/b", failed: true, perm: true, named: true },
+      { letter: "L", path: "/a", failed: true, perm: false, named: false },
     ]);
   });
 

@@ -1111,6 +1111,17 @@ describe("resolveAuditPrefixes", () => {
     ]);
   });
 
+  it("lists the spellings whose last component is a symlink, not one made by a symlink further up", () => {
+    // The workspace /sym/work is a symlink itself.
+    expect(prefixesOf("current", "/real/work/releases/v2").links).toStrictEqual([
+      "/sym/work/current",
+      "/real/work/current",
+      "/sym/work",
+    ]);
+    expect(prefixesOf("app", "/real/work/app").links).toStrictEqual(["/sym/work"]);
+    expect(prefixesOf("../other", "/real/other").links).toStrictEqual(["/sym/work"]);
+  });
+
   it("shows a failed access through the input's symlink under ./, as the access that reached it", () => {
     const { cwd, workspace, home } = prefixesOf("current", "/real/work/releases/v2");
     const prefixes = { cwd, workspace, home };
