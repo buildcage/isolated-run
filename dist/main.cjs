@@ -75143,7 +75143,7 @@ function mountAt(mounts, path) {
 var WritablePathConflictError = class extends Error {};
 function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
-	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
+	if (overlapping) throw new WritablePathConflictError(`path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
 // src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
@@ -75682,7 +75682,7 @@ function reservedInternalDestinations() {
 function assertNoFreshMountDestinations(writableDirs, freshMountDestinations) {
 	for (let dir of writableDirs) {
 		let shadowed = [...freshMountDestinations].find((d) => isAtOrUnder(dir, d));
-		if (shadowed) throw new WritablePathConflictError(`writable path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
+		if (shadowed) throw new WritablePathConflictError(`path ${JSON.stringify(dir)} is inside ${JSON.stringify(shadowed)}, which the sandbox mounts itself; bind-mounting the host's copy there would expose it inside the sandbox. Choose a path outside it.`);
 	}
 }
 function assertOverlayPathsAreOptionSafe(roots) {
@@ -76075,7 +76075,7 @@ function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRea
 	if (!writeThroughPaths.includes("/")) try {
 		assertNoFreshMountDestinations(writeThroughPaths, new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)));
 	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 }
 function resolveWriteThroughInput(writeThroughInput, env, baseDir) {
@@ -76117,7 +76117,7 @@ function resolveFilesystemPlan(filesystemMode, writeThroughInput, env, deps = {}
 	try {
 		assertScratchBaseNotWritable(writeThroughPaths);
 	} catch (e) {
-		throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+		throw new SandboxError(`Invalid write-through: ${errorMessage(e)}`, "FILESYSTEM_INPUT_CONFLICT");
 	}
 	let overlay = filesystemMode === "ephemeral" ? planOverlay(env, writeThroughPaths, hostMounts, deps) : {
 		overlayRoots: [],

@@ -488,7 +488,7 @@ describe("buildOciConfig", () => {
           ...baseArgs,
           writable: { ...baseArgs.writable, writablePaths: [SANDBOX_SCRATCH_BASE] },
         }),
-      ).toThrow(/overlaps the sandbox's own scratch directory/);
+      ).toThrow(/^path "[^"]+" overlaps the sandbox's own scratch directory/);
     });
 
     it("fails closed when $HOME or RUNNER_TEMP itself overlaps the scratch base", () => {
@@ -497,7 +497,7 @@ describe("buildOciConfig", () => {
           ...baseArgs,
           writable: { ...baseArgs.writable, home: SANDBOX_SCRATCH_BASE, writablePaths: [] },
         }),
-      ).toThrow(/overlaps/);
+      ).toThrow(new RegExp(`^path "${SANDBOX_SCRATCH_BASE}" overlaps`));
     });
 
     it("does not fail closed for an unrelated sibling under /var/tmp", () => {
@@ -678,7 +678,7 @@ describe("buildOciConfig: ephemeral mode", () => {
         ...baseArgs,
         ephemeral: { overlayRoots: [], allowWrite: [SANDBOX_SCRATCH_BASE] },
       }),
-    ).toThrow(/overlaps the sandbox's own scratch directory/);
+    ).toThrow(/^path "[^"]+" overlaps the sandbox's own scratch directory/);
   });
 });
 

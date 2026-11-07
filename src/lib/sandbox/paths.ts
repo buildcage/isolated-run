@@ -62,9 +62,10 @@ function mountAt(mounts: MountinfoEntry[], path: string): MountinfoEntry | undef
 
 /**
  * Thrown by the guards that reject a writable path conflicting with something
- * the sandbox needs for itself. assertScratchBaseNotWritable also runs early
- * over the write-through input, so the early and the bundle-time callers both
- * turn it into FILESYSTEM_INPUT_CONFLICT.
+ * the sandbox needs for itself. assertScratchBaseNotWritable and
+ * assertNoFreshMountDestinations also run early over the write-through input,
+ * so the early and the bundle-time callers both turn it into
+ * FILESYSTEM_INPUT_CONFLICT.
  */
 export class WritablePathConflictError extends Error {}
 
@@ -75,18 +76,17 @@ export class WritablePathConflictError extends Error {}
  * exceptions are recursive bind-mounts, so any overlap would recursively
  * re-expose that rootfs inside the sandbox as a second, writable copy of
  * the whole host `/`, the exact escape SANDBOX_SCRATCH_BASE's placement
- * (outside the default writable set) exists to avoid. Only reachable via an
- * explicit `write-through:` input naming SANDBOX_SCRATCH_BASE or an ancestor of it
- * (workdir/home/tmp/RUNNER_TEMP are operator/runner-controlled, not
- * attacker-controlled), so this is a misconfiguration guard, not a
+ * (outside the default writable set) exists to avoid. A `write-through:`
+ * entry or a runner-set path such as RUNNER_TEMP can reach it, neither
+ * attacker-controlled, so this is a misconfiguration guard, not a
  * hardening measure against a hostile isolated command.
  */
 export function assertScratchBaseNotWritable(writableDirs: string[]): void {
   const overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
   if (overlapping) {
     throw new WritablePathConflictError(
-      `writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); ` +
-        `this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`,
+      `path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); ` +
+        `this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a path outside ${SANDBOX_SCRATCH_BASE}.`,
     );
   }
 }

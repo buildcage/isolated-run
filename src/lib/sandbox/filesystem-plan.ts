@@ -80,7 +80,10 @@ export function validateFilesystemInputs(
         new Set(RUNC_FRESH_MOUNTS.map((m) => m.destination)),
       );
     } catch (e) {
-      throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+      throw new SandboxError(
+        `Invalid write-through: ${errorMessage(e)}`,
+        "FILESYSTEM_INPUT_CONFLICT",
+      );
     }
   }
 }
@@ -216,7 +219,10 @@ export function resolveFilesystemPlan(
   try {
     assertScratchBaseNotWritable(writeThroughPaths);
   } catch (e) {
-    throw new SandboxError(errorMessage(e), "FILESYSTEM_INPUT_CONFLICT");
+    throw new SandboxError(
+      `Invalid write-through: ${errorMessage(e)}`,
+      "FILESYSTEM_INPUT_CONFLICT",
+    );
   }
 
   // Before the targets are made, so a working directory this refuses leaves
