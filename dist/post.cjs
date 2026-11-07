@@ -1,4 +1,4 @@
-//#region \0rolldown/runtime.js
+// \0rolldown/runtime.js
 var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDesc = Object.getOwnPropertyDescriptor, __getOwnPropNames = Object.getOwnPropertyNames, __getProtoOf = Object.getPrototypeOf, __hasOwnProp = Object.prototype.hasOwnProperty, __copyProps = (to, from, except, desc) => {
 	if (from && typeof from == "object" || typeof from == "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) key = keys[i], !__hasOwnProp.call(to, key) && key !== except && __defProp(to, key, {
 		get: ((k) => from[k]).bind(null, key),
@@ -9,7 +9,6 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 	value: mod,
 	enumerable: !0
 }) : target, mod));
-//#endregion
 let node_child_process = require("node:child_process"), node_fs = require("node:fs"), node_url = require("node:url"), os = require("os");
 os = __toESM(os, 1);
 let fs = require("fs");
@@ -21,8 +20,7 @@ events = __toESM(events, 1);
 let node_crypto = require("node:crypto"), child_process = require("child_process");
 child_process = __toESM(child_process, 1), require("timers");
 let node_path = require("node:path");
-//#endregion
-//#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/summary.js
+// node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/summary.js
 var __awaiter$6 = function(thisArg, _arguments, P, generator) {
 	function adopt(value) {
 		return value instanceof P ? value : new P(function(resolve) {
@@ -170,8 +168,7 @@ function getInput(name, options) {
 function getState(name) {
 	return process.env[`STATE_${name}`] || "";
 }
-//#endregion
-//#region src/core/lib/actions/annotation.ts
+// src/core/lib/actions/annotation.ts
 function escapeData(message) {
 	return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
@@ -193,8 +190,7 @@ function createAnnotation(enabled) {
 	};
 }
 const annotate = createAnnotation(!0);
-//#endregion
-//#region src/core/lib/actions/input-names.ts
+// src/core/lib/actions/input-names.ts
 function inputEnvName(name) {
 	return `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
 }
@@ -213,8 +209,7 @@ function normalizeInputNames(env, names, lists = []) {
 	}
 	return warnings;
 }
-//#endregion
-//#region src/core/lib/docker/args.ts
+// src/core/lib/docker/args.ts
 function fileArgs(composeFiles) {
 	return composeFiles.flatMap((file) => ["-f", file]);
 }
@@ -230,8 +225,7 @@ function buildComposeDownArgs({ composeFiles, projectName }) {
 		"-v"
 	];
 }
-//#endregion
-//#region src/lib/compose-file.ts
+// src/lib/compose-file.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$1, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
@@ -239,8 +233,7 @@ async function readLocalImageOverride(env, log = console.log) {
 function resolveComposeFiles(override) {
 	return override?.composeOverlay ? [DEFAULT_COMPOSE_FILE, override.composeOverlay] : [DEFAULT_COMPOSE_FILE];
 }
-//#endregion
-//#region src/core/lib/errors.ts
+// src/core/lib/errors.ts
 var ActionError = class extends Error {
 	code;
 	constructor(message, code) {
@@ -250,12 +243,10 @@ var ActionError = class extends Error {
 function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
 }
-//#endregion
-//#region src/core/lib/acl/ipv4.ts
+// src/core/lib/acl/ipv4.ts
 const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])", PREFIX = "(3[0-2]|[12]?[0-9])", IPV4 = `${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}`;
 RegExp(`^${OCTET}$`), RegExp(`^${IPV4}(?:/${PREFIX})?$`), RegExp(`^${IPV4}/${PREFIX}$`);
-//#endregion
-//#region src/proxy/aws-hosts.ts
+// src/proxy/aws-hosts.ts
 const AMAZONAWS_TLDS = [
 	"com",
 	"com\\.cn",
@@ -272,19 +263,16 @@ const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAI
 `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` + vpceHost("git-codecommit(-fips)?");
 const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
 formName("awsaccesskeyid"), formName("x-amz-credential"), RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
-//#endregion
-//#region src/lib/errors.ts
+// src/lib/errors.ts
 var SandboxError = class extends ActionError {};
-//#endregion
-//#region src/lib/filesystem-mode.ts
+// src/lib/filesystem-mode.ts
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
 	let trimmed = input?.trim() || "persistent";
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
-//#endregion
-//#region src/lib/inputs.ts
+// src/lib/inputs.ts
 const LIST_INPUTS = [
 	"allowed-https-rules",
 	"allowed-http-rules",
@@ -353,8 +341,7 @@ function describeDockerFailure(e, { operation = "docker", env = process.env, exi
 function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
 }
-//#endregion
-//#region src/lib/sandbox/pinned-commands.ts
+// src/lib/sandbox/pinned-commands.ts
 const pinned = new Map();
 function hostCommand(command) {
 	return pinned.get(command) ?? command;
@@ -372,8 +359,7 @@ function hostCommandEnv(command, env = process.env) {
 		PATH: pinnedPathEnvs.get(command) ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	};
 }
-//#endregion
-//#region src/lib/container.ts
+// src/lib/container.ts
 const CONTAINER_NAME_PATTERN = /^buildcage-proxy-[0-9a-f]{8}$/;
 function isValidContainerName(name) {
 	return CONTAINER_NAME_PATTERN.test(name);
@@ -426,13 +412,11 @@ function readContainerOwner(containerName, { exec = captureDockerViaExec } = {})
 	let owner = inspectFormat(containerName, "{{index .Config.Labels \"io.buildcage.owner\"}}", exec);
 	return owner === "<no value>" ? "" : owner;
 }
-//#endregion
-//#region src/core/lib/docker/compose-project-name.ts
+// src/core/lib/docker/compose-project-name.ts
 function deriveProjectName(containerName) {
 	return `buildcage-${(0, node_crypto.createHash)("sha256").update(containerName).digest("hex").slice(0, 12)}`;
 }
-//#endregion
-//#region src/lib/post-state.ts
+// src/lib/post-state.ts
 function resolvePostState(state) {
 	let problems = [], { containerName, ephemeralRoots } = state;
 	if (!containerName) return {
@@ -482,8 +466,7 @@ function isTracer(pid, readFile) {
 		return;
 	}
 }
-//#endregion
-//#region src/lib/retry-briefly.ts
+// src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
 	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
 	for (let attempt = 1;; attempt++) try {
@@ -493,8 +476,7 @@ function retryBriefly(fn, options = {}) {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 	}
 }
-//#endregion
-//#region src/lib/sandbox/mountinfo.ts
+// src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
 	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
 		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
@@ -510,8 +492,7 @@ function parseMountinfo(mountinfoContent) {
 function unescapeField(field) {
 	return (field ?? "").replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
 }
-//#endregion
-//#region src/lib/sandbox/run-host-command.ts
+// src/lib/sandbox/run-host-command.ts
 function runPinnedHostCommand(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
@@ -523,8 +504,7 @@ function runPinnedHostCommand(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-//#endregion
-//#region src/lib/sandbox/scratch-dir.ts
+// src/lib/sandbox/scratch-dir.ts
 const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
 function parseMountsUnder(mountinfoContent, dir) {
 	let prefix = dir.endsWith("/") ? dir : `${dir}/`;
@@ -586,8 +566,7 @@ function scratchDirFor(containerName) {
 	if (!isValidContainerName(containerName)) throw new SandboxError(`Refusing to derive a scratch dir from container name ${JSON.stringify(containerName)}.`, "CONTAINER_NAME_INVALID");
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchDirNameFor(containerName));
 }
-//#endregion
-//#region src/lib/sandbox/nss-db-ledger.ts
+// src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
 function defaultLstat(path) {
 	return (0, node_fs.lstatSync)(path, {
@@ -775,8 +754,7 @@ function runnerFilesDirFor(containerName) {
 	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
-//#endregion
-//#region src/lib/post-cleanup.ts
+// src/lib/post-cleanup.ts
 function defaultKillTracer(pid) {
 	runPinnedHostCommand("sudo", [
 		"-n",
@@ -842,8 +820,7 @@ function planPostCleanup(state, env, annotation, deps = {}) {
 	}
 	return reclaimed && releaseNssDbUse(scratchDirNameFor(targets.containerName), { warn: annotation.warning }), targets;
 }
-//#endregion
-//#region src/lib/post-pinning.ts
+// src/lib/post-pinning.ts
 function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
@@ -861,13 +838,11 @@ function takePinningForPost(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 		(0, node_fs.rmSync)(path, { force: !0 });
 	}
 }
-//#endregion
-//#region src/lib/sandbox/paths.ts
+// src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
+// src/lib/sandbox/symlinks.ts
 const realSymlinkDeps = {
 	lstat: (path) => {
 		try {
@@ -910,8 +885,7 @@ function realPathOf(path, deps = realSymlinkDeps) {
 	let resolved = resolveHostPath(path, deps);
 	return "real" in resolved ? resolved.real : path;
 }
-//#endregion
-//#region src/lib/sandbox/oci-mounts.ts
+// src/lib/sandbox/oci-mounts.ts
 function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths = [] }) {
 	return [...new Set([
 		workdir,
@@ -921,8 +895,7 @@ function writableDirsOf({ workdir, home, tmp = "/tmp", runnerTemp, writablePaths
 		...writablePaths
 	].filter((p) => !!p))];
 }
-//#endregion
-//#region src/core/lib/actions/dot-dot.ts
+// src/core/lib/actions/dot-dot.ts
 function hasDotDotAfterStart(path) {
 	let parts = path.split("/"), start = 0;
 	for (; ["..", "."].includes(parts[start]) || start > 0 && parts[start] === "";) start++;
@@ -958,8 +931,7 @@ function resolveWriteThroughPaths(input, env, baseDir) {
 	let lines = splitWriteThroughInput(input);
 	return [...new Set(lines.map((line) => resolveWriteThroughEntry(line, env, baseDir)))];
 }
-//#endregion
-//#region src/lib/sandbox/host-commands.ts
+// src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
@@ -1063,8 +1035,7 @@ function workingDirectoryOf(env, realpath = realPathOf) {
 	let input = env[inputEnvName("working-directory")]?.trim() ?? "", workspace = env.GITHUB_WORKSPACE;
 	if ((0, node_path.isAbsolute)(input) || workspace) return (0, node_path.isAbsolute)(input) ? realpath(input) : realpath(input ? `${workspace}/${input}` : workspace);
 }
-//#endregion
-//#region src/post.ts
+// src/post.ts
 async function stopProxyContainer({ containerName, projectName }) {
 	let composeFiles = resolveComposeFiles(await readLocalImageOverride(process.env));
 	(0, node_child_process.execFileSync)(hostCommand("docker"), buildComposeDownArgs({
@@ -1089,4 +1060,3 @@ function main() {
 	targets && stopProxyContainer(targets);
 }
 process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href) && main();
-//#endregion

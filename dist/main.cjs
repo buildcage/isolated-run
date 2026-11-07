@@ -1,4 +1,4 @@
-//#region \0rolldown/runtime.js
+// \0rolldown/runtime.js
 var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDesc = Object.getOwnPropertyDescriptor, __getOwnPropNames = Object.getOwnPropertyNames, __getProtoOf = Object.getPrototypeOf, __hasOwnProp = Object.prototype.hasOwnProperty, __esmMin = (fn, res, err) => () => {
 	if (err) throw err[0];
 	try {
@@ -23,7 +23,6 @@ var __create = Object.create, __defProp = Object.defineProperty, __getOwnPropDes
 	value: mod,
 	enumerable: !0
 }) : target, mod));
-//#endregion
 let node_fs = require("node:fs");
 node_fs = __toESM(node_fs, 1);
 let node_url = require("node:url"), os = require("os");
@@ -65,7 +64,7 @@ node_https = __toESM(node_https, 1);
 let stream = require("stream");
 stream = __toESM(stream, 1);
 let node_string_decoder = require("node:string_decoder"), node_readline = require("node:readline");
-//#region src/core/lib/errors.ts
+// src/core/lib/errors.ts
 var ActionError = class extends Error {
 	code;
 	constructor(message, code) {
@@ -75,8 +74,7 @@ var ActionError = class extends Error {
 function errorMessage(e) {
 	return e instanceof Error ? e.message : String(e);
 }
-//#endregion
-//#region src/core/lib/actions/annotation.ts
+// src/core/lib/actions/annotation.ts
 function escapeData$1(message) {
 	return message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
@@ -98,15 +96,13 @@ function createAnnotation(enabled) {
 	};
 }
 const annotate = createAnnotation(!0);
-//#endregion
-//#region src/core/lib/actions/fatal.ts
+// src/core/lib/actions/fatal.ts
 function exitOnFatalError(context) {
 	return (err) => {
 		err instanceof ActionError ? annotate.error(err.message) : annotate.error(`Unexpected error in ${context}: ${errorMessage(err)}`), process.exit(1);
 	};
 }
-//#endregion
-//#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/utils.js
+// node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/utils.js
 function toCommandValue(input) {
 	return input == null ? "" : typeof input == "string" || input instanceof String ? input : JSON.stringify(input);
 }
@@ -121,8 +117,7 @@ function toCommandProperties(annotationProperties) {
 	} : {};
 }
 var init_utils$4 = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
+// node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 function issueCommand(command, properties, message) {
 	let cmd = new Command(command, properties, message);
 	process.stdout.write(cmd.toString() + os.EOL);
@@ -152,8 +147,7 @@ var CMD_STRING, Command, init_command = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/file-command.js
+// node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/file-command.js
 function issueFileCommand(command, message) {
 	let filePath = process.env[`GITHUB_${command}`];
 	if (!filePath) throw Error(`Unable to find environment variable for file command ${command}`);
@@ -169,8 +163,7 @@ function prepareKeyValueMessage(key, value) {
 var init_file_command = __esmMin((() => {
 	init_utils$4();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+http-client@4.0.1/node_modules/@actions/http-client/lib/proxy.js
+// node_modules/.pnpm/@actions+http-client@4.0.1/node_modules/@actions/http-client/lib/proxy.js
 function getProxyUrl(reqUrl) {
 	let usingSsl = reqUrl.protocol === "https:";
 	if (checkBypass(reqUrl)) return;
@@ -1190,7 +1183,7 @@ var DecodedURL, init_proxy = __esmMin((() => {
 			else if (isStream(body)) {
 				this.body = body;
 				let rState = this.body._readableState;
-				(!rState || !rState.autoDestroy) && (this.endHandler = function() {
+				rState && rState.autoDestroy || (this.endHandler = function() {
 					destroy(this);
 				}, this.body.on("end", this.endHandler)), this.errorHandler = (err) => {
 					this.abort ? this.abort(err) : this.error = err;
@@ -1506,7 +1499,7 @@ var DecodedURL, init_proxy = __esmMin((() => {
 			this._onTimeout = callback, this._idleTimeout = delay, this._timerArg = arg, this.refresh();
 		}
 		refresh() {
-			this._state === -2 && fastTimers.push(this), (!fastNowTimeout || fastTimers.length === 1) && refreshTimeout(), this._state = 0;
+			this._state === -2 && fastTimers.push(this), fastNowTimeout && fastTimers.length !== 1 || refreshTimeout(), this._state = 0;
 		}
 		clear() {
 			this._state = -1, this._idleStart = -1;
@@ -3934,7 +3927,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r\n\r\n`);
 			let [bodyStream, contentType] = extractBody(body);
 			headers["content-type"] = contentType, body = bodyStream.stream, contentLength = bodyStream.length;
 		}
-		if (contentLength ??= request.contentLength, (contentLength === 0 || !expectsPayload) && (contentLength = null), shouldSendContentLength(method) && contentLength > 0 && request.contentLength != null && request.contentLength !== contentLength) {
+		if (contentLength ??= request.contentLength, contentLength !== 0 && expectsPayload || (contentLength = null), shouldSendContentLength(method) && contentLength > 0 && request.contentLength != null && request.contentLength !== contentLength) {
 			if (client[kStrictContentLength]) return util.errorRequest(client, request, new RequestContentLengthMismatchError()), !1;
 			process.emitWarning(new RequestContentLengthMismatchError());
 		}
@@ -10681,8 +10674,7 @@ ${pendingInterceptorsFormatter.format(pending)}
 })), init_platform = __esmMin((() => {
 	init_exec(), os.default.platform(), os.default.arch();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/core.js
+// node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/core.js
 function setSecret(secret) {
 	issueCommand("add-mask", {}, secret);
 }
@@ -10716,24 +10708,21 @@ var ExitCode, init_core = __esmMin((() => {
 		ExitCode[ExitCode.Success = 0] = "Success", ExitCode[ExitCode.Failure = 1] = "Failure";
 	})(ExitCode ||= {});
 }));
-//#endregion
-//#region src/core/lib/line-comments.ts
+// src/core/lib/line-comments.ts
 function stripLineComment(line) {
 	return line.replace(/(^|\s)#.*$/, "$1");
 }
 function rejectGluedHash(rule) {
 	if (rule.includes("#")) throw Error(`Invalid rule ${JSON.stringify(rule)}: a "#" starts a comment only with a space before it, and "#" is never part of a host or URL, so a rule cannot contain one.`);
 }
-//#endregion
-//#region src/core/lib/acl/ipv4.ts
+// src/core/lib/acl/ipv4.ts
 const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])", PREFIX = "(3[0-2]|[12]?[0-9])", IPV4 = `${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}`, OCTET_RE = RegExp(`^${OCTET}$`), IPV4_OR_CIDR = RegExp(`^${IPV4}(?:/${PREFIX})?$`), IPV4_CIDR = RegExp(`^${IPV4}/${PREFIX}$`);
 function isIpRuleAddress(host) {
 	if (!/[*?]/.test(host)) return IPV4_OR_CIDR.test(host);
 	let octets = host.split(".");
 	return octets.length > 4 || octets.length < 4 && !host.includes("**") ? !1 : octets.every((octet) => /[*?]/.test(octet) || OCTET_RE.test(octet));
 }
-//#endregion
-//#region src/core/lib/acl/partial-wildcard.ts
+// src/core/lib/acl/partial-wildcard.ts
 const REGEX_META = /[.+^$()[\]{}|\\]/g, DOMAIN = {
 	across: ".+",
 	within: "[^.]+",
@@ -10902,8 +10891,7 @@ function splitRawRegexHost(pattern) {
 	}
 	return { host };
 }
-//#endregion
-//#region src/core/lib/acl/url-rules.ts
+// src/core/lib/acl/url-rules.ts
 const DEFAULT_PORT$1 = {
 	https: "443",
 	http: "80"
@@ -11023,8 +11011,7 @@ function splitUrlRuleLines(rulesInput) {
 function buildUrlRules(rulesInput) {
 	return splitUrlRuleLines(rulesInput).map(convertUrlRule);
 }
-//#endregion
-//#region src/core/lib/acl/wildcard-rules.ts
+// src/core/lib/acl/wildcard-rules.ts
 function splitRuleTokens(rulesInput) {
 	let tokens = rulesInput?.split(/\r?\n/).map(stripLineComment).join(" ").trim().split(/\s+/).filter(Boolean) ?? [];
 	return tokens.forEach(rejectGluedHash), tokens;
@@ -11083,8 +11070,7 @@ function wildcardToRegex(pattern) {
 	let portRegex = port === "*" ? "\\d+" : port;
 	return `${domainToRegex(domain)}:${portRegex}`;
 }
-//#endregion
-//#region node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/identity.js
+// node_modules/.pnpm/yaml@2.9.1/node_modules/yaml/dist/nodes/identity.js
 var require_identity$1 = __commonJSMin(((exports) => {
 	let ALIAS = Symbol.for("yaml.alias"), DOC = Symbol.for("yaml.document"), MAP = Symbol.for("yaml.map"), PAIR = Symbol.for("yaml.pair"), SCALAR = Symbol.for("yaml.scalar"), SEQ = Symbol.for("yaml.seq"), NODE_TYPE = Symbol.for("yaml.node.type"), isAlias = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === ALIAS, isDocument = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === DOC, isMap = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === MAP, isPair = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === PAIR, isScalar = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === SCALAR, isSeq = (node) => !!node && typeof node == "object" && node[NODE_TYPE] === SEQ;
 	function isCollection(node) {
@@ -11283,7 +11269,7 @@ var require_identity$1 = __commonJSMin(((exports) => {
 					identity.isNode(node) && node.tag && (tags[node.tag] = !0);
 				}), tagNames = Object.keys(tags);
 			} else tagNames = [];
-			for (let [handle, prefix] of tagEntries) (handle !== "!!" || prefix !== "tag:yaml.org,2002:") && (!doc || tagNames.some((tn) => tn.startsWith(prefix))) && lines.push(`%TAG ${handle} ${prefix}`);
+			for (let [handle, prefix] of tagEntries) handle === "!!" && prefix === "tag:yaml.org,2002:" || doc && !tagNames.some((tn) => tn.startsWith(prefix)) || lines.push(`%TAG ${handle} ${prefix}`);
 			return lines.join("\n");
 		}
 	};
@@ -13151,7 +13137,7 @@ var require_identity$1 = __commonJSMin(((exports) => {
 				break;
 			}
 			case "newline":
-				atNewline ? comment ? comment += token.source : (!found || indicator !== "seq-item-ind") && (spaceBefore = !0) : commentSep += token.source, atNewline = !0, hasNewline = !0, (anchor || tag) && (newlineAfterProp = token), hasSpace = !0;
+				atNewline ? comment ? comment += token.source : found && indicator === "seq-item-ind" || (spaceBefore = !0) : commentSep += token.source, atNewline = !0, hasNewline = !0, (anchor || tag) && (newlineAfterProp = token), hasSpace = !0;
 				break;
 			case "anchor":
 				anchor && onError(token, "MULTIPLE_ANCHORS", "A node can have at most one anchor"), token.source.endsWith(":") && onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", !0), anchor = token, start ??= token.offset, atNewline = !1, hasSpace = !1, reqSpace = !0;
@@ -15420,8 +15406,7 @@ function hasDotDotAfterStart(path) {
 	return parts.slice(start).includes("..");
 }
 const DOT_DOT_AFTER_START = "has a \"..\" after its start. Name the path without it; only a relative path may climb, with a leading \"../\".";
-//#endregion
-//#region src/core/lib/actions/input-names.ts
+// src/core/lib/actions/input-names.ts
 init_core();
 function inputEnvName(name) {
 	return `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
@@ -15450,8 +15435,7 @@ function setOutputUnderBothNames(name, value, setOutput$1 = setOutput) {
 	}
 	if (failures.length > 0) throw failures[0];
 }
-//#endregion
-//#region src/core/lib/actions/config-file.ts
+// src/core/lib/actions/config-file.ts
 var ConfigFileError = class extends ActionError {};
 function refuseUntrustedEvent(env) {
 	let event = env.GITHUB_EVENT_NAME, triggeredBy;
@@ -15584,8 +15568,7 @@ function applyConfigFile(env, inputs, baseDir) {
 		origins
 	};
 }
-//#endregion
-//#region src/core/lib/actions/inputs.ts
+// src/core/lib/actions/inputs.ts
 init_core();
 var InvalidInputError = class extends ActionError {
 	constructor(message, code) {
@@ -15633,8 +15616,7 @@ function resolveProxyMode(input) {
 	if (!PROXY_MODES.includes(trimmed)) throw new InvalidInputError(`Invalid proxy-mode: ${JSON.stringify(input)}. Must be one of ${PROXY_MODES.join(", ")}.`, "INVALID_PROXY_MODE");
 	return trimmed;
 }
-//#endregion
-//#region src/core/lib/actions/engine-rule-support.ts
+// src/core/lib/actions/engine-rule-support.ts
 function checkUrlAndTlsRuleSupport({ proxyEngine, proxyMode, urlRules, tlsRules }, warn) {
 	if (proxyEngine === "inspect") return;
 	let unsupported = [];
@@ -15649,8 +15631,7 @@ function checkKnownBlockedUrlRuleSupport({ proxyEngine, proxyMode, knownBlockedU
 	if (proxyMode === "audit") warn(`${reason} They are ignored for this run. Drop the method to acknowledge the whole host, or switch to proxy-engine: inspect.`);
 	else throw new InvalidInputError(`${reason} Drop the method to acknowledge the whole host, or switch to proxy-engine: inspect.`, "INVALID_PROXY_ENGINE");
 }
-//#endregion
-//#region src/core/lib/actions/log.ts
+// src/core/lib/actions/log.ts
 function logRules(label, rules) {
 	console.log(`${label} rules:${rules.length === 0 ? " (none)" : ""}`);
 	for (let r of rules) console.log(`  ${r}`);
@@ -15671,8 +15652,7 @@ async function withLogGroupAsync(title, fn) {
 		console.log("::endgroup::");
 	}
 }
-//#endregion
-//#region src/core/lib/acl/coredns-config.ts
+// src/core/lib/acl/coredns-config.ts
 function escapeForCel(regex) {
 	return regex.replace(/\\/g, "\\\\");
 }
@@ -15782,16 +15762,13 @@ function generateCorednsConfig(rules, options) {
 	}
 	return lines.push(...serviceZoneLines(proxyAddress, ttlSeconds)), lines.push("# Everything else resolves to the proxy and is answered locally, so the", "# query never leaves and the request still arrives somewhere its full URL", "# can be recorded before being denied.", ". {", HEALTH_LINE, ...proxyAnswerLines(proxyAddress, ttlSeconds), "    log . \"buildcage dns denied name={name}\"", "    errors", "}", ""), lines.join("\n");
 }
-//#endregion
-//#region src/core/lib/log/proxy-address.ts
+// src/core/lib/log/proxy-address.ts
 const PROXY_ADDRESS = "198.19.255.1", PROXY_SUBNET = "198.19.255.0/24", UNKNOWN_HOST = "(unknown)";
-//#endregion
-//#region src/core/lib/acl/haproxy-internal-dst.ts
+// src/core/lib/acl/haproxy-internal-dst.ts
 function internalDstAcl(name, opts, fetch = "var(txn.dst)") {
 	return [`    acl ${name} ${fetch} -m ip ${opts.internalAddrs.join(" ")}`, ...opts.hostAddressFile ? [`    acl ${name} ${fetch} -m ip -f ${opts.hostAddressFile}`] : []];
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-matchers.ts
+// src/core/lib/acl/haproxy-matchers.ts
 const HOST_ONLY = "host_only,regsub(\\.$,)", HOSTNAME_CHARSET = "^[A-Za-z0-9._-]+$";
 function escapeForHaproxy(value) {
 	return value.replace(/[\\#'" ]/g, "\\$&");
@@ -15820,8 +15797,7 @@ function pathMatcher(pathRegex) {
 		pattern: unescape(body)
 	};
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-detect-frontend.ts
+// src/core/lib/acl/haproxy-detect-frontend.ts
 function tlsCond(host) {
 	return `${host.id}_sni${host.port ? ` ${host.id}_port` : ""} sni_is_name`;
 }
@@ -15844,8 +15820,7 @@ function detectFrontend(spec) {
 	}
 	return l.push("    # `accept` ends content-rule evaluation, so it comes after every rule", "    # that needs the request buffer (the SNI capture and resolution above).", "    # Separate rules: while a ClientHello is incomplete the first one waits", "    # for the rest, where an `||` would accept on its first segment.", "    tcp-request content accept if { req.ssl_hello_type 1 }", "    tcp-request content accept if { req.len gt 0 }", ""), hasPassthrough && l.push("    use_backend passthrough if { var(txn.pass) -m found }", ""), l.push("    acl is_tls req.ssl_hello_type 1", "    use_backend to_tls if is_tls", "    default_backend to_plain", "", "backend passthrough", "    mode tcp", "    server origin 0.0.0.0", "", "backend to_tls", "    mode tcp", `    server s 127.0.0.1:${tlsStagePort} send-proxy-v2`, "", "backend to_plain", "    mode tcp", `    server s 127.0.0.1:${plainStagePort} send-proxy-v2`, ""), l;
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-rule-block.ts
+// src/core/lib/acl/haproxy-rule-block.ts
 function deniesEverything(rules, mode) {
 	return mode !== "audit" && rules.length === 0;
 }
@@ -15872,8 +15847,7 @@ function ruleBlock(rules, mode, scheme) {
 	for (let clause of clauses) lines.push(`    http-request set-var(txn.allowed) bool(true) if !{ var(txn.allowed) -m bool } ${clause}`);
 	return lines.push("    http-request deny unless { var(txn.allowed) -m bool }"), lines.push(""), lines;
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-rules.ts
+// src/core/lib/acl/haproxy-rules.ts
 const HOST_IS_ADDRESS = `^${IPV4}$`, INTERNAL_RANGES = [
 	"0.0.0.0/8",
 	"127.0.0.0/8",
@@ -16007,8 +15981,7 @@ function resolverHosts(inputs) {
 	for (let rule of inputs.urlRules ?? []) add(hostOnlyRegexOfUrlRule(rule));
 	return hosts;
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-inspect-stage.ts
+// src/core/lib/acl/haproxy-inspect-stage.ts
 const LOG_FIELD_NAME = /^[a-z][A-Za-z0-9]*$/, LOG_FIELD_VAR = /^txn\.[a-z0-9_]+$/;
 function logFieldTokens({ name, fields }) {
 	if (!LOG_FIELD_NAME.test(name)) throw Error(`invalid log field object: ${name}`);
@@ -16058,15 +16031,13 @@ function inspectStage({ name, port, bindExtra, scheme, rules, backend }, ctx) {
 	let { mode, extension } = ctx, logFormat = `"buildcage %[date(0,ms)] ${scheme} %HM %ST %B ts=%ts reason=%[var(txn.reason)] tlserr=%[ssl_bc_err] dst=%[dst]:%[dst_port]${extension ? " wb=%[var(txn.would_block),regsub([^A-Za-z0-9._-],_,g)]" + (extension.logFields ? logFieldTokens(extension.logFields) : "") : ""}${clientTlsFields(scheme)} host=%[var(txn.host_log)] %[var(txn.pathq)]"`, l = [];
 	return l.push(`frontend ${name}`, `    bind 127.0.0.1:${port} accept-proxy${bindExtra}`, "    mode http", ...scheme === "http" ? PLAIN_REQUEST_TIMEOUTS : [], "    http-request set-var(txn.host_log) 'req.hdr(host),regsub(\"[\\s\\\"[:cntrl:]]\",_,g)'", "", "    # Decode before stripping `..`: `.` is unreserved, so `%2e%2e` is not", "    # a dot-dot segment until decoded, and stripping first would miss it.", "    http-request normalize-uri percent-decode-unreserved", "    http-request normalize-uri path-strip-dotdot", "", "    # pathq, not %HU: %HU is the target as sent (a path over HTTP/1.1, an", "    # absolute URI over HTTP/2), and pathq is not readable at log time.", "    # Set after normalization, so the log shows the path the rules matched.", "    http-request set-var(txn.pathq) 'pathq,regsub(\"[\\\"[:cntrl:]]\",_,g)'", "", "    # A request with no Host names nothing: the rules match on it, the", "    # origin is resolved from it, and the log's URL is built from it. Named", "    # here rather than left to the log's own empty fields, which a Host the", "    # client chose can imitate. Blocked in `audit` too, as the same check", "    # in the universal engine is: there is nothing to connect to either way.", "    # Ahead of the path denies below, so that a request carrying neither a", "    # Host nor a legal path is named by the one the report can act on: the", "    # other leaves a row named for the `-` the log prints in its place.", "    acl has_host hdr(host) -m found", "    acl host_not_empty hdr_len(host) gt 0", "    http-request set-var(txn.reason) str(missing-host-header) if !has_host or !host_not_empty", "    http-request deny deny_status 400 if !has_host or !host_not_empty", "", "    # The one Host every later step reads. An acl on req.hdr(host) scans", "    # every value while a fetch takes the last, so reading the header twice", "    # could judge one value and connect to another.", `    http-request set-var(txn.host) req.hdr(host),lower,${HOST_ONLY}`, "    # A `:` left in the name could let a `~` rule's port pattern match it.", "    # Blocked in `audit` too.", `    acl host_is_name var(txn.host) -m reg ${HOSTNAME_CHARSET}`, "    http-request set-var(txn.reason) str(invalid-host) if !host_is_name", "    http-request deny deny_status 400 if !host_is_name", "", "    # `%2f` and `%5c` survive decoding (both reserved) yet an origin may", "    # read `..%2f` / `..%5c` as a segment, and a raw backslash is not a", "    # valid path char at all. None is stripped, so each is blocked. A lone", "    # encoded separator stays legal (e.g. npm's `/@scope%2fpackage`).", "    # `;` (or `%3b`) ends a segment too: Tomcat and Jetty drop what follows", "    # as a path parameter, so they read `..;/` as `../`.", "    # `\\\\` is one literal backslash: HAProxy's parser takes the pair as one.", "    http-request deny deny_status 403 if { path -m reg -i (^|/|%2f|%5c)\\.\\.($|/|;|%2f|%5c|%3b) }", "    http-request deny deny_status 403 if { path -m sub \\\\ }", "", `    log-format ${logFormat}`, ...scheme === "https" ? [`    error-log-format ${logFormat}`] : [], ""), l.push(...ruleBlock(rules, mode, scheme)), deniesEverything(rules, mode) || (extension && (l.push(...extension.requestRules(mode)), scheme === "https" && l.push(...extension.responseRules())), l.push("    # Connect to the address this proxy resolves the Host to, discarding", "    # the client's address, so a forged Host or doctored /etc/hosts cannot", "    # choose the target.", "    # txn.host has already dropped the port a header carries, which is not", "    # part of the name. An address is taken as-is: no resolver can answer", "    # one, and the rules above already decided, so nothing is loosened.", `    acl host_is_address var(txn.host) -m reg ${HOST_IS_ADDRESS}`, "    http-request set-var(txn.dst) var(txn.host) if host_is_address", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address", "    # A fresh attempt, not a replay: nothing cached the failure.", "    http-request do-resolve(txn.dst,buildcage,ipv4) var(txn.host) unless host_is_address or { var(txn.dst) -m found }", "    http-request set-var(txn.reason) str(dns-failed) unless { var(txn.dst) -m found }", "    http-request deny deny_status 502 unless { var(txn.dst) -m found }", "", "    # Set before the internal-destination check below, not after: %[dst] in", "    # the log-format is this, and a blocked request must show the address that", "    # tripped it, not whatever the client's own (fake, unresolved) address", "    # was: CoreDNS never hands out a real one; see coredns-config.ts.", "    http-request set-dst var(txn.dst)", "", "    # A resolved destination may not be internal; see INTERNAL_RANGES.", ...internalDstAcl("dst_internal", ctx), ...internalGuard(rules, ctx.listenPort))), l.push(`    default_backend ${backend}`, ""), l;
 }
-//#endregion
-//#region src/core/lib/log/proxy-notices.ts
+// src/core/lib/log/proxy-notices.ts
 const PROXY_LOG_BARRIER = "buildcage log barrier", RING_DROPPED = /^(\d+) events? dropped\0?$/;
 function ringDropped(trimmed) {
 	let match = RING_DROPPED.exec(trimmed);
 	return match ? Number(match[1]) : void 0;
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-sections.ts
+// src/core/lib/acl/haproxy-sections.ts
 const LOG_RING = "buildcage";
 function preamble(spec) {
 	return [
@@ -16143,8 +16114,7 @@ function originBackends(systemCaFile) {
 		""
 	];
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-config.ts
+// src/core/lib/acl/haproxy-config.ts
 const DEFAULTS$1 = {
 	listenPort: 10024,
 	caSignFile: "/etc/haproxy/ca.pem",
@@ -16217,8 +16187,7 @@ function generateHaproxyConfig(options) {
 		...originBackends(opts.systemCaFile)
 	].join("\n");
 }
-//#endregion
-//#region src/core/lib/acl/haproxy-universal-config.ts
+// src/core/lib/acl/haproxy-universal-config.ts
 const MATCH_ANYTHING = [{
 	raw: null,
 	regex: ".*"
@@ -16405,8 +16374,7 @@ function generateUniversalHaproxyConfig(options) {
 		""
 	].join("\n");
 }
-//#endregion
-//#region src/core/lib/acl/rules.ts
+// src/core/lib/acl/rules.ts
 var InvalidRulesError = class extends ActionError {};
 function parseRulesOrThrow(rulesInput) {
 	try {
@@ -16462,8 +16430,7 @@ function buildACLRules({ httpsRulesInput, httpRulesInput, ipRulesInput }) {
 		ipRules: parseIpRulesOrThrow(ipRulesInput)
 	};
 }
-//#endregion
-//#region src/core/lib/actions/rule-inputs.ts
+// src/core/lib/actions/rule-inputs.ts
 init_core();
 function readRuleInputs(getInput$11 = getInput) {
 	let rules = buildACLRules({
@@ -16500,18 +16467,15 @@ function checkRuleListSizesOrThrow(rules, names) {
 		if (bytes > limit) throw new InvalidRulesError(`${name} is ${bytes} bytes as parsed, over the ${limit} one environment variable can hold; write fewer, broader rules`, "INVALID_RULES");
 	}
 }
-//#endregion
-//#region src/core/lib/docker/compose-project-name.ts
+// src/core/lib/docker/compose-project-name.ts
 function deriveProjectName(containerName) {
 	return `buildcage-${(0, node_crypto.createHash)("sha256").update(containerName).digest("hex").slice(0, 12)}`;
 }
-//#endregion
-//#region src/core/lib/provenance/image-ref.ts
+// src/core/lib/provenance/image-ref.ts
 function resolveBuildcageImageRef({ imageDigest, actionRepository }) {
 	return `${`ghcr.io/${actionRepository}`.toLowerCase()}@${imageDigest}`;
 }
-//#endregion
-//#region src/core/lib/provenance/docker-credentials.ts
+// src/core/lib/provenance/docker-credentials.ts
 function readGhcrBasicAuth(_env = process.env, _readFileSync = node_fs.readFileSync) {
 	try {
 		let configDir = _env.DOCKER_CONFIG ?? node_path.default.join(node_os.default.homedir(), ".docker"), config = JSON.parse(_readFileSync(node_path.default.join(configDir, "config.json"), "utf8"));
@@ -16521,8 +16485,7 @@ function readGhcrBasicAuth(_env = process.env, _readFileSync = node_fs.readFileS
 		return null;
 	}
 }
-//#endregion
-//#region src/core/lib/provenance/errors.ts
+// src/core/lib/provenance/errors.ts
 var VerifyImageError = class extends ActionError {}, ProvenanceError = class extends ActionError {};
 function engineTagSuffix(proxyEngine) {
 	return `-${proxyEngine}`;
@@ -16532,8 +16495,7 @@ function imageTagFromRef(actionRef, proxyEngine = "inspect") {
 	let base;
 	return base = /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef, `${base}${engineTagSuffix(proxyEngine)}`;
 }
-//#endregion
-//#region src/core/lib/provenance/engine-label.ts
+// src/core/lib/provenance/engine-label.ts
 const IMAGE_VERSION_LABEL = "org.opencontainers.image.version", RELEASE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 function checkImageEngine({ labels, proxyEngine, imageTag }) {
 	let label = labels[IMAGE_VERSION_LABEL];
@@ -16541,8 +16503,7 @@ function checkImageEngine({ labels, proxyEngine, imageTag }) {
 	let suffix = engineTagSuffix(proxyEngine);
 	if (!(label.endsWith(suffix) && RELEASE_VERSION.test(label.slice(0, label.length - suffix.length)))) throw new VerifyImageError(`Image ${imageTag} was not published for proxy engine ${proxyEngine} (${IMAGE_VERSION_LABEL}: ${label}), so the rules this run was given would not be enforced.`, "VERIFY_FAILED");
 }
-//#endregion
-//#region src/core/lib/provenance/oci-registry.ts
+// src/core/lib/provenance/oci-registry.ts
 const MANIFEST_MEDIA_TYPES = ["application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json"], INDEX_MEDIA_TYPES = ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"];
 async function withRegistryErrors(what, fn) {
 	try {
@@ -16647,8 +16608,7 @@ async function fetchRegistryToken(registry, repo, basicAuth, _fetch = fetch) {
 		throw new VerifyImageError(basicAuth ? `Registry authentication failed: HTTP ${resp.status}. The credentials in Docker config may be expired, and ${registry} refuses them even for a public package. Run \`docker login ${registry}\` again, or \`docker logout ${registry}\` if the package is public.` : `Failed to get registry token: HTTP ${resp.status}. The package may be private. Run \`docker login ${registry}\` (or use docker/login-action with 'packages: read') before this action.`, "TOKEN_ERROR");
 	});
 }
-//#endregion
-//#region src/core/lib/provenance/oci-bundle.ts
+// src/core/lib/provenance/oci-bundle.ts
 const BUNDLE_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json", IMAGE_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json";
 async function fetchBundle(registry, repo, digest, token, _fetch = fetch) {
 	let client = registryClient(registry, repo, token, _fetch), fromReferrers = await bundleFromReferrers(client, digest);
@@ -16704,8 +16664,7 @@ async function bundleBlob(client, blobDigest) {
 		absentOn404: !1
 	});
 }
-//#endregion
-//#region node_modules/.pnpm/@sigstore+protobuf-specs@0.5.2/node_modules/@sigstore/protobuf-specs/dist/__generated__/envelope.js
+// node_modules/.pnpm/@sigstore+protobuf-specs@0.5.2/node_modules/@sigstore/protobuf-specs/dist/__generated__/envelope.js
 var require_envelope = __commonJSMin(((exports) => {
 	Object.defineProperty(exports, "__esModule", { value: !0 }), exports.Signature = exports.Envelope = void 0, exports.Envelope = {
 		fromJSON(object) {
@@ -18913,7 +18872,7 @@ var require_envelope = __commonJSMin(((exports) => {
 				if (didSomething = !1, !this.preserveMultipleSlashes) {
 					for (let i = 1; i < parts.length - 1; i++) {
 						let p = parts[i];
-						(i !== 1 || p !== "" || parts[0] !== "") && (p === "." || p === "") && (didSomething = !0, parts.splice(i, 1), i--);
+						i === 1 && p === "" && parts[0] === "" || p !== "." && p !== "" || (didSomething = !0, parts.splice(i, 1), i--);
 					}
 					parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === "") && (didSomething = !0, parts.pop());
 				}
@@ -18944,7 +18903,7 @@ var require_envelope = __commonJSMin(((exports) => {
 					if (!this.preserveMultipleSlashes) {
 						for (let i = 1; i < parts.length - 1; i++) {
 							let p = parts[i];
-							(i !== 1 || p !== "" || parts[0] !== "") && (p === "." || p === "") && (didSomething = !0, parts.splice(i, 1), i--);
+							i === 1 && p === "" && parts[0] === "" || p !== "." && p !== "" || (didSomething = !0, parts.splice(i, 1), i--);
 						}
 						parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === "") && (didSomething = !0, parts.pop());
 					}
@@ -23080,8 +23039,7 @@ function assertSignedDigest(envelope, expectedDigest) {
 		throw err instanceof VerifyImageError ? err : new VerifyImageError("Failed to parse signed payload from bundle", "VERIFY_FAILED");
 	}
 }
-//#endregion
-//#region src/core/lib/provenance/sigstore.ts
+// src/core/lib/provenance/sigstore.ts
 async function fetchTrustedRoot() {
 	let cachePath = await (0, node_fs_promises.mkdtemp)((0, node_path.join)(process.env.RUNNER_TEMP || (0, node_os.tmpdir)(), "buildcage-tuf-"));
 	try {
@@ -23111,8 +23069,7 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 	}
 	assertSignedDigest(bundle.content.dsseEnvelope, expectedDigest);
 }
-//#endregion
-//#region src/core/lib/provenance/verify-policy.ts
+// src/core/lib/provenance/verify-policy.ts
 const RELEASE_REF = /^v\d+(\.\d+(\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?)?)?$/, escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseInsensitive = (s) => escapeRegex(s).replace(/[A-Za-z]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
 function buildVerifyOptions({ actionRef, actionRepo }) {
 	let sanPrefix = `^${escapeRegex("https://github.com/")}${caseInsensitive(actionRepo)}${escapeRegex("/.github/workflows/docker-publish.yml@refs/tags/")}`, base = {
@@ -23129,8 +23086,7 @@ function buildVerifyOptions({ actionRef, actionRepo }) {
 		certificateIdentityURI: `${sanPrefix}${escapeRegex(actionRef)}(\\.|$)`
 	} : null;
 }
-//#endregion
-//#region src/core/lib/provenance/verify-image.ts
+// src/core/lib/provenance/verify-image.ts
 const REGISTRY = "ghcr.io";
 async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "inspect" }) {
 	let repoPath = actionRepo.toLowerCase(), verifyOptions = buildVerifyOptions({
@@ -23165,8 +23121,7 @@ async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) 
 	}
 	return requireDigest(digest, actionRef);
 }
-//#endregion
-//#region src/core/lib/report/render/fit-step-summary.ts
+// src/core/lib/report/render/fit-step-summary.ts
 const STEP_SUMMARY_LIMIT_BYTES = 1048576, bytes = (s) => Buffer.byteLength(s, "utf8"), rank = (b) => b.cut === "keep" ? -Infinity : b.priority, wholeBlock = (b) => (b.open ?? "") + b.text + (b.close ?? "");
 function withNotices(blocks, noticeFor) {
 	return blocks.map((b) => b.cut === "keep" ? b : {
@@ -23196,15 +23151,13 @@ function cutBlock(b, budget) {
 	let head = b.head ?? 0;
 	return head > 0 && count <= head ? alone : (fenceOpen && (kept += "```\n"), head > 0 && (kept += "\n"), open + kept + notice + close);
 }
-//#endregion
-//#region src/core/lib/docker/host-addresses.ts
+// src/core/lib/docker/host-addresses.ts
 function listHostIpv4Addresses({ networkInterfaces: list = node_os.networkInterfaces } = {}) {
 	let found = new Set();
-	for (let infos of Object.values(list())) for (let info of infos ?? []) (info.family === "IPv4" || info.family === 4) && (info.internal || found.add(info.address));
+	for (let infos of Object.values(list())) for (let info of infos ?? []) info.family !== "IPv4" && info.family !== 4 || info.internal || found.add(info.address);
 	return [...found].sort();
 }
-//#endregion
-//#region src/core/lib/actions/docker-error.ts
+// src/core/lib/actions/docker-error.ts
 const SLIM_RUNNER_DETECTED_PREFIX = " Detected a container-based GitHub-hosted runner image (e.g. \"ubuntu-slim\")", SLIM_RUNNER_NOTE$1 = `${SLIM_RUNNER_DETECTED_PREFIX}: these ship a Docker client with no daemon and are not supported for this action.`;
 function capturedStderr(e) {
 	let err = e && typeof e == "object" ? e : {};
@@ -23222,8 +23175,7 @@ function describeDockerFailure(e, { operation = "docker", env = process.env, exi
 function isLikelySlimRunner(_env = process.env, _exists = node_fs.existsSync) {
 	return _env.ImageOS === "Linux" && _exists("/run/.containerenv");
 }
-//#endregion
-//#region src/lib/errors.ts
+// src/lib/errors.ts
 var SandboxError = class extends ActionError {};
 function asSandboxError(e, prefix, code) {
 	return e instanceof SandboxError ? e : new SandboxError(`${prefix}: ${errorMessage(e)}`, code);
@@ -23231,8 +23183,7 @@ function asSandboxError(e, prefix, code) {
 function cancelledBeforeRun() {
 	return new SandboxError("The step was cancelled before the command ran.", "CANCELLED_BEFORE_RUN");
 }
-//#endregion
-//#region src/lib/sandbox/pinned-commands.ts
+// src/lib/sandbox/pinned-commands.ts
 const pinned = new Map();
 function hostCommand(command) {
 	return pinned.get(command) ?? command;
@@ -23250,8 +23201,7 @@ function hostCommandEnv(command, env = process.env) {
 		PATH: pinnedPathEnvs.get(command) ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	};
 }
-//#endregion
-//#region src/lib/container.ts
+// src/lib/container.ts
 const CONTAINER_NAME_PREFIX = "buildcage-proxy-";
 function generateContainerName() {
 	return `${CONTAINER_NAME_PREFIX}${(0, node_crypto.randomBytes)(4).toString("hex")}`;
@@ -23310,8 +23260,7 @@ function inspectFormat(containerName, format, exec) {
 function getContainerNetns(containerName, { exec = captureDockerViaExec$1 } = {}) {
 	return inspectFormat(containerName, "{{.NetworkSettings.SandboxKey}}", exec) || null;
 }
-//#endregion
-//#region src/lib/compose-env.ts
+// src/lib/compose-env.ts
 const PROXY_RULE_INPUTS = [
 	"allowed-https-rules",
 	"allowed-http-rules",
@@ -23337,8 +23286,7 @@ function buildComposeEnv({ containerName, proxyMode, proxyEngine, imageRef, http
 		HOST_ADDRESSES: hostAddresses().join(" ")
 	};
 }
-//#endregion
-//#region src/lib/compose-file.ts
+// src/lib/compose-file.ts
 const __dirname$3 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)), DEFAULT_COMPOSE_FILE = (0, node_path.join)(__dirname$3, "../docker/compose.action.yaml");
 async function readLocalImageOverride(env, log = console.log) {
 	return null;
@@ -23346,8 +23294,7 @@ async function readLocalImageOverride(env, log = console.log) {
 function resolveComposeFiles(override) {
 	return override?.composeOverlay ? [DEFAULT_COMPOSE_FILE, override.composeOverlay] : [DEFAULT_COMPOSE_FILE];
 }
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/config.js
 function getUploadChunkSize() {
 	return 8388608;
 }
@@ -27232,8 +27179,7 @@ var init_config = __esmMin((() => {
 })), init_generated = __esmMin((() => {
 	init_timestamp(), init_wrappers(), init_artifact$1(), init_artifact_twirp_client$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/retention.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/retention.js
 function getExpiration(retentionDays) {
 	if (!retentionDays) return;
 	let maxRetentionDays = getRetentionDays();
@@ -27250,8 +27196,7 @@ function getRetentionDays() {
 var init_retention = __esmMin((() => {
 	init_generated(), init_core();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/path-and-artifact-name-validation.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/path-and-artifact-name-validation.js
 function validateArtifactName(name) {
 	if (!name) throw Error("Provided artifact name input during validation is empty");
 	for (let [invalidCharacterKey, errorMessageForCharacter] of invalidArtifactNameCharacters) if (name.includes(invalidCharacterKey)) throw Error(`The artifact name is not valid: ${name}. Contains the following character: ${errorMessageForCharacter}
@@ -27358,8 +27303,7 @@ var invalidArtifactFilePathCharacters, invalidArtifactNameCharacters, init_path_
 })), require_package_version = __commonJSMin(((exports, module) => {
 	module.exports = { version: require_package().version };
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/user-agent.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/user-agent.js
 function getUserAgentString$1() {
 	return `@actions/artifact-${import_package_version.version}`;
 }
@@ -27400,8 +27344,7 @@ var import_package_version, init_user_agent = __esmMin((() => {
 		}
 	}, UsageError.isUsageErrorMessage = (msg) => msg ? msg.includes("insufficient usage") : !1;
 }));
-//#endregion
-//#region node_modules/.pnpm/jwt-decode@4.0.0/node_modules/jwt-decode/build/esm/index.js
+// node_modules/.pnpm/jwt-decode@4.0.0/node_modules/jwt-decode/build/esm/index.js
 function b64DecodeUnicode(str) {
 	return decodeURIComponent(atob(str).replace(/(.)/g, (m, p) => {
 		let code = p.charCodeAt(0).toString(16).toUpperCase();
@@ -27446,8 +27389,7 @@ function jwtDecode(token, options) {
 var InvalidTokenError, init_esm$13 = __esmMin((() => {
 	InvalidTokenError = class extends Error {}, InvalidTokenError.prototype.name = "InvalidTokenError";
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/util.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/util.js
 function getBackendIdsFromToken() {
 	let decoded = jwtDecode(getRuntimeToken());
 	if (!decoded.scp) throw InvalidJwtError;
@@ -27479,8 +27421,7 @@ function maskSecretUrls(body) {
 var InvalidJwtError, init_util$3 = __esmMin((() => {
 	init_core(), init_config(), init_esm$13(), InvalidJwtError = Error("Failed to get backend IDs: The provided JWT token is invalid and/or missing claims");
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/artifact-twirp-client.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/shared/artifact-twirp-client.js
 function internalArtifactTwirpClient(options) {
 	let client = new ArtifactHttpClient(getUserAgentString$1(), options?.maxAttempts, options?.retryIntervalMs, options?.retryMultiplier);
 	return new ArtifactServiceClientJSON(client);
@@ -27595,8 +27536,7 @@ var __awaiter$10, ArtifactHttpClient, init_artifact_twirp_client = __esmMin((() 
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/upload-zip-specification.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/upload-zip-specification.js
 function validateRootDirectory(rootDirectory) {
 	if (!fs.existsSync(rootDirectory)) throw Error(`The provided rootDirectory ${rootDirectory} does not exist`);
 	if (!fs.statSync(rootDirectory).isDirectory()) throw Error(`The provided rootDirectory ${rootDirectory} is not a valid directory`);
@@ -27636,22 +27576,19 @@ var init_upload_zip_specification = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/log.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/log.js
 function log(message, ...args) {
 	node_process.default.stderr.write(`${node_util.default.format(message, ...args)}${node_os.EOL}`);
 }
 var init_log$6 = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/env.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/env.js
 function getEnvironmentVariable(name) {
 	return node_process.default.env[name];
 }
 var init_env = __esmMin((() => {
 	typeof node_process.default.versions.deno == "string" && node_process.default.versions.deno.length, typeof node_process.default.versions.bun == "string" && node_process.default.versions.bun.length;
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/debug.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/debug.js
 function enable(namespaces) {
 	enabledString = namespaces, enabledNamespaces = [], skippedNamespaces = [];
 	let namespaceList = namespaces.split(",").map((ns) => ns.trim());
@@ -27722,8 +27659,7 @@ var debugEnvVariable, enabledString, enabledNamespaces, skippedNamespaces, debug
 		log
 	});
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/logger.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/logger/logger.js
 function patchLogMethod(parent, child) {
 	child.log = (...args) => {
 		parent.log(...args);
@@ -27794,8 +27730,7 @@ var TYPESPEC_RUNTIME_LOG_LEVELS, levelMap, context$3, init_logger = __esmMin((()
 		namespace: "typeSpecRuntime"
 	}), context$3.logger;
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/httpHeaders.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/httpHeaders.js
 function normalizeName(name) {
 	return name.toLowerCase();
 }
@@ -27843,14 +27778,12 @@ var HttpHeadersImpl, init_httpHeaders$1 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/uuidUtils.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/uuidUtils.js
 function randomUUID$1() {
 	return globalThis.crypto.randomUUID();
 }
 var init_uuidUtils = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipelineRequest.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipelineRequest.js
 function createPipelineRequest$1(options) {
 	return new PipelineRequestImpl(options);
 }
@@ -27880,8 +27813,7 @@ var PipelineRequestImpl, init_pipelineRequest$1 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipeline.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/pipeline.js
 function createEmptyPipeline$1() {
 	return HttpPipeline.create();
 }
@@ -27991,14 +27923,12 @@ var ValidPhaseNames, HttpPipeline, init_pipeline$2 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/object.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/object.js
 function isObject(input) {
 	return typeof input == "object" && !!input && !Array.isArray(input) && !(input instanceof RegExp) && !(input instanceof Date);
 }
 var init_object = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/error.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/error.js
 function isError$1(e) {
 	if (isObject(e)) {
 		let hasName = typeof e.name == "string", hasMessage = typeof e.message == "string";
@@ -28057,8 +27987,7 @@ var init_error$1 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/restError.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/restError.js
 function isRestError$1(e) {
 	return e instanceof RestError$1 || isError$1(e) && e.name === "RestError";
 }
@@ -28097,8 +28026,7 @@ var errorSanitizer, RestError$1, init_restError$1 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/bytesEncoding.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/bytesEncoding.js
 function uint8ArrayToString$1(bytes, format) {
 	return Buffer.from(bytes).toString(format);
 }
@@ -28108,8 +28036,7 @@ function stringToUint8Array$1(value, format) {
 var init_bytesEncoding = __esmMin((() => {})), logger$4, init_log$5 = __esmMin((() => {
 	init_logger(), logger$4 = createClientLogger$1("ts-http-runtime");
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/nodeHttpClient.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/nodeHttpClient.js
 function isReadableStream(body) {
 	return body && typeof body.pipe == "function";
 }
@@ -28273,16 +28200,14 @@ var DEFAULT_TLS_SETTINGS, ReportTransform, NodeHttpClient, init_nodeHttpClient =
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/defaultHttpClient.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/defaultHttpClient.js
 function createDefaultHttpClient$1() {
 	return createNodeHttpClient();
 }
 var init_defaultHttpClient$1 = __esmMin((() => {
 	init_nodeHttpClient();
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/logPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/logPolicy.js
 function logPolicy$1(options = {}) {
 	let logger = options.logger ?? logger$4.info, sanitizer = new Sanitizer({
 		additionalAllowedHeaderNames: options.additionalAllowedHeaderNames,
@@ -28301,14 +28226,12 @@ function logPolicy$1(options = {}) {
 var logPolicyName, init_logPolicy$1 = __esmMin((() => {
 	init_log$5(), init_sanitizer(), logPolicyName = "logPolicy";
 })), init_constants$3 = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/random.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/random.js
 function getRandomIntegerInclusive(min, max) {
 	return min = Math.ceil(min), max = Math.floor(max), Math.floor(Math.random() * (max - min + 1)) + min;
 }
 var init_random = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/delay.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/delay.js
 function calculateRetryDelay(retryAttempt, config) {
 	let exponentialDelay = config.retryDelayInMs * 2 ** retryAttempt, clampedDelay = Math.min(config.maxRetryDelayInMs, exponentialDelay);
 	return { retryAfterInMs: clampedDelay / 2 + getRandomIntegerInclusive(0, clampedDelay / 2) };
@@ -28316,8 +28239,7 @@ function calculateRetryDelay(retryAttempt, config) {
 var init_delay$1 = __esmMin((() => {
 	init_random();
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/helpers.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/helpers.js
 function delay$2(delayInMs, value, options) {
 	return new Promise((resolve, reject) => {
 		let timer, onAborted, rejectOnAbort = () => reject(new AbortError$1(options?.abortErrorMsg ? options?.abortErrorMsg : StandardAbortMessage$1)), removeListeners = () => {
@@ -28338,8 +28260,7 @@ function parseHeaderValueAsNumber(response, headerName) {
 var StandardAbortMessage$1, init_helpers = __esmMin((() => {
 	init_AbortError$1(), StandardAbortMessage$1 = "The operation was aborted.";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/throttlingRetryStrategy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/throttlingRetryStrategy.js
 function getRetryAfterInMs(response) {
 	if (response && [429, 503].includes(response.status)) try {
 		for (let header of AllRetryAfterHeaders) {
@@ -28373,8 +28294,7 @@ var RetryAfterHeader, AllRetryAfterHeaders, init_throttlingRetryStrategy = __esm
 		RetryAfterHeader
 	];
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/exponentialRetryStrategy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/retryStrategies/exponentialRetryStrategy.js
 function exponentialRetryStrategy(options = {}) {
 	let retryInterval = options.retryDelayInMs ?? DEFAULT_CLIENT_RETRY_INTERVAL, maxRetryInterval = options.maxRetryDelayInMs ?? DEFAULT_CLIENT_MAX_RETRY_INTERVAL;
 	return {
@@ -28397,8 +28317,7 @@ function isSystemError(err) {
 var DEFAULT_CLIENT_RETRY_INTERVAL, DEFAULT_CLIENT_MAX_RETRY_INTERVAL, init_exponentialRetryStrategy = __esmMin((() => {
 	init_delay$1(), init_throttlingRetryStrategy(), DEFAULT_CLIENT_RETRY_INTERVAL = 1e3, DEFAULT_CLIENT_MAX_RETRY_INTERVAL = 64e3;
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/retryPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/retryPolicy.js
 function retryPolicy(strategies, options = { maxRetries: 3 }) {
 	let logger = options.logger || retryPolicyLogger;
 	return {
@@ -28452,8 +28371,7 @@ function retryPolicy(strategies, options = { maxRetries: 3 }) {
 var retryPolicyLogger, retryPolicyName, init_retryPolicy = __esmMin((() => {
 	init_helpers(), init_restError$1(), init_AbortError$1(), init_logger(), init_constants$3(), retryPolicyLogger = createClientLogger$1("ts-http-runtime retryPolicy"), retryPolicyName = "retryPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/defaultRetryPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/defaultRetryPolicy.js
 function defaultRetryPolicy$1(options = {}) {
 	return {
 		name: defaultRetryPolicyName,
@@ -28463,8 +28381,7 @@ function defaultRetryPolicy$1(options = {}) {
 var defaultRetryPolicyName, init_defaultRetryPolicy$1 = __esmMin((() => {
 	init_exponentialRetryStrategy(), init_throttlingRetryStrategy(), init_retryPolicy(), init_constants$3(), defaultRetryPolicyName = "defaultRetryPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/formData.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/formData.js
 function convertBodyToFormDataMap(body) {
 	if (typeof FormData < "u" && body instanceof FormData) {
 		let formDataMap = {};
@@ -28476,8 +28393,7 @@ function convertBodyToFormDataMap(body) {
 	}
 }
 var init_formData = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/formDataPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/formDataPolicy.js
 function formDataPolicy$1() {
 	return {
 		name: formDataPolicyName,
@@ -28519,8 +28435,7 @@ async function prepareFormData(formData, request) {
 var formDataPolicyName, init_formDataPolicy$1 = __esmMin((() => {
 	init_bytesEncoding(), init_formData(), init_httpHeaders$1(), formDataPolicyName = "formDataPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/agentPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/agentPolicy.js
 function agentPolicy$1(agent) {
 	return {
 		name: agentPolicyName,
@@ -28530,8 +28445,7 @@ function agentPolicy$1(agent) {
 var agentPolicyName, init_agentPolicy$1 = __esmMin((() => {
 	agentPolicyName = "agentPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/tlsPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/tlsPolicy.js
 function tlsPolicy$1(tlsSettings) {
 	return {
 		name: tlsPolicyName,
@@ -28882,8 +28796,7 @@ var tlsPolicyName, init_tlsPolicy$1 = __esmMin((() => {
 		return ret;
 	}
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/proxyPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/proxyPolicy.js
 function getEnvironmentValue(name) {
 	if (process.env[name]) return process.env[name];
 	if (process.env[name.toLowerCase()]) return process.env[name.toLowerCase()];
@@ -28946,8 +28859,7 @@ function proxyPolicy$1(proxySettings, options) {
 var import_dist, import_dist$1, HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, NO_PROXY, proxyPolicyName, globalNoProxyList, noProxyListLoaded, globalBypassedMap, init_proxyPolicy$1 = __esmMin((() => {
 	import_dist = require_dist$2(), import_dist$1 = require_dist$1(), init_log$5(), HTTPS_PROXY = "HTTPS_PROXY", HTTP_PROXY = "HTTP_PROXY", ALL_PROXY = "ALL_PROXY", NO_PROXY = "NO_PROXY", proxyPolicyName = "proxyPolicy", globalNoProxyList = [], noProxyListLoaded = !1, globalBypassedMap = new Map();
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/decompressResponsePolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/decompressResponsePolicy.js
 function decompressResponsePolicy$1() {
 	return {
 		name: decompressResponsePolicyName$1,
@@ -28959,8 +28871,7 @@ function decompressResponsePolicy$1() {
 var decompressResponsePolicyName$1, init_decompressResponsePolicy$1 = __esmMin((() => {
 	decompressResponsePolicyName$1 = "decompressResponsePolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/redirectPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/redirectPolicy.js
 function redirectPolicy$1(options = {}) {
 	let { maxRetries = 20, allowCrossOriginRedirects = !1 } = options;
 	return {
@@ -28985,14 +28896,12 @@ async function handleRedirect(next, response, maxRetries, allowCrossOriginRedire
 var redirectPolicyName$1, allowedRedirect, init_redirectPolicy$1 = __esmMin((() => {
 	init_log$5(), redirectPolicyName$1 = "redirectPolicy", allowedRedirect = ["GET", "HEAD"];
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/typeGuards.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/typeGuards.js
 function isBlob(x) {
 	return x instanceof Blob;
 }
 var init_typeGuards = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/concat.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/util/concat.js
 async function* streamAsyncIterator() {
 	let reader = this.getReader();
 	try {
@@ -29025,8 +28934,7 @@ async function concat(sources) {
 var init_concat = __esmMin((() => {
 	init_typeGuards();
 }));
-//#endregion
-//#region node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/multipartPolicy.js
+// node_modules/.pnpm/@typespec+ts-http-runtime@0.3.9_supports-color@7.2.0/node_modules/@typespec/ts-http-runtime/dist/esm/policies/multipartPolicy.js
 function generateBoundary() {
 	return `----AzSDKFormBoundary${randomUUID$1()}`;
 }
@@ -29085,8 +28993,7 @@ var multipartPolicyName$1, maxBoundaryLength, validBoundaryCharacters, init_mult
 })), init_esm$12 = __esmMin((() => {
 	init_AbortError$1(), init_logger(), init_httpHeaders$1(), init_pipelineRequest$1(), init_pipeline$2(), init_restError$1(), init_defaultHttpClient$1(), init_logPolicy$1(), init_constants$3(), init_defaultRetryPolicy$1(), init_formDataPolicy$1(), init_agentPolicy$1(), init_tlsPolicy$1(), init_proxyPolicy$1(), init_decompressResponsePolicy$1(), init_redirectPolicy$1(), init_multipartPolicy$1(), init_log$5(), init_env(), init_typeGuards();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/pipeline.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/pipeline.js
 function createEmptyPipeline() {
 	return createEmptyPipeline$1();
 }
@@ -29095,8 +29002,7 @@ var init_pipeline$1 = __esmMin((() => {
 })), init_internal$2 = __esmMin((() => {
 	init_logger();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+logger@1.4.0_supports-color@7.2.0/node_modules/@azure/logger/dist/esm/index.js
+// node_modules/.pnpm/@azure+logger@1.4.0_supports-color@7.2.0/node_modules/@azure/logger/dist/esm/index.js
 function createClientLogger(namespace) {
 	return context$2.createClientLogger(namespace);
 }
@@ -29110,8 +29016,7 @@ var context$2, init_esm$11 = __esmMin((() => {
 })), init_internal$1 = __esmMin((() => {
 	init_agentPolicy$1(), init_decompressResponsePolicy$1(), init_defaultRetryPolicy$1(), init_exponentialRetryStrategy(), init_retryPolicy(), init_constants$3(), init_throttlingRetryStrategy(), init_formDataPolicy$1(), init_logPolicy$1(), init_multipartPolicy$1(), init_proxyPolicy$1(), init_redirectPolicy$1(), init_tlsPolicy$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/logPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/logPolicy.js
 function logPolicy(options = {}) {
 	return logPolicy$1({
 		logger: logger$3.info,
@@ -29121,16 +29026,14 @@ function logPolicy(options = {}) {
 var init_logPolicy = __esmMin((() => {
 	init_log$4(), init_internal$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/redirectPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/redirectPolicy.js
 function redirectPolicy(options = {}) {
 	return redirectPolicy$1(options);
 }
 var redirectPolicyName, init_redirectPolicy = __esmMin((() => {
 	init_internal$1(), redirectPolicyName = redirectPolicyName$1;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/userAgentPlatform.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/userAgentPlatform.js
 function getHeaderName() {
 	return "User-Agent";
 }
@@ -29143,8 +29046,7 @@ async function setPlatformSpecificData(map) {
 var init_userAgentPlatform = __esmMin((() => {})), SDK_VERSION$1, init_constants$2 = __esmMin((() => {
 	SDK_VERSION$1 = "1.25.0";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/userAgent.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/userAgent.js
 function getUserAgentString(telemetryInfo) {
 	let parts = [];
 	for (let [key, value] of telemetryInfo) {
@@ -29165,8 +29067,7 @@ async function getUserAgentValue(prefix) {
 var init_userAgent = __esmMin((() => {
 	init_userAgentPlatform(), init_constants$2();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/userAgentPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/userAgentPolicy.js
 function userAgentPolicy(options = {}) {
 	let userAgentValue = getUserAgentValue(options.userAgentPrefix);
 	return {
@@ -29179,8 +29080,7 @@ function userAgentPolicy(options = {}) {
 var UserAgentHeaderName, userAgentPolicyName, init_userAgentPolicy = __esmMin((() => {
 	init_userAgent(), UserAgentHeaderName = getUserAgentHeaderName(), userAgentPolicyName = "userAgentPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/file.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/file.js
 function hasRawContent(x) {
 	return typeof x[rawContent] == "function";
 }
@@ -29190,8 +29090,7 @@ function getRawContent$1(blob) {
 var rawContent, init_file = __esmMin((() => {
 	init_file(), rawContent = Symbol("rawContent");
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/multipartPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/multipartPolicy.js
 function multipartPolicy() {
 	let tspPolicy = multipartPolicy$1();
 	return {
@@ -29205,24 +29104,21 @@ function multipartPolicy() {
 var multipartPolicyName, init_multipartPolicy = __esmMin((() => {
 	init_internal$1(), init_file(), multipartPolicyName = multipartPolicyName$1;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/decompressResponsePolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/decompressResponsePolicy.js
 function decompressResponsePolicy() {
 	return decompressResponsePolicy$1();
 }
 var decompressResponsePolicyName, init_decompressResponsePolicy = __esmMin((() => {
 	init_internal$1(), decompressResponsePolicyName = decompressResponsePolicyName$1;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/defaultRetryPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/defaultRetryPolicy.js
 function defaultRetryPolicy(options = {}) {
 	return defaultRetryPolicy$1(options);
 }
 var init_defaultRetryPolicy = __esmMin((() => {
 	init_internal$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/formDataPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/formDataPolicy.js
 function formDataPolicy() {
 	return formDataPolicy$1();
 }
@@ -29239,8 +29135,7 @@ var init_formDataPolicy = __esmMin((() => {
 })), init_esm$10 = __esmMin((() => {
 	init_AbortError();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/createAbortablePromise.js
+// node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/createAbortablePromise.js
 function createAbortablePromise(buildPromise, options) {
 	let { cleanupBeforeAbort, abortSignal, abortErrorMsg } = options ?? {};
 	return new Promise((resolve, reject) => {
@@ -29269,8 +29164,7 @@ function createAbortablePromise(buildPromise, options) {
 var init_createAbortablePromise = __esmMin((() => {
 	init_esm$10();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/delay.js
+// node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/delay.js
 function delay$1(timeInMs, options) {
 	let token, { abortSignal, abortErrorMsg } = options ?? {};
 	return createAbortablePromise((resolve) => {
@@ -29284,8 +29178,7 @@ function delay$1(timeInMs, options) {
 var StandardAbortMessage, init_delay = __esmMin((() => {
 	init_createAbortablePromise(), StandardAbortMessage = "The delay was aborted.";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/error.js
+// node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/error.js
 function getErrorMessage(e) {
 	if (isError$1(e)) return e.message;
 	{
@@ -29301,8 +29194,7 @@ function getErrorMessage(e) {
 var init_error = __esmMin((() => {
 	init_internal();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/index.js
+// node_modules/.pnpm/@azure+core-util@1.14.0_supports-color@7.2.0/node_modules/@azure/core-util/dist/esm/index.js
 function isError(e) {
 	return isError$1(e);
 }
@@ -29318,8 +29210,7 @@ function stringToUint8Array(value, format) {
 var isNodeLike, init_esm$9 = __esmMin((() => {
 	init_internal(), init_createAbortablePromise(), init_delay(), init_error(), isNodeLike = !0;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/proxyPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/proxyPolicy.js
 function getDefaultProxySettings(proxyUrl) {
 	return getDefaultProxySettings$1(proxyUrl);
 }
@@ -29329,8 +29220,7 @@ function proxyPolicy(proxySettings, options) {
 var init_proxyPolicy = __esmMin((() => {
 	init_internal$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/setClientRequestIdPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/setClientRequestIdPolicy.js
 function setClientRequestIdPolicy(requestIdHeaderName = "x-ms-client-request-id") {
 	return {
 		name: setClientRequestIdPolicyName,
@@ -29342,24 +29232,21 @@ function setClientRequestIdPolicy(requestIdHeaderName = "x-ms-client-request-id"
 var setClientRequestIdPolicyName, init_setClientRequestIdPolicy = __esmMin((() => {
 	setClientRequestIdPolicyName = "setClientRequestIdPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/agentPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/agentPolicy.js
 function agentPolicy(agent) {
 	return agentPolicy$1(agent);
 }
 var init_agentPolicy = __esmMin((() => {
 	init_internal$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/tlsPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/tlsPolicy.js
 function tlsPolicy(tlsSettings) {
 	return tlsPolicy$1(tlsSettings);
 }
 var init_tlsPolicy = __esmMin((() => {
 	init_internal$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/tracingContext.js
+// node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/tracingContext.js
 function createTracingContext(options = {}) {
 	let context = new TracingContextImpl(options.parentContext);
 	return options.span && (context = context.setValue(knownContextKeys.span, options.span)), options.namespace && (context = context.setValue(knownContextKeys.namespace, options.namespace)), context;
@@ -29390,8 +29277,7 @@ var knownContextKeys, TracingContextImpl, init_tracingContext = __esmMin((() => 
 })), import_state_cjs$1, state$1, init_state$1 = __esmMin((() => {
 	import_state_cjs$1 = require_state_cjs$1(), state$1 = import_state_cjs$1.state;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/instrumenter.js
+// node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/instrumenter.js
 function createDefaultTracingSpan() {
 	return {
 		end: () => {},
@@ -29421,8 +29307,7 @@ function getInstrumenter() {
 var init_instrumenter = __esmMin((() => {
 	init_tracingContext(), init_state$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/tracingClient.js
+// node_modules/.pnpm/@azure+core-tracing@1.4.0/node_modules/@azure/core-tracing/dist/esm/tracingClient.js
 function createTracingClient(options) {
 	let { namespace, packageName, packageVersion } = options;
 	function startSpan(name, operationOptions, spanOptions) {
@@ -29476,16 +29361,14 @@ var init_tracingClient = __esmMin((() => {
 })), init_esm$8 = __esmMin((() => {
 	init_instrumenter(), init_tracingClient();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/restError.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/restError.js
 function isRestError(e) {
 	return isRestError$1(e);
 }
 var RestError, init_restError = __esmMin((() => {
 	init_esm$12(), RestError = RestError$1;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/tracingPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/tracingPolicy.js
 function tracingPolicy(options = {}) {
 	let userAgentPromise = getUserAgentValue(options.userAgentPrefix), sanitizer = new Sanitizer({ additionalAllowedQueryParameters: options.additionalAllowedQueryParameters }), tracingClient = tryCreateTracingClient();
 	return {
@@ -29565,8 +29448,7 @@ function tryProcessResponse(span, response) {
 var tracingPolicyName, init_tracingPolicy = __esmMin((() => {
 	init_esm$8(), init_constants$2(), init_userAgent(), init_log$4(), init_esm$9(), init_restError(), init_internal(), tracingPolicyName = "tracingPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/wrapAbortSignal.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/wrapAbortSignal.js
 function wrapAbortSignalLike(abortSignalLike) {
 	if (abortSignalLike instanceof AbortSignal) return { abortSignal: abortSignalLike };
 	if (abortSignalLike.aborted) return { abortSignal: AbortSignal.abort("reason" in abortSignalLike ? abortSignalLike.reason : void 0) };
@@ -29583,8 +29465,7 @@ function wrapAbortSignalLike(abortSignalLike) {
 	};
 }
 var init_wrapAbortSignal = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/wrapAbortSignalLikePolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/wrapAbortSignalLikePolicy.js
 function wrapAbortSignalLikePolicy() {
 	return {
 		name: wrapAbortSignalLikePolicyName,
@@ -29603,8 +29484,7 @@ function wrapAbortSignalLikePolicy() {
 var wrapAbortSignalLikePolicyName, init_wrapAbortSignalLikePolicy = __esmMin((() => {
 	init_wrapAbortSignal(), wrapAbortSignalLikePolicyName = "wrapAbortSignalLikePolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/createPipelineFromOptions.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/createPipelineFromOptions.js
 function createPipelineFromOptions(options) {
 	let pipeline = createEmptyPipeline();
 	return isNodeLike && (options.agent && pipeline.addPolicy(agentPolicy(options.agent)), options.tlsOptions && pipeline.addPolicy(tlsPolicy(options.tlsOptions)), pipeline.addPolicy(proxyPolicy(options.proxyOptions)), pipeline.addPolicy(decompressResponsePolicy())), pipeline.addPolicy(wrapAbortSignalLikePolicy()), pipeline.addPolicy(formDataPolicy(), { beforePolicies: [multipartPolicyName] }), pipeline.addPolicy(userAgentPolicy(options.userAgentOptions)), pipeline.addPolicy(setClientRequestIdPolicy(options.telemetryOptions?.clientRequestIdHeaderName)), pipeline.addPolicy(multipartPolicy(), { afterPhase: "Deserialize" }), pipeline.addPolicy(defaultRetryPolicy(options.retryOptions), { phase: "Retry" }), pipeline.addPolicy(tracingPolicy({
@@ -29615,8 +29495,7 @@ function createPipelineFromOptions(options) {
 var init_createPipelineFromOptions = __esmMin((() => {
 	init_logPolicy(), init_pipeline$1(), init_redirectPolicy(), init_userAgentPolicy(), init_multipartPolicy(), init_decompressResponsePolicy(), init_defaultRetryPolicy(), init_formDataPolicy(), init_esm$9(), init_proxyPolicy(), init_setClientRequestIdPolicy(), init_agentPolicy(), init_tlsPolicy(), init_tracingPolicy(), init_wrapAbortSignalLikePolicy();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/defaultHttpClient.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/defaultHttpClient.js
 function createDefaultHttpClient() {
 	let client = createDefaultHttpClient$1();
 	return { async sendRequest(request) {
@@ -29631,24 +29510,21 @@ function createDefaultHttpClient() {
 var init_defaultHttpClient = __esmMin((() => {
 	init_esm$12(), init_wrapAbortSignal();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/httpHeaders.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/httpHeaders.js
 function createHttpHeaders(rawHeaders) {
 	return createHttpHeaders$1(rawHeaders);
 }
 var init_httpHeaders = __esmMin((() => {
 	init_esm$12();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/pipelineRequest.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/pipelineRequest.js
 function createPipelineRequest(options) {
 	return createPipelineRequest$1(options);
 }
 var init_pipelineRequest = __esmMin((() => {
 	init_esm$12();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/tokenCycler.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/util/tokenCycler.js
 async function beginRefresh(getAccessToken, retryIntervalInMs, refreshTimeout) {
 	async function tryGetAccessToken() {
 		if (Date.now() < refreshTimeout) try {
@@ -29698,8 +29574,7 @@ var DEFAULT_CYCLER_OPTIONS, init_tokenCycler = __esmMin((() => {
 		refreshWindowInMs: 12e4
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/bearerTokenAuthenticationPolicy.js
+// node_modules/.pnpm/@azure+core-rest-pipeline@1.25.0_supports-color@7.2.0/node_modules/@azure/core-rest-pipeline/dist/esm/policies/bearerTokenAuthenticationPolicy.js
 async function trySendRequest(request, next) {
 	try {
 		return [await next(request), void 0];
@@ -29805,8 +29680,7 @@ var bearerTokenAuthenticationPolicyName, init_bearerTokenAuthenticationPolicy = 
 })), init_esm$7 = __esmMin((() => {
 	init_pipeline$1(), init_createPipelineFromOptions(), init_defaultHttpClient(), init_httpHeaders(), init_pipelineRequest(), init_restError(), init_decompressResponsePolicy(), init_internal$1(), init_setClientRequestIdPolicy(), init_logPolicy(), init_multipartPolicy(), init_proxyPolicy(), init_redirectPolicy(), init_esm$11(), init_constants$2(), init_tracingPolicy(), init_defaultRetryPolicy(), init_userAgentPolicy(), init_tlsPolicy(), init_formDataPolicy(), init_bearerTokenAuthenticationPolicy(), init_tokenCycler(), init_log$4(), init_agentPolicy(), init_file();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-auth@1.11.0_supports-color@7.2.0/node_modules/@azure/core-auth/dist/esm/tokenCredential.js
+// node_modules/.pnpm/@azure+core-auth@1.11.0_supports-color@7.2.0/node_modules/@azure/core-auth/dist/esm/tokenCredential.js
 function isTokenCredential(credential) {
 	let castCredential = credential;
 	return castCredential && typeof castCredential.getToken == "function" && (castCredential.signRequest === void 0 || castCredential.getToken.length > 0);
@@ -29814,8 +29688,7 @@ function isTokenCredential(credential) {
 var init_tokenCredential = __esmMin((() => {})), init_esm$6 = __esmMin((() => {
 	init_esm$9(), init_tokenCredential();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/disableKeepAlivePolicy.js
+// node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/disableKeepAlivePolicy.js
 function createDisableKeepAlivePolicy() {
 	return {
 		name: disableKeepAlivePolicyName,
@@ -29830,8 +29703,7 @@ function pipelineContainsDisableKeepAlivePolicy(pipeline) {
 var disableKeepAlivePolicyName, init_disableKeepAlivePolicy = __esmMin((() => {
 	disableKeepAlivePolicyName = "DisableKeepAlivePolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/base64.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/base64.js
 function encodeByteArray(value) {
 	return uint8ArrayToString(value, "base64");
 }
@@ -29841,8 +29713,7 @@ function decodeString(value) {
 var init_base64 = __esmMin((() => {
 	init_esm$9();
 })), init_interfaces$1 = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/utils.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/utils.js
 function isPrimitiveBody(value, mapperTypeName) {
 	return mapperTypeName !== "Composite" && mapperTypeName !== "Dictionary" && (typeof value == "string" || typeof value == "number" || typeof value == "boolean" || mapperTypeName?.match(/^(Date|DateTime|DateTimeRfc1123|UnixTime|ByteArray|Base64Url)$/i) !== null || value == null);
 }
@@ -29891,8 +29762,7 @@ function flattenResponse(fullResponse, responseSpec) {
 var validateISODuration, validUuidRegex, init_utils$3 = __esmMin((() => {
 	validateISODuration = /^(-|\+)?P(?:([-+]?[0-9,.]*)Y)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)W)?(?:([-+]?[0-9,.]*)D)?(?:T(?:([-+]?[0-9,.]*)H)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)S)?)?$/, validUuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializer.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializer.js
 function createSerializer(modelMappers = {}, isXML = !1) {
 	return new SerializerImpl(modelMappers, isXML);
 }
@@ -30286,8 +30156,7 @@ var SerializerImpl, MapperTypeNames, init_serializer = __esmMin((() => {
 })), import_state_cjs, state, init_state = __esmMin((() => {
 	import_state_cjs = require_state_cjs(), state = import_state_cjs.state;
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/operationHelpers.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/operationHelpers.js
 function getOperationArgumentValueFromParameter(operationArguments, parameter, fallbackObject) {
 	let parameterPath = parameter.parameterPath, parameterMapper = parameter.mapper, value;
 	if (typeof parameterPath == "string" && (parameterPath = [parameterPath]), Array.isArray(parameterPath)) {
@@ -30337,8 +30206,7 @@ function getOperationRequestInfo(request) {
 var originalRequestSymbol$1, init_operationHelpers = __esmMin((() => {
 	init_state(), originalRequestSymbol$1 = Symbol.for("@azure/core-client original request");
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/deserializationPolicy.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/deserializationPolicy.js
 function deserializationPolicy(options = {}) {
 	let jsonContentTypes = options.expectedContentTypes?.json ?? defaultJsonContentTypes, xmlContentTypes = options.expectedContentTypes?.xml ?? defaultXmlContentTypes, parseXML = options.parseXML, serializerOptions = options.serializerOptions, updatedOptions = { xml: {
 		rootName: serializerOptions?.xml.rootName ?? "",
@@ -30462,8 +30330,7 @@ async function parse$3(jsonContentTypes, xmlContentTypes, operationResponse, opt
 var defaultJsonContentTypes, defaultXmlContentTypes, deserializationPolicyName, init_deserializationPolicy = __esmMin((() => {
 	init_interfaces$1(), init_esm$7(), init_serializer(), init_operationHelpers(), defaultJsonContentTypes = ["application/json", "text/json"], defaultXmlContentTypes = ["application/xml", "application/atom+xml"], deserializationPolicyName = "deserializationPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/interfaceHelpers.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/interfaceHelpers.js
 function getStreamingResponseStatusCodes(operationSpec) {
 	let result = new Set();
 	for (let [statusCode, operationResponse] of Object.entries(operationSpec.responses)) operationResponse.bodyMapper && operationResponse.bodyMapper.type.name === MapperTypeNames.Stream && result.add(Number(statusCode));
@@ -30476,8 +30343,7 @@ function getPathStringFromParameter(parameter) {
 var init_interfaceHelpers = __esmMin((() => {
 	init_serializer();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializationPolicy.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serializationPolicy.js
 function serializationPolicy(options = {}) {
 	let stringifyXML = options.stringifyXML;
 	return {
@@ -30562,8 +30428,7 @@ function prepareXMLRootList(obj, elementName, xmlNamespaceKey, xmlNamespace) {
 var serializationPolicyName, init_serializationPolicy = __esmMin((() => {
 	init_interfaces$1(), init_operationHelpers(), init_serializer(), init_interfaceHelpers(), serializationPolicyName = "serializationPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/pipeline.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/pipeline.js
 function createClientPipeline(options = {}) {
 	let pipeline = createPipelineFromOptions(options ?? {});
 	return options.credentialOptions && pipeline.addPolicy(bearerTokenAuthenticationPolicy({
@@ -30574,16 +30439,14 @@ function createClientPipeline(options = {}) {
 var init_pipeline = __esmMin((() => {
 	init_deserializationPolicy(), init_esm$7(), init_serializationPolicy();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/httpClientCache.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/httpClientCache.js
 function getCachedDefaultHttpClient$1() {
 	return cachedHttpClient ||= createDefaultHttpClient(), cachedHttpClient;
 }
 var cachedHttpClient, init_httpClientCache = __esmMin((() => {
 	init_esm$7();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/urlHelpers.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/urlHelpers.js
 function getRequestUrl(baseUri, operationSpec, operationArguments, fallbackObject) {
 	let urlReplacements = calculateUrlReplacements(operationSpec, operationArguments, fallbackObject), isAbsolutePath = !1, requestUrl = replaceAll(baseUri, urlReplacements);
 	if (operationSpec.path) {
@@ -30678,8 +30541,7 @@ var CollectionFormatToDelimiterMap, init_urlHelpers = __esmMin((() => {
 })), logger$2, init_log$3 = __esmMin((() => {
 	init_esm$11(), logger$2 = createClientLogger("core-client");
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serviceClient.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/serviceClient.js
 function createDefaultPipeline(options) {
 	let credentialScopes = getCredentialScopes(options), credentialOptions = options.credential && credentialScopes ? {
 		credentialScopes,
@@ -30740,8 +30602,7 @@ var ServiceClient, init_serviceClient = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/authorizeRequestOnTenantChallenge.js
+// node_modules/.pnpm/@azure+core-client@1.11.1_supports-color@7.2.0/node_modules/@azure/core-client/dist/esm/authorizeRequestOnTenantChallenge.js
 function isUuid(text) {
 	return /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/.test(text);
 }
@@ -30791,8 +30652,7 @@ var Constants, authorizeRequestOnTenantChallenge, init_authorizeRequestOnTenantC
 })), init_esm$5 = __esmMin((() => {
 	init_serializer(), init_serviceClient(), init_pipeline(), init_interfaces$1(), init_deserializationPolicy(), init_serializationPolicy(), init_log$3(), init_base64(), init_authorizeRequestOnTenantChallenge();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/util.js
+// node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/util.js
 function toPipelineRequest(webResource, options = {}) {
 	let request = webResource[originalRequestSymbol], headers = createHttpHeaders(webResource.headers.toJson({ preserveCase: !0 }));
 	if (request) return request.headers = headers, request;
@@ -30943,8 +30803,7 @@ var originalRequestSymbol, originalClientRequestSymbol, passThroughProps, HttpHe
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/response.js
+// node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/response.js
 function toCompatResponse(response, options) {
 	let request = toWebResourceLike(response.request), headers = toHttpHeadersLike(response.headers);
 	return options?.createProxy ? new Proxy(response, {
@@ -30989,8 +30848,7 @@ var originalResponse, init_response = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/requestPolicyFactoryPolicy.js
+// node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/policies/requestPolicyFactoryPolicy.js
 function createRequestPolicyFactoryPolicy(factories) {
 	let orderedFactories = factories.slice().reverse();
 	return {
@@ -31015,8 +30873,7 @@ var HttpPipelineLogLevel, mockRequestPolicyOptions, requestPolicyFactoryPolicyNa
 		}
 	}, requestPolicyFactoryPolicyName = "RequestPolicyFactoryPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/httpClientAdapter.js
+// node_modules/.pnpm/@azure+core-http-compat@2.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__@azure+co_3cf5eb9a54062b72e4ef3d91ae6a8e59/node_modules/@azure/core-http-compat/dist/esm/httpClientAdapter.js
 function convertHttpClient(requestPolicyClient) {
 	return { sendRequest: async (request) => toPipelineResponse(await requestPolicyClient.sendRequest(toWebResourceLike(request, { createProxy: !0 }))) };
 }
@@ -31025,8 +30882,7 @@ var init_httpClientAdapter = __esmMin((() => {
 })), init_esm$4 = __esmMin((() => {
 	init_extendedClient(), init_response(), init_requestPolicyFactoryPolicy(), init_disableKeepAlivePolicy(), init_httpClientAdapter(), init_util$2();
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/util.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/util.js
 function getAllMatches(string, regex) {
 	let matches = [], match = regex.exec(string);
 	for (; match;) {
@@ -31058,8 +30914,7 @@ var regexName, isName, DANGEROUS_PROPERTY_NAMES, criticalProperties, init_util$1
 		"prototype"
 	];
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/validator.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/validator.js
 function validate(xmlData, options) {
 	options = Object.assign({}, defaultOptions$2, options);
 	let tags = [], tagFound = !1, reachedRoot = !1;
@@ -31317,8 +31172,7 @@ var defaultOptions$2, doubleQuote, singleQuote, init_validator = __esmMin((() =>
 		frac34: "¾"
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@nodable+entities@3.1.0/node_modules/@nodable/entities/src/EntityDecoder.js
+// node_modules/.pnpm/@nodable+entities@3.1.0/node_modules/@nodable/entities/src/EntityDecoder.js
 function validateEntityName$1(name) {
 	if (name[0] === "#") throw Error(`[EntityReplacer] Invalid character '#' in entity name: "${name}"`);
 	for (let ch of name) if (SPECIAL_CHARS.has(ch)) throw Error(`[EntityReplacer] Invalid character '${ch}' in entity name: "${name}"`);
@@ -31496,8 +31350,7 @@ var ENTITY_ACTION, SPECIAL_CHARS, LIMIT_TIER_EXTERNAL, LIMIT_TIER_BASE, LIMIT_TI
 })), init_src$4 = __esmMin((() => {
 	init_EntityDecoder(), init_entities();
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/OptionsBuilder.js
 function validatePropertyName(propertyName, optionName) {
 	if (typeof propertyName != "string") return;
 	let normalized = propertyName.toLowerCase();
@@ -31651,8 +31504,7 @@ var defaultOnDangerousProperty, defaultOptions$1, buildOptions, init_OptionsBuil
 		}, validator;
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/DocTypeReader.js
 function hasSeq(data, seq, i) {
 	for (let j = 0; j < seq.length; j++) if (seq[j] !== data[i + j + 1]) return !1;
 	return !0;
@@ -31893,8 +31745,7 @@ var DocTypeReader, skipWhitespace, init_DocTypeReader = __esmMin((() => {
 		cp <= LOW_MAX ? TABLE[cp - TABLE_OFFSET] = d : HIGH_MAP.set(cp, d);
 	}
 }));
-//#endregion
-//#region node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/anynum.js
+// node_modules/.pnpm/anynum@1.0.1/node_modules/anynum/anynum.js
 function anynum(str) {
 	if (typeof str != "string") return str;
 	let len = str.length;
@@ -31968,8 +31819,7 @@ var CHAR_0, CHAR_9, CHAR_MINUS, MINUS_SET, init_anynum = __esmMin((() => {
 		65123
 	]);
 }));
-//#endregion
-//#region node_modules/.pnpm/strnum@2.5.1/node_modules/strnum/strnum.js
+// node_modules/.pnpm/strnum@2.5.1/node_modules/strnum/strnum.js
 function toNumber(str, options = {}) {
 	if (options = Object.assign({}, consider, options), !str || typeof str != "string") return str;
 	let trimmedStr = str.trim();
@@ -32045,8 +31895,7 @@ var hexRegex, binRegex, octRegex, numRegex, consider, eNotationRegx, init_strnum
 		unicode: !1
 	}, eNotationRegx = /^([-+])?(0*)(\d*(\.\d*)?[eE][-\+]?\d+)$/;
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/ignoreAttributes.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/ignoreAttributes.js
 function getIgnoreAttributesFn$1(ignoreAttributes) {
 	return typeof ignoreAttributes == "function" ? ignoreAttributes : Array.isArray(ignoreAttributes) ? (attrName) => {
 		for (let pattern of ignoreAttributes) if (typeof pattern == "string" && attrName === pattern || pattern instanceof RegExp && pattern.test(attrName)) return !0;
@@ -32984,8 +32833,7 @@ var init_ignoreAttributes$1 = __esmMin((() => {})), Expression, init_Expression 
 		}
 	], SQL_STRICT_PATTERNS = [...SQL_PATTERNS, ...SQL_STRICT_EXTRA];
 }));
-//#endregion
-//#region node_modules/.pnpm/is-unsafe@2.0.2/node_modules/is-unsafe/src/index.js
+// node_modules/.pnpm/is-unsafe@2.0.2/node_modules/is-unsafe/src/index.js
 function assertString(value) {
 	if (typeof value != "string") throw TypeError(`is-unsafe: first argument must be a string, got ${typeof value}`);
 }
@@ -33041,8 +32889,7 @@ var init_src$1 = __esmMin((() => {
 		LOG: LOG_PATTERNS
 	});
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/OrderedObjParser.js
 function extractRawAttributes(prefixedAttrs, options) {
 	if (!prefixedAttrs) return {};
 	let attrs = options.attributesGroupName ? prefixedAttrs[options.attributesGroupName] : prefixedAttrs;
@@ -33348,8 +33195,7 @@ var OrderedObjParser, attrsRegx, parseXml, init_OrderedObjParser = __esmMin((() 
 		return xmlObj.child;
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/node2json.js
+// node_modules/.pnpm/fast-xml-parser@5.11.2/node_modules/fast-xml-parser/src/xmlparser/node2json.js
 function stripAttributePrefix(attrs, prefix) {
 	if (!attrs || typeof attrs != "object") return {};
 	if (!prefix) return attrs;
@@ -33434,8 +33280,7 @@ var METADATA_SYMBOL, init_node2json = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/util.js
+// node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/util.js
 function valToStr(val) {
 	return typeof val == "number" && Object.is(val, -0) ? "-0" : String(val);
 }
@@ -33449,8 +33294,7 @@ function escapeAttribute(val) {
 	return valToStr(val).replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 var init_util = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/orderedJs2Xml.js
+// node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/orderedJs2Xml.js
 function detectXmlVersionFromArray(jArray, options) {
 	if (!Array.isArray(jArray) || jArray.length === 0) return "1.0";
 	let first = jArray[0];
@@ -33590,16 +33434,14 @@ function replaceEntitiesValue(textValue, options) {
 var EOL$1, init_orderedJs2Xml = __esmMin((() => {
 	init_src$2(), init_util(), init_src$3(), EOL$1 = "\n";
 }));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/ignoreAttributes.js
+// node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/ignoreAttributes.js
 function getIgnoreAttributesFn(ignoreAttributes) {
 	return typeof ignoreAttributes == "function" ? ignoreAttributes : Array.isArray(ignoreAttributes) ? (attrName) => {
 		for (let pattern of ignoreAttributes) if (typeof pattern == "string" && attrName === pattern || pattern instanceof RegExp && pattern.test(attrName)) return !0;
 	} : () => !1;
 }
 var init_ignoreAttributes = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/fxb.js
+// node_modules/.pnpm/fast-xml-builder@1.3.1/node_modules/fast-xml-builder/src/fxb.js
 function Builder(options) {
 	if (this.options = Object.assign({}, defaultOptions, options), this.options.stopNodes && Array.isArray(this.options.stopNodes) && (this.options.stopNodes = this.options.stopNodes.map((node) => typeof node == "string" && node.startsWith("*.") ? ".." + node.substring(2) : node)), this.stopNodeExpressions = [], this.options.stopNodes && Array.isArray(this.options.stopNodes)) for (let i = 0; i < this.options.stopNodes.length; i++) {
 		let node = this.options.stopNodes[i];
@@ -33864,8 +33706,7 @@ var defaultOptions, init_fxb = __esmMin((() => {
 })), XMLValidator, init_fxp = __esmMin((() => {
 	init_validator(), init_XMLParser(), init_json2xml(), XMLValidator = { validate };
 })), init_xml_common = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@azure+core-xml@1.6.0/node_modules/@azure/core-xml/dist/esm/xml.js
+// node_modules/.pnpm/@azure+core-xml@1.6.0/node_modules/@azure/core-xml/dist/esm/xml.js
 function getCommonOptions(options) {
 	return {
 		attributesGroupName: "$",
@@ -34573,8 +34414,7 @@ var init_xml = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/streamHelpers.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/streamHelpers.js
 function signalStreamEnd(pushData) {
 	pushData(null);
 }
@@ -34635,8 +34475,7 @@ var init_streamHelpers = __esmMin((() => {})), MAX_SEGMENT_CONTENT_LENGTH, SMReg
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageEncodingStream.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageEncodingStream.js
 function isNodeReadableStream(source) {
 	return source !== null && source instanceof node_stream.default && typeof source._read == "function" && typeof source._readableState == "object" && typeof source.pipe == "function";
 }
@@ -34834,8 +34673,7 @@ var StructuredMessageEncodingStream, init_StructuredMessageEncodingStream = __es
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageDecodingStream.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/StructuredMessageDecodingStream.js
 async function structuredMessageDecodingBrowser(source) {
 	throw Error("structuredMessageDecodingBrowser is only for Browser");
 }
@@ -34879,8 +34717,7 @@ var StructuredMessageDecodingStream, init_StructuredMessageDecodingStream = __es
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/cache.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/cache.js
 function getCachedDefaultHttpClient() {
 	return _defaultHttpClient ||= createDefaultHttpClient(), _defaultHttpClient;
 }
@@ -34976,8 +34813,7 @@ var _defaultHttpClient, init_cache = __esmMin((() => {
 		X_MS_CopySourceErrorCode: "x-ms-copy-source-error-code"
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/utils.common.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/utils.common.js
 function setURLParameter$1(url, name, value) {
 	let urlParsed = new URL(url), encodedName = encodeURIComponent(name), encodedValue = value ? encodeURIComponent(value) : void 0, searchString = urlParsed.search === "" ? "?" : urlParsed.search, searchPieces = [];
 	for (let pair of searchString.slice(1).split("&")) if (pair) {
@@ -35024,8 +34860,7 @@ async function delay(timeInMs, aborter, abortError) {
 	});
 }
 var init_utils_common$2 = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/SharedKeyComparator.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/utils/SharedKeyComparator.js
 function compareHeader(lhs, rhs) {
 	return isLessThan(lhs, rhs) ? -1 : 1;
 }
@@ -35596,8 +35431,7 @@ var table_lv0, table_lv2, table_lv4, init_SharedKeyComparator = __esmMin((() => 
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageBrowserPolicyV2.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageBrowserPolicyV2.js
 function storageBrowserPolicy() {
 	return {
 		name: storageBrowserPolicyName,
@@ -35609,8 +35443,7 @@ function storageBrowserPolicy() {
 var storageBrowserPolicyName, init_StorageBrowserPolicyV2 = __esmMin((() => {
 	storageBrowserPolicyName = "storageBrowserPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageCorrectContentLengthPolicy.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageCorrectContentLengthPolicy.js
 function storageCorrectContentLengthPolicy() {
 	function correctContentLength(request) {
 		request.body && (typeof request.body == "string" || Buffer.isBuffer(request.body)) && request.body.length > 0 && request.headers.set(HeaderConstants.CONTENT_LENGTH, Buffer.byteLength(request.body));
@@ -35625,8 +35458,7 @@ function storageCorrectContentLengthPolicy() {
 var storageCorrectContentLengthPolicyName, init_StorageCorrectContentLengthPolicy = __esmMin((() => {
 	init_constants$1(), storageCorrectContentLengthPolicyName = "StorageCorrectContentLengthPolicy";
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRetryPolicyV2.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRetryPolicyV2.js
 function storageRetryPolicy(options = {}) {
 	let retryPolicyType = options.retryPolicyType ?? DEFAULT_RETRY_OPTIONS.retryPolicyType, maxTries = options.maxTries ?? DEFAULT_RETRY_OPTIONS.maxTries, retryDelayInMs = options.retryDelayInMs ?? DEFAULT_RETRY_OPTIONS.retryDelayInMs, maxRetryDelayInMs = options.maxRetryDelayInMs ?? DEFAULT_RETRY_OPTIONS.maxRetryDelayInMs, secondaryHost = options.secondaryHost ?? DEFAULT_RETRY_OPTIONS.secondaryHost, tryTimeoutInMs = options.tryTimeoutInMs ?? DEFAULT_RETRY_OPTIONS.tryTimeoutInMs;
 	function shouldRetry({ isPrimaryRetry, attempt, response, error }) {
@@ -35711,8 +35543,7 @@ var storageRetryPolicyName, DEFAULT_RETRY_OPTIONS, retriableErrors, RETRY_ABORT_
 		"REQUEST_SEND_ERROR"
 	], RETRY_ABORT_ERROR = new AbortError("The operation was aborted.");
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageSharedKeyCredentialPolicyV2.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageSharedKeyCredentialPolicyV2.js
 function storageSharedKeyCredentialPolicy(options) {
 	function signRequest(request) {
 		request.headers.set(HeaderConstants.X_MS_DATE, new Date().toUTCString()), request.body && (typeof request.body == "string" || Buffer.isBuffer(request.body)) && request.body.length > 0 && request.headers.set(HeaderConstants.CONTENT_LENGTH, Buffer.byteLength(request.body));
@@ -35773,8 +35604,7 @@ function storageSharedKeyCredentialPolicy(options) {
 var storageSharedKeyCredentialPolicyName, init_StorageSharedKeyCredentialPolicyV2 = __esmMin((() => {
 	init_constants$1(), init_utils_common$2(), init_SharedKeyComparator(), storageSharedKeyCredentialPolicyName = "storageSharedKeyCredentialPolicy";
 })), init_StorageRedirectRangeHeaderPolicy = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRequestFailureDetailsParserPolicy.js
+// node_modules/.pnpm/@azure+storage-common@12.5.0_@azure+core-client@1.11.1_supports-color@7.2.0__supports-color@7.2.0/node_modules/@azure/storage-common/dist/esm/policies/StorageRequestFailureDetailsParserPolicy.js
 function storageRequestFailureDetailsParserPolicy() {
 	return {
 		name: storageRequestFailureDetailsParserPolicyName,
@@ -35836,8 +35666,7 @@ var storageRequestFailureDetailsParserPolicyName, init_StorageRequestFailureDeta
 		"11104"
 	];
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/Pipeline.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/Pipeline.js
 function isPipelineLike(pipeline) {
 	if (!pipeline || typeof pipeline != "object") return !1;
 	let castPipeline = pipeline;
@@ -46865,8 +46694,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/utils/utils.common.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/utils/utils.common.js
 function escapeURLPath(url) {
 	let urlParsed = new URL(url), path = urlParsed.pathname;
 	return path ||= "/", path = escape(path), urlParsed.pathname = path, urlParsed.toString();
@@ -47257,8 +47085,7 @@ var accountNameSuffixes, init_utils_common$1 = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/sas/SasIPRange.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/sas/SasIPRange.js
 function ipRangeToString(ipRange) {
 	return ipRange.end ? `${ipRange.start}-${ipRange.end}` : ipRange.start;
 }
@@ -47404,8 +47231,7 @@ var init_SasIPRange = __esmMin((() => {})), SASProtocol, SASQueryParameters, ini
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/sas/BlobSASSignatureValues.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/sas/BlobSASSignatureValues.js
 function generateBlobSASQueryParameters(blobSASSignatureValues, sharedKeyCredentialOrUserDelegationKey, accountName) {
 	return generateBlobSASQueryParametersInternal(blobSASSignatureValues, sharedKeyCredentialOrUserDelegationKey, accountName).sasQueryParameters;
 }
@@ -48245,8 +48071,7 @@ var init_BlobSASSignatureValues = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/internal-avro/utils/utils.common.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/internal-avro/utils/utils.common.js
 function arraysEqual(a, b) {
 	if (a === b) return !0;
 	if (a == null || b == null || a.length !== b.length) return !1;
@@ -48523,8 +48348,7 @@ var init_utils_common = __esmMin((() => {})), AvroReader, init_AvroReader = __es
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/models.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/models.js
 function toAccessTier(tier) {
 	if (tier !== void 0) return tier;
 }
@@ -48541,8 +48365,7 @@ var BlockBlobTier, PremiumPageBlobTier, StorageBlobAudience, init_models = __esm
 		StorageBlobAudience.StorageOAuthScopes = "https://storage.azure.com/.default", StorageBlobAudience.DiskComputeOAuthScopes = "https://disk.compute.azure.com/.default";
 	})(StorageBlobAudience ||= {});
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/PageBlobRangeResponse.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/PageBlobRangeResponse.js
 function rangeResponseFromModel(response) {
 	let pageRange = (response._response.parsedBody.pageRange || []).map((x) => ({
 		offset: x.start,
@@ -48650,8 +48473,7 @@ var init_PageBlobRangeResponse = __esmMin((() => {})), PollerStoppedError, Polle
 })), init_pollOperation = __esmMin((() => {})), init_esm$1 = __esmMin((() => {
 	init_esm$11(), init_esm$9(), init_lroEngine(), init_poller(), init_pollOperation();
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/pollers/BlobStartCopyFromUrlPoller.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/pollers/BlobStartCopyFromUrlPoller.js
 function makeBlobBeginCopyFromURLPollOperation(state) {
 	return {
 		state: { ...state },
@@ -48699,8 +48521,7 @@ var BlobBeginCopyFromUrlPoller, cancel, update, toString, init_BlobStartCopyFrom
 		});
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/Range.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/Range.js
 function rangeToString(iRange) {
 	if (iRange.offset < 0) throw RangeError("Range.offset cannot be smaller than 0.");
 	if (iRange.count && iRange.count <= 0) throw RangeError("Range.count must be larger than 0. Leave it undefined if you want a range from offset to the end.");
@@ -48752,8 +48573,7 @@ var init_Range = __esmMin((() => {})), BatchStates, Batch, init_Batch = __esmMin
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/utils/utils.js
+// node_modules/.pnpm/@azure+storage-blob@12.34.0_supports-color@7.2.0/node_modules/@azure/storage-blob/dist/esm/utils/utils.js
 async function streamToBuffer(stream, buffer, offset, end, encoding) {
 	let pos = 0, count = end - offset;
 	return new Promise((resolve, reject) => {
@@ -49960,8 +49780,7 @@ var fsStat, fsCreateReadStream, init_utils$2 = __esmMin((() => {
 })), init_BlobBatch = __esmMin((() => {})), init_BlobBatchClient = __esmMin((() => {})), init_ContainerClient = __esmMin((() => {})), init_AccountSASPermissions = __esmMin((() => {})), init_AccountSASResourceTypes = __esmMin((() => {})), init_AccountSASServices = __esmMin((() => {})), init_BlobServiceClient = __esmMin((() => {})), init_generatedModels = __esmMin((() => {})), init_esm = __esmMin((() => {
 	init_esm$7(), init_BlobServiceClient(), init_Clients(), init_ContainerClient(), init_BlobLeaseClient(), init_AccountSASPermissions(), init_AccountSASResourceTypes(), init_AccountSASServices(), init_AccountSASPermissions(), init_AccountSASResourceTypes(), init_AccountSASServices(), init_SASQueryParameters(), init_constants(), init_utils_common$1(), init_BlobBatch(), init_BlobBatchClient(), init_BlobSASPermissions(), init_BlobSASSignatureValues(), init_ContainerSASPermissions(), init_models(), init_esm$2(), init_Pipeline(), init_SASQueryParameters(), init_generatedModels(), init_log$1();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/blob-upload.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/blob-upload.js
 function uploadToBlobStorage(authenticatedUploadURL, uploadStream, contentType) {
 	return __awaiter$9(this, void 0, void 0, function* () {
 		let uploadByteCount = 0, lastProgressTime = Date.now(), abortController = new AbortController(), chunkTimer = (interval) => __awaiter$9(this, void 0, void 0, function* () {
@@ -54648,9 +54467,9 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		let readable = options.readable ?? isReadableNodeStream(stream), writable = options.writable ?? isWritableNodeStream(stream), wState = stream._writableState, rState = stream._readableState, onlegacyfinish = () => {
 			stream.writable || onfinish();
 		}, willEmitClose = _willEmitClose(stream) && isReadableNodeStream(stream) === readable && isWritableNodeStream(stream) === writable, writableFinished = isWritableFinished(stream, !1), onfinish = () => {
-			writableFinished = !0, stream.destroyed && (willEmitClose = !1), (!willEmitClose || stream.readable && !readable) && (!readable || readableFinished) && callback.call(stream);
+			writableFinished = !0, stream.destroyed && (willEmitClose = !1), willEmitClose && (!stream.readable || readable) || readable && !readableFinished || callback.call(stream);
 		}, readableFinished = isReadableFinished(stream, !1), onend = () => {
-			readableFinished = !0, stream.destroyed && (willEmitClose = !1), (!willEmitClose || stream.writable && !writable) && (!writable || writableFinished) && callback.call(stream);
+			readableFinished = !0, stream.destroyed && (willEmitClose = !1), willEmitClose && (!stream.writable || writable) || writable && !writableFinished || callback.call(stream);
 		}, onerror = (err) => {
 			callback.call(stream, err);
 		}, closed = isClosed(stream), onclose = () => {
@@ -54821,7 +54640,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		function ondrain() {
 			source.readable && source.resume && source.resume();
 		}
-		dest.on("drain", ondrain), !dest._isStdio && (!options || options.end !== !1) && (source.on("end", onend), source.on("close", onclose));
+		dest.on("drain", ondrain), dest._isStdio || options && options.end === !1 || (source.on("end", onend), source.on("close", onclose));
 		let didOnEnd = !1;
 		function onend() {
 			didOnEnd || (didOnEnd = !0, dest.end());
@@ -57743,7 +57562,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 				if (didSomething = !1, !this.preserveMultipleSlashes) {
 					for (let i = 1; i < parts.length - 1; i++) {
 						let p = parts[i];
-						(i !== 1 || p !== "" || parts[0] !== "") && (p === "." || p === "") && (didSomething = !0, parts.splice(i, 1), i--);
+						i === 1 && p === "" && parts[0] === "" || p !== "." && p !== "" || (didSomething = !0, parts.splice(i, 1), i--);
 					}
 					parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === "") && (didSomething = !0, parts.pop());
 				}
@@ -57774,7 +57593,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					if (!this.preserveMultipleSlashes) {
 						for (let i = 1; i < parts.length - 1; i++) {
 							let p = parts[i];
-							(i !== 1 || p !== "" || parts[0] !== "") && (p === "." || p === "") && (didSomething = !0, parts.splice(i, 1), i--);
+							i === 1 && p === "" && parts[0] === "" || p !== "." && p !== "" || (didSomething = !0, parts.splice(i, 1), i--);
 						}
 						parts[0] === "." && parts.length === 2 && (parts[1] === "." || parts[1] === "") && (didSomething = !0, parts.pop());
 					}
@@ -58725,7 +58544,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		[FLUSH](noDrain = !1) {
 			do;
 			while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) && this[BUFFER].length);
-			!noDrain && !this[BUFFER].length && !this[EOF] && this.emit("drain");
+			noDrain || this[BUFFER].length || this[EOF] || this.emit("drain");
 		}
 		[FLUSHCHUNK](chunk) {
 			return this.emit("data", chunk), this[FLOWING];
@@ -59634,7 +59453,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 								return;
 							}
 						}
-						for (let e of entries) e && (!filter || filter(e)) && (results.write(withFileTypes ? e : e.fullpath()) || (paused = !0));
+						for (let e of entries) !e || filter && !filter(e) || results.write(withFileTypes ? e : e.fullpath()) || (paused = !0);
 						processing--;
 						for (let e of entries) {
 							let r = e.realpathCached() || e;
@@ -59661,7 +59480,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 					}
 					processing++, dirs.add(dir);
 					let entries = dir.readdirSync();
-					for (let e of entries) (!filter || filter(e)) && (results.write(withFileTypes ? e : e.fullpath()) || (paused = !0));
+					for (let e of entries) filter && !filter(e) || results.write(withFileTypes ? e : e.fullpath()) || (paused = !0);
 					processing--;
 					for (let e of entries) {
 						let r = e;
@@ -61773,7 +61592,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			this.pipeToFinished = !0;
 		}
 		done(stream, err) {
-			err && (this.error = err), stream === this.to && (this.to = null, this.from !== null) ? (!(this.from._duplexState & READ_DONE) || !this.pipeToFinished) && this.from.destroy(this.error || StreamError.PREMATURE_CLOSE("Writable stream closed")) : stream === this.from && (this.from = null, this.to !== null) ? stream._duplexState & READ_DONE || this.to.destroy(this.error || StreamError.PREMATURE_CLOSE("Readable stream closed")) : (this.afterPipe !== null && this.afterPipe(this.error), this.to = this.from = this.afterPipe = null);
+			err && (this.error = err), stream === this.to && (this.to = null, this.from !== null) ? this.from._duplexState & READ_DONE && this.pipeToFinished || this.from.destroy(this.error || StreamError.PREMATURE_CLOSE("Writable stream closed")) : stream === this.from && (this.from = null, this.to !== null) ? stream._duplexState & READ_DONE || this.to.destroy(this.error || StreamError.PREMATURE_CLOSE("Readable stream closed")) : (this.afterPipe !== null && this.afterPipe(this.error), this.to = this.from = this.afterPipe = null);
 		}
 	};
 	function afterDrain() {
@@ -62595,7 +62414,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		}
 		entry(header, buffer, callback) {
 			if (this._finalized || this.destroying) throw Error("already finalized or destroyed");
-			typeof buffer == "function" && (callback = buffer, buffer = null), callback ||= noop, (!header.size || header.type === "symlink") && (header.size = 0), header.type ||= modeToType(header.mode), header.mode ||= header.type === "directory" ? 493 : 420, header.uid ||= 0, header.gid ||= 0, header.mtime ||= new Date(), typeof buffer == "string" && (buffer = b4a.from(buffer));
+			typeof buffer == "function" && (callback = buffer, buffer = null), callback ||= noop, header.size && header.type !== "symlink" || (header.size = 0), header.type ||= modeToType(header.mode), header.mode ||= header.type === "directory" ? 493 : 420, header.uid ||= 0, header.gid ||= 0, header.mtime ||= new Date(), typeof buffer == "string" && (buffer = b4a.from(buffer));
 			let sink = new Sink(this, header, callback);
 			return b4a.isBuffer(buffer) ? (header.size = buffer.byteLength, sink.write(buffer), sink.end(), sink) : (sink._isVoid, sink);
 		}
@@ -63037,8 +62856,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 		return !!formats[format];
 	}, vending.registerFormat("zip", require_zip()), vending.registerFormat("tar", require_tar()), vending.registerFormat("json", require_json()), module.exports = vending;
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/stream.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/stream.js
 function createRawFileUploadStream(filePath) {
 	return __awaiter$8(this, void 0, void 0, function* () {
 		debug(`Creating raw file upload stream for: ${filePath}`);
@@ -63086,8 +62904,7 @@ var __awaiter$8, WaterMarkedUploadStream, init_stream = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/zip.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/zip.js
 function createZipUploadStream(uploadSpecification_1) {
 	return __awaiter$7(this, arguments, void 0, function* (uploadSpecification, compressionLevel = 6) {
 		debug(`Creating Artifact archive with compressionLevel: ${compressionLevel}`);
@@ -63141,8 +62958,7 @@ var import_archiver, __awaiter$7, zipErrorCallback, zipWarningCallback, zipFinis
 		debug("Zip stream for upload has ended.");
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/types.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/types.js
 function getMimeType(filePath) {
 	let ext = path.extname(filePath).toLowerCase();
 	return mimeTypes[ext] || "application/octet-stream";
@@ -63199,8 +63015,7 @@ var mimeTypes, init_types = __esmMin((() => {
 		".eot": "application/vnd.ms-fontobject"
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/upload-artifact.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/upload/upload-artifact.js
 function uploadArtifact(name, files, rootDirectory, options) {
 	return __awaiter$6(this, void 0, void 0, function* () {
 		let artifactFileName = `${name}.zip`;
@@ -63724,8 +63539,7 @@ var __awaiter$6, init_upload_artifact = __esmMin((() => {
 	};
 	let lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => (c[k.toLowerCase()] = obj[k], c), {});
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/internal/utils.js
+// node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/internal/utils.js
 function getAuthString(token, options) {
 	if (!token && !options.auth) throw Error("Parameter token or opts.auth is required");
 	if (token && options.auth) throw Error("Parameters token and opts.auth may not both be specified");
@@ -63783,21 +63597,18 @@ var import_lib, import_undici, __awaiter$5, init_utils$1 = __esmMin((() => {
 		});
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/universal-user-agent@7.0.3/node_modules/universal-user-agent/index.js
+// node_modules/.pnpm/universal-user-agent@7.0.3/node_modules/universal-user-agent/index.js
 function getUserAgent() {
 	return typeof navigator == "object" && "userAgent" in navigator ? navigator.userAgent : typeof process == "object" && process.version !== void 0 ? `Node.js/${process.version.substr(1)} (${process.platform}; ${process.arch})` : "<environment undetectable>";
 }
 var init_universal_user_agent = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/register.js
+// node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/register.js
 function register(state, name, method, options) {
 	if (typeof method != "function") throw Error("method for before hook must be a function");
 	return options ||= {}, Array.isArray(name) ? name.reverse().reduce((callback, name) => register.bind(null, state, name, callback, options), method)() : Promise.resolve().then(() => state.registry[name] ? state.registry[name].reduce((method, registered) => registered.hook.bind(null, method, options), method)() : method(options));
 }
 var init_register = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/add.js
+// node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/add.js
 function addHook(state, kind, name, hook) {
 	let orig = hook;
 	state.registry[name] || (state.registry[name] = []), kind === "before" && (hook = (method, options) => Promise.resolve().then(orig.bind(null, options)).then(method.bind(null, options))), kind === "after" && (hook = (method, options) => {
@@ -63809,16 +63620,14 @@ function addHook(state, kind, name, hook) {
 	});
 }
 var init_add = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/remove.js
+// node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/lib/remove.js
 function removeHook(state, name, method) {
 	if (!state.registry[name]) return;
 	let index = state.registry[name].map((registered) => registered.orig).indexOf(method);
 	index !== -1 && state.registry[name].splice(index, 1);
 }
 var init_remove = __esmMin((() => {}));
-//#endregion
-//#region node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/index.js
+// node_modules/.pnpm/before-after-hook@4.0.0/node_modules/before-after-hook/index.js
 function bindApi(hook, state, name) {
 	let removeHookRef = bindable(removeHook, null).apply(null, name ? [state, name] : [state]);
 	hook.api = { remove: removeHookRef }, hook.remove = removeHookRef, [
@@ -63849,8 +63658,7 @@ var bind, bindable, before_after_hook_default, init_before_after_hook = __esmMin
 		Collection
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+endpoint@11.0.5/node_modules/@octokit/endpoint/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+endpoint@11.0.5/node_modules/@octokit/endpoint/dist-bundle/index.js
 function lowercaseKeys(object) {
 	return object ? Object.keys(object).reduce((newObj, key) => (newObj[key.toLowerCase()] = object[key], newObj), {}) : {};
 }
@@ -64006,8 +63814,7 @@ var DEFAULTS, urlVariableRegex, endpoint, init_dist_bundle$5 = __esmMin((() => {
 		mediaType: { format: "" }
 	}, urlVariableRegex = /\{[^{}}]+\}/g, endpoint = withDefaults$2(null, DEFAULTS);
 }));
-//#endregion
-//#region node_modules/.pnpm/content-type@3.1.1/node_modules/content-type/dist/index.js
+// node_modules/.pnpm/content-type@3.1.1/node_modules/content-type/dist/index.js
 function parse$1(header, options) {
 	let stopFlags = SEMI_FLAG | (options?.comma === !0 ? COMMA_FLAG : 0), len = header.length, valueStart = options?.start ?? 0;
 	for (; (CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0;) valueStart++;
@@ -64253,8 +64060,7 @@ var SP, HTAB, SEMI, EQ, DQUOTE, BSLASH, COMMA, LOWER_CASE, OWS, SEMI_FLAG, COMMA
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+request@10.0.16/node_modules/@octokit/request/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+request@10.0.16/node_modules/@octokit/request/dist-bundle/index.js
 function isPlainObject(value) {
 	if (typeof value != "object" || !value || Object.prototype.toString.call(value) !== "[object Object]") return !1;
 	let proto = Object.getPrototypeOf(value);
@@ -64358,8 +64164,7 @@ function withDefaults$1(oldEndpoint, newDefaults) {
 var defaults_default, noop$1, request, init_dist_bundle$4 = __esmMin((() => {
 	init_dist_bundle$5(), init_universal_user_agent(), init_dist(), init_json_with_bigint(), init_dist_src$3(), defaults_default = { headers: { "user-agent": `octokit-request.js/10.0.16 ${getUserAgent()}` } }, noop$1 = () => "", request = withDefaults$1(endpoint, defaults_default);
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+graphql@9.0.5/node_modules/@octokit/graphql/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+graphql@9.0.5/node_modules/@octokit/graphql/dist-bundle/index.js
 function _buildMessageForResponseErrors(data) {
 	return "Request failed due to following response errors:\n" + data.errors.map((e) => ` - ${e.message}`).join("\n");
 }
@@ -64421,8 +64226,7 @@ var VERSION$5, GraphqlResponseError, NON_VARIABLE_OPTIONS, FORBIDDEN_VARIABLE_OP
 		url: "/graphql"
 	});
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+auth-token@6.0.0/node_modules/@octokit/auth-token/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+auth-token@6.0.0/node_modules/@octokit/auth-token/dist-bundle/index.js
 async function auth(token) {
 	let isApp = isJWT(token), isInstallation = token.startsWith("v1.") || token.startsWith("ghs_"), isUserToServer = token.startsWith("ghu_");
 	return {
@@ -64447,8 +64251,7 @@ var b64url, sep, jwtRE, isJWT, createTokenAuth, init_dist_bundle$2 = __esmMin(((
 })), VERSION$4, init_version$2 = __esmMin((() => {
 	VERSION$4 = "7.0.8";
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+core@7.0.8/node_modules/@octokit/core/dist-src/index.js
+// node_modules/.pnpm/@octokit+core@7.0.8/node_modules/@octokit/core/dist-src/index.js
 function createLogger(logger = {}) {
 	return typeof logger.debug != "function" && (logger.debug = noop), typeof logger.info != "function" && (logger.info = noop), typeof logger.warn != "function" && (logger.warn = consoleWarn), typeof logger.error != "function" && (logger.error = consoleError), logger;
 }
@@ -65798,8 +65601,7 @@ var noop, consoleWarn, consoleError, userAgentTrail, Octokit, init_dist_src$2 = 
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/endpoints-to-methods.js
+// node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/endpoints-to-methods.js
 function endpointsToMethods(octokit) {
 	let newMethods = {};
 	for (let scope of endpointMethodsMap.keys()) newMethods[scope] = new Proxy({
@@ -65877,16 +65679,14 @@ var endpointMethodsMap, handler, init_endpoints_to_methods = __esmMin((() => {
 		}
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/index.js
+// node_modules/.pnpm/@octokit+plugin-rest-endpoint-methods@17.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-rest-endpoint-methods/dist-src/index.js
 function restEndpointMethods(octokit) {
 	return { rest: endpointsToMethods(octokit) };
 }
 var init_dist_src$1 = __esmMin((() => {
 	init_version$1(), init_endpoints_to_methods(), restEndpointMethods.VERSION = VERSION$3;
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+plugin-paginate-rest@14.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-paginate-rest/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+plugin-paginate-rest@14.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-paginate-rest/dist-bundle/index.js
 function normalizePaginatedListResponse(response) {
 	if (!response.data) return {
 		...response,
@@ -65942,8 +65742,7 @@ function paginateRest(octokit) {
 var VERSION$2, init_dist_bundle$1 = __esmMin((() => {
 	VERSION$2 = "0.0.0-development", Object.assign(paginate, { iterator }), paginateRest.VERSION = VERSION$2;
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/utils.js
+// node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/utils.js
 function getOctokitOptions(token, options) {
 	let opts = Object.assign({}, options || {}), auth = getAuthString(token, opts);
 	auth && (opts.auth = auth);
@@ -65959,8 +65758,7 @@ var baseUrl, defaults, GitHub, init_utils = __esmMin((() => {
 		}
 	}, GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaults);
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/github.js
+// node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/github.js
 function getOctokit(token, options, ...additionalPlugins) {
 	return new (GitHub.plugin(...additionalPlugins))(getOctokitOptions(token, options));
 }
@@ -66446,7 +66244,7 @@ var init_github = __esmMin((() => {
 		for (var i = 1, isOwn = !0; i < parts.length; i += 1) {
 			var part = parts[i], first = $strSlice(part, 0, 1), last = $strSlice(part, -1);
 			if ((first === "\"" || first === "'" || first === "`" || last === "\"" || last === "'" || last === "`") && first !== last) throw new $SyntaxError("property names with quotes must have matching quotes");
-			if ((part === "constructor" || !isOwn) && (skipFurtherCaching = !0), intrinsicBaseName += "." + part, intrinsicRealName = "%" + intrinsicBaseName + "%", hasOwn(INTRINSICS, intrinsicRealName)) value = INTRINSICS[intrinsicRealName];
+			if (part !== "constructor" && isOwn || (skipFurtherCaching = !0), intrinsicBaseName += "." + part, intrinsicRealName = "%" + intrinsicBaseName + "%", hasOwn(INTRINSICS, intrinsicRealName)) value = INTRINSICS[intrinsicRealName];
 			else if (value != null) {
 				if (!(part in value)) {
 					if (!allowMissing) throw new $TypeError("base intrinsic for " + name + " exists, but the property is not available.");
@@ -67475,11 +67273,7 @@ var init_github = __esmMin((() => {
 		shim
 	}), module.exports = boundMethod;
 })), require_StringToNumber = __commonJSMin(((exports, module) => {
-	var GetIntrinsic = require_get_intrinsic(), $RegExp = GetIntrinsic("%RegExp%"), $TypeError = require_type(), $parseInteger = GetIntrinsic("%parseInt%"), callBound = require_call_bound(), regexTester = require_safe_regex_test(), $strSlice = callBound("String.prototype.slice"), isBinary = regexTester(/^0b[01]+$/i), isOctal = regexTester(/^0o[0-7]+$/i), isInvalidHexLiteral = regexTester(/^[-+]0x[0-9a-f]+$/i), hasNonWS = regexTester(new $RegExp("[" + [
-		"",
-		"​",
-		"￾"
-	].join("") + "]", "g")), $trim = require_string_prototype_trim();
+	var GetIntrinsic = require_get_intrinsic(), $RegExp = GetIntrinsic("%RegExp%"), $TypeError = require_type(), $parseInteger = GetIntrinsic("%parseInt%"), callBound = require_call_bound(), regexTester = require_safe_regex_test(), $strSlice = callBound("String.prototype.slice"), isBinary = regexTester(/^0b[01]+$/i), isOctal = regexTester(/^0o[0-7]+$/i), isInvalidHexLiteral = regexTester(/^[-+]0x[0-9a-f]+$/i), hasNonWS = regexTester(new $RegExp("[​￾]", "g")), $trim = require_string_prototype_trim();
 	module.exports = function StringToNumber(argument) {
 		if (typeof argument != "string") throw new $TypeError("Assertion failed: `argument` is not a String");
 		if (isBinary(argument)) return +$parseInteger($strSlice(argument, 2), 2);
@@ -68692,7 +68486,7 @@ var init_github = __esmMin((() => {
 	}, Traverse.prototype.reduce = function(cb, init) {
 		var skip = arguments.length === 1, acc = skip ? this.value : init;
 		return this.forEach(function(x) {
-			(!this.isRoot || !skip) && (acc = cb.call(this, acc, x));
+			this.isRoot && skip || (acc = cb.call(this, acc, x));
 		}), acc;
 	}, Traverse.prototype.deepEqual = function(obj) {
 		if (arguments.length !== 1) throw Error("deepEqual requires exactly one object to compare against");
@@ -68717,8 +68511,8 @@ var init_github = __esmMin((() => {
 				if (typeof x == "function") x instanceof RegExp ? String(x) !== String(y) && notEqual() : x !== y && notEqual();
 				else if (typeof x == "object") {
 					if (toS(y) === "[object Arguments]" || toS(x) === "[object Arguments]") toS(x) !== toS(y) && notEqual();
-					else if (toS(y) === "[object RegExp]" || toS(x) === "[object RegExp]") (!x || !y || x.toString() !== y.toString()) && notEqual();
-					else if (x instanceof Date || y instanceof Date) (!(x instanceof Date) || !(y instanceof Date) || x.getTime() !== y.getTime()) && notEqual();
+					else if (toS(y) === "[object RegExp]" || toS(x) === "[object RegExp]") x && y && x.toString() === y.toString() || notEqual();
+					else if (x instanceof Date || y instanceof Date) x instanceof Date && y instanceof Date && x.getTime() === y.getTime() || notEqual();
 					else {
 						var kx = Object.keys(x), ky = Object.keys(y);
 						if (kx.length !== ky.length) return notEqual();
@@ -69545,7 +69339,7 @@ var init_github = __esmMin((() => {
 	var path = require("path"), fs = require("fs"), _0777 = 511;
 	module.exports = mkdirP.mkdirp = mkdirP.mkdirP = mkdirP;
 	function mkdirP(p, opts, f, made) {
-		typeof opts == "function" ? (f = opts, opts = {}) : (!opts || typeof opts != "object") && (opts = { mode: opts });
+		typeof opts == "function" ? (f = opts, opts = {}) : opts && typeof opts == "object" || (opts = { mode: opts });
 		var mode = opts.mode, xfs = opts.fs || fs;
 		mode === void 0 && (mode = _0777), made ||= null;
 		var cb = f || function() {};
@@ -69565,7 +69359,7 @@ var init_github = __esmMin((() => {
 		});
 	}
 	mkdirP.sync = function sync(p, opts, made) {
-		(!opts || typeof opts != "object") && (opts = { mode: opts });
+		opts && typeof opts == "object" || (opts = { mode: opts });
 		var mode = opts.mode, xfs = opts.fs || fs;
 		mode === void 0 && (mode = _0777), made ||= null, p = path.resolve(p);
 		try {
@@ -69631,8 +69425,7 @@ var init_github = __esmMin((() => {
 })), require_unzip = __commonJSMin(((exports) => {
 	exports.Parse = require_parser_stream(), exports.Extract = require_extract();
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/download/download-artifact.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/download/download-artifact.js
 function exists(path) {
 	return __awaiter$4(this, void 0, void 0, function* () {
 		try {
@@ -69775,8 +69568,7 @@ var import_unzip, __awaiter$4, scrubQueryParameters, init_download_artifact = __
 		return parsed.search = "", parsed.toString();
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/retry-options.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/retry-options.js
 function getRetryOptions(defaultOptions, retries = defaultMaxRetryNumber, exemptStatusCodes = defaultExemptStatusCodes) {
 	if (retries <= 0) return [{ enabled: !1 }, defaultOptions.request];
 	let retryOptions = { enabled: !0 };
@@ -69795,8 +69587,7 @@ var defaultMaxRetryNumber, defaultExemptStatusCodes, init_retry_options = __esmM
 })), VERSION$1, init_version = __esmMin((() => {
 	VERSION$1 = "6.0.0";
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+plugin-request-log@6.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-request-log/dist-src/index.js
+// node_modules/.pnpm/@octokit+plugin-request-log@6.0.0_@octokit+core@7.0.8/node_modules/@octokit/plugin-request-log/dist-src/index.js
 function requestLog(octokit) {
 	octokit.hook.wrap("request", (request, options) => {
 		octokit.log.debug("request", options);
@@ -70516,8 +70307,7 @@ var init_dist_src = __esmMin((() => {
 		return Bottleneck_1;
 	}));
 }));
-//#endregion
-//#region node_modules/.pnpm/@octokit+plugin-retry@8.1.1_@octokit+core@7.0.8/node_modules/@octokit/plugin-retry/dist-bundle/index.js
+// node_modules/.pnpm/@octokit+plugin-retry@8.1.1_@octokit+core@7.0.8/node_modules/@octokit/plugin-retry/dist-bundle/index.js
 function isRequestError(error) {
 	return error.request !== void 0;
 }
@@ -70566,8 +70356,7 @@ function retry(octokit, octokitOptions) {
 var import_light, VERSION, init_dist_bundle = __esmMin((() => {
 	import_light = __toESM(require_light(), 1), init_dist_src$3(), VERSION = "0.0.0-development", retry.VERSION = VERSION;
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/get-artifact.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/get-artifact.js
 function getArtifactPublic(artifactName, workflowRunId, repositoryOwner, repositoryName, token) {
 	return __awaiter$3(this, void 0, void 0, function* () {
 		let [retryOpts, requestOpts] = getRetryOptions(defaults), getArtifactResp = yield getOctokit(token, {
@@ -70645,8 +70434,7 @@ var __awaiter$3, init_get_artifact = __esmMin((() => {
 		});
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/delete/delete-artifact.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/delete/delete-artifact.js
 function deleteArtifactPublic(artifactName, workflowRunId, repositoryOwner, repositoryName, token) {
 	return __awaiter$2(this, void 0, void 0, function* () {
 		let [retryOpts, requestOpts] = getRetryOptions(defaults), github = getOctokit(token, {
@@ -70711,8 +70499,7 @@ var __awaiter$2, init_delete_artifact = __esmMin((() => {
 		});
 	};
 }));
-//#endregion
-//#region node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/list-artifacts.js
+// node_modules/.pnpm/@actions+artifact@6.3.1_supports-color@7.2.0/node_modules/@actions/artifact/lib/internal/find/list-artifacts.js
 function listArtifactsPublic(workflowRunId_1, repositoryOwner_1, repositoryName_1, token_1) {
 	return __awaiter$1(this, arguments, void 0, function* (workflowRunId, repositoryOwner, repositoryName, token, latest = !1) {
 		info(`Fetching artifact list for workflow run ${workflowRunId} in repository ${repositoryOwner}/${repositoryName}`);
@@ -70938,8 +70725,7 @@ If the error persists, please check whether Actions and API requests are operati
 }), client, init_artifact = __esmMin((() => {
 	init_client(), init_interfaces(), init_errors(), init_client(), client = new DefaultArtifactClient();
 }));
-//#endregion
-//#region src/lib/artifact-upload.ts
+// src/lib/artifact-upload.ts
 function artifactName(prefix, containerName) {
 	return `${prefix}-${containerName.split("-").at(-1)}`;
 }
@@ -70947,8 +70733,7 @@ const uploadViaActionsArtifact = async (name, files, rootDirectory, options) => 
 	let { DefaultArtifactClient } = await Promise.resolve().then(() => (init_artifact(), artifact_exports));
 	return new DefaultArtifactClient().uploadArtifact(name, files, rootDirectory, options);
 };
-//#endregion
-//#region src/lib/filesystem-audit/artifact.ts
+// src/lib/filesystem-audit/artifact.ts
 function filesystemAuditArtifactName(containerName) {
 	return artifactName("buildcage-filesystem-audit", containerName);
 }
@@ -70973,26 +70758,22 @@ async function uploadFilesystemAuditArtifact(files, containerName, retentionDays
 function setFilesystemAuditOutput(name) {
 	setOutputUnderBothNames("filesystem-audit-artifact-name", name);
 }
-//#endregion
-//#region src/lib/fail-or-warn.ts
+// src/lib/fail-or-warn.ts
 function failOrWarn(annotation, failClosed) {
 	return (message) => {
 		failClosed ? (annotation.error(`${message}; failing the step under restrict with fail-on-blocked`), process.exitCode = 1) : annotation.warning(message);
 	};
 }
-//#endregion
-//#region src/core/lib/actions/write-step-summary.ts
+// src/core/lib/actions/write-step-summary.ts
 init_core();
 async function writeStepSummary(markdown, summaryFile) {
 	summaryFile ? await summary.addRaw(markdown).write() : console.log(markdown);
 }
-//#endregion
-//#region src/core/lib/report/outcome/annotate.ts
+// src/core/lib/report/outcome/annotate.ts
 function applyOutcomeAnnotations(annotation, emissions) {
 	for (let { level, message, shouldFail } of emissions) level === "error" ? annotation.error(message) : level === "warning" ? annotation.warning(message) : level === "notice" && annotation.notice(message), shouldFail && (process.exitCode = 1);
 }
-//#endregion
-//#region src/core/lib/log/authority.ts
+// src/core/lib/log/authority.ts
 const DEFAULT_PORT = {
 	https: "443",
 	http: "80"
@@ -71013,8 +70794,7 @@ function ruleHost(host) {
 function sniHost(sni) {
 	return sni.replace(/[A-Z]/g, (c) => c.toLowerCase());
 }
-//#endregion
-//#region src/core/lib/log/traffic-event.ts
+// src/core/lib/log/traffic-event.ts
 const FAILURE_REASONS$1 = new Set([
 	"origin-unreachable",
 	"origin-no-response",
@@ -71045,8 +70825,7 @@ function connectedHosts(timeline) {
 function isRedundantDns(event, connected) {
 	return event.protocol !== "dns" || event.action === "discovery" ? !1 : event.action === "block" ? connected.blocked.has(event.host) : connected.any.has(event.host);
 }
-//#endregion
-//#region src/core/lib/report/outcome/blocked-outcome.ts
+// src/core/lib/report/outcome/blocked-outcome.ts
 function determineBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedRows, logLooksPlausible, proxyAnswered, resolverAnswered }) {
 	if (!proxyAnswered || !resolverAnswered) return {
 		level: "error",
@@ -71088,7 +70867,7 @@ function buildBlockedMessage({ blockedCount, blockedRows, engineLabel, isAudit }
 }
 function describeInterruptions({ proxyAnswered, resolverAnswered, droppedLines, restarts, logWriterDeaths }) {
 	let facts = [];
-	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), (!proxyAnswered || !resolverAnswered) && facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), logWriterDeaths.proxy && facts.push(`The proxy's log writer died ${logWriterDeaths.proxy} time(s) during the run, losing the lines it had been sent but not yet written.`), logWriterDeaths.resolver && facts.push(`The DNS resolver's log writer died ${logWriterDeaths.resolver} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
+	return proxyAnswered || facts.push("The proxy did not answer the report, so it stopped or hung during the run. Requests made while it was down failed rather than going around it."), resolverAnswered || facts.push("The DNS resolver did not answer the report, so it stopped or hung during the run. Lookups made while it was down failed and left no line."), proxyAnswered && resolverAnswered || facts.push("The step fails for this whatever the mode or fail-on-blocked."), restarts.proxy && facts.push(`The proxy restarted ${restarts.proxy} time(s) during the run.`), restarts.resolver && facts.push(`The DNS resolver restarted ${restarts.resolver} time(s) during the run.`), (restarts.proxy || restarts.resolver) && facts.push("A restart loses the line of whatever was still in progress when the service stopped."), logWriterDeaths.proxy && facts.push(`The proxy's log writer died ${logWriterDeaths.proxy} time(s) during the run, losing the lines it had been sent but not yet written.`), logWriterDeaths.resolver && facts.push(`The DNS resolver's log writer died ${logWriterDeaths.resolver} time(s) during the run, losing the lines it had been sent but not yet written.`), droppedLines && facts.push(`The proxy dropped at least ${droppedLines} log line(s) during the run because it could not write them.`), facts;
 }
 function possibleCauses(facts) {
 	return facts.length === 0 ? "Either" : "Other causes may apply too:";
@@ -71132,8 +70911,7 @@ function describeBlockedOutcome({ isAudit, failOnBlocked, blockedCount, blockedR
 		message
 	};
 }
-//#endregion
-//#region src/core/lib/report/outcome/report-outcomes.ts
+// src/core/lib/report/outcome/report-outcomes.ts
 function describeReportOutcomes(report, { failOnBlocked, engineLabel }) {
 	let emissions = [describeBlockedOutcome({
 		isAudit: report.parameters.mode === "audit",
@@ -71172,8 +70950,7 @@ function describeFailedConnections(report, engineLabel) {
 		message: `${report.parameters.mode === "audit" ? `${count} connection(s) buildcage ${engineLabel} recorded did not complete` : `${count} connection(s) failed after buildcage ${engineLabel} allowed them`}, listed with ⚠️ under Failed Hosts. The origin broke off, answered nothing usable, or its name resolved nowhere upstream: no rule blocked them and none can change the outcome, so none of them fails the step.`
 	};
 }
-//#endregion
-//#region src/core/lib/report/elapsed-time.ts
+// src/core/lib/report/elapsed-time.ts
 function toParts(elapsedSeconds) {
 	let totalMs = Math.max(0, Math.round(elapsedSeconds * 1e3)), ms = totalMs % 1e3, totalSeconds = Math.floor(totalMs / 1e3), seconds = totalSeconds % 60, totalMinutes = Math.floor(totalSeconds / 60), minutes = totalMinutes % 60;
 	return {
@@ -71194,8 +70971,7 @@ function formatElapsedFixed(elapsedSeconds) {
 	let { hours, minutes, seconds, ms } = toParts(elapsedSeconds);
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(ms, 3)}`;
 }
-//#endregion
-//#region src/core/lib/report/render/credential-query.ts
+// src/core/lib/report/render/credential-query.ts
 const CREDENTIAL_PARAMS = new Set("accesskey.accesstoken.apikey.apitoken.auth.authorization.authtoken.clientsecret.code.credential.credentials.idtoken.jwt.key.passwd.password.pat.privatetoken.pwd.refreshtoken.secret.session.sessiontoken.sig.signature.subscriptionkey.token.xamzsecuritytoken.xamzsignature.xapikey.xgoogsignature".split("."));
 function credentialName(name) {
 	return withoutIndexes(name).toLowerCase().replace(/[-_.]/g, "");
@@ -71264,8 +71040,7 @@ function formatTime(epochSeconds, startedAt) {
 function formatBytes(bytes) {
 	return bytes < 1024 ? `${bytes}B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / 1048576).toFixed(1)}MB`;
 }
-//#endregion
-//#region src/core/lib/report/render/fold-expected-blocked.ts
+// src/core/lib/report/render/fold-expected-blocked.ts
 function foldExpectedBlockedRows(rows) {
 	let unmatched = [], groups = new Map();
 	for (let row of rows) {
@@ -71300,8 +71075,7 @@ function toRow(group) {
 		note: `(${group.hosts.size} host${group.hosts.size === 1 ? "" : "s"})`
 	};
 }
-//#endregion
-//#region src/core/lib/report/render/markdown-table.ts
+// src/core/lib/report/render/markdown-table.ts
 const ALIGN_MARKERS = {
 	left: "---",
 	right: "---:",
@@ -71325,8 +71099,7 @@ function markdownTable(formats, rows) {
 	}
 	return lines.join("\n");
 }
-//#endregion
-//#region src/core/lib/report/render/host-table.ts
+// src/core/lib/report/render/host-table.ts
 const OUTCOME_MARK = {
 	blocked: "🚫 ",
 	failed: "⚠️ "
@@ -71380,8 +71153,7 @@ function restrictExampleBlock(yaml, { appendix, footnote } = {}) {
 function restrictExampleTruncationNote(artifactAvailable) {
 	return `_…omitted: the example restrict step is too large for GitHub's Job Summary size limit; ${artifactAvailable ? "the buildcage-traffic artifact uploaded for this run has every request to write the rules from" : "set upload-traffic-artifact: true to get every request to write the rules from as a downloadable artifact"}._\n`;
 }
-//#endregion
-//#region src/core/lib/report/render/inspect-example.ts
+// src/core/lib/report/render/inspect-example.ts
 const METHOD_ORDER = [
 	"GET",
 	"HEAD",
@@ -71505,8 +71277,7 @@ function buildInspectRestrictExample(requests, actionRepo, actionRef, { allowedI
 		footnote: "Permits exactly what this build did; a versioned or dated URL may drift."
 	});
 }
-//#endregion
-//#region src/core/lib/report/render/universal-example.ts
+// src/core/lib/report/render/universal-example.ts
 const ruleTypeToParam = {
 	HTTPS: "allowed-https-rules",
 	HTTP: "allowed-http-rules",
@@ -71528,8 +71299,7 @@ function buildUniversalRestrictExample(auditedRows, actionRepo, actionRef, step 
 	}
 	return yaml += exampleStepTail(step), restrictExampleBlock(yaml);
 }
-//#endregion
-//#region src/core/lib/report/render/verdict.ts
+// src/core/lib/report/render/verdict.ts
 function renderVerdict(report, extra = {}) {
 	let unexpected = 0, expected = 0;
 	for (let row of report.blocked) row.expected ? expected += row.count : unexpected += row.count;
@@ -71551,8 +71321,7 @@ function renderVerdict(report, extra = {}) {
 	].join(" · ");
 	return `> [!${caution.length ? "CAUTION" : "WARNING"}]\n> ${items}\n\n`;
 }
-//#endregion
-//#region src/core/lib/report/render/traffic-parts.ts
+// src/core/lib/report/render/traffic-parts.ts
 const SECTION$1 = "traffic", TRAFFIC_BLOCK = {
 	example: "traffic-example",
 	blocked: "traffic-blocked",
@@ -71676,8 +71445,7 @@ function reportHeading(title, isAudit) {
 function reportFooter(actionRepo) {
 	return `*Reported by [${actionRepo}](https://github.com/${actionRepo})*\n\n<hr>\n`;
 }
-//#endregion
-//#region src/core/lib/report/render/traffic-report.ts
+// src/core/lib/report/render/traffic-report.ts
 function stackTrafficBlocks(heading, parts) {
 	let blocks = [heading], wrote = !1;
 	for (let part of parts) {
@@ -71698,8 +71466,7 @@ function stackTrafficBlocks(heading, parts) {
 	}
 	return blocks;
 }
-//#endregion
-//#region src/proxy/aws-hosts.ts
+// src/proxy/aws-hosts.ts
 const AMAZONAWS_TLDS = [
 	"com",
 	"com\\.cn",
@@ -71716,8 +71483,7 @@ const ECR_REGISTRY_HOST = `\\.dkr\\.ecr(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAI
 `^git-codecommit(-fips)?\\.[a-z0-9-]+\\.${AMAZONAWS_DOMAINS}$|` + vpceHost("git-codecommit(-fips)?");
 const formName = (name) => name.split("").map((c) => `(${[c, ...new Set([c, c.toUpperCase()].map((l) => `%${l.charCodeAt(0).toString(16)}`))].join("|")})`).join("");
 formName("awsaccesskeyid"), formName("x-amz-credential");
-//#endregion
-//#region src/proxy/aws-keys.ts
+// src/proxy/aws-keys.ts
 const ACCOUNT_ID = /^\d{12}$/, ACCESS_KEY_ID = /^[A-Z0-9]{16,128}$/;
 function parseAwsAccounts(input) {
 	let tokens = splitRuleTokens(input).flatMap((token) => token.split(",").filter(Boolean)), invalid = tokens.filter((token) => !isAwsAccountId(token));
@@ -71733,13 +71499,11 @@ function isAwsAccessKeyId(value) {
 function awsFieldsOf(e) {
 	return e.extensions?.aws ?? {};
 }
-//#endregion
-//#region src/lib/first-of.ts
+// src/lib/first-of.ts
 function firstOf(names, shown) {
 	return names.length <= shown ? names.join(", ") : `${names.slice(0, shown - 1).join(", ")} and ${names.length - shown + 1} more`;
 }
-//#endregion
-//#region src/lib/aws-keys.ts
+// src/lib/aws-keys.ts
 const KEY_NOT_ALLOWED = "aws-key-not-allowed", ECR_REGISTRY = RegExp(`${ECR_REGISTRY_HOST}|^[0-9]{12}\\.dkr-ecr\\.[a-z0-9-]+\\.on\\.aws\$`);
 function isEcrRegistry(host) {
 	return ECR_REGISTRY.test(host);
@@ -71847,8 +71611,7 @@ function awsKeysBlocks(keys, fit) {
 	})));
 	return [trafficTableBlock("traffic-aws-keys", fit.priority, awsKeysTruncationNote(fit.artifactAvailable), "### 🔑 AWS Keys\n\n", table, "\n")];
 }
-//#endregion
-//#region src/core/lib/log/aggregate.ts
+// src/core/lib/log/aggregate.ts
 function entryKey(e) {
 	return `${e.host}\t${e.port}\t${e.ruleType}\t${e.reason}`;
 }
@@ -71872,8 +71635,7 @@ function aggregate(filtered) {
 		};
 	}).sort(compareAggregated);
 }
-//#endregion
-//#region src/core/lib/report/build/aggregate.ts
+// src/core/lib/report/build/aggregate.ts
 function targetOf(event) {
 	return `${event.host}:${event.port === void 0 ? "0" : event.port}`;
 }
@@ -71982,8 +71744,7 @@ async function assembleReportData(engine, proxyScan, dnsScan, parameters, { prox
 		timeline
 	};
 }
-//#endregion
-//#region src/lib/would-block.ts
+// src/lib/would-block.ts
 function blockedKeys(timeline, keys) {
 	let audited = new Map();
 	for (let e of timeline) {
@@ -72069,8 +71830,7 @@ function wouldBlockTables(timeline, keys, fit) {
 	}
 	return blocks;
 }
-//#endregion
-//#region src/lib/aws-report.ts
+// src/lib/aws-report.ts
 function awsTroubleshootingBlocks(report, actionRepo, actionRef) {
 	let reasons = new Set();
 	for (let r of report.blocked) !r.expected && r.reason.startsWith("aws-") && reasons.add(r.reason);
@@ -72079,8 +71839,7 @@ function awsTroubleshootingBlocks(report, actionRepo, actionRef) {
 	let url = `https://github.com/${actionRepo}/blob/${actionRef}/docs/aws.md#troubleshooting`, names = new Intl.ListFormat("en", { type: "disjunction" }).format([...reasons].map((r) => `\`${r}\``));
 	return [trafficFrame(`<sub>*For ${names}, see [what to do](${url}).*</sub>\n`)];
 }
-//#endregion
-//#region src/lib/step-output-file.ts
+// src/lib/step-output-file.ts
 const WIDE_BOMS = [
 	[255, 254],
 	[254, 255],
@@ -72229,8 +71988,7 @@ function quoted(text) {
 	let chars = Array.from(text), cut = chars.length > 64 ? `${chars.slice(0, 64).join("")}…` : text;
 	return JSON.stringify(cut).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => Array.from({ length: c.length }, (_, i) => `\\u${c.charCodeAt(i).toString(16).padStart(4, "0")}`).join(""));
 }
-//#endregion
-//#region src/lib/retry-briefly.ts
+// src/lib/retry-briefly.ts
 function retryBriefly(fn, options = {}) {
 	let { attempts = 5, delayMs = 200, retryOn = () => !0 } = options;
 	for (let attempt = 1;; attempt++) try {
@@ -72240,8 +71998,7 @@ function retryBriefly(fn, options = {}) {
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 	}
 }
-//#endregion
-//#region src/lib/sandbox/mountinfo.ts
+// src/lib/sandbox/mountinfo.ts
 function parseMountinfo(mountinfoContent) {
 	return mountinfoContent.split("\n").filter(Boolean).map((line) => {
 		let fields = line.split(" "), dashIndex = fields.indexOf("-"), superOptions = unescapeField(fields[dashIndex + 3]);
@@ -72260,8 +72017,7 @@ function unescapeField(field) {
 function listHostMounts() {
 	return parseMountinfo((0, node_fs.readFileSync)("/proc/self/mountinfo", "utf8"));
 }
-//#endregion
-//#region src/lib/sandbox/run-host-command.ts
+// src/lib/sandbox/run-host-command.ts
 function runPinnedHostCommand(command, args) {
 	(0, node_child_process.execFileSync)(hostCommand(command), args, {
 		encoding: "utf8",
@@ -72273,8 +72029,7 @@ function runPinnedHostCommand(command, args) {
 		env: hostCommandEnv(command)
 	});
 }
-//#endregion
-//#region src/lib/sandbox/scratch-dir.ts
+// src/lib/sandbox/scratch-dir.ts
 const SANDBOX_SCRATCH_BASE = `/var/tmp/buildcage-${process.getuid()}`;
 function checkScratchBaseParent(realpath = node_fs.realpathSync) {
 	let parent = (0, node_path.dirname)(SANDBOX_SCRATCH_BASE), real;
@@ -72373,8 +72128,7 @@ async function withScratchDir(fn, { containerName, ephemeralRoots, warn } = {}) 
 		});
 	}
 }
-//#endregion
-//#region src/lib/sandbox/runner-output-files.ts
+// src/lib/sandbox/runner-output-files.ts
 const RUNNER_FILES_DIR = "/dev/buildcage-runner-files", LEAF = {
 	GITHUB_OUTPUT: "output",
 	GITHUB_STEP_SUMMARY: "step-summary"
@@ -72532,8 +72286,7 @@ function runnerFilesDirFor(containerName) {
 	let scratchName = (0, node_path.basename)(scratchDirFor(containerName));
 	return (0, node_path.join)(SANDBOX_SCRATCH_BASE, scratchName.replace(/^sandbox-/, "runner-files-"));
 }
-//#endregion
-//#region src/lib/filesystem-audit/record.ts
+// src/lib/filesystem-audit/record.ts
 const LETTER = {
 	read: "R",
 	write: "W",
@@ -72608,8 +72361,7 @@ function parseLine(line) {
 		return;
 	}
 }
-//#endregion
-//#region src/lib/filesystem-audit/agg.ts
+// src/lib/filesystem-audit/agg.ts
 const newAgg = () => ({
 	ok: 0,
 	failed: 0,
@@ -72640,8 +72392,7 @@ function fmtFlags(a) {
 	for (let c of ORDER) a.perm & BIT[c] ? out += `${c.toLowerCase()}!` : a.failed & ~a.ok & BIT[c] && (out += c.toLowerCase());
 	return out;
 }
-//#endregion
-//#region src/lib/filesystem-audit/paths.ts
+// src/lib/filesystem-audit/paths.ts
 const MEMFD_PREFIX = "memfd:", MEMFD = `\0${MEMFD_PREFIX}`, MEMFDS = `${MEMFD}\0`, DELETED_MARK = " (deleted)", DELETED = `\0${DELETED_MARK}`;
 function marked(r, path) {
 	return r.memfd ? MEMFD + path.slice(6) : r.deleted ? path + DELETED : path;
@@ -72704,8 +72455,7 @@ function components(p) {
 function spell(parts) {
 	return parts[0] === "/" ? `/${parts.slice(1).join("/")}` : parts.join("/");
 }
-//#endregion
-//#region src/lib/filesystem-audit/escape.ts
+// src/lib/filesystem-audit/escape.ts
 const UNSAFE = String.raw`\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800\\`, UNSAFE_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"*]`, "gu"), UNSAFE_COMMAND_CHARS = RegExp(`^ +| +$|(?! )[${UNSAFE}"[\\]]`, "gu"), NAMED_ESCAPES = {
 	"\n": "\\n",
 	"\r": "\\r",
@@ -72758,8 +72508,7 @@ function markdownRows(header, rows) {
 		...rows.map(line)
 	].join("\n");
 }
-//#endregion
-//#region src/lib/sandbox/filesystem-audit-paths.ts
+// src/lib/sandbox/filesystem-audit-paths.ts
 const RECORD_FILE = "filesystem-audit.jsonl";
 function filesystemAuditPaths(containerName, scratchBase) {
 	let suffix = containerName.split("-").at(-1), uploadDir = (0, node_path.join)(scratchBase, `filesystem-audit-${suffix}`);
@@ -72781,8 +72530,7 @@ function isTracer(pid, readFile) {
 		return;
 	}
 }
-//#endregion
-//#region src/lib/filesystem-audit/rules.ts
+// src/lib/filesystem-audit/rules.ts
 const EXPECTED_RULES_INPUT = "expected-filesystem-rules", invalidRules = (ref, reason) => new SandboxError(`Invalid ${EXPECTED_RULES_INPUT} at ${ref}: ${reason}`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 function fields(line, ref) {
 	let out = [], i = 0;
@@ -72968,8 +72716,7 @@ var RuleMatcher = class {
 		};
 	}
 };
-//#endregion
-//#region src/lib/filesystem-audit/proposed-rules.ts
+// src/lib/filesystem-audit/proposed-rules.ts
 const ruleField = (text) => text.startsWith("memfd:\"") ? text : text === "" || text.startsWith("#") ? `"${text}"` : field(text), RULES_TO_ADD_HEADER = [
 	`# Rules for the file accesses no ${EXPECTED_RULES_INPUT} matched in this run.`,
 	`# Review them, then add them to ${EXPECTED_RULES_INPUT}, under with: or in a config-file.`,
@@ -73014,8 +72761,7 @@ function writeProposedRules(summary, path, annotation, writeFile) {
 		return annotation.warning(`Failed to write the proposed ${EXPECTED_RULES_INPUT}: ${errorMessage(e)}`), "write-failed";
 	}
 }
-//#endregion
-//#region src/lib/filesystem-audit/command.ts
+// src/lib/filesystem-audit/command.ts
 const utf8 = new TextEncoder();
 function bytesOf(s) {
 	let out = [];
@@ -73047,8 +72793,7 @@ function commandOf(program, runName, comm) {
 		field: `${baseField}[${own}]`
 	};
 }
-//#endregion
-//#region src/lib/filesystem-audit/fold-tree.ts
+// src/lib/filesystem-audit/fold-tree.ts
 const starred = (path) => path === "/" ? "/**" : `${path}/**`, twin = (kids, name) => {
 	let live = unmarked(name);
 	return live !== name && kids.has(live);
@@ -73331,8 +73076,7 @@ var Lines = class {
 		return this.lines.stopped !== void 0;
 	}
 };
-//#endregion
-//#region src/lib/filesystem-audit/strip.ts
+// src/lib/filesystem-audit/strip.ts
 const SHELL_COMM = "run-script.sh", readsOnly = (r) => r.kind === "read" || (r.kind === "open" || r.kind === "mmap") && r.access === "r";
 function createStripper(scratchBase) {
 	let under = (p) => typeof p == "string" && (p === scratchBase || p.startsWith(`${scratchBase}/`)), isShellExec = (r) => r.kind === "exec" && r.pid !== void 0 && typeof r.path == "string" && leaf(r.path) === SHELL_COMM, asRecord = (r) => typeof r == "object" && r ? r : void 0, ownShellPids = new Set(), shell, script, init, boundary = -1, observed = 0, filtered = 0;
@@ -73370,8 +73114,7 @@ function createStripper(scratchBase) {
 		}
 	};
 }
-//#endregion
-//#region src/lib/filesystem-audit/reduce.ts
+// src/lib/filesystem-audit/reduce.ts
 const LIBRARY_NAME = /\.(so(\.\d+)*|node)$/, SENSITIVE_IN_HOME = [
 	".ssh",
 	".aws",
@@ -73689,8 +73432,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 		ended
 	};
 }
-//#endregion
-//#region src/lib/filesystem-audit/render.ts
+// src/lib/filesystem-audit/render.ts
 const LEGEND = "R read · W write · X exec · M move · L link · D delete · A attr · lowercase = failed · ! = refused", heading = (title) => `\n${reportHeading(title, !1).trimEnd()}`;
 function killedNote(rows) {
 	let killed = inRecordingOrder(rows);
@@ -73879,8 +73621,7 @@ function filesystemTruncationNote(artifact, cause = "size") {
 	let rest = artifact === "not-requested" ? "set upload-filesystem-audit-artifact: true to get every access as a downloadable artifact" : artifact === "upload-failed" ? "the recording could not be uploaded as an artifact, so the rest is not kept" : `the ${artifactLink(artifact)} uploaded for this run has every access`;
 	return `_…truncated: ${cause === "paths" ? "the filesystem audit touched too many distinct paths to summarize" : "the filesystem audit exceeded GitHub's Job Summary size limit"}; ${rest}._\n\n`;
 }
-//#endregion
-//#region src/lib/summary-priorities.ts
+// src/lib/summary-priorities.ts
 const TRAFFIC_PRIORITIES = {
 	[TRAFFIC_BLOCK.example]: 1,
 	[TRAFFIC_BLOCK.blocked]: 3,
@@ -73892,8 +73633,7 @@ const TRAFFIC_PRIORITIES = {
 	[FILESYSTEM_BLOCK.paths]: 6,
 	[FILESYSTEM_BLOCK.log]: 10
 };
-//#endregion
-//#region src/lib/report.ts
+// src/lib/report.ts
 function reportTitle(label, title = "Outbound Traffic Report") {
 	return label ? `${title} — ${label}` : title;
 }
@@ -74020,8 +73760,7 @@ async function writeReportSummary(report, annotation, { extraBlocks = [], comman
 	});
 	wrote === "blocks" ? cutIds.has("traffic-would-block") && annotation.warning("The ⚠️ Restrict Would Block section was cut to fit GitHub's Job Summary size limit. " + (artifactAvailable ? "The buildcage-traffic artifact uploaded for this run has every request." : "Set upload-traffic-artifact: true to get every request as an artifact.")) : annotation.warning(reportDidNotFitMessage(artifactAvailable));
 }
-//#endregion
-//#region src/lib/sandbox/symlinks.ts
+// src/lib/sandbox/symlinks.ts
 const realSymlinkDeps = {
 	lstat: (path) => {
 		try {
@@ -74064,8 +73803,7 @@ function realPathOf(path, deps = realSymlinkDeps) {
 	let resolved = resolveHostPath(path, deps);
 	return "real" in resolved ? resolved.real : path;
 }
-//#endregion
-//#region src/lib/filesystem-audit/line-file.ts
+// src/lib/filesystem-audit/line-file.ts
 const CHUNK_BYTES = 1 << 20;
 function readLines(path, onLine, chunkBytes = CHUNK_BYTES) {
 	let fd = (0, node_fs.openSync)(path, "r");
@@ -74100,8 +73838,7 @@ function openWriter(path, chunkBytes = CHUNK_BYTES) {
 		}
 	};
 }
-//#endregion
-//#region src/lib/filesystem-audit/report.ts
+// src/lib/filesystem-audit/report.ts
 const FILESYSTEM_ACTIVITY_TITLE = "Filesystem Activity Report", realDeps$3 = {
 	readLines,
 	createSummary: createAuditSummary,
@@ -74280,8 +74017,7 @@ function reduce(outPath, cleanPath, options, annotation, deps) {
 		written
 	};
 }
-//#endregion
-//#region src/lib/filesystem-audit/rules-input.ts
+// src/lib/filesystem-audit/rules-input.ts
 function ruleSources(value, config) {
 	let lines = value.split("\n"), at = config?.offset ?? lines.length;
 	return [{
@@ -74303,8 +74039,7 @@ function readExpectedFilesystemRules(value, config, filesystemAudit) {
 	if (filesystemAudit !== "record") throw new SandboxError(`${EXPECTED_RULES_INPUT} needs filesystem-audit: record, which records the accesses it is matched against.`, "INVALID_EXPECTED_FILESYSTEM_RULES");
 	return { expected: rules };
 }
-//#endregion
-//#region src/lib/sandbox/write-through.ts
+// src/lib/sandbox/write-through.ts
 const ALLOWED_WRITE_THROUGH_VARS = [
 	"HOME",
 	"GITHUB_WORKSPACE",
@@ -74384,8 +74119,7 @@ function ensureWriteThroughTargetsExist(resolvedPaths, { exists = defaultExists,
 		throw new WriteThroughTargetUncreatableError(`write-through: ${JSON.stringify(path)} doesn't exist and couldn't be created: ${e instanceof Error ? e.message : String(e)}`);
 	}
 }
-//#endregion
-//#region src/lib/filesystem-example-inputs.ts
+// src/lib/filesystem-example-inputs.ts
 function yamlScalar(text) {
 	try {
 		if ((0, import_dist$5.parse)(text) === text) return text;
@@ -74398,24 +74132,21 @@ function filesystemExampleInputs({ workingDirectory, filesystemMode, writeThroug
 	let paths = splitWriteThroughInput(writeThroughInput);
 	return paths.length > 0 && lines.push("write-through: |", ...paths.map((path) => `  ${path}`)), filesystemAudit !== "off" && lines.push(`filesystem-audit: ${filesystemAudit}`), expectedFilesystemRules && lines.push(`# This step's ${EXPECTED_RULES_INPUT} are left out: add them back, under with: or in a config-file.`, ...failOnUnexpectedFileAccess ? ["# Until then, fail-on-unexpected-file-access fails the step on every file access."] : [], `# See ${guideUrl}#expected-accesses`), failOnUnexpectedFileAccess && lines.push("fail-on-unexpected-file-access: true"), lines;
 }
-//#endregion
-//#region src/lib/filesystem-audit/mode.ts
+// src/lib/filesystem-audit/mode.ts
 const FILESYSTEM_AUDIT = ["off", "record"];
 function resolveFilesystemAudit(input) {
 	let trimmed = input?.trim() || "off";
 	if (!FILESYSTEM_AUDIT.includes(trimmed)) throw new SandboxError(`Invalid filesystem-audit: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_AUDIT.join(", ")}.`, "INVALID_FILESYSTEM_AUDIT");
 	return trimmed;
 }
-//#endregion
-//#region src/lib/filesystem-mode.ts
+// src/lib/filesystem-mode.ts
 const FILESYSTEM_MODES = ["persistent", "ephemeral"];
 function resolveFilesystemMode(input) {
 	let trimmed = input?.trim() || "persistent";
 	if (!FILESYSTEM_MODES.includes(trimmed)) throw new SandboxError(`Invalid filesystem-mode: ${JSON.stringify(input)}. Must be one of ${FILESYSTEM_MODES.join(", ")}.`, "INVALID_FILESYSTEM_MODE");
 	return trimmed;
 }
-//#endregion
-//#region src/lib/inputs.ts
+// src/lib/inputs.ts
 init_core();
 const LIST_INPUTS = [
 	"allowed-https-rules",
@@ -74556,8 +74287,7 @@ function awsExampleInputs({ key, roleAccounts }, timeline = []) {
 	}, line = (a, text) => added.has(a) ? `# ${text}${mark(a)}` : text;
 	return accounts.length === 1 ? lines.push(line(accounts[0], `allowed-aws-role-accounts: "${accounts[0]}"`)) : accounts.length > 1 && roleAccounts.length === 0 ? lines.push("# allowed-aws-role-accounts: |", ...accounts.map((a) => `#   ${a}${mark(a)}`)) : accounts.length > 1 && lines.push("allowed-aws-role-accounts: |", ...accounts.map((a) => `  ${line(a, a)}`)), lines;
 }
-//#endregion
-//#region src/lib/overlayfs-preflight.ts
+// src/lib/overlayfs-preflight.ts
 const REQUIREMENT$1 = `filesystem-mode: ephemeral requires overlayfs support on ${SANDBOX_SCRATCH_BASE}: an overlay mount's upperdir/workdir are placed there, and the kernel doesn't allow those to themselves sit on an overlayfs filesystem. This commonly fails when the runner process is itself running inside a container whose own root filesystem is overlayfs (e.g. many container-based self-hosted runner setups), since that puts SANDBOX_SCRATCH_BASE on overlayfs too. Use filesystem-mode: persistent instead, or run this action from a runner whose filesystem isn't overlayfs-backed.`;
 function describeOverlayFailure(e) {
 	let captured = capturedStderr(e);
@@ -74625,8 +74355,7 @@ function probeOverlayMount(probeDir, exec) {
 		env: hostCommandEnv("sudo")
 	});
 }
-//#endregion
-//#region src/lib/post-pinning.ts
+// src/lib/post-pinning.ts
 function postPinningPath(env, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let owner = ownerToken(env);
 	if (!owner) return;
@@ -74637,8 +74366,7 @@ function savePinningForPost(env, pinning, scratchBase = SANDBOX_SCRATCH_BASE) {
 	let path = postPinningPath(env, scratchBase);
 	env.GITHUB_STATE && path && (ensureOwnScratchBase(scratchBase), (0, node_fs.writeFileSync)(path, JSON.stringify(pinning), { mode: 384 }));
 }
-//#endregion
-//#region src/core/lib/docker/args.ts
+// src/core/lib/docker/args.ts
 function buildDockerCpArgs({ containerName, containerPath, hostPath }) {
 	return [
 		"cp",
@@ -74690,8 +74418,7 @@ function buildComposeDownArgs({ composeFiles, projectName }) {
 		"-v"
 	];
 }
-//#endregion
-//#region src/core/lib/docker/health.ts
+// src/core/lib/docker/health.ts
 function buildDockerInspectStateArgs(containerName) {
 	return [
 		"inspect",
@@ -74723,8 +74450,7 @@ function describeContainerStartFailure(state, { role, containerName }) {
 	let subject = `Buildcage's ${role} container (${containerName})`, probe = state.lastHealthOutput ? ` Last health check output: ${JSON.stringify(state.lastHealthOutput)}.` : "", evidence = " Its log is printed above.";
 	return state.status === "running" ? isContainerReady(state) ? `${subject} is running, but \`docker compose up\` failed. See the Docker output above.${probe}` : `${subject} started but never became ready.${probe}${evidence}` : `${subject} stopped${state.exitCode === null ? "" : ` with code ${state.exitCode}`} instead of starting up.${probe}${evidence}`;
 }
-//#endregion
-//#region src/lib/proxy-lifecycle.ts
+// src/lib/proxy-lifecycle.ts
 const captureDockerViaExec = (args, env) => (0, node_child_process.execFileSync)(hostCommand("docker"), args, {
 	encoding: "utf8",
 	env: hostCommandEnv("docker", env),
@@ -74803,8 +74529,7 @@ async function stopSandboxProxy({ composeFiles, projectName, composeEnv, annotat
 		}
 	});
 }
-//#endregion
-//#region src/lib/sandbox/nss-db-ledger.ts
+// src/lib/sandbox/nss-db-ledger.ts
 const NSS_DB_LEDGER_NAME = "nssdb-ledger.json";
 function defaultMkdir(path, mode) {
 	(0, node_fs.mkdirSync)(path, { mode });
@@ -75023,8 +74748,7 @@ function releaseNssDb(name, deps = {}) {
 function useNameFor(scratchDir) {
 	return (0, node_path.basename)(scratchDir);
 }
-//#endregion
-//#region src/lib/sandbox/nss-db.ts
+// src/lib/sandbox/nss-db.ts
 const NSS_XDG_DB_PATH = ".local/share/pki/nssdb", NSS_CA_DB_DESTINATION = "/dev/buildcage-nssdb", NSS_SLOT = `library=libsoftokn3.so
 name="buildcage proxy CA"
 parameters="configdir='sql:${NSS_CA_DB_DESTINATION}' flags=readOnly"\nNSS=""
@@ -75393,8 +75117,7 @@ function nssDbDetached(files, deps = {}) {
 function releaseNssDbDirs(files, deps = {}) {
 	files.claim?.registered && releaseNssDb(files.claim.name, deps);
 }
-//#endregion
-//#region src/lib/sandbox/paths.ts
+// src/lib/sandbox/paths.ts
 function isAtOrUnder(path, ancestor) {
 	return path === ancestor || path.startsWith(ancestor.endsWith("/") ? ancestor : `${ancestor}/`);
 }
@@ -75422,8 +75145,7 @@ function assertScratchBaseNotWritable(writableDirs) {
 	let overlapping = writableDirs.find((p) => pathsOverlap(p, SANDBOX_SCRATCH_BASE));
 	if (overlapping) throw new WritablePathConflictError(`writable path ${JSON.stringify(overlapping)} overlaps the sandbox's own scratch directory (${SANDBOX_SCRATCH_BASE}); this would re-expose the sandboxed host filesystem read-write inside the sandbox itself. Choose a writable path outside ${SANDBOX_SCRATCH_BASE}.`);
 }
-//#endregion
-//#region src/lib/sandbox/ca-trust.ts
+// src/lib/sandbox/ca-trust.ts
 const SYSTEM_CA_CANDIDATES = [
 	"/etc/ssl/certs/ca-certificates.crt",
 	"/etc/pki/tls/certs/ca-bundle.crt",
@@ -75646,8 +75368,7 @@ function caTrustAdditions(files, env) {
 		env: extraEnv
 	};
 }
-//#endregion
-//#region src/lib/sandbox/env-loader.ts
+// src/lib/sandbox/env-loader.ts
 const ENV_BLOB_TERMINATOR = "__BUILDCAGE_ENV_END__", ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/, RUNNER_ONLY_ENV_KEYS = new Set([
 	"ACTIONS_RUNTIME_URL",
 	"ACTIONS_RUNTIME_TOKEN",
@@ -75686,8 +75407,7 @@ function envLoaderArgs(loaderPath, scriptPath) {
 		scriptPath
 	];
 }
-//#endregion
-//#region src/lib/sandbox/ephemeral-fs.ts
+// src/lib/sandbox/ephemeral-fs.ts
 function defaultDeviceOf(path) {
 	return (0, node_fs.statSync)(path).dev;
 }
@@ -75786,8 +75506,7 @@ function formatFilesystemPlanLog(mode, overlayRoots, writeThrough, mediatedVaria
 	for (let name of mediatedVariables) lines.push(`Written back after the step:             $${name}`);
 	return lines;
 }
-//#endregion
-//#region src/lib/sandbox/host-probes.ts
+// src/lib/sandbox/host-probes.ts
 const SETPRIV_CANDIDATE_PATHS = [
 	"/usr/bin/setpriv",
 	"/bin/setpriv",
@@ -75891,8 +75610,7 @@ function checkFilesystemAuditHost(probes = realHostProbes) {
 	if (probes.cgroupPath() === void 0) throw hostCannotAudit(NO_CGROUP_V2_REASON);
 	if (!probes.kernelBtf()) throw hostCannotAudit("the kernel exposes no BTF");
 }
-//#endregion
-//#region src/lib/sandbox/oci-mounts.ts
+// src/lib/sandbox/oci-mounts.ts
 function freshMountDestinationsFrom(baseSpec) {
 	return new Set(baseSpec.mounts.map((m) => m.destination));
 }
@@ -76047,8 +75765,7 @@ function scratchBaseCovers(aliases = []) {
 		]
 	}));
 }
-//#endregion
-//#region src/lib/sandbox/host-commands.ts
+// src/lib/sandbox/host-commands.ts
 const PINNED_COMMANDS = ["docker", "sudo"];
 function persistingWritablePaths(filesystemMode, writeThroughPaths, defaultDirs) {
 	return filesystemMode === "ephemeral" ? writeThroughPaths : writableDirsOf({
@@ -76158,8 +75875,7 @@ function pinningPaths(readWriteThroughInput, env, baseDir, realpath = realPathOf
 	} catch {}
 	return persistingWritablePaths("persistent", writeThroughPaths, resolveDefaultWritableDirs(env, realpath));
 }
-//#endregion
-//#region src/lib/sandbox/runtime-sockets.ts
+// src/lib/sandbox/runtime-sockets.ts
 const RUNTIME_SOCKET_PATHS = [
 	"/var/run/docker.sock",
 	"/run/docker.sock",
@@ -76175,8 +75891,7 @@ function rootlessRuntimeSocketPaths(env) {
 	let dir = env.XDG_RUNTIME_DIR;
 	return dir ? [`${dir}/docker.sock`, `${dir}/podman/podman.sock`] : [];
 }
-//#endregion
-//#region src/lib/sandbox/identity.ts
+// src/lib/sandbox/identity.ts
 function assertNonRootUid(uid) {
 	if (uid === 0) throw new SandboxError("Buildcage will not run as root (uid 0): it keeps the runner's own uid, and as root only filesystem permissions separate the command from root-owned host sockets, which cannot guarantee isolation. Run the GitHub Actions runner as a non-root user.", "ROOT_RUNNER");
 }
@@ -76350,8 +76065,7 @@ function assertSandboxShows(wd, spec) {
 	let hidden = hiddenWorkingDirectory(wd.path, spec.mounts, spec.maskedPaths);
 	if (hidden) throw unusable(wd, hidden);
 }
-//#endregion
-//#region src/lib/sandbox/filesystem-plan.ts
+// src/lib/sandbox/filesystem-plan.ts
 function validateFilesystemInputs(filesystemMode, writeThroughPaths, reservedRealPaths = []) {
 	if (filesystemMode === "ephemeral" && writeThroughPaths.includes("/")) throw new SandboxError("write-through: / drops the read-only restriction wholesale, which has no meaning in filesystem-mode: ephemeral -- it would persist every write, the one thing that mode exists to prevent. List the paths that must survive instead.", "FILESYSTEM_INPUT_CONFLICT");
 	for (let path of writeThroughPaths) {
@@ -76460,8 +76174,7 @@ function onRealRunnerDir(path, env, realpath) {
 	let dir = runnerDirs(env).filter((d) => isAtOrUnder(path, d)).sort(longestFirst)[0];
 	return dir === void 0 ? path : (0, node_path.join)(realpath(dir), (0, node_path.relative)(dir, path));
 }
-//#endregion
-//#region src/lib/sandbox/filesystem-audit-tracer.ts
+// src/lib/sandbox/filesystem-audit-tracer.ts
 const END_LINE = /"kind":"end"[^\n]*\n$/;
 function cgroupFsPath(cgroupsPath) {
 	return (0, node_path.join)("/sys/fs/cgroup", cgroupsPath);
@@ -76614,8 +76327,7 @@ async function startFilesystemAudit({ tracerPath, cgroupsPath, outPath, pidFileP
 	let cancelled = !exited && cancel?.aborted, failure = exited ? hostCannotAudit(child.reason() || "the tracer exited") : auditUnavailable("the tracer did not attach in time");
 	throw await haltTracer(tracer, !1, haltOptions, haltDeps), remove(outPath), cancelled ? cancelledBeforeRun() : failure;
 }
-//#endregion
-//#region src/lib/sandbox/host-protected-paths.ts
+// src/lib/sandbox/host-protected-paths.ts
 function runnerActionRoot() {
 	return (0, node_path.resolve)((0, node_path.dirname)(process.argv[1]), "..");
 }
@@ -76697,15 +76409,13 @@ function renameGuardDirs(readonlyDirs, persisting) {
 	}
 	return [...guards].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
-//#endregion
-//#region scripts/extra-masked-proc-paths.json
+// scripts/extra-masked-proc-paths.json
 var extra_masked_proc_paths_default = [
 	"/proc/kallsyms",
 	"/proc/kmsg",
 	"/proc/sysrq-trigger"
 ];
-//#endregion
-//#region src/lib/sandbox/oci-protected-paths.ts
+// src/lib/sandbox/oci-protected-paths.ts
 function maskedRuntimeDir(env) {
 	let dir = env.XDG_RUNTIME_DIR;
 	return !dir || ["/run", "/var/run"].some((run) => isAtOrUnder(dir, run)) ? [] : [dir];
@@ -76724,8 +76434,7 @@ function resolveProtectedPaths({ baseMaskedPaths, baseReadonlyPaths, env, hostMo
 		readonlyPaths: disableReadonly ? keptReadonlyPaths : Array.from(new Set([...keptReadonlyPaths, ...computeReadonlyHostMounts(hostMounts, writablePaths, freshMountDestinations).filter((p) => !isExtraMasked(p))]))
 	};
 }
-//#endregion
-//#region src/lib/sandbox/oci-config.ts
+// src/lib/sandbox/oci-config.ts
 const REQUIRED_NAMESPACES = [
 	"pid",
 	"network",
@@ -76829,8 +76538,7 @@ function buildOciConfig(baseSpec, { identity, cwd, writable, ephemeral, runtime,
 		}
 	};
 }
-//#endregion
-//#region src/lib/sandbox/oci-files.ts
+// src/lib/sandbox/oci-files.ts
 function writeRunScript(runInput, execDir) {
 	let scriptPath = (0, node_path.join)(execDir, "run-script.sh"), content = runInput.startsWith("#!") ? runInput : `#!/bin/bash\nset -e\n${runInput}\n`;
 	return (0, node_fs.writeFileSync)(scriptPath, content, { mode: 448 }), scriptPath;
@@ -76843,8 +76551,7 @@ function writeResolvConf(dns, dir) {
 	let resolvConfPath = (0, node_path.join)(dir, "resolv.conf");
 	return (0, node_fs.writeFileSync)(resolvConfPath, `nameserver ${dns}\n`, { mode: 420 }), resolvConfPath;
 }
-//#endregion
-//#region src/lib/sandbox/run.ts
+// src/lib/sandbox/run.ts
 const __dirname$1 = (0, node_path.dirname)((0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href));
 function defaultSpawn(command, args, input) {
 	let child = (0, node_child_process.spawn)(hostCommand(command), args, {
@@ -76906,8 +76613,7 @@ async function runIsolated({ runcPath, proxyNetns, bundleDir, containerId, netns
 	if ("status" in exit) return exit.status;
 	throw "signal" in exit ? new SandboxError(`The sandbox was ended by ${exit.signal}, so the command's exit status is unknown.`, "SANDBOX_TERMINATED") : new SandboxError(`Failed to start the sandbox: ${errorMessage(exit.error)}`, "SANDBOX_LAUNCH_FAILED");
 }
-//#endregion
-//#region src/lib/sandbox/runc-bootstrap.ts
+// src/lib/sandbox/runc-bootstrap.ts
 function generateBaseOciSpec(runcPath, bundleDir, { execIn = defaultExecIn, readFile = defaultReadFile } = {}) {
 	return execIn(runcPath, ["spec"], bundleDir), JSON.parse(readFile((0, node_path.join)(bundleDir, "config.json")));
 }
@@ -76944,8 +76650,7 @@ function extractRuncBootstrap({ containerName, destDir }, deps = {}) {
 		baseSpec
 	};
 }
-//#endregion
-//#region src/lib/sandbox/sandboxed-command.ts
+// src/lib/sandbox/sandboxed-command.ts
 init_core();
 const realDeps$2 = {
 	withScratchDir,
@@ -77198,8 +76903,7 @@ async function runSandboxedCommand(options, overrides = {}) {
 		warn
 	});
 }
-//#endregion
-//#region src/core/lib/docker/container-env.ts
+// src/core/lib/docker/container-env.ts
 function parseDockerInspectEnv(inspectOutput) {
 	let entries = JSON.parse(inspectOutput), env = {};
 	for (let entry of entries) {
@@ -77211,8 +76915,7 @@ function parseDockerInspectEnv(inspectOutput) {
 function parseDockerInspectLabels(inspectOutput) {
 	return JSON.parse(inspectOutput) ?? {};
 }
-//#endregion
-//#region src/core/lib/docker/client.ts
+// src/core/lib/docker/client.ts
 function parseContainerIds(psOutput) {
 	return psOutput.split("\n").map((s) => s.trim()).filter(Boolean);
 }
@@ -77312,8 +77015,7 @@ function createDocker(run = defaultRunCommand, spawnDocker = defaultSpawnCommand
 		}
 	};
 }
-//#endregion
-//#region src/core/lib/docker/proxy-health.ts
+// src/core/lib/docker/proxy-health.ts
 const COUNTER = /^haproxy_process_dropped_logs_total (\d+)$/m, LOG_DIR = "/var/log/haproxy", BARRIER_SCRIPT = [
 	"i=0",
 	"still=0",
@@ -77408,8 +77110,7 @@ function readResolverAnswered(docker, containerId) {
 		return !1;
 	}
 }
-//#endregion
-//#region src/core/lib/docker/rotated-log.ts
+// src/core/lib/docker/rotated-log.ts
 const READ_SCRIPT = "cd \"$1\" || exit 1,i=0,until command exec 3<current; do,  i=$((i + 1)),  if [ $i -ge 10 ]; then exec 3</dev/null; break; fi,  sleep 0.1,done 2>/dev/null,last=$(stat -L -c %d:%i /proc/self/fd/3),[ -n \"$last\" ] || exit 1,seen=\" \",listed=,while :; do,  now=$(ls -d @????????????????????????.? previous 2>/dev/null),  [ \"$now\" = \"$listed\" ] && break,  listed=$now,  for f in $now; do,    command exec 4<\"$f\" 2>/dev/null || continue,    id=$(stat -L -c %d:%i /proc/self/fd/4),    [ -n \"$id\" ] || exit 1,    [ \"$id\" = \"$last\" ] && break,    case $seen in *\" $id \"*) continue ;; esac,    seen=\"$seen$id \",    cat <&4 || exit 1,    [ -z \"$(tail -c 1 /proc/self/fd/4)\" ] || echo,  done,done,exec 4<&-,cat <&3".split(",").join("\n");
 function readRotatedLog(docker, containerId, dir) {
 	return docker.execLines(containerId, [
@@ -77420,8 +77121,7 @@ function readRotatedLog(docker, containerId, dir) {
 		dir
 	], `docker exec reading ${dir}`);
 }
-//#endregion
-//#region src/core/lib/report/action-version.ts
+// src/core/lib/report/action-version.ts
 function readActionVersion$1(docker, containerId, proxyEngine) {
 	try {
 		let label = docker.readLabels(containerId)["org.opencontainers.image.version"];
@@ -77432,8 +77132,7 @@ function readActionVersion$1(docker, containerId, proxyEngine) {
 		return;
 	}
 }
-//#endregion
-//#region src/core/lib/log/dns.ts
+// src/core/lib/log/dns.ts
 const DNS_NAME = String.raw`((?:[^\s\\]|\\.)+?)`, DNS = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns (allowed|denied) name=${DNS_NAME}\.?$`), DNS_DISCOVERY = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns discovery name=${DNS_NAME}\.? type=(\S+)$`), DNS_SERVICE_DENIED = new RegExp(String.raw`^(\S+ \S+)\s+.*buildcage dns service-denied name=${DNS_NAME}\.? type=(\S+)$`), DNS_LINE = /^\S+ \S+\s+.*buildcage dns (?!reverse )/;
 function timeOf(stamp) {
 	let parsed = Date.parse(`${stamp.replace(" ", "T")}Z`);
@@ -77504,8 +77203,7 @@ async function scanDnsLog(lines, isAudit = !1) {
 		restarts
 	};
 }
-//#endregion
-//#region src/core/lib/log/start-marker.ts
+// src/core/lib/log/start-marker.ts
 const START = RegExp("^buildcage haproxy starting (\\d+)$");
 function createProxyLogTally() {
 	let startedAt, headIntact, unparsed = 0, restarts = 0, dropped = 0;
@@ -77535,15 +77233,13 @@ function createProxyLogTally() {
 		}
 	};
 }
-//#endregion
-//#region src/core/lib/log/termination.ts
+// src/core/lib/log/termination.ts
 const BAD_REQUEST_METHOD = "<BADREQ>";
 function incompleteReason(terminationState, method) {
 	let cause = terminationState[0];
 	if (cause !== "P") return terminationState[1] === "R" ? cause === "C" ? "client-aborted" : cause === "c" ? "client-timeout" : "no-request" : method === "<BADREQ>" ? "no-request" : void 0;
 }
-//#endregion
-//#region src/core/lib/log/inspect.ts
+// src/core/lib/log/inspect.ts
 const REQUEST = /^buildcage (?<ms>\d+) (?<scheme>https?) (?<method>\S+) (?<status>-?\d+) (?<bytes>\d+) ts=(?<ts>\S*) reason=(?<reason>\S+) tlserr=(?<tlserr>\S+) dst=(?<dstHost>\S+):(?<dstPort>\d+) (?:wb=(?<wb>\S+) )?(?<ext>(?:[a-z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*=\S+ )*)(?:fcerr=(?<fcerr>\S+) )?(?:sni=(?<sni>\S+) )?host=(?<host>\S+) (?<target>\S+)$/, PASSTHROUGH = /^buildcage (\d+) pass (tls|tcp) (\d+) ts=(\S*) reason=(\S+) dst=(\S+):(\d+) sni=(\S+)$/;
 function isBlock(terminationState) {
 	let cause = terminationState[0];
@@ -77645,8 +77341,7 @@ function blockUnpassedAddresses(events) {
 function blockUnallowedNames(events, allowsName) {
 	for (let event of events) event.action === "incomplete" && event.protocol === "https" && (event.host === "(unknown)" || allowsName(event.host) || event.destination?.startsWith("198.19.255.1:") || (event.action = "block", event.reason = "sni-not-allowed"));
 }
-//#endregion
-//#region src/core/lib/report/build/inspect.ts
+// src/core/lib/report/build/inspect.ts
 function resolverAllows(parameters) {
 	let { resolverHosts } = compileRuleSet({
 		httpsRules: parameters.allowedHttpsRules,
@@ -77660,8 +77355,7 @@ async function buildInspectReportData(proxyLines, dnsLines, parameters, health) 
 	let isAudit = parameters.mode === "audit";
 	return assembleReportData("inspect", scanInspectLog(proxyLines, isAudit, isAudit ? void 0 : resolverAllows(parameters)), scanDnsLog(dnsLines, isAudit), parameters, health);
 }
-//#endregion
-//#region src/core/lib/log/haproxy.ts
+// src/core/lib/log/haproxy.ts
 const DECISION = /^buildcage (\d+) \[(AUDIT|ALLOWED|BLOCKED)\] \((\w+)\) "([A-Za-z0-9._:-]+)" ([A-Za-z0-9-]+) (\d+|-)(?: ts=[A-Za-z-]{2} dst=[0-9.]+:\d+)?$/, NO_REQUEST = /^buildcage (\d+) \[-\] \(HTTP\) "-" - (?:\d+|-) ts=([A-Za-z-]{2}) dst=([0-9.]+):(\d+)$/, PROTOCOL = {
 	HTTPS: "https",
 	HTTP: "http",
@@ -77706,8 +77400,7 @@ async function scanHaproxyLog(lines, isAudit) {
 		...tally.result()
 	};
 }
-//#endregion
-//#region src/core/lib/report/build/universal.ts
+// src/core/lib/report/build/universal.ts
 async function buildUniversalReportData(proxyLines, dnsLines, parameters, health) {
 	let isAudit = parameters.mode === "audit";
 	return assembleReportData("universal", scanHaproxyLog(proxyLines, isAudit), scanDnsLog(dnsLines, isAudit), parameters, health);
@@ -77764,8 +77457,7 @@ async function readReport(docker, containerName, parameters, proxyEngine) {
 function readActionVersion(containerName, proxyEngine, docker) {
 	return readActionVersion$1(docker ?? createHostDocker(), containerName, proxyEngine);
 }
-//#endregion
-//#region src/core/lib/report/outcome/traffic-output.ts
+// src/core/lib/report/outcome/traffic-output.ts
 const RECORD_FIELDS = new Set([
 	"time",
 	"elapsed",
@@ -77798,8 +77490,7 @@ function buildTrafficRecords(events, startedAt) {
 function writeTrafficFile(path, records) {
 	(0, node_fs.writeFileSync)(path, JSON.stringify(records, null, 2) + "\n");
 }
-//#endregion
-//#region src/lib/traffic-artifact.ts
+// src/lib/traffic-artifact.ts
 async function uploadTrafficArtifact(report, containerName, retentionDays, annotation, { upload = uploadViaActionsArtifact, scratchBase = SANDBOX_SCRATCH_BASE } = {}) {
 	ensureOwnScratchBase(scratchBase);
 	let scratchDir = (0, node_fs.mkdtempSync)((0, node_path.join)(scratchBase, "traffic-"));
@@ -77821,8 +77512,7 @@ async function uploadTrafficArtifact(report, containerName, retentionDays, annot
 function setTrafficArtifactOutput(name) {
 	setOutputUnderBothNames("traffic-artifact-name", name);
 }
-//#endregion
-//#region src/lib/step-report.ts
+// src/lib/step-report.ts
 const realDeps$1 = {
 	fetchReport,
 	readActionVersion,
@@ -77891,8 +77581,7 @@ async function writeMoreSummary(blocks, env, annotation, { commandBytes } = {}, 
 		annotation.warning(`Failed to write the Job Summary: ${errorMessage(e)}`);
 	}
 }
-//#endregion
-//#region src/lib/sudo-preflight.ts
+// src/lib/sudo-preflight.ts
 const SLIM_RUNNER_NOTE = `${SLIM_RUNNER_DETECTED_PREFIX}: these typically don't have passwordless sudo configured for this kind of privileged setup.`;
 function describeSudoFailure(e, { env = process.env, exists = node_fs.existsSync } = {}) {
 	let captured = capturedStderr(e);
@@ -77905,8 +77594,7 @@ function checkPasswordlessSudo({ execFile = runPinnedHostCommand } = {}) {
 		throw new SandboxError(describeSudoFailure(e), "PASSWORDLESS_SUDO_REQUIRED");
 	}
 }
-//#endregion
-//#region src/lib/sandbox-step.ts
+// src/lib/sandbox-step.ts
 init_core();
 function onCancel(listener) {
 	let signals = ["SIGINT", "SIGTERM"];
@@ -78244,8 +77932,7 @@ async function runSandboxStep(env, overrides = {}) {
 	}
 	return exitCode;
 }
-//#endregion
-//#region src/main.ts
+// src/main.ts
 if (process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_url.fileURLToPath)(require("url").pathToFileURL(__filename).href)) {
 	let settled = !1;
 	process.on("beforeExit", () => {
@@ -78256,4 +77943,3 @@ if (process.argv[1] && (0, node_fs.realpathSync)(process.argv[1]) === (0, node_u
 		settled = !0;
 	});
 }
-//#endregion
