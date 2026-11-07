@@ -221,6 +221,17 @@ describe("createAuditSummary: path names", () => {
     ]);
   });
 
+  it("shows a symlinked workspace removed under its own path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/sym/work" },
+        { kind: "read", comm: "cat", path: "/real/work/a" },
+      ),
+      { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual(["R cat ./a", "D rm /sym/work"]);
+  });
+
   it("still shows a failed access at a symlinked prefix where the link leads", () => {
     const md = renderFilesystemAuditSummary(
       jsonl({ kind: "unlink", comm: "rm", path: "/work/link", failed: true, err: 13 }),
