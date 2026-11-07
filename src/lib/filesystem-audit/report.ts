@@ -443,7 +443,8 @@ export function readStepFilesystemAudit(
 /**
  * Annotates the accesses no rule took and returns the verdict's item for
  * them, a caution when they fail the step. The count is the Unexpected
- * Accesses table's rows, and absent when the table was given up or cut short.
+ * Accesses table's rows, a lower bound when the table was cut short, and
+ * absent when it was given up.
  */
 function reportUnexpected(
   summary: AuditSummary | undefined,
@@ -455,16 +456,18 @@ function reportUnexpected(
   const n = summary.proposed?.length;
   const es = n === 1 ? "" : "es";
   const what =
-    n === undefined || summary.proposedCut
+    n === undefined
       ? "unexpected file accesses (too many to list)"
-      : `${n} unexpected file access${es}`;
+      : summary.proposedCut
+        ? `more than ${n} unexpected file access${es}`
+        : `${n} unexpected file access${es}`;
   const outside = empty ? `${EXPECTED_RULES_INPUT}, which is empty` : EXPECTED_RULES_INPUT;
   const fellOutside = `File accesses fell outside ${outside}${empty ? "," : ""}`;
   const message =
     n === undefined
       ? `${fellOutside} on too many distinct paths to list.`
       : summary.proposedCut
-        ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists the first ${n}.`
+        ? `${fellOutside} on more paths than the Job Summary can hold; the Unexpected Accesses table lists part of them.`
         : `${n} file access${es} fell outside ${outside}; the Unexpected Accesses table lists ${n === 1 ? "it" : "them"}.`;
   if (failOnUnexpected) {
     annotation.error(`${message} Failing the step, as fail-on-unexpected-file-access is true.`);
