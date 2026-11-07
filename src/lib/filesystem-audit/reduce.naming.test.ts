@@ -179,7 +179,7 @@ describe("createAuditSummary: path names", () => {
   it("keys a file once when the working directory holds the workspace's symlink and its target", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { kind: "read", comm: "node", path: "/h/work/r/a" },
+        { kind: "open", comm: "node", path: "/h/work/r/a", access: "r", failed: true, err: 2 },
         { kind: "read", comm: "node", path: "/h/ws-real/a" },
       ),
       { cwd: ["/h"], workspace: ["/h/work/r", "/h/ws-real"], home: ["/h"] },
@@ -218,6 +218,22 @@ describe("createAuditSummary: path names", () => {
       "D rm $GITHUB_WORKSPACE/link",
       "W mv /home/old",
       "M mv /home/u-link",
+    ]);
+  });
+
+  it("shows a directory made where the working directory's symlink was, and what is in it, under its own path", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "mkdir", comm: "mkdir", path: "/work/link" },
+        { kind: "write", comm: "touch", path: "/work/link/x" },
+      ),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual([
+      "W mkdir $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "W touch $GITHUB_WORKSPACE/link/x",
     ]);
   });
 

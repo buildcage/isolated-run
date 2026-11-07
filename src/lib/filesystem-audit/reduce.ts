@@ -179,7 +179,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
   const observed = new Map<number | undefined, number>();
   const load = (proc: string, path: string, library: boolean): void => {
     if (loaded.size >= limits.loads) return;
-    loaded.add(keyOf(proc, canonical(path, prefixes)));
+    loaded.add(keyOf(proc, canonical(path, prefixes, true)));
     if (library) loaded.add(keyOf(proc, "/etc/ld.so.cache"));
   };
   // A memfd's or deleted file's name proves nothing about what it holds.
@@ -465,7 +465,9 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     // The exec maps its image under the name it gives, before its own record.
     if (!r.image) commsBefore.set(r.pid, r.comm ?? "");
     if (r.kind === "exec" && r.path) {
-      const p = walk(normalize(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
+      const p = walk(
+        normalize(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)),
+      );
       programs.set(r.pid, rank(p, false));
       runNames.set(r.pid, r.name ?? r.path);
     } else if (r.kind === "exec") {

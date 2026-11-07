@@ -72444,7 +72444,7 @@ function canonical(path, prefixes, succeeded = !1) {
 	});
 	if (!found) return path;
 	let tail = rest(path, found.spelling);
-	return !tail && succeeded && found.spelling !== found.real ? path : tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
+	return succeeded && found.spelling !== found.real ? path : tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
 function sortKey(path) {
 	return under(path, ".") ? [0, path] : under(path, "$GITHUB_WORKSPACE") ? [1, path] : under(path, "~") ? [2, path] : [3, path];
@@ -73133,7 +73133,7 @@ function createAuditSummary(prefixes) {
 		...LIMITS,
 		...prefixes.limits
 	}, limit = limits.bytes, loose = Math.min(limits.loose, limit), loaded = new Set(), images = new Map(), observed = new Map(), load = (proc, path, library) => {
-		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
+		loaded.size >= limits.loads || (loaded.add(keyOf(proc, canonical(path, prefixes, !0))), library && loaded.add(keyOf(proc, "/etc/ld.so.cache")));
 	}, isLibraryMap = (r) => r.kind === "mmap" && r.access === "x" && !!r.path && !!(r.image || !r.memfd && !r.deleted && LIBRARY_NAME.test(r.path)), observe = (r) => {
 		if (!isRecord(r)) return;
 		let proc = procOf(observed, r);
@@ -73271,7 +73271,7 @@ function createAuditSummary(prefixes) {
 		}
 		let runner = r.kind === "exec" ? runnerOf(r) : void 0;
 		if (r.image || commsBefore.set(r.pid, r.comm ?? ""), r.kind === "exec" && r.path) {
-			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes)), nsPids.get(r.pid)));
+			let p = walk(normalize$2(marked(r, canonical(r.path, prefixes, !r.failed)), nsPids.get(r.pid)));
 			programs.set(r.pid, rank(p, !1)), runNames.set(r.pid, r.name ?? r.path);
 		} else r.kind === "exec" && (programs.delete(r.pid), runNames.delete(r.pid));
 		if (!isLibraryMap(r)) {

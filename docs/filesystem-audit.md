@@ -256,15 +256,17 @@ each has rows of its own.
 - A failed access is shown under the name the command passed, joined to its working directory, or
   the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
   alone, such as `fchmod`, is shown under that file's path.
-- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a path through it is
-  shown where it leads, so a failed access through the symlink and a successful one share a row.
-  So is a path through the working directory as its input spells it, symlinks and a leading `..`
-  included. Other symlinks are not followed for this. All three are resolved before the command runs, as are
-  the tool cache and the runner files, so a command that later swaps one for a symlink does not
-  change what `./` or `$GITHUB_WORKSPACE/` stands for. The symlink itself, removed, moved or made
-  by a command that succeeds, shows under its own path: `rm` of a `working-directory` link in the
-  workspace shows `$GITHUB_WORKSPACE/<link>`, not `.`. A failed one still shows where the link leads, since the
-  recording cannot tell whether it followed the link.
+- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a failed access
+  through it is shown where it leads, so it shares a row with a successful one, which is recorded
+  with symlinks resolved. So is one through the working directory as its input spells it, symlinks
+  and a leading `..` included. Other symlinks are not followed for this. All three are resolved
+  before the command runs, as are the tool cache and the runner files, so a command that later
+  swaps one for a symlink does not change what `./` or `$GITHUB_WORKSPACE/` stands for.
+- A successful access recorded at such a symlink's own path acted on the link, or on what a
+  command put in its place, and shows under that path. After `rm` of a `working-directory` link in
+  the workspace and a `mkdir` of the same name, both and what is written in the new directory
+  show under `$GITHUB_WORKSPACE/<link>`, not `./`. A failed access there still shows where the
+  link led, since the recording cannot tell whether it followed the link.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
