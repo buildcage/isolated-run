@@ -258,7 +258,8 @@ each has rows of its own.
   missing in, followed by the rest of the name; an `rm`, `rmdir`, `mv`, `mkdir`, `mknod` or `ln`
   whose directory was found, under that directory and the name it acts on, which these never
   follow, so a failed `rmdir` of a symlink shows the link; and an `open` refused at the file it
-  reached, under that file. Any other failed access, such as a `chmod` or a `cat` refused with
+  reached, under that file. A run, a time or xattr change and an `open` of a name too long to
+  record whole are not placed this way. Any other failed access, such as a `cat` refused with
   `EACCES`, is shown under the name the command passed, joined to its working directory, or the
   directory it passed by descriptor, without resolving `..`. One made through a file descriptor
   alone, such as `fchmod`, is shown under that file's path.

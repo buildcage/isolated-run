@@ -320,7 +320,7 @@ describe("createAuditSummary: path names", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "unlink", comm: "rm", path: "/work/link" },
-        { kind: "mkdir", comm: "rm", path: "/work/link" },
+        { kind: "mkdir", comm: "mkdir", path: "/work/link" },
         {
           kind: "rename",
           comm: "mv",
@@ -345,7 +345,8 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual([
       "w mv ./b",
       "l ln ./c",
-      "WD rm $GITHUB_WORKSPACE/link",
+      "W mkdir $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
       "m mv $GITHUB_WORKSPACE/link/nodir/a",
       "w ln $GITHUB_WORKSPACE/link/nodir/d",
     ]);

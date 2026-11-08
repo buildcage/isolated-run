@@ -72437,6 +72437,7 @@ function ruleSpellings(path, prefixes) {
 function canonical(path, prefixes, resolved = !1) {
 	let variable = prefixes.runnerFiles?.get(path);
 	if (variable) return "\0$" + variable;
+	if (resolved) return path;
 	let found;
 	for (let spellings of [
 		prefixes.cwd ?? [],
@@ -72446,7 +72447,7 @@ function canonical(path, prefixes, resolved = !1) {
 		spelling,
 		real: spellings.at(-1)
 	});
-	if (!found || found.spelling !== found.real && resolved) return path;
+	if (!found) return path;
 	let tail = rest(path, found.spelling);
 	return tail ? found.real === "/" ? `/${tail}` : `${found.real}/${tail}` : found.real;
 }
