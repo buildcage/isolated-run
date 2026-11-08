@@ -787,10 +787,10 @@ the tracer learned the name:
 - **Failed calls.** A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate counts as
   done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed record
   means only that the call returned an error: the step can install its own seccomp filter to fail a
-  call before the kernel looks at the file. An open refused after the kernel reached its file is
-  recorded as failed with the path it resolved.
-- **Names the command passed.** Any other failed call, and an attribute change through
-  `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the
+  call before the kernel looks at the file.
+- **Names the command passed.** A failed call, and an attribute change through `utimensat`,
+  `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded where the kernel took
+  the name, as `resolved` marks. Where the tracer did not see that, they are recorded under the
   name the command passed, joined to its working directory or directory descriptor without
   resolving `..`. The artifact keeps that name as `name` where it differs from `path`. These names
   are best-effort, since they are read from the command's memory when the call returns. Before
@@ -919,7 +919,7 @@ Unlike the summary, it also lists a directory that was made and then written und
 | `owner`       | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
 | `failed`      | a failed operation                                              | `true`                                                                                                                                                                                                     |
 | `err`         | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
-| `resolved`    | a failed operation, where known                                 | `path` has its symlinks resolved, as a successful operation's has; see below                                                                                                                               |
+| `resolved`    | a failed operation or an `attr`, where known                    | `path` has its symlinks resolved, as a successful operation's has; see below                                                                                                                               |
 | `to_resolved` | a failed `rename` or `link`, where known                        | as `resolved`, for `to`                                                                                                                                                                                    |
 | `image`       | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
 | `memfd`       | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
@@ -940,14 +940,21 @@ kernel names without a path (such as `pipe:[1234]`), a path too deep to record i
 the relative name of a failed call or an attribute change whose directory could not be read. A
 failed open's `path` and `name` end in `…` where its name was too long to record in full.
 
-A failed call's `path` is the name it passed, joined to its directory when relative, unless
-`resolved` says where the kernel took it, with symlinks followed: for a name that does not exist
-(`ENOENT`), the directory the kernel found it missing in followed by the rest of the name; for an
-`unlink`, `rmdir`, `rename`, `mkdir`, `mknod`, `symlink`, or a `link`'s new name, whose directory
-was found, that directory followed by the last name, which these never follow; and for an `open`
-refused at the file it reached, or a call through a descriptor alone, that file. Where `link`
-leads to `/real`, `cat link/missing` records `/real/missing`, and a failed `rmdir link` records
-`link` itself.
+The `path` of a failed call or an attribute change is the name it passed, joined to its directory
+when relative, unless `resolved` says where the kernel took it, with symlinks followed:
+
+- a file the kernel reached, as for an `open` refused for the file's mode or a `chmod` refused for
+  its owner: that file.
+- an `unlink`, `rmdir`, `rename`, `mkdir`, `mknod`, `symlink`, or a `link`'s new name, whose
+  directory was found: that directory followed by the last name, which these never follow.
+- a name the kernel could not finish looking up: the directory it was in when a name was missing
+  (`ENOENT`) or a symlink led too deep (`ELOOP`), or the one it had stepped into when that refused
+  it (`EACCES`, `ENOTDIR`), followed by the rest of the name.
+- a call through a descriptor alone: that file.
+
+One that failed inside a symlink's target, as through a dangling symlink, keeps the name as passed.
+Where `link` leads to `/real`, `cat link/missing` records `/real/missing`, `cat link/dir/x` where
+`dir` refuses a search records `/real/dir/x`, and a failed `rmdir link` records `link` itself.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as

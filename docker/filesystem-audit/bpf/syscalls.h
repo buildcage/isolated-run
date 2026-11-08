@@ -22,6 +22,9 @@
 #ifndef ENOENT
 #define ENOENT 2
 #endif
+#ifndef ELOOP
+#define ELOOP 40
+#endif
 
 /**
  * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
@@ -259,9 +262,9 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret, 
 	if (ret < 0)
 		e->path_len = -ret;
 	e->n2 = stopped;
-	// So the reader can drop it for the path change its hook sent (RESULT_FD).
-	if (call->kind != K_ATTR_FAILED)
-		e->tid = (u32)bpf_get_current_pid_tgid();
+	// So the reader can drop it for the path change its hook sent
+	// (RESULT_FD), or place a time or xattr change, which has no result.
+	e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = call->val1;
 	e->gid = call->val2;
 	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;

@@ -104,13 +104,17 @@ func (r *recorder) add(raw []byte) error {
 		r.started = true
 	}
 	r.setProgram(&rec)
-	if rec.tid == 0 {
-		return r.write(rec)
-	}
-	if rec.Failed && raw[offN2] != 0 {
-		if c := r.calls[rec.tid]; c != nil {
-			c.place(&rec, raw[offN2])
+	if c := r.calls[rec.tid]; c != nil && rec.tid != 0 && (rec.Failed || rec.Kind == "attr") {
+		if raw[offN2] != 0 {
+			c.place(&rec, raw[offN2], false)
 		}
+		// A time or xattr change has no result to end its call.
+		if rec.Kind == "attr" {
+			c.forgetStops()
+		}
+	}
+	if rec.tid == 0 || rec.Kind == "attr" {
+		return r.write(rec)
 	}
 	if rec.Failed {
 		// Recorded from its call's exit, just before the call's result,

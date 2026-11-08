@@ -83,6 +83,9 @@ const (
 	resultWatched = uint8(filesystemAuditResultBitRESULT_WATCHED)
 	resultFD      = uint8(filesystemAuditResultBitRESULT_FD)
 	resultStop    = uint8(filesystemAuditResultBitRESULT_STOP)
+	// stopReached is namei.h's STOP_REACHED: a K_STOP of the file a lookup
+	// reached.
+	stopReached = 3
 )
 
 // hdr is what the reader needs of an event that settles others.

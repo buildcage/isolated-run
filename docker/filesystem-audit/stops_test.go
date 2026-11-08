@@ -11,6 +11,7 @@ const (
 	stopFailed = 1
 	stopParent = 2
 	nrRename   = 82
+	nrChmod    = 90
 )
 
 // stopAt is a K_STOP: name number which, from offset at on, was not looked up
@@ -101,7 +102,7 @@ func TestRecorderKeepsTheNameWithoutAStop(t *testing.T) {
 		"cut name": {{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, comm: "sh", tid: 1, n2: 1, data: []byte("/ws/x\x00")},
 			stopAt(1, 1, stopFailed, 4, "real"), stopResult(1, -int32(unix.ENOENT))},
 		// Past the end of the name, as when another thread rewrote it.
-		"offset out of range": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, 5, "real"),
+		"offset out of range": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, 6, "real"),
 			stopResult(1, -int32(unix.ENOENT))},
 		"negative offset": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, -1, "real"),
 			stopResult(1, -int32(unix.ENOENT))},
@@ -153,6 +154,42 @@ func TestRecorderPlacesEachNameOfARenameItsExitSentAStopFor(t *testing.T) {
 		}
 		if (got[0]["resolved"] == true) != (tc.sent&1 != 0) || (got[0]["to_resolved"] == true) != (tc.sent&2 != 0) {
 			t.Fatalf("sent %d: lines = %v, want resolved only where moved", tc.sent, got)
+		}
+	}
+}
+
+// A lookup that reached its file places the call's failure there, a name cut
+// short included, since nothing of the name follows the file.
+func TestRecorderPlacesAFailureAtTheFileItReached(t *testing.T) {
+	cut := event{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, comm: "sh", tid: 1, n2: 1, data: []byte("/ws/f\x00")}
+	for name, open := range map[string]event{"whole": openName(1, "/ws/f"), "cut": cut} {
+		got := recordLines(t, open, stopAt(1, 1, stopReached, 0, "f", "ws", "real"),
+			stopResult(1, -int32(unix.EACCES)))
+		if len(got) != 1 || got[0]["path"] != "/real/ws/f" || got[0]["resolved"] != true {
+			t.Fatalf("%s: lines = %v, want /real/ws/f resolved", name, got)
+		}
+	}
+}
+
+// A time or xattr change has no result: its record takes the K_STOP its exit
+// sent, success or failure, and its call ends with it.
+func TestRecorderPlacesATimeChange(t *testing.T) {
+	for _, err := range []unix.Errno{0, unix.EPERM} {
+		kind := filesystemAuditKindK_ATTR
+		if err != 0 {
+			kind = filesystemAuditKindK_ATTR_FAILED
+		}
+		got := recordLines(t,
+			stopAt(1, 1, stopReached, 0, "f", "ws", "real"),
+			failure(1, kind, err, 1, "/ws/f"),
+			// A later call whose exit sent none.
+			failure(1, filesystemAuditKindK_CHMOD_FAILED, unix.EPERM, 1, "/ws/g"),
+			result(1, nrChmod, resultWatched, -int32(unix.EPERM)))
+		if len(got) != 2 || got[0]["path"] != "/real/ws/f" || got[0]["name"] != "/ws/f" || got[0]["resolved"] != true {
+			t.Fatalf("%v: lines = %v, want /real/ws/f resolved", err, got)
+		}
+		if got[1]["path"] != "/ws/g" || got[1]["resolved"] != nil {
+			t.Fatalf("%v: lines = %v, want /ws/g as passed", err, got)
 		}
 	}
 }

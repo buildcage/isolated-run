@@ -186,7 +186,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "attr through a descriptor (futimens)",
 			ev:   event{kind: filesystemAuditKindK_ATTR, comm: "touch", bases: 1, marks: markDescriptor, mode: 2, data: append([]byte("\x00"), comps("f", "tmp")...)},
-			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/f"},
+			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/f", Resolved: true},
 		},
 		{
 			name: "write",
@@ -357,7 +357,7 @@ func TestDecode(t *testing.T) {
 			name: "attr through a memfd's descriptor (futimens)",
 			ev: event{kind: filesystemAuditKindK_ATTR, comm: "touch", bases: 1, mode: 1, marks: markInternal | markDescriptor,
 				data: append([]byte("\x00"), comps("memfd:x")...)},
-			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true},
+			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true, Resolved: true},
 		},
 		{
 			name: "failed chmod through a descriptor (fchmod)",
