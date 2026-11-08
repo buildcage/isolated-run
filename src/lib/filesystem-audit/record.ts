@@ -13,6 +13,9 @@ export interface AuditRecord {
   access?: string;
   err?: number;
   failed?: boolean;
+  /** A failure whose path, or to, the kernel resolved as a success's. */
+  resolved?: boolean;
+  to_resolved?: boolean;
   image?: boolean;
   memfd?: boolean;
   deleted?: boolean;
@@ -43,6 +46,13 @@ const LETTER: Record<string, string> = {
 export const ORDER = "RWXMLDA";
 const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 
+/** Whether a run's path has its symlinks resolved: where the tracer saw its file. */
+export const ranResolved = (r: AuditRecord): boolean => !r.failed && r.name !== undefined;
+
+// A success's path has its symlinks resolved, and a failure's where the
+// tracer says so.
+const resolvedBy = (failed: boolean, flag?: boolean): boolean => !failed || Boolean(flag);
+
 interface Classified {
   /** One action letter, or R and W for a failed open that asked for both. */
   letter: string;
@@ -50,12 +60,10 @@ interface Classified {
   failed: boolean;
   /** Failed for want of permission. */
   perm: boolean;
-  /** Acts on the path's last component, not on where a symlink there leads. */
-  named: boolean;
+  /** The path has its symlinks resolved: a success's, or a failure's the
+   *  kernel resolved. A run the tracer did not see keeps the name it was given. */
+  resolved: boolean;
 }
-
-// Kinds that never follow a symlink in the last component of their path.
-const NAMED = new Set(["mkdir", "mknod", "symlink", "rename", "unlink", "rmdir"]);
 
 // The actions a record counts as, each with the path it acts on. open counts
 // only when it creates or truncates; a plain read/write of an open file comes
@@ -82,12 +90,18 @@ export function classify(r: AuditRecord): Classified[] {
   if (!letter) return [];
   const perm = failed && PERM_ERRNO.has(r.err ?? 0);
   if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-  const named = NAMED.has(r.kind);
-  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm, named }] : [];
+  const resolved = r.kind === "exec" ? ranResolved(r) : resolvedBy(failed, r.resolved);
+  const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm, resolved }] : [];
   // An exchange moves each path to the other; any other rename writes its
   // new name, as a link does, so a file moved somewhere shows up there.
   if (r.kind === "rename" && r.to)
-    out.push({ letter: r.exchange ? letter : "W", path: r.to, failed, perm, named });
+    out.push({
+      letter: r.exchange ? letter : "W",
+      path: r.to,
+      failed,
+      perm,
+      resolved: resolvedBy(failed, r.to_resolved),
+    });
   return out;
 }
 
@@ -105,8 +119,22 @@ function classifyLink(
   const file = !r.deleted && !r.memfd ? r.path : undefined;
   const fileRefused = Boolean(file) && failed && r.err === 1;
   const out: Classified[] = [];
-  if (r.to) out.push({ letter, path: r.to, failed, perm: perm && !fileRefused, named: true });
-  if (file) out.push({ letter: "L", path: file, failed, perm: fileRefused, named: false });
+  if (r.to)
+    out.push({
+      letter,
+      path: r.to,
+      failed,
+      perm: perm && !fileRefused,
+      resolved: resolvedBy(failed, r.to_resolved),
+    });
+  if (file)
+    out.push({
+      letter: "L",
+      path: file,
+      failed,
+      perm: fileRefused,
+      resolved: resolvedBy(failed, r.resolved),
+    });
   return out;
 }
 
