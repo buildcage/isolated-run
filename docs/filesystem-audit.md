@@ -253,16 +253,16 @@ each has rows of its own.
 **Which path.**
 
 - A program is shown under the file it ran, with symlinks followed.
-- A failed access is shown where the kernel took it, with symlinks followed, where the recording
-  says so (`resolved`): a name that does not exist (`ENOENT`) in the directory the kernel found it
-  missing in, followed by the rest of the name; an `rm`, `rmdir`, `mv`, `mkdir`, `mknod` or `ln`
-  whose directory was found, under that directory and the name it acts on, which these never
-  follow, so a failed `rmdir` of a symlink shows the link; and an `open` refused at the file it
-  reached, under that file. A run, a time or xattr change and an `open` of a name too long to
-  record whole are not placed this way. Any other failed access, such as a `cat` refused with
-  `EACCES`, is shown under the name the command passed, joined to its working directory, or the
-  directory it passed by descriptor, without resolving `..`. One made through a file descriptor
-  alone, such as `fchmod`, is shown under that file's path.
+- A failed access, and a time or xattr change, are shown where the kernel took them, with symlinks
+  followed, where the recording says so (`resolved`): under the file the kernel reached, as for a
+  `cat` refused for the file's mode; for an `rm`, `rmdir`, `mv`, `mkdir`, `mknod` or `ln` whose
+  directory was found, under that directory and the name it acts on, which these never follow, so
+  a failed `rmdir` of a symlink shows the link; and for a name the kernel could not finish looking
+  up, under the directory it found a name missing in or that refused it, followed by the rest of
+  the name. One that failed inside a symlink's target, as through a dangling symlink, is shown
+  under the name the command passed, joined to its working directory, or the directory it passed
+  by descriptor, without resolving `..`. One made through a file descriptor alone, such as
+  `fchmod`, is shown under that file's path.
 - Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a failed access shown
   by name through it is shown where it leads, and so is one through the working directory as its
   input spells it, symlinks and a leading `..` included. Other symlinks are not followed for this.

@@ -49,9 +49,9 @@ const PERM_ERRNO = new Set([1, 13, 30]); // EPERM, EACCES, EROFS
 /** Whether a run's path has its symlinks resolved: where the tracer saw its file. */
 export const ranResolved = (r: AuditRecord): boolean => !r.failed && r.name !== undefined;
 
-// A success's path has its symlinks resolved, and a failure's where the
-// tracer says so.
-const resolvedBy = (failed: boolean, flag?: boolean): boolean => !failed || Boolean(flag);
+// A success's path has its symlinks resolved, and a name the tracer took as
+// passed, a failure's or a time or xattr change's, where it says so.
+const resolvedBy = (byName: boolean, flag?: boolean): boolean => !byName || Boolean(flag);
 
 interface Classified {
   /** One action letter, or R and W for a failed open that asked for both. */
@@ -60,8 +60,9 @@ interface Classified {
   failed: boolean;
   /** Failed for want of permission. */
   perm: boolean;
-  /** The path has its symlinks resolved: a success's, or a failure's the
-   *  kernel resolved. A run the tracer did not see keeps the name it was given. */
+  /** The path has its symlinks resolved: a success's, or one the tracer took
+   *  by name that the kernel resolved. A run the tracer did not see keeps the
+   *  name it was given. */
   resolved: boolean;
 }
 
@@ -90,7 +91,8 @@ export function classify(r: AuditRecord): Classified[] {
   if (!letter) return [];
   const perm = failed && PERM_ERRNO.has(r.err ?? 0);
   if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-  const resolved = r.kind === "exec" ? ranResolved(r) : resolvedBy(failed, r.resolved);
+  const resolved =
+    r.kind === "exec" ? ranResolved(r) : resolvedBy(failed || r.kind === "attr", r.resolved);
   const out: Classified[] = r.path ? [{ letter, path: r.path, failed, perm, resolved }] : [];
   // An exchange moves each path to the other; any other rename writes its
   // new name, as a link does, so a file moved somewhere shows up there.

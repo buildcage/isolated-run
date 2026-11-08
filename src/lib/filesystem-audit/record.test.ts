@@ -27,11 +27,12 @@ describe("classify", () => {
     ["chown", "A"],
     ["attr", "A"],
   ])("names %s by %s, done or failed", (kind, letter) => {
-    // A run's file is the one the tracer saw it run, with the name it was given.
-    const name = kind === "exec" ? { name: "a" } : {};
+    // A run's file is the one the tracer saw it run, with the name it was
+    // given, and a time or xattr change's where the tracer placed it.
+    const name = kind === "exec" ? { name: "a" } : kind === "attr" ? { resolved: true } : {};
     expect(classify({ kind, path: "/a", ...name })).toStrictEqual([ok(letter, "/a")]);
     expect(classify({ kind, path: "/a", ...name, failed: true, err: 2 })).toStrictEqual([
-      { letter, path: "/a", failed: true, perm: false, resolved: false },
+      { letter, path: "/a", failed: true, perm: false, resolved: kind === "attr" },
     ]);
   });
 
@@ -125,6 +126,12 @@ describe("classify", () => {
         kind === "rename" ? [true, false] : [false, true],
       );
     }
+  });
+
+  it("takes a time or xattr change as resolved only where the tracer says so", () => {
+    expect(classify({ kind: "attr", path: "/a" })[0]?.resolved).toBe(false);
+    expect(classify({ kind: "attr", path: "/a", resolved: true })[0]?.resolved).toBe(true);
+    expect(classify({ kind: "chmod", path: "/a" })[0]?.resolved).toBe(true);
   });
 
   it("takes a run as resolved only where the tracer saw its file", () => {

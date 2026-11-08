@@ -72306,7 +72306,7 @@ const LETTER = {
 	1,
 	13,
 	30
-]), ranResolved = (r) => !r.failed && r.name !== void 0, resolvedBy = (failed, flag) => !failed || !!flag;
+]), ranResolved = (r) => !r.failed && r.name !== void 0, resolvedBy = (byName, flag) => !byName || !!flag;
 function classify(r) {
 	let letter, failed = !1;
 	if (r.failed && r.kind === "open") {
@@ -72316,7 +72316,7 @@ function classify(r) {
 	if (!letter) return [];
 	let perm = failed && PERM_ERRNO.has(r.err ?? 0);
 	if (r.kind === "link") return classifyLink(r, letter, failed, perm);
-	let resolved = r.kind === "exec" ? ranResolved(r) : resolvedBy(failed, r.resolved), out = r.path ? [{
+	let resolved = r.kind === "exec" ? ranResolved(r) : resolvedBy(failed || r.kind === "attr", r.resolved), out = r.path ? [{
 		letter,
 		path: r.path,
 		failed,
