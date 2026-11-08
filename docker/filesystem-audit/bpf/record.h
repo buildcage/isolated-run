@@ -125,8 +125,9 @@ static __always_inline struct event *start(u32 slot, u32 kind)
  * Sends @p e to the reader.
  *
  * @param cap The size of what @p e points into, a constant in each caller.
+ * @return Whether it was queued; one the full ring refused counts in drops.
  */
-static __always_inline void submit_cap(struct event *e, u32 cap)
+static __always_inline int submit_cap(struct event *e, u32 cap)
 {
 	u32 len = e->data_len;
 	if (len > DATA_SZ + NAME_LEN)
@@ -145,13 +146,16 @@ static __always_inline void submit_cap(struct event *e, u32 cap)
 	if (waiting && *(volatile u32 *)waiting &&
 	    bpf_ringbuf_query(&events, BPF_RB_AVAIL_DATA) > WAKEUP_BYTES)
 		flags = BPF_RB_FORCE_WAKEUP;
-	if (bpf_ringbuf_output(&events, e, size, flags) != 0)
+	if (bpf_ringbuf_output(&events, e, size, flags) != 0) {
 		bump(&drops);
+		return 0;
+	}
+	return 1;
 }
 
-static __always_inline void submit(struct event *e)
+static __always_inline int submit(struct event *e)
 {
-	submit_cap(e, sizeof(*e));
+	return submit_cap(e, sizeof(*e));
 }
 
 #endif

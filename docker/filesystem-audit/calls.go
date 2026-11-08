@@ -19,10 +19,10 @@ type call struct {
 	name             []byte
 	hasOpen, hasName bool
 	cut, created     bool
-	// stop is the call's latest K_STOP, and parent its first name's from a
-	// parent lookup; their buffers are kept from call to call.
-	stop, parent       []byte
-	hasStop, hasParent bool
+	// stops are the K_STOPs of the call's first and second name, their
+	// buffers kept from call to call.
+	stops   [2][]byte
+	hasStop [2]bool
 }
 
 // pending says whether c holds anything of a call.
@@ -100,7 +100,7 @@ func (r *recorder) lose(c *call) error {
 
 // clear empties c, keeping its buffers.
 func (c *call) clear() {
-	*c = call{name: c.name[:0], stop: c.stop[:0], parent: c.parent[:0]}
+	*c = call{name: c.name[:0], stops: [2][]byte{c.stops[0][:0], c.stops[1][:0]}}
 }
 
 // settle writes what the thread sent during the call the result h ends. A
@@ -176,7 +176,7 @@ func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 	case hasName:
 		rec := failedOpen(string(c.name), c.cut, raw)
 		if h.n1&resultStop != 0 && !c.cut {
-			c.place(&rec)
+			c.place(&rec, 1)
 		}
 		r.setProgram(&rec)
 		return r.write(rec)
@@ -205,62 +205,51 @@ func isRestart(ret int32) bool {
 	return ret <= -512 && ret >= -516
 }
 
-// keepStop holds the K_STOP raw of the thread's call, and its first name's
-// from a parent lookup.
+// keepStop holds the K_STOP raw of the thread's call, one per name.
 func (c *call) keepStop(raw []byte) {
-	c.stop, c.hasStop = append(c.stop[:0], raw...), true
-	if binary.LittleEndian.Uint32(raw[offMode:]) == 1 {
-		c.hasParent = raw[offN2] == stopParent
-		if c.hasParent {
-			c.parent = append(c.parent[:0], raw...)
-		}
-	}
+	i := (binary.LittleEndian.Uint32(raw[offMode:]) - 1) & 1
+	c.stops[i], c.hasStop[i] = append(c.stops[i][:0], raw...), true
 }
 
 // forgetStops drops the K_STOPs of a call that ended.
 func (c *call) forgetStops() {
-	c.hasStop, c.hasParent = false, false
+	c.hasStop = [2]bool{}
 }
 
-// place moves rec, a failure of c's call that its latest K_STOP speaks for,
-// to where the kernel took its names: the directory the lookup stopped in
-// followed by the rest of the name, for a name found missing or one the call
-// acts on in a parent it found. When a rename's or link's new name was looked
-// up last, the first name's parent lookup, if any, places that name too.
-func (c *call) place(rec *record) {
-	if !c.hasStop {
-		return
-	}
-	if placeName(rec, c.stop) == 2 && c.hasParent {
-		placeName(rec, c.parent)
+// place moves the names of rec, a failure of c's call, that sent (bit 0 the
+// first, bit 1 the second) says its K_STOPs place, to where the kernel took
+// them: the directory each lookup stopped in followed by the rest of the name.
+func (c *call) place(rec *record, sent uint8) {
+	for i := range c.stops {
+		if sent&(1<<i) != 0 && c.hasStop[i] {
+			placeName(rec, c.stops[i])
+		}
 	}
 }
 
-// placeName moves the name of rec that the K_STOP raw is of, if it is the name
-// rec holds, and returns which name that is.
-func placeName(rec *record, raw []byte) uint32 {
+// placeName moves the name of rec that the K_STOP raw is of.
+func placeName(rec *record, raw []byte) {
 	le := binary.LittleEndian
-	which := le.Uint32(raw[offMode:])
-	data := raw[hdrLen:]
-	n := int(le.Uint32(raw[offFlags:]))
 	at := int(int32(le.Uint32(raw[offPathLen:])))
-	if n < 1 || n > len(data) || at < 0 || at >= n-1 {
-		return which
+	dir, _ := components(raw[hdrLen:], int(raw[offN1]), raw[offTruncated] != 0)
+	from := func(passed string) (string, bool) {
+		if at < 0 || at >= len(passed) {
+			return "", false
+		}
+		return tidy(strings.TrimSuffix(dir, "/") + "/" + passed[at:]), true
 	}
-	name := string(data[:n-1])
-	dir, _ := components(data[n:], int(raw[offN1]), raw[offTruncated] != 0)
-	p := tidy(strings.TrimSuffix(dir, "/") + "/" + name[at:])
-	switch which {
+	switch le.Uint32(raw[offMode:]) {
 	case 1:
-		if passed := orPath(rec.Name, rec.Path); passed == name {
+		passed := orPath(rec.Name, rec.Path)
+		if p, ok := from(passed); ok {
 			rec.Path, rec.Name, rec.Resolved = p, passedName(passed, p), true
 		}
 	case 2:
-		if passed := orPath(rec.ToName, rec.To); passed == name {
+		passed := orPath(rec.ToName, rec.To)
+		if p, ok := from(passed); ok {
 			rec.To, rec.ToName, rec.ToResolved = p, passedName(passed, p), true
 		}
 	}
-	return which
 }
 
 // orPath is the name a command passed, from a record's name field or, where

@@ -43,6 +43,10 @@ func requireLinux61(kspec *btf.Spec) error {
 	return nil
 }
 
+// lookupProgs note where a name's lookup stopped; one is of no use without
+// the other, whose later lookup it would be taken for.
+var lookupProgs = []string{"on_terminate_walk", "on_complete_walk"}
+
 // dropAbsentPrograms removes optional programs whose attach target the
 // running kernel does not expose, so loading does not fail on a missing one.
 func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
@@ -51,6 +55,13 @@ func dropAbsentPrograms(spec *ebpf.CollectionSpec, kspec *btf.Spec) {
 		if err := kspec.TypeByName(fn, &f); err != nil {
 			fmt.Fprintf(os.Stderr, "filesystem-audit: %s absent from kernel BTF, skipped\n", fn)
 			delete(spec.Programs, prog)
+		}
+	}
+	for _, prog := range lookupProgs {
+		if spec.Programs[prog] == nil {
+			for _, p := range lookupProgs {
+				delete(spec.Programs, p)
+			}
 		}
 	}
 }
