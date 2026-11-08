@@ -81,11 +81,12 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	/** Thread tid exited. */
 	K_EXIT = 34,
 	/**
-	 * Where the kernel took a name the failed call in tid passed, sent at its
-	 * exit: data holds the directory's path components, as for unlink, and
-	 * path_len where in the name the part not looked up starts. mode is 1 for
-	 * the call's first name and 2 for a rename's or link's new one, n2 is
-	 * STOP_FAILED or STOP_PARENT (see namei.h) and nr the call's.
+	 * Where the kernel took a name the call in tid passed, sent at its exit:
+	 * data holds the path components of the file it reached (n2
+	 * STOP_REACHED), or of a directory (STOP_FAILED, STOP_PARENT; see
+	 * namei.h), as for unlink, with path_len where in the name the part
+	 * after it starts. mode is 1 for the call's first name and 2 for a
+	 * rename's or link's new one, and nr the call's.
 	 */
 	K_STOP = 35
 };

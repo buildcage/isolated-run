@@ -100,7 +100,9 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct path_call call = {}; // so no field reaches the stack unset
 	long nr = sys_nr(regs);
 	int watched = classify(nr, regs, &call);
-	int stopped = watched || is_open_nr(nr) ? stop_exit(slot, nr, ret) : 0;
+	int stopped = watched || is_open_nr(nr) ?
+			      stop_exit(slot, nr, ret, watched && call.kind == K_ATTR_FAILED) :
+			      0;
 	// Before the call's K_RESULT, which decides whether they stand.
 	if (watched)
 		op_exit(slot, &call, ret, stopped);

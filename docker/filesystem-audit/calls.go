@@ -175,8 +175,8 @@ func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 		return nil
 	case hasName:
 		rec := failedOpen(string(c.name), c.cut, raw)
-		if h.n1&resultStop != 0 && !c.cut {
-			c.place(&rec, 1)
+		if h.n1&resultStop != 0 {
+			c.place(&rec, 1, c.cut)
 		}
 		r.setProgram(&rec)
 		return r.write(rec)
@@ -216,24 +216,30 @@ func (c *call) forgetStops() {
 	c.hasStop = [2]bool{}
 }
 
-// place moves the names of rec, a failure of c's call, that sent (bit 0 the
+// place moves the names of rec, a record of c's call, that sent (bit 0 the
 // first, bit 1 the second) says its K_STOPs place, to where the kernel took
-// them: the directory each lookup stopped in followed by the rest of the name.
-func (c *call) place(rec *record, sent uint8) {
+// them: the file each lookup reached, or the directory it stopped in followed
+// by the rest of the name. A name cut short, whose rest is lost, is placed
+// only at its file.
+func (c *call) place(rec *record, sent uint8, cut bool) {
 	for i := range c.stops {
 		if sent&(1<<i) != 0 && c.hasStop[i] {
-			placeName(rec, c.stops[i])
+			placeName(rec, c.stops[i], cut)
 		}
 	}
 }
 
 // placeName moves the name of rec that the K_STOP raw is of.
-func placeName(rec *record, raw []byte) {
+func placeName(rec *record, raw []byte, cut bool) {
 	le := binary.LittleEndian
 	at := int(int32(le.Uint32(raw[offPathLen:])))
 	dir, _ := components(raw[hdrLen:], int(raw[offN1]), raw[offTruncated] != 0)
+	reached := raw[offN2] == stopReached
 	from := func(passed string) (string, bool) {
-		if at < 0 || at >= len(passed) {
+		switch {
+		case reached:
+			return tidy(dir), true
+		case cut || at < 0 || at > len(passed):
 			return "", false
 		}
 		return tidy(strings.TrimSuffix(dir, "/") + "/" + passed[at:]), true

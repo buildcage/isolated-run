@@ -36,6 +36,13 @@ try: os.unlink(d + "/gone-beneath-link")
 except FileNotFoundError: pass
 try: os.rename(d + "/moved-beneath-link", d + "/x")
 except FileNotFoundError: pass' "$GITHUB_WORKSPACE/linked-link"
+# A directory beneath it that refuses a search, and a time change through it.
+mkdir "$GITHUB_WORKSPACE/linked/shut"
+chmod 000 "$GITHUB_WORKSPACE/linked/shut"
+: < "$GITHUB_WORKSPACE/linked-link/shut/refused-beneath-link" 2>/dev/null || true
+chmod 755 "$GITHUB_WORKSPACE/linked/shut"
+: > "$GITHUB_WORKSPACE/linked/touched-beneath-link"
+touch -d @0 "$GITHUB_WORKSPACE/linked-link/touched-beneath-link"
 # rmdir acts on the symlink itself, which is no directory.
 rmdir "$GITHUB_WORKSPACE/linked-link" 2>/dev/null || true
 # Changes the kernel refuses after the tracer's hook has seen them.

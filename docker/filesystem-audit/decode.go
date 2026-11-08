@@ -186,7 +186,7 @@ func decode(raw []byte) (record, error) {
 	// A change through a descriptor alone (futimens, fchmod) names no file,
 	// so its path is the descriptor's own.
 	if marks&markDescriptor != 0 {
-		r.Resolved = r.Failed
+		r.Resolved = true
 		applyMarks(&r, marks, false)
 	}
 	return r, nil
