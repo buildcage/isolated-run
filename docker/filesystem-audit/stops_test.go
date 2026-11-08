@@ -9,20 +9,21 @@ import (
 
 const (
 	stopFailed = 1
+	stopParent = 2
 	nrRename   = 82
 )
 
-// stopAt is a K_STOP: the lookup of the call's name number which stopped
-// with name[at:] left, in the directory whose components dir lists leaf first.
-func stopAt(tid uint32, which uint32, typ uint8, name string, at int32, dir ...string) event {
+// stopAt is a K_STOP: name number which, from offset at on, was not looked up
+// in the directory whose components dir lists leaf first.
+func stopAt(tid uint32, which uint32, typ uint8, at int32, dir ...string) event {
 	return event{kind: filesystemAuditKindK_STOP, pid: 9, comm: "sh", tid: tid, mode: which, n2: typ,
-		pathRet: at, flags: uint32(len(name) + 1), n1: uint8(len(dir)), data: append([]byte(name+"\x00"), comps(dir...)...)}
+		pathRet: at, n1: uint8(len(dir)), data: comps(dir...)}
 }
 
-// missing is the exit's record of a call that failed with ENOENT, its K_STOP
-// marked as saying where.
-func missing(tid uint32, kind filesystemAuditKind, names ...string) event {
-	e := event{kind: kind, pid: 9, comm: "sh", tid: tid, pathRet: int32(unix.ENOENT), n2: 1}
+// failure is the exit's record of a call that failed with err, sent marking
+// the names its exit sent K_STOP for.
+func failure(tid uint32, kind filesystemAuditKind, err unix.Errno, sent uint8, names ...string) event {
+	e := event{kind: kind, pid: 9, comm: "sh", tid: tid, pathRet: int32(err), n2: sent}
 	for _, n := range names {
 		e.data = append(e.data, n+"\x00"...)
 	}
@@ -62,7 +63,7 @@ func field(got []map[string]any, key string) []any {
 func TestRecorderMovesAFailedOpenToWhereItsNameWasMissing(t *testing.T) {
 	got := recordLines(t,
 		openName(1, "/ws/a/b"),
-		stopAt(1, 1, stopFailed, "/ws/a/b", 4, "ws", "real"),
+		stopAt(1, 1, stopFailed, 4, "ws", "real"),
 		stopResult(1, -int32(unix.ENOENT)))
 	if len(got) != 1 || got[0]["path"] != "/real/ws/a/b" || got[0]["name"] != "/ws/a/b" || got[0]["resolved"] != true {
 		t.Fatalf("lines = %v, want /real/ws/a/b resolved, by the name /ws/a/b", got)
@@ -73,7 +74,7 @@ func TestRecorderMovesAFailedOpenToWhereItsNameWasMissing(t *testing.T) {
 func TestRecorderMovesARelativeName(t *testing.T) {
 	got := recordLines(t,
 		openName(1, "x//y"),
-		stopAt(1, 1, stopFailed, "x//y", 0, "ws", "real"),
+		stopAt(1, 1, stopFailed, 0, "ws", "real"),
 		stopResult(1, -int32(unix.ENOENT)))
 	if got[0]["path"] != "/real/ws/x/y" || got[0]["name"] != "x//y" {
 		t.Fatalf("lines = %v, want /real/ws/x/y by the name x//y", got)
@@ -82,7 +83,7 @@ func TestRecorderMovesARelativeName(t *testing.T) {
 
 // Moved to a directory under a path too long to walk, a name starts with "…".
 func TestRecorderMovesANameUnderACutDirectory(t *testing.T) {
-	stop := stopAt(1, 1, stopFailed, "/ws/x", 4, "ws")
+	stop := stopAt(1, 1, stopFailed, 4, "ws")
 	stop.truncated = 1
 	got := recordLines(t, openName(1, "/ws/x"), stop, stopResult(1, -int32(unix.ENOENT)))
 	if got[0]["path"] != "…/ws/x" {
@@ -92,85 +93,67 @@ func TestRecorderMovesANameUnderACutDirectory(t *testing.T) {
 
 func TestRecorderKeepsTheNameWithoutAStop(t *testing.T) {
 	for name, events := range map[string][]event{
-		// The open's latest lookup sent none, or failed for another reason.
-		"no stop bit": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, "/ws/x", 4, "real"),
+		// The exit sent none for the open's name.
+		"no stop bit": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, 4, "real"),
 			openResult(1, -int32(unix.ENOENT))},
 		"no stop": {openName(1, "/ws/x"), stopResult(1, -int32(unix.ENOENT))},
-		// A K_STOP of another name, as of an earlier call whose result was lost.
-		"other name": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, "/ws/y", 4, "real"),
-			stopResult(1, -int32(unix.ENOENT))},
-		// A name cut short is not the name the kernel copied.
+		// A name cut short has lost the part the offset counts into.
 		"cut name": {{kind: filesystemAuditKindK_OPEN_NAME, pid: 9, comm: "sh", tid: 1, n2: 1, data: []byte("/ws/x\x00")},
-			stopAt(1, 1, stopFailed, "/ws/x", 4, "real"), stopResult(1, -int32(unix.ENOENT))},
-		"missing part out of range": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, "/ws/x", 5, "real"),
+			stopAt(1, 1, stopFailed, 4, "real"), stopResult(1, -int32(unix.ENOENT))},
+		// Past the end of the name, as when another thread rewrote it.
+		"offset out of range": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, 5, "real"),
 			stopResult(1, -int32(unix.ENOENT))},
-		"name longer than the sample": {openName(1, "/ws/x"),
-			event{kind: filesystemAuditKindK_STOP, tid: 1, mode: 1, n2: stopFailed, flags: 100, data: []byte("/ws/x\x00")},
+		"negative offset": {openName(1, "/ws/x"), stopAt(1, 1, stopFailed, -1, "real"),
 			stopResult(1, -int32(unix.ENOENT))},
 		// Forgotten with the result of the call that sent it.
-		"earlier call's": {stopAt(1, 1, stopFailed, "/ws/x", 4, "real"), openResult(1, 3),
+		"earlier call's": {stopAt(1, 1, stopFailed, 4, "real"), openResult(1, -int32(unix.EACCES)),
 			openName(1, "/ws/x"), stopResult(1, -int32(unix.ENOENT))},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := recordLines(t, events...)
-			if !strings.HasPrefix(got[0]["path"].(string), "/ws/x") || got[0]["resolved"] != nil {
+			last := got[len(got)-1]
+			if !strings.HasPrefix(last["path"].(string), "/ws/x") || last["resolved"] != nil {
 				t.Fatalf("lines = %v, want /ws/x as passed", got)
 			}
 		})
 	}
 }
 
-// An unlink or rmdir that found the parent but not the name.
-func TestRecorderMovesARemovalToItsParent(t *testing.T) {
-	got := recordLines(t,
-		stopAt(1, 1, stopParent, "/ws/gone", 4, "ws", "real"),
-		missing(1, filesystemAuditKindK_UNLINK_FAILED, "/ws/gone"),
-		result(1, nrUnlink, resultWatched, -int32(unix.ENOENT)))
-	if len(got) != 1 || got[0]["path"] != "/real/ws/gone" || got[0]["name"] != "/ws/gone" || got[0]["resolved"] != true {
-		t.Fatalf("lines = %v, want /real/ws/gone resolved", got)
+// An unlink or rmdir that found the parent: the name it acts on is there,
+// whatever the error, a symlink itself included.
+func TestRecorderPlacesARemovalInItsParent(t *testing.T) {
+	for _, err := range []unix.Errno{unix.ENOENT, unix.ENOTDIR} {
+		got := recordLines(t,
+			stopAt(1, 1, stopParent, 4, "ws", "real"),
+			failure(1, filesystemAuditKindK_RMDIR_FAILED, err, 1, "/ws/gone"),
+			result(1, nrUnlink, resultWatched, -int32(err)))
+		if len(got) != 1 || got[0]["path"] != "/real/ws/gone" || got[0]["name"] != "/ws/gone" || got[0]["resolved"] != true {
+			t.Fatalf("%v: lines = %v, want /real/ws/gone resolved", err, got)
+		}
 	}
 }
 
-func TestRecorderPlacesEachNameOfARename(t *testing.T) {
-	for name, tc := range map[string]struct {
-		stops    []event
+func TestRecorderPlacesEachNameOfARenameItsExitSentAStopFor(t *testing.T) {
+	stops := []event{stopAt(1, 1, stopParent, 4, "ws", "real"), stopAt(1, 2, stopFailed, 4, "ws", "real")}
+	for _, tc := range []struct {
+		sent     uint8
 		path, to string
 	}{
-		// Both parents found: each name is where its parent led.
-		"both parents": {[]event{stopAt(1, 1, stopParent, "/ws/a", 4, "ws", "real"),
-			stopAt(1, 2, stopParent, "/ws/b/c", 6, "b", "ws", "real")}, "/real/ws/a", "/real/ws/b/c"},
-		"new parent missing": {[]event{stopAt(1, 1, stopParent, "/ws/a", 4, "ws", "real"),
-			stopAt(1, 2, stopFailed, "/ws/b/c", 4, "ws", "real")}, "/real/ws/a", "/real/ws/b/c"},
-		"old parent missing": {[]event{stopAt(1, 1, stopFailed, "/ws/a", 4, "real")}, "/real/a", "/ws/b/c"},
-		// The new name's parent found after a first lookup that sent none of its own.
-		"no first parent": {[]event{stopAt(1, 1, stopFailed, "/ws/a", 4, "real"),
-			stopAt(1, 2, stopParent, "/ws/b/c", 6, "b", "ws", "real")}, "/ws/a", "/real/ws/b/c"},
+		{3, "/real/ws/a", "/real/ws/b/c"},
+		{1, "/real/ws/a", "/ws/b/c"},
+		{2, "/ws/a", "/real/ws/b/c"},
+		{0, "/ws/a", "/ws/b/c"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			events := append(tc.stops, missing(1, filesystemAuditKindK_RENAME_FAILED, "/ws/a", "/ws/b/c"),
-				result(1, nrRename, resultWatched, -int32(unix.ENOENT)))
-			got := recordLines(t, events...)
-			if got[0]["path"] != tc.path || got[0]["to"] != tc.to {
-				t.Fatalf("lines = %v, want %s to %s", got, tc.path, tc.to)
-			}
-			if (got[0]["resolved"] == true) != (tc.path != "/ws/a") || (got[0]["to_resolved"] == true) != (tc.to != "/ws/b/c") {
-				t.Fatalf("lines = %v, want resolved only where moved", got)
-			}
-		})
-	}
-}
-
-// A removal refused once its parent was found acts on the name there, a
-// symlink itself included.
-func TestRecorderPlacesARefusedRemovalInItsParent(t *testing.T) {
-	refused := missing(1, filesystemAuditKindK_RMDIR_FAILED, "/ws")
-	refused.pathRet, refused.n2 = int32(unix.ENOTDIR), stopParent
-	got := recordLines(t,
-		stopAt(1, 1, stopParent, "/ws", 1),
-		refused,
-		result(1, nrUnlink, resultWatched, -int32(unix.ENOTDIR)))
-	if got[0]["path"] != "/ws" || got[0]["resolved"] != true {
-		t.Fatalf("lines = %v, want /ws resolved", got)
+		events := append(append([]event{}, stops...),
+			failure(1, filesystemAuditKindK_RENAME_FAILED, unix.ENOENT, tc.sent, "/ws/a", "/ws/b/c"),
+			result(1, nrRename, resultWatched, -int32(unix.ENOENT)))
+		got := recordLines(t, events...)
+		if got[0]["path"] != tc.path || got[0]["to"] != tc.to {
+			t.Fatalf("sent %d: lines = %v, want %s to %s", tc.sent, got, tc.path, tc.to)
+		}
+		if (got[0]["resolved"] == true) != (tc.sent&1 != 0) || (got[0]["to_resolved"] == true) != (tc.sent&2 != 0) {
+			t.Fatalf("sent %d: lines = %v, want resolved only where moved", tc.sent, got)
+		}
 	}
 }
 

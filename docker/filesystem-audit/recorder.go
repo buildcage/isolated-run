@@ -109,7 +109,7 @@ func (r *recorder) add(raw []byte) error {
 	}
 	if rec.Failed && raw[offN2] != 0 {
 		if c := r.calls[rec.tid]; c != nil {
-			c.place(&rec)
+			c.place(&rec, raw[offN2])
 		}
 	}
 	if rec.Failed {

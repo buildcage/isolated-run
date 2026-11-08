@@ -241,8 +241,8 @@ static __always_inline int names_fd(struct path_call *p)
 }
 
 /**
- * Emits the call as it ended with @p ret; @p stopped is what its latest K_STOP
- * says of the failure (see stop_exit()).
+ * Emits the call as it ended with @p ret; @p stopped holds the names its exit
+ * sent K_STOP for (see stop_exit()).
  */
 static __always_inline void op_exit(u32 slot, struct path_call *call, long ret, int stopped)
 {

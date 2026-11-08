@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT OR GPL-2.0-only
 /**
  * @file namei.h
- * Where the kernel took a watched call's name. Each lookup of the call's own
- * name that ends short of it sends K_STOP, as does a parent lookup for a call
- * that acts on the name itself. A call that failed after its latest lookup
- * sent one is marked so (see stop_exit()), and the reader takes that directory
- * and the rest of the name for its path.
+ * Where the kernel took a watched call's names. Each lookup of a name the call
+ * passed notes where it stopped short of the name, if it did: in a directory
+ * that lacks the rest, or in the parent of a name the call acts on without
+ * following it. When the call fails, its exit sends K_STOP for each name whose
+ * latest lookup says where the failure lies, and marks the failure with which
+ * (see stop_exit()); the reader takes that directory and the rest of the name
+ * for its path.
  *
  * Programs, included by filesystem_audit.bpf.c after the headers they use and
  * its BPF_PROG.
@@ -13,12 +15,25 @@
 #ifndef FILESYSTEM_AUDIT_NAMEI_H
 #define FILESYSTEM_AUDIT_NAMEI_H
 
-/** The lookups of the call in progress: how many, and the latest that sent K_STOP. */
+#define STOP_FAILED 1 ///< a lookup that failed: the name from nd->last on was not found
+#define STOP_PARENT 2 ///< a parent lookup that succeeded: nd->last is the name it acts on
+
+/** Where the latest lookup of one of a call's names stopped short of it. */
+struct name_stop {
+	u64 dentry;  ///< the directory, held by the lookup only until it ends
+	u64 mnt;
+	u32 off;     ///< where in the name the part not looked up starts
+	u32 type;    ///< STOP_*
+	u32 lookup;  ///< the call's count at the name's latest lookup
+	u32 stopped; ///< the call's count at the lookup that noted the above
+};
+
+/** The lookups of the call in progress, of its first and second name. */
 struct lookups {
 	u64 first; ///< the struct filename of the call's first lookup
-	u32 count;
-	u32 sent;
-	u32 sent_type; ///< the STOP_* of the latest K_STOP
+	u32 count; ///< lookups that got anywhere, numbered from 1
+	u32 pad;
+	struct name_stop names[2];
 };
 
 struct {
@@ -31,11 +46,12 @@ struct {
 /**
  * Whether the current call is one whose failure the tracer records by name,
  * giving the names it passed in @p a and @p b (0 for none), its number in
- * @p nr, and in @p named whether it acts on the last component of a name it
- * looks the parent of up, which it never follows: a removal, a move or a
- * creation.
+ * @p nr, and in @p named the names (bit 0 the first, bit 1 the second) whose
+ * last component it acts on without following, so a parent lookup places
+ * them: both of a rename, the new name of a link, and the one name of a
+ * removal or creation. classify() gives each call's kind.
  */
-static __always_inline int call_names(long *nr, u64 *a, u64 *b, int *named)
+static __always_inline int call_names(long *nr, u64 *a, u64 *b, u32 *named)
 {
 	struct pt_regs *regs = (struct pt_regs *)bpf_task_pt_regs(bpf_get_current_task_btf());
 	*nr = sys_nr(regs);
@@ -49,28 +65,37 @@ static __always_inline int call_names(long *nr, u64 *a, u64 *b, int *named)
 		return 0;
 	*a = call.p1;
 	*b = call.p2;
-	*named = call.kind == K_UNLINK_FAILED || call.kind == K_RMDIR_FAILED ||
-		 call.kind == K_RENAME_FAILED || call.kind == K_MKDIR_FAILED ||
-		 call.kind == K_MKNOD_FAILED || call.kind == K_SYMLINK_FAILED ||
-		 call.kind == K_LINK_FAILED;
+	switch (call.kind) {
+	case K_RENAME_FAILED:
+		*named = 3;
+		break;
+	case K_LINK_FAILED:
+		*named = 2;
+		break;
+	case K_UNLINK_FAILED:
+	case K_RMDIR_FAILED:
+	case K_MKDIR_FAILED:
+	case K_MKNOD_FAILED:
+	case K_SYMLINK_FAILED:
+		*named = 1;
+		break;
+	}
 	return 1;
 }
 
-#define STOP_FAILED 1 ///< a lookup that failed: the name from nd->last on was not found
-#define STOP_PARENT 2 ///< a lookup that succeeded: nd->last is the name in nd->path
-
 /**
- * Sends where @p nd stands and what of the call's own name is left from
- * there, unless the lookup found all it looked for.
+ * Notes where the lookup @p nd of one of the call's names stands, if it
+ * stopped short of the name: a failed lookup (STOP_FAILED) in a directory, or
+ * a parent lookup (STOP_PARENT) for a name the call acts on.
  */
-static __always_inline void stop_at(u32 slot, struct nameidata *nd, u8 type)
+static __always_inline void stop_at(struct nameidata *nd, u8 type)
 {
 	if (!in_target())
 		return;
 	long nr;
 	u64 a = 0, b = 0;
-	int named = 0;
-	if (!call_names(&nr, &a, &b, &named) || (type == STOP_PARENT && !named))
+	u32 named = 0;
+	if (!call_names(&nr, &a, &b, &named))
 		return;
 	struct filename *fn = BPF_CORE_READ(nd, name);
 	// A name the kernel made itself is not the call's own; 7.0 dropped uptr,
@@ -88,46 +113,45 @@ static __always_inline void stop_at(u32 slot, struct nameidata *nd, u8 type)
 		return;
 	if (!s->count)
 		s->first = (u64)fn;
+	if (!which)
+		which = (u64)fn == s->first ? 1 : 2;
 	struct vfsmount *mnt = BPF_CORE_READ(nd, path.mnt);
 	struct dentry *d = BPF_CORE_READ(nd, path.dentry);
 	// No path: a lookup that succeeded handed it over, or one already ended
 	// (path_openat can end its lookup twice).
 	if (!mnt || !d)
 		return;
-	s->count++; // the call's error comes from its latest lookup
-	// A component that names nd->path itself was found, as on every open
-	// that succeeds, or failed once stepped into (ENOTDIR, EACCES).
-	// last_type does not tell: an error open_last_lookups returns passes
-	// through link_path_walk, which sets LAST_ROOT first.
-	if (BPF_CORE_READ(d, d_name.hash_len) == BPF_CORE_READ(nd, last.hash_len))
+	struct name_stop *ns = &s->names[(which - 1) & 1];
+	ns->lookup = ++s->count; // a failure lies with the name's latest lookup
+	if (type == STOP_PARENT) {
+		// Any other lookup has stepped into its last component by now.
+		if (!(named & which))
+			return;
+	} else if (BPF_CORE_READ(d, d_name.hash_len) == BPF_CORE_READ(nd, last.hash_len)) {
+		// A component that names nd->path itself was found, as on every
+		// open that succeeds, or failed once stepped into (ENOTDIR,
+		// EACCES). last_type does not tell: an error open_last_lookups
+		// returns passes through link_path_walk, which sets LAST_ROOT
+		// first.
 		return;
+	}
 	const char *name = BPF_CORE_READ(fn, name);
 	const char *last = (const char *)BPF_CORE_READ(nd, last.name);
 	u64 off = (u64)last - (u64)name;
 	// Stopped inside a symlink's body, not the call's own name.
 	if ((u64)last < (u64)name || off >= PATH_LEN)
 		return;
-	struct event *e = start(slot, K_STOP);
-	if (!e)
+	// "." and ".." are never missing nor acted on: the lookup stopped past
+	// them.
+	char c[3] = {};
+	bpf_probe_read_kernel(c, sizeof(c), last);
+	if (c[0] == '.' && (c[1] == 0 || c[1] == '/' || (c[1] == '.' && (c[2] == 0 || c[2] == '/'))))
 		return;
-	long r = bpf_probe_read_kernel_str(e->data, PATH_LEN, name);
-	if (r <= 0 || off >= (u64)r - 1)
-		return;
-	// "." and ".." are never missing: the lookup stopped past them.
-	char c0 = e->data[off & (PATH_LEN - 1)], c1 = e->data[(off + 1) & (PATH_LEN - 1)],
-	     c2 = e->data[(off + 2) & (PATH_LEN - 1)];
-	if (c0 == '.' && (c1 == 0 || c1 == '/' || (c1 == '.' && (c2 == 0 || c2 == '/'))))
-		return;
-	e->tid = (u32)bpf_get_current_pid_tgid();
-	e->nr = nr;
-	e->path_len = off;
-	e->flags = r;
-	e->mode = which ? which : (u64)fn == s->first ? 1 : 2;
-	e->n2 = type;
-	e->data_len = walk(e, r & (PATH_LEN - 1), d, mnt, &e->n1, &e->truncated);
-	s->sent = s->count;
-	s->sent_type = type;
-	submit(e);
+	ns->dentry = (u64)d;
+	ns->mnt = (u64)mnt;
+	ns->off = off;
+	ns->type = type;
+	ns->stopped = s->count;
 }
 
 /**
@@ -138,7 +162,7 @@ static __always_inline void stop_at(u32 slot, struct nameidata *nd, u8 type)
 SEC("fentry/terminate_walk")
 int BPF_PROG(on_terminate_walk, struct nameidata *nd)
 {
-	stop_at(slot, nd, STOP_FAILED);
+	stop_at(nd, STOP_FAILED);
 	return 0;
 }
 
@@ -146,35 +170,56 @@ int BPF_PROG(on_terminate_walk, struct nameidata *nd)
  * A parent lookup that succeeded (path_parentat) clears nd->path before
  * terminate_walk, so the directory a removal, move or creation acts in is
  * taken here, as the lookup completes. One that then fails is retried or ends
- * at terminate_walk, whose lookup counts after this one. Any other lookup has
- * stepped into its last component by now.
+ * at terminate_walk, whose lookup counts after this one.
  */
 SEC("fentry/complete_walk")
 int BPF_PROG(on_complete_walk, struct nameidata *nd)
 {
-	stop_at(slot, nd, STOP_PARENT);
+	stop_at(nd, STOP_PARENT);
 	return 0;
 }
 
 /**
- * What the latest K_STOP of the call returning @p ret says of its failure:
- * STOP_PARENT for one after a parent lookup, which places the names it acts
- * on, STOP_FAILED for a name found missing, or 0. Forgets the call's lookups
+ * Sends K_STOP for name @p i of the call ending with @p ret if its latest
+ * lookup says where the failure lies: in the parent of a name the call acts
+ * on, or, for ENOENT, where the name was found missing.
+ */
+static __always_inline int send_stop(u32 slot, struct name_stop *ns, int i, long nr, long ret)
+{
+	if (!ns->lookup || ns->stopped != ns->lookup || (ns->type != STOP_PARENT && ret != -ENOENT))
+		return 0;
+	struct event *e = start(slot, K_STOP);
+	if (!e)
+		return 0;
+	e->tid = (u32)bpf_get_current_pid_tgid();
+	e->nr = nr;
+	e->path_len = ns->off;
+	e->mode = i + 1;
+	e->n2 = ns->type;
+	// The lookup dropped its hold on the directory, but a directory stays
+	// cached while it is there, and the read is checked either way.
+	e->data_len = walk(e, 0, (struct dentry *)ns->dentry, (struct vfsmount *)ns->mnt, &e->n1,
+			   &e->truncated);
+	return submit(e) ? 1 << i : 0;
+}
+
+/**
+ * The names (bit 0 the first, bit 1 the second) of the call returning @p ret,
+ * syscall @p nr, that its exit sent K_STOP for; forgets the call's lookups
  * either way.
  */
-static __noinline int stop_exit(long ret)
+static __noinline int stop_exit(u32 slot, long nr, long ret)
 {
 	struct lookups *s = bpf_task_storage_get(&lookups, bpf_get_current_task_btf(), 0, 0);
 	if (!s || !s->count)
 		return 0;
-	int stopped = 0;
-	if (ret < 0 && s->sent == s->count)
-		stopped = s->sent_type == STOP_PARENT ? STOP_PARENT : ret == -ENOENT ? STOP_FAILED : 0;
-	s->count = 0;
-	s->sent = 0;
-	s->first = 0;
-	s->sent_type = 0;
-	return stopped;
+	int sent = 0;
+	if (ret < 0 && !is_restart(ret)) {
+		sent |= send_stop(slot, &s->names[0], 0, nr, ret);
+		sent |= send_stop(slot, &s->names[1], 1, nr, ret);
+	}
+	__builtin_memset(s, 0, sizeof(*s));
+	return sent;
 }
 
 #endif

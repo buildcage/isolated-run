@@ -42,5 +42,5 @@
 {"t":"1970-01-01T00:00:00.000Z","kind":"rename","pid":9,"ppid":1,"comm":"sh","program":"/work/A/gradlew","path":"/src/a","name":"a","to":"/dst/b","to_name":"b","err":18,"failed":true}
 {"t":"1970-01-01T00:00:00.000Z","kind":"link","pid":9,"ppid":1,"comm":"sh","program":"/work/A/gradlew","path":"/src/a","name":"a","to":"/dst/b","to_name":"b","err":18,"failed":true}
 {"t":"1970-01-01T00:00:00.000Z","kind":"open","pid":9,"ppid":1,"comm":"sh","program":"/work/A/gradlew","path":"/real/ws/missing","name":"/ws/missing","access":"r","err":2,"failed":true,"resolved":true}
-{"t":"1970-01-01T00:00:00.000Z","kind":"rename","pid":9,"ppid":1,"comm":"sh","program":"/work/A/gradlew","path":"/real/ws/a","name":"/ws/a","to":"/real/ws/b/c","to_name":"/ws/b/c","err":2,"failed":true,"resolved":true,"to_resolved":true}
+{"t":"1970-01-01T00:00:00.000Z","kind":"rename","pid":9,"ppid":1,"comm":"sh","program":"/work/A/gradlew","path":"/ws/a","to":"/real/ws/b/c","to_name":"/ws/b/c","err":2,"failed":true,"to_resolved":true}
 {"kind":"end","dropped":1,"untracked":2,"host_missed":3}
