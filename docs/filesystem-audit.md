@@ -647,10 +647,9 @@ A host that falls short fails the step before the command runs, with the reason;
   program in a step without the audit.
 - **A small cost to the whole host.** A typical build, which spends little of its time in system
   calls, barely slows down. While the step runs, though, the tracer's hooks run on every system call
-  on the runner host, since a hook has to run to tell whose call it is. Each call takes roughly 60
-  to 250 nanoseconds longer, opening and closing a file the most, and one that looks up a path
-  name about 60 to 160 more. A GitHub-hosted runner runs one job, so only that job pays. On a
-  self-hosted runner shared by several jobs, they all do.
+  on the runner host, since a hook has to run to tell whose call it is, so each call takes a little
+  longer, opening a file or looking up a path the most. A GitHub-hosted runner runs one job, so
+  only that job pays. On a self-hosted runner shared by several jobs, they all do.
 
 ## Troubleshooting
 
