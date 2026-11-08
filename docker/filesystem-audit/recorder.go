@@ -104,7 +104,7 @@ func (r *recorder) add(raw []byte) error {
 		r.started = true
 	}
 	r.setProgram(&rec)
-	if c := r.calls[rec.tid]; c != nil && rec.tid != 0 && (rec.Failed || rec.Kind == "attr") {
+	if c := r.calls[rec.tid]; c != nil && rec.tid != 0 && fromExit(header(raw).kind) {
 		if raw[offN2] != 0 {
 			c.place(&rec, raw[offN2], false)
 		}
@@ -261,4 +261,19 @@ type end struct {
 	Dropped    uint64 `json:"dropped"`
 	Untracked  uint64 `json:"untracked"`
 	HostMissed uint64 `json:"host_missed"`
+}
+
+// fromExit reports whether kind is sent from its call's exit (op_exit() in
+// bpf/syscalls.h), whose n2 holds the names it sent K_STOP for.
+func fromExit(kind filesystemAuditKind) bool {
+	switch kind {
+	case filesystemAuditKindK_UNLINK_FAILED, filesystemAuditKindK_RENAME_FAILED,
+		filesystemAuditKindK_CHMOD_FAILED, filesystemAuditKindK_CHOWN_FAILED,
+		filesystemAuditKindK_ATTR, filesystemAuditKindK_ATTR_FAILED,
+		filesystemAuditKindK_RMDIR_FAILED, filesystemAuditKindK_MKDIR_FAILED,
+		filesystemAuditKindK_MKNOD_FAILED, filesystemAuditKindK_SYMLINK_FAILED,
+		filesystemAuditKindK_LINK_FAILED, filesystemAuditKindK_TRUNCATE_FAILED:
+		return true
+	}
+	return false
 }

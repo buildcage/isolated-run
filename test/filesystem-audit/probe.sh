@@ -36,11 +36,17 @@ try: os.unlink(d + "/gone-beneath-link")
 except FileNotFoundError: pass
 try: os.rename(d + "/moved-beneath-link", d + "/x")
 except FileNotFoundError: pass' "$GITHUB_WORKSPACE/linked-link"
-# A directory beneath it that refuses a search, and a time change by name through it.
+# A directory beneath it that refuses a search.
 mkdir "$GITHUB_WORKSPACE/linked/shut"
 chmod 000 "$GITHUB_WORKSPACE/linked/shut"
 : < "$GITHUB_WORKSPACE/linked-link/shut/refused-beneath-link" 2>/dev/null || true
 chmod 755 "$GITHUB_WORKSPACE/linked/shut"
+# A directory beneath it that refuses a new file.
+mkdir "$GITHUB_WORKSPACE/linked/closed"
+chmod 555 "$GITHUB_WORKSPACE/linked/closed"
+: > "$GITHUB_WORKSPACE/linked-link/closed/made-beneath-link" 2>/dev/null || true
+chmod 755 "$GITHUB_WORKSPACE/linked/closed"
+# A time change by name through it.
 : > "$GITHUB_WORKSPACE/linked/touched-beneath-link"
 python3 -c 'import os, sys; os.utime(sys.argv[1], (0, 0))' "$GITHUB_WORKSPACE/linked-link/touched-beneath-link"
 # rmdir acts on the symlink itself, which is no directory.

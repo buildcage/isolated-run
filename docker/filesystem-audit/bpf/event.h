@@ -91,6 +91,13 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	K_STOP = 35
 };
 
+/** Where a K_STOP's lookup stood, in its n2 (see namei.h). */
+enum stop_type {
+	STOP_FAILED = 1,  ///< A lookup that failed at nd->last, in nd->path.
+	STOP_PARENT = 2,  ///< A parent lookup that succeeded: nd->last is the name the call acts on.
+	STOP_REACHED = 3, ///< A lookup that reached its file, nd->path.
+};
+
 /** K_RESULT bits, in n1. */
 enum result_bit {
 	RESULT_OPEN = 1,    ///< An open(2) family call.

@@ -948,12 +948,14 @@ when relative, unless `resolved` says where the kernel took it, with symlinks fo
   its owner: that file.
 - an `unlink`, `rmdir`, `rename`, `mkdir`, `mknod`, `symlink`, or a `link`'s new name, whose
   directory was found: that directory followed by the last name, which these never follow.
-- a name the kernel could not finish looking up: the directory it was in when a name was missing
-  (`ENOENT`) or a symlink led too deep (`ELOOP`), or the one it had stepped into when that refused
-  it (`EACCES`, `ENOTDIR`), followed by the rest of the name.
+- a name the kernel could not finish looking up: the one it had stepped into when that refused it
+  (`EACCES`, `ENOTDIR`), or else the directory it was in, as when a name was missing (`ENOENT`), a
+  symlink led too deep (`ELOOP`), or an `open` could not create its file there, followed by the
+  rest of the name.
 - a call through a descriptor alone: that file.
 
-One that failed inside a symlink's target, as through a dangling symlink, keeps the name as passed.
+One that failed inside a symlink's target, as through a dangling symlink, keeps the name as passed,
+and so does one refused by the directory a relative name starts in.
 Where `link` leads to `/real`, `cat link/missing` records `/real/missing`, `cat link/dir/x` where
 `dir` refuses a search records `/real/dir/x`, and a failed `rmdir link` records `link` itself.
 
