@@ -88,7 +88,7 @@ done
 holds "An open refused by a directory beneath a symlink is recorded where the link leads" \
   'any(.[]; .kind == "open" and .err == 13 and .resolved and (.path | endswith("/linked/shut/refused-beneath-link")))'
 holds "A time change through a symlink is recorded where the link leads" \
-  'any(.[]; .kind == "attr" and (.failed | not) and .resolved and (.path | endswith("/linked/touched-beneath-link")) and (.name | endswith("/linked-link/touched-beneath-link")))'
+  'any(.[]; .kind == "attr" and (.failed | not) and .resolved and (.path // "" | endswith("/linked/touched-beneath-link")) and (.name // "" | endswith("/linked-link/touched-beneath-link")))'
 holds "A failed rmdir of a symlink is recorded under the link itself" \
   'any(.[]; .kind == "rmdir" and .err == 20 and .resolved and (.path | endswith("/linked-link")))'
 
