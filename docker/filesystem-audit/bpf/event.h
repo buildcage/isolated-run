@@ -29,8 +29,9 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	 * @name Path syscalls recorded from their exit
 	 * data holds the user path(s), NUL-separated (old then new for rename),
 	 * then the base directories of the relative ones (see add_base);
-	 * path_len holds the errno of a failed one. A failed chmod's new mode is
-	 * in flags, a failed chown's new uid in flags and gid in gid.
+	 * path_len holds the errno of a failed one, and n2 what the call's latest
+	 * K_STOP says of it (see stop_exit()). A failed chmod's new mode is in
+	 * flags, a failed chown's new uid in flags and gid in gid.
 	 * @{
 	 */
 	K_UNLINK_FAILED = 16, K_RENAME_FAILED = 17, K_CHMOD_FAILED = 18,
@@ -78,7 +79,16 @@ enum kind { K_OPEN = 1, K_EXEC = 2, K_UNLINK = 3, K_RMDIR = 4, K_RENAME = 5,
 	/** The open(2) in tid reached its create step. */
 	K_OPEN_CREATE = 33,
 	/** Thread tid exited. */
-	K_EXIT = 34
+	K_EXIT = 34,
+	/**
+	 * Where a lookup of a name the call in tid passed stopped short of it:
+	 * data holds the kernel's copy of the name (flags bytes with its NUL),
+	 * then the directory's path components, as for unlink; path_len is where
+	 * in the name the part not looked up yet starts. mode is 1 for the
+	 * call's first name and 2 for a rename's or link's new one, n2 is
+	 * STOP_FAILED or STOP_PARENT (see namei.h) and nr the call's.
+	 */
+	K_STOP = 35
 };
 
 /** K_RESULT bits, in n1. */
@@ -86,6 +96,7 @@ enum result_bit {
 	RESULT_OPEN = 1,    ///< An open(2) family call.
 	RESULT_WATCHED = 2, ///< A failure is recorded from the call's arguments (see op_exit()).
 	RESULT_FD = 4,      ///< The call names its file by descriptor (see names_fd()).
+	RESULT_STOP = 8,    ///< The open's latest K_STOP says where its name was missing.
 };
 
 /**

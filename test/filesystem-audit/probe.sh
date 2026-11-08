@@ -25,6 +25,19 @@ try: os.unlink("gone", dir_fd=d)
 except FileNotFoundError: pass
 try: os.open("absent", os.O_RDONLY, dir_fd=d)
 except FileNotFoundError: pass' "$GITHUB_WORKSPACE/sub"
+# Names missing beneath a symlink, which the kernel looked up where it
+# leads: an open, an unlink that found the parent, and a rename's source.
+mkdir -p "$GITHUB_WORKSPACE/linked"
+ln -s linked "$GITHUB_WORKSPACE/linked-link"
+: < "$GITHUB_WORKSPACE/linked-link/missing-beneath-link" 2>/dev/null || true
+python3 -c 'import os, sys
+d = sys.argv[1]
+try: os.unlink(d + "/gone-beneath-link")
+except FileNotFoundError: pass
+try: os.rename(d + "/moved-beneath-link", d + "/x")
+except FileNotFoundError: pass' "$GITHUB_WORKSPACE/linked-link"
+# rmdir acts on the symlink itself, which is no directory.
+rmdir "$GITHUB_WORKSPACE/linked-link" 2>/dev/null || true
 # Changes the kernel refuses after the tracer's hook has seen them.
 chmod 777 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true
 chown 1:2 "$GITHUB_WORKSPACE/root-owned.txt" 2>/dev/null || true

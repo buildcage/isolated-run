@@ -80,6 +80,14 @@ holds "An xattr set through a descriptor is recorded" \
 holds "A symlink's longest target is recorded whole" \
   'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)'
 
+# A name missing beneath a symlink is recorded where the kernel looked for it.
+for kind in open unlink rename; do
+  holds "A failed $kind of a name missing beneath a symlink is recorded where the link leads" \
+    "any(.[]; .kind == \"$kind\" and .err == 2 and .resolved and (.path | test(\"/linked/[a-z]+-beneath-link$\")) and (.name | test(\"/linked-link/[a-z]+-beneath-link$\")))"
+done
+holds "A failed rmdir of a symlink is recorded under the link itself" \
+  'any(.[]; .kind == "rmdir" and .err == 20 and .resolved and (.path | endswith("/linked-link")))'
+
 # Refused after the tracer's hook: no mapping, and only the failed open.
 holds_not "A refused mapping is not recorded" \
   'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))'

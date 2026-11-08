@@ -107,6 +107,15 @@ func contractEvents() []event {
 		exitFailure(filesystemAuditKindK_CHOWN_FAILED, event{flags: 1001, gid: 121}),
 		twoPathFailure(filesystemAuditKindK_RENAME_FAILED),
 		twoPathFailure(filesystemAuditKindK_LINK_FAILED),
+		// Failures for a missing name, moved to where the kernel found it
+		// missing.
+		ev(event{kind: filesystemAuditKindK_OPEN_NAME, tid: tid, data: []byte("/ws/missing\x00")}),
+		ev(stopAt(tid, 1, stopFailed, "/ws/missing", 4, "ws", "real")),
+		ev(stopResult(tid, -int32(unix.ENOENT))),
+		ev(stopAt(tid, 1, stopParent, "/ws/a", 4, "ws", "real")),
+		ev(stopAt(tid, 2, stopFailed, "/ws/b/c", 4, "ws", "real")),
+		ev(missing(tid, filesystemAuditKindK_RENAME_FAILED, "/ws/a", "/ws/b/c")),
+		ev(result(tid, nrRename, resultWatched, -int32(unix.ENOENT))),
 	)
 }
 

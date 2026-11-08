@@ -149,7 +149,7 @@ const DECLARED: Record<keyof AuditRecord, true> = {
   syscall: true,
   killed: true,
 };
-const IGNORED = new Set(["to_name", "flags", "mode", "owner", "compat"]);
+const IGNORED = new Set(["to_name", "flags", "mode", "owner", "compat", "resolved", "to_resolved"]);
 const NOT_ACCESS = new Set(["fork", "syscall", "end"]);
 
 describe("the tracer's recording", () => {

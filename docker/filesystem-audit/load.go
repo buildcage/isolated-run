@@ -20,6 +20,9 @@ var optionalProgs = map[string]string{
 	"on_do_file_open":  "do_file_open",
 	"on_exec_file":     "security_bprm_creds_for_exec",
 	"on_file_truncate": "security_file_truncate",
+	// Without them every failure keeps the name it passed.
+	"on_terminate_walk": "terminate_walk",
+	"on_complete_walk":  "complete_walk",
 }
 
 // openNameProgs is the subset of optionalProgs that sends an open's name; at

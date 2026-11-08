@@ -63,33 +63,35 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		}{l.t, plain(r)})
 	}
 	return json.Marshal(struct {
-		Time     string  `json:"t"`
-		Kind     string  `json:"kind"`
-		PID      uint32  `json:"pid"`
-		PPID     uint32  `json:"ppid"`
-		NSPid    uint32  `json:"nspid,omitempty"`
-		Comm     rawName `json:"comm"`
-		Program  rawName `json:"program,omitempty"`
-		Path     rawName `json:"path,omitempty"`
-		Name     rawName `json:"name,omitempty"`
-		To       rawName `json:"to,omitempty"`
-		ToName   rawName `json:"to_name,omitempty"`
-		Access   string  `json:"access,omitempty"`
-		Flags    uint32  `json:"flags,omitempty"`
-		Mode     string  `json:"mode,omitempty"`
-		Owner    string  `json:"owner,omitempty"`
-		Err      int32   `json:"err,omitempty"`
-		Failed   bool    `json:"failed,omitempty"`
-		Image    bool    `json:"image,omitempty"`
-		Memfd    bool    `json:"memfd,omitempty"`
-		Deleted  bool    `json:"deleted,omitempty"`
-		Exchange bool    `json:"exchange,omitempty"`
-		Syscall  string  `json:"syscall,omitempty"`
-		Compat   bool    `json:"compat,omitempty"`
-		Killed   bool    `json:"killed,omitempty"`
+		Time       string  `json:"t"`
+		Kind       string  `json:"kind"`
+		PID        uint32  `json:"pid"`
+		PPID       uint32  `json:"ppid"`
+		NSPid      uint32  `json:"nspid,omitempty"`
+		Comm       rawName `json:"comm"`
+		Program    rawName `json:"program,omitempty"`
+		Path       rawName `json:"path,omitempty"`
+		Name       rawName `json:"name,omitempty"`
+		To         rawName `json:"to,omitempty"`
+		ToName     rawName `json:"to_name,omitempty"`
+		Access     string  `json:"access,omitempty"`
+		Flags      uint32  `json:"flags,omitempty"`
+		Mode       string  `json:"mode,omitempty"`
+		Owner      string  `json:"owner,omitempty"`
+		Err        int32   `json:"err,omitempty"`
+		Failed     bool    `json:"failed,omitempty"`
+		Resolved   bool    `json:"resolved,omitempty"`
+		ToResolved bool    `json:"to_resolved,omitempty"`
+		Image      bool    `json:"image,omitempty"`
+		Memfd      bool    `json:"memfd,omitempty"`
+		Deleted    bool    `json:"deleted,omitempty"`
+		Exchange   bool    `json:"exchange,omitempty"`
+		Syscall    string  `json:"syscall,omitempty"`
+		Compat     bool    `json:"compat,omitempty"`
+		Killed     bool    `json:"killed,omitempty"`
 	}{l.t, r.Kind, r.PID, r.PPID, r.NSPid, rawName(r.Comm), rawName(r.Program), rawName(r.Path), rawName(r.Name),
 		rawName(r.To), rawName(r.ToName), r.Access, r.Flags, r.Mode, r.Owner, r.Err,
-		r.Failed, r.Image, r.Memfd, r.Deleted, r.Exchange, r.Syscall, r.Compat, r.Killed})
+		r.Failed, r.Resolved, r.ToResolved, r.Image, r.Memfd, r.Deleted, r.Exchange, r.Syscall, r.Compat, r.Killed})
 }
 
 // reference is the line appendRecord must write, as legacy wrote it.
@@ -185,6 +187,7 @@ func FuzzAppendRecord(f *testing.F) {
 			Access: access, Flags: flags, Mode: mode, Owner: owner, Err: errno, Syscall: syscall,
 			Failed: bits&1 != 0, Image: bits&2 != 0, Memfd: bits&4 != 0, Deleted: bits&8 != 0,
 			Exchange: bits&16 != 0, Compat: bits&32 != 0, Killed: bits&64 != 0,
+			Resolved: bits&128 != 0, ToResolved: bits&256 != 0,
 		}
 		if got, want := appendRecord(nil, &r, &timeText{}, ns), reference(r, ns); string(got) != string(want) {
 			t.Fatalf("got  %s\nwant %s", got, want)

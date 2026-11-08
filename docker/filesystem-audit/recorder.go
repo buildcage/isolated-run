@@ -78,6 +78,11 @@ func (r *recorder) add(raw []byte) error {
 				return r.openName(h, raw)
 			}
 			return nil
+		case filesystemAuditKindK_STOP:
+			if r.started {
+				r.callOf(h.tid).keepStop(raw)
+			}
+			return nil
 		case filesystemAuditKindK_OPEN_CREATE:
 			if r.started {
 				r.callOf(h.tid).created = true
@@ -101,6 +106,11 @@ func (r *recorder) add(raw []byte) error {
 	r.setProgram(&rec)
 	if rec.tid == 0 {
 		return r.write(rec)
+	}
+	if rec.Failed && raw[offN2] != 0 {
+		if c := r.calls[rec.tid]; c != nil {
+			c.place(&rec)
+		}
 	}
 	if rec.Failed {
 		// Recorded from its call's exit, just before the call's result,

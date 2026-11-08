@@ -68,6 +68,8 @@ func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 		b = strconv.AppendInt(append(b, `,"err":`...), int64(r.Err), 10)
 	}
 	b = appendTrue(b, `,"failed":`, r.Failed)
+	b = appendTrue(b, `,"resolved":`, r.Resolved)
+	b = appendTrue(b, `,"to_resolved":`, r.ToResolved)
 	b = appendTrue(b, `,"image":`, r.Image)
 	b = appendTrue(b, `,"memfd":`, r.Memfd)
 	b = appendTrue(b, `,"deleted":`, r.Deleted)

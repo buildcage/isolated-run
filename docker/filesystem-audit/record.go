@@ -30,6 +30,13 @@ type record struct {
 	Owner  string `json:"owner,omitempty"`
 	Err    int32  `json:"err,omitempty"`
 	Failed bool   `json:"failed,omitempty"`
+	// Resolved marks a failure whose Path the kernel resolved, symlinks and
+	// all, as a success's is: the file it was refused at, the directory it
+	// found the name missing in followed by the rest of the name, or the
+	// directory a removal, move or creation acted in followed by the name it
+	// acted on. ToResolved is the same for To.
+	Resolved   bool `json:"resolved,omitempty"`
+	ToResolved bool `json:"to_resolved,omitempty"`
 	// Image marks a mapping the kernel made while starting a program: the
 	// program itself, its dynamic loader, or a script's interpreter.
 	Image bool `json:"image,omitempty"`

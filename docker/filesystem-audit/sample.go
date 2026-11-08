@@ -82,7 +82,12 @@ const (
 	resultOpen    = uint8(filesystemAuditResultBitRESULT_OPEN)
 	resultWatched = uint8(filesystemAuditResultBitRESULT_WATCHED)
 	resultFD      = uint8(filesystemAuditResultBitRESULT_FD)
+	resultStop    = uint8(filesystemAuditResultBitRESULT_STOP)
 )
+
+// stopParent is STOP_PARENT in bpf/namei.h: a K_STOP from a parent lookup
+// that succeeded.
+const stopParent = 2
 
 // hdr is what the reader needs of an event that settles others.
 type hdr struct {
