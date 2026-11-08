@@ -259,8 +259,8 @@ each has rows of its own.
   directory was found, under that directory and the name it acts on, which these never follow, so
   a failed `rmdir` of a symlink shows the link; and for a name the kernel could not finish looking
   up, under the directory it found a name missing in or that refused it, followed by the rest of
-  the name. One that failed inside a symlink's target, as through a dangling symlink, is shown
-  under the name the command passed, joined to its working directory, or the directory it passed
+  the name. One that failed inside a symlink's target, as through a dangling symlink, or in the
+  directory a relative name starts in, is shown under the name the command passed, joined to its working directory, or the directory it passed
   by descriptor, without resolving `..`. One made through a file descriptor alone, such as
   `fchmod`, is shown under that file's path.
 - Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a failed access shown
