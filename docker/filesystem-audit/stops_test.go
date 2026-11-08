@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	stopFailed = 1
-	stopParent = 2
+	stopFailed = uint8(filesystemAuditStopTypeSTOP_FAILED)
+	stopParent = uint8(filesystemAuditStopTypeSTOP_PARENT)
 	nrRename   = 82
 	nrChmod    = 90
 )

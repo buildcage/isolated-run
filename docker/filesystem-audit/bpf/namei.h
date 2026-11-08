@@ -15,12 +15,9 @@
 #ifndef FILESYSTEM_AUDIT_NAMEI_H
 #define FILESYSTEM_AUDIT_NAMEI_H
 
-#define STOP_FAILED 1  ///< a lookup that failed at nd->last
-#define STOP_PARENT 2  ///< a parent lookup that succeeded: nd->last is the name the call acts on
-#define STOP_REACHED 3 ///< a lookup that reached its file, nd->path
-
-#define IN_DOT 1  ///< nd->last is "." or "..", which the lookup has taken
-#define IN_LAST 2 ///< nd->path is what nd->last names: the lookup stepped into it
+#define IN_DOT 1   ///< nd->last is "." or "..", which the lookup has taken
+#define IN_LAST 2  ///< nd->path is what nd->last names: the lookup stepped into it
+#define IN_FINAL 4 ///< nd->last is the name's last component
 
 /** Where the latest lookup of one of a call's names stopped. */
 struct name_stop {
@@ -28,7 +25,7 @@ struct name_stop {
 	u64 mnt;
 	u32 off;     ///< where in the name nd->last starts
 	u32 len;     ///< nd->last's length
-	u32 type;    ///< STOP_*
+	u32 type;    ///< enum stop_type
 	u32 in;      ///< IN_* of a failed lookup
 	u32 lookup;  ///< the call's count at the name's latest lookup
 	u32 stopped; ///< the call's count at the lookup that noted the above
@@ -91,6 +88,25 @@ static __always_inline int call_names(long *nr, u64 *a, u64 *b, u32 *named)
 }
 
 /**
+ * The hash and length of the name @p d has in its parent directory, as
+ * nd->last holds them: at a mount's root, the mountpoint's, through up to
+ * three mounts stacked there.
+ */
+static __always_inline u64 name_hash_len(struct dentry *d, struct vfsmount *vfs)
+{
+	u32 off_mnt = bpf_core_field_offset(struct mount, mnt);
+	for (int i = 0; i < 4 && BPF_CORE_READ(vfs, mnt_root) == d; i++) {
+		struct mount *m = (void *)vfs - off_mnt;
+		struct mount *parent = BPF_CORE_READ(m, mnt_parent);
+		if (!parent || parent == m)
+			break; // the namespace's root
+		d = BPF_CORE_READ(m, mnt_mountpoint);
+		vfs = (void *)parent + off_mnt;
+	}
+	return BPF_CORE_READ(d, d_name.hash_len);
+}
+
+/**
  * Notes where the lookup @p nd of one of the call's names stands: as it
  * completes its walk (@p completed), the file it reached (STOP_REACHED) or,
  * for a name the call acts on, the parent (STOP_PARENT); as it ends without
@@ -150,7 +166,7 @@ static __always_inline void stop_at(struct nameidata *nd, int completed)
 		len = hash_len >> 32;
 		off = (u64)last - (u64)name;
 		// Stopped inside a symlink's body, not the call's own name.
-		if (!len || (u64)last < (u64)name || off >= PATH_LEN)
+		if (!len || BPF_CORE_READ(nd, depth) || (u64)last < (u64)name || off >= PATH_LEN)
 			return;
 		char c[2] = {}, end = 0, before = '/';
 		bpf_probe_read_kernel(c, sizeof(c), last);
@@ -161,14 +177,14 @@ static __always_inline void stop_at(struct nameidata *nd, int completed)
 		// took any, as when the directory it starts in refuses a search.
 		if (before != '/' || (end && end != '/'))
 			return;
+		if (!end)
+			in = IN_FINAL;
 		if (c[0] == '.' && (len == 1 || (len == 2 && c[1] == '.')))
-			in = IN_DOT;
-		// Stepped into: nd->path has nd->last's name, or is a mount's root.
-		// The errno says whether that is where the failure lies (see
-		// send_stop()).
-		else if (type == STOP_FAILED && (BPF_CORE_READ(d, d_name.hash_len) == hash_len ||
-						 BPF_CORE_READ(mnt, mnt_root) == d))
-			in = IN_LAST;
+			in |= IN_DOT;
+		// Stepped into: nd->path goes by nd->last's name. The errno says
+		// whether that is where the failure lies (see send_stop()).
+		else if (type == STOP_FAILED && name_hash_len(d, mnt) == hash_len)
+			in |= IN_LAST;
 	}
 	ns->dentry = (u64)d;
 	ns->mnt = (u64)mnt;
@@ -208,7 +224,10 @@ int BPF_PROG(on_complete_walk, struct nameidata *nd)
  * lookup says where the call took it: the file it reached, the parent of a
  * name the call acts on, or the component a failed lookup stopped at. A name
  * missing, or a symlink too deep, lies in the directory the lookup stood in;
- * any other failure in the component it stepped into.
+ * any other failure in the component it stepped into, if it did, and else in
+ * that directory. A search the directory a lookup starts in refuses fails
+ * before nd->last is set, so short of a step only the name's last component,
+ * as a create refused there has, is taken for this lookup's.
  */
 static __always_inline int send_stop(u32 slot, struct name_stop *ns, int i, long nr, long ret)
 {
@@ -217,10 +236,12 @@ static __always_inline int send_stop(u32 slot, struct name_stop *ns, int i, long
 	u32 at = ns->off;
 	if (ns->type == STOP_FAILED) {
 		int in_dir = ret == -ENOENT || ret == -ELOOP;
-		if (ret >= 0 || (!in_dir && !ns->in))
+		if (ret >= 0)
 			return 0;
-		if (ns->in == IN_DOT || (!in_dir && ns->in))
+		if ((ns->in & IN_DOT) || (!in_dir && (ns->in & IN_LAST)))
 			at += ns->len;
+		else if (!in_dir && !(ns->in & IN_FINAL))
+			return 0;
 	}
 	struct event *e = start(slot, K_STOP);
 	if (!e)

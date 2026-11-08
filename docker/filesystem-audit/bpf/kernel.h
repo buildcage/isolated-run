@@ -147,6 +147,7 @@ struct filename {
 struct nameidata {
 	struct path path;
 	struct qstr last;
+	unsigned int depth;
 	struct filename *name;
 } __attribute__((preserve_access_index));
 

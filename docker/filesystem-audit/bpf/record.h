@@ -20,6 +20,7 @@
 /** Keeps struct event in BTF for bpf2go's -type. */
 const struct event *unused_event __attribute__((unused));
 const enum result_bit *unused_result_bit __attribute__((unused));
+const enum stop_type *unused_stop_type __attribute__((unused));
 
 /**
  * The watched cgroup, set by the loader. Descent is checked in the kernel's
