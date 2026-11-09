@@ -4,10 +4,11 @@
  * Where the kernel took a watched call's names. Each lookup of a name the call
  * passed notes where it stopped: at the file it reached, in the parent of a
  * name the call acts on without following it, or at the component it failed
- * at. When the call fails, or for a time or xattr change at all, its exit
- * sends K_STOP for each name whose latest lookup says where the call took it,
- * and marks the call's record with which (see stop_exit()); the reader takes
- * that file, or that directory and the rest of the name, for its path.
+ * at, if it followed a symlink. When the call fails, or for a time or xattr
+ * change at all, its exit sends K_STOP for each name whose latest lookup says
+ * where the call took it, and marks the call's record with which (see
+ * stop_exit()); the reader takes that file, or that directory and the rest of
+ * the name, for its path.
  *
  * Programs, included by filesystem_audit.bpf.c after the headers they use and
  * its BPF_PROG.
@@ -155,6 +156,9 @@ static __always_inline void stop_at(struct nameidata *nd, int completed)
 		return;
 	struct name_stop *ns = &s->names[(which - 1) & 1];
 	ns->lookup = ++s->count; // a failure lies with the name's latest lookup
+	// No symlink followed: the name already says where the kernel took it.
+	if (!BPF_CORE_READ(nd, total_link_count))
+		return;
 	u32 type = !completed ? STOP_FAILED : named & which ? STOP_PARENT : STOP_REACHED;
 	u64 off = 0;
 	u32 len = 0;

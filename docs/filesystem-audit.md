@@ -953,10 +953,12 @@ when relative, unless `resolved` says where the kernel took it, with symlinks fo
   rest of the name.
 - a call through a descriptor alone: that file.
 
-One that failed inside a symlink's target, as through a dangling symlink, keeps the name as passed,
-and so does one refused by the directory a relative name starts in.
+A name the kernel took without following a symlink already says where it went, so it is kept as
+passed and not marked. One that failed inside a symlink's target, as through a dangling symlink,
+keeps the name as passed too, and so does one refused by the directory a relative name starts in.
 Where `link` leads to `/real`, `cat link/missing` records `/real/missing`, `cat link/dir/x` where
-`dir` refuses a search records `/real/dir/x`, and a failed `rmdir link` records `link` itself.
+`dir` refuses a search records `/real/dir/x`, and a failed `rmdir link` records `link` itself, by
+name.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as
