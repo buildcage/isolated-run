@@ -148,6 +148,7 @@ struct nameidata {
 	struct path path;
 	struct qstr last;
 	unsigned int depth;
+	int total_link_count; ///< symlinks the lookup followed
 	struct filename *name;
 } __attribute__((preserve_access_index));
 

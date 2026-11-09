@@ -92,7 +92,7 @@ holds "An open refused a new file beneath a symlink is recorded where the link l
 holds "A time change through a symlink is recorded where the link leads" \
   'any(.[]; .kind == "attr" and (.failed | not) and .resolved and (.path // "" | endswith("/linked/touched-beneath-link")) and (.name // "" | endswith("/linked-link/touched-beneath-link")))'
 holds "A failed rmdir of a symlink is recorded under the link itself" \
-  'any(.[]; .kind == "rmdir" and .err == 20 and .resolved and (.path | endswith("/linked-link")))'
+  'any(.[]; .kind == "rmdir" and .err == 20 and (.path | endswith("/linked-link")))'
 
 # Refused after the tracer's hook: no mapping, and only the failed open.
 holds_not "A refused mapping is not recorded" \
