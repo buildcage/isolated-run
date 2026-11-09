@@ -73414,12 +73414,11 @@ function withMark(line, mark) {
 	let field = "rule" in mark ? `"rule":${JSON.stringify(mark.rule)}` : "\"unexpected\":true";
 	return `${line.slice(0, -1)},${field}}`;
 }
-function withElapsed(line, startedAt) {
-	if (!line.startsWith("{\"time\":\"")) return line;
-	let end = line.indexOf("\"", 9), ms = end === -1 ? NaN : Date.parse(line.slice(9, end));
-	if (Number.isNaN(ms)) return line;
-	let elapsed = formatElapsedFixed(ms / 1e3 - startedAt);
-	return `${line.slice(0, end + 1)},"elapsed":"${elapsed}"${line.slice(end + 1)}`;
+function withElapsed(line, r, startedAt) {
+	let time = isRecord(r) ? r.time : void 0;
+	if (typeof time != "string") return line;
+	let ms = Date.parse(time), head = `{"time":${JSON.stringify(time)}`;
+	return Number.isNaN(ms) || !line.startsWith(head) ? line : `${head},"elapsed":"${formatElapsedFixed(ms / 1e3 - startedAt)}"${line.slice(head.length)}`;
 }
 function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
 	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
@@ -73443,7 +73442,7 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 		let kept = stripper.filter(line, r), mark = summarize(() => summary.add(kept ? kept.record : r, kept !== void 0));
 		if (!kept || !sink) return;
 		let out = mark ? withMark(kept.line, mark) : kept.line;
-		sink(options.startedAt === void 0 ? out : withElapsed(out, options.startedAt));
+		sink(options.startedAt === void 0 ? out : withElapsed(out, kept.record, options.startedAt));
 	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
 	let result;
 	return summarize(() => result = summary.finish()), {

@@ -674,18 +674,17 @@ function withMark(line: string, mark: RuleMark): string {
   return `${line.slice(0, -1)},${field}}`;
 }
 
-const TIME = '{"time":"';
-
-// The line with `elapsed`, its time since the proxy started, after the `time`
-// the tracer writes first. The end line has no time and stays as it is.
-function withElapsed(line: string, startedAt: number): string {
-  if (!line.startsWith(TIME)) return line;
-  const end = line.indexOf('"', TIME.length);
-  // A line cut off mid-write keeps none.
-  const ms = end === -1 ? NaN : Date.parse(line.slice(TIME.length, end));
-  if (Number.isNaN(ms)) return line;
+// The line of record `r` with `elapsed`, its time since the proxy started,
+// after the `time` the tracer writes first. A line that is not a record, as one
+// cut off mid-write, and the end line, which has no time, stay as they are.
+function withElapsed(line: string, r: unknown, startedAt: number): string {
+  const time = isRecord(r) ? r.time : undefined;
+  if (typeof time !== "string") return line;
+  const ms = Date.parse(time);
+  const head = `{"time":${JSON.stringify(time)}`;
+  if (Number.isNaN(ms) || !line.startsWith(head)) return line;
   const elapsed = formatElapsedFixed(ms / 1000 - startedAt);
-  return `${line.slice(0, end + 1)},"elapsed":"${elapsed}"${line.slice(end + 1)}`;
+  return `${head},"elapsed":"${elapsed}"${line.slice(head.length)}`;
 }
 
 export interface ReducedRecording {
@@ -748,7 +747,7 @@ export function reduceRecording(
     const mark = summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
     if (!kept || !sink) return;
     const out = mark ? withMark(kept.line, mark) : kept.line;
-    sink(options.startedAt === undefined ? out : withElapsed(out, options.startedAt));
+    sink(options.startedAt === undefined ? out : withElapsed(out, kept.record, options.startedAt));
   });
   // The tracer has stopped, so the two reads see the same lines, which the
   // line positions the first pass found depend on.
