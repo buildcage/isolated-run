@@ -89,7 +89,7 @@ func decode(raw []byte) (record, error) {
 	r := common(raw)
 	switch kind {
 	case filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT, filesystemAuditKindK_OPEN_NAME,
-		filesystemAuditKindK_OPEN_CREATE:
+		filesystemAuditKindK_OPEN_CREATE, filesystemAuditKindK_STOP:
 		// The recorder takes these from their header; they make no line.
 		return record{}, fmt.Errorf("kind %d settles other events and is no line of its own", kind)
 	case filesystemAuditKindK_OPEN:
@@ -186,6 +186,7 @@ func decode(raw []byte) (record, error) {
 	// A change through a descriptor alone (futimens, fchmod) names no file,
 	// so its path is the descriptor's own.
 	if marks&markDescriptor != 0 {
+		r.Resolved = true
 		applyMarks(&r, marks, false)
 	}
 	return r, nil

@@ -1,6 +1,10 @@
 package main
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/binary"
+	"strings"
+)
 
 // call is what one thread sent while in a syscall. It stays with its thread,
 // for the next call, until the thread exits.
@@ -15,6 +19,10 @@ type call struct {
 	name             []byte
 	hasOpen, hasName bool
 	cut, created     bool
+	// stops are the K_STOPs of the call's first and second name, their
+	// buffers kept from call to call.
+	stops   [2][]byte
+	hasStop [2]bool
 }
 
 // pending says whether c holds anything of a call.
@@ -90,9 +98,9 @@ func (r *recorder) lose(c *call) error {
 	return nil
 }
 
-// clear empties c, keeping its name's buffer.
+// clear empties c, keeping its buffers.
 func (c *call) clear() {
-	*c = call{name: c.name[:0]}
+	*c = call{name: c.name[:0], stops: [2][]byte{c.stops[0][:0], c.stops[1][:0]}}
 }
 
 // settle writes what the thread sent during the call the result h ends. A
@@ -108,6 +116,7 @@ func (r *recorder) settle(h hdr, raw []byte) error {
 	if !c.pending() {
 		c.created = false // a mark left by a call that sent neither name nor file
 	}
+	defer c.forgetStops()
 	if err := r.settleOp(c, h); err != nil {
 		return err
 	}
@@ -134,7 +143,8 @@ func (r *recorder) settleOp(c *call, h hdr) error {
 	case h.ret >= 0:
 		return r.write(*op)
 	case h.n1&resultWatched == 0 || h.n1&resultFD != 0:
-		op.Err, op.Failed = -h.ret, true
+		op.Err, op.Failed, op.Resolved = -h.ret, true, true
+		op.ToResolved = op.To != "" && op.Kind != "symlink"
 		return r.write(*op)
 	}
 	if !hasFailure {
@@ -159,12 +169,15 @@ func (r *recorder) settleOpen(c *call, h hdr, raw []byte) error {
 				return err
 			}
 		}
-		open.Err, open.Failed = -h.ret, true
+		open.Err, open.Failed, open.Resolved = -h.ret, true, true
 		return r.write(*open)
 	case h.ret >= 0:
 		return nil
 	case hasName:
 		rec := failedOpen(string(c.name), c.cut, raw)
+		if h.n1&resultStop != 0 {
+			c.place(&rec, 1, c.cut)
+		}
 		r.setProgram(&rec)
 		return r.write(rec)
 	}
@@ -190,4 +203,66 @@ func (r *recorder) exited(tid uint32) error {
 // for.
 func isRestart(ret int32) bool {
 	return ret <= -512 && ret >= -516
+}
+
+// keepStop holds the K_STOP raw of the thread's call, one per name.
+func (c *call) keepStop(raw []byte) {
+	i := (binary.LittleEndian.Uint32(raw[offMode:]) - 1) & 1
+	c.stops[i], c.hasStop[i] = append(c.stops[i][:0], raw...), true
+}
+
+// forgetStops drops the K_STOPs of a call that ended.
+func (c *call) forgetStops() {
+	c.hasStop = [2]bool{}
+}
+
+// place moves the names of rec, a record of c's call, that sent (bit 0 the
+// first, bit 1 the second) says its K_STOPs place, to where the kernel took
+// them: the file each lookup reached, or the directory it stopped in followed
+// by the rest of the name. A name cut short, whose rest is lost, is placed
+// only at its file.
+func (c *call) place(rec *record, sent uint8, cut bool) {
+	for i := range c.stops {
+		if sent&(1<<i) != 0 && c.hasStop[i] {
+			placeName(rec, c.stops[i], cut)
+		}
+	}
+}
+
+// placeName moves the name of rec that the K_STOP raw is of.
+func placeName(rec *record, raw []byte, cut bool) {
+	le := binary.LittleEndian
+	at := int(int32(le.Uint32(raw[offPathLen:])))
+	dir, _ := components(raw[hdrLen:], int(raw[offN1]), raw[offTruncated] != 0)
+	reached := raw[offN2] == stopReached
+	from := func(passed string) (string, bool) {
+		switch {
+		case reached:
+			return tidy(dir), true
+		case cut || at < 0 || at > len(passed):
+			return "", false
+		}
+		return tidy(strings.TrimSuffix(dir, "/") + "/" + passed[at:]), true
+	}
+	switch le.Uint32(raw[offMode:]) {
+	case 1:
+		passed := orPath(rec.Name, rec.Path)
+		if p, ok := from(passed); ok {
+			rec.Path, rec.Name, rec.Resolved = p, passedName(passed, p), true
+		}
+	case 2:
+		passed := orPath(rec.ToName, rec.To)
+		if p, ok := from(passed); ok {
+			rec.To, rec.ToName, rec.ToResolved = p, passedName(passed, p), true
+		}
+	}
+}
+
+// orPath is the name a command passed, from a record's name field or, where
+// that is empty, the path it equals.
+func orPath(name, path string) string {
+	if name == "" {
+		return path
+	}
+	return name
 }

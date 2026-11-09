@@ -19,6 +19,12 @@
 #ifndef ENAMETOOLONG
 #define ENAMETOOLONG 36
 #endif
+#ifndef ENOENT
+#define ENOENT 2
+#endif
+#ifndef ELOOP
+#define ELOOP 40
+#endif
 
 /**
  * Whether @p ret is one of ERESTARTSYS to ERESTART_RESTARTBLOCK: a signal
@@ -237,8 +243,11 @@ static __always_inline int names_fd(struct path_call *p)
 	       (p->empty_dfd && bpf_probe_read_user(&c, 1, (void *)p->p1) == 0 && c == 0);
 }
 
-/** Emits the call as it ended with @p ret. */
-static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
+/**
+ * Emits the call as it ended with @p ret; @p stopped holds the names its exit
+ * sent K_STOP for (see stop_exit()).
+ */
+static __always_inline void op_exit(u32 slot, struct path_call *call, long ret, int stopped)
 {
 	if (is_restart(ret) || (ret < 0 && -ret == call->quiet_err))
 		return;
@@ -252,9 +261,10 @@ static __always_inline void op_exit(u32 slot, struct path_call *call, long ret)
 		return;
 	if (ret < 0)
 		e->path_len = -ret;
-	// So the reader can drop it for the path change its hook sent (RESULT_FD).
-	if (call->kind != K_ATTR_FAILED)
-		e->tid = (u32)bpf_get_current_pid_tgid();
+	e->n2 = stopped;
+	// So the reader can drop it for the path change its hook sent
+	// (RESULT_FD), or place a time or xattr change, which has no result.
+	e->tid = (u32)bpf_get_current_pid_tgid();
 	e->flags = call->val1;
 	e->gid = call->val2;
 	long r = call->p1 ? bpf_probe_read_user_str(e->data, PATH_LEN, (void *)call->p1) : 0;

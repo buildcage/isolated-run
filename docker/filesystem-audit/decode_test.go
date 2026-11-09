@@ -32,7 +32,7 @@ func TestDecodeGivesAnUnknownKindNoName(t *testing.T) {
 // The kinds the recorder takes from their header never become lines.
 func TestDecodeRefusesTheKindsThatSettleOthers(t *testing.T) {
 	for _, k := range []filesystemAuditKind{filesystemAuditKindK_RESULT, filesystemAuditKindK_EXIT,
-		filesystemAuditKindK_OPEN_NAME, filesystemAuditKindK_OPEN_CREATE} {
+		filesystemAuditKindK_OPEN_NAME, filesystemAuditKindK_OPEN_CREATE, filesystemAuditKindK_STOP} {
 		if _, err := decode(event{kind: k}.bytes()); err == nil {
 			t.Errorf("kind %d decoded to a line", k)
 		}
@@ -186,7 +186,7 @@ func TestDecode(t *testing.T) {
 		{
 			name: "attr through a descriptor (futimens)",
 			ev:   event{kind: filesystemAuditKindK_ATTR, comm: "touch", bases: 1, marks: markDescriptor, mode: 2, data: append([]byte("\x00"), comps("f", "tmp")...)},
-			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/f"},
+			want: record{Kind: "attr", Comm: "touch", Path: "/tmp/f", Resolved: true},
 		},
 		{
 			name: "write",
@@ -357,25 +357,25 @@ func TestDecode(t *testing.T) {
 			name: "attr through a memfd's descriptor (futimens)",
 			ev: event{kind: filesystemAuditKindK_ATTR, comm: "touch", bases: 1, mode: 1, marks: markInternal | markDescriptor,
 				data: append([]byte("\x00"), comps("memfd:x")...)},
-			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true},
+			want: record{Kind: "attr", Comm: "touch", Path: "memfd:x", Memfd: true, Resolved: true},
 		},
 		{
 			name: "failed chmod through a descriptor (fchmod)",
 			ev: event{kind: filesystemAuditKindK_CHMOD_FAILED, comm: "python3", pathRet: int32(unix.EROFS), bases: 1, marks: markDescriptor, mode: 3, flags: 0o4755,
 				data: append([]byte("\x00"), comps("env", "bin", "usr")...)},
-			want: record{Kind: "chmod", Comm: "python3", Path: "/usr/bin/env", Mode: "4755", Err: int32(unix.EROFS), Failed: true},
+			want: record{Kind: "chmod", Comm: "python3", Path: "/usr/bin/env", Mode: "4755", Err: int32(unix.EROFS), Failed: true, Resolved: true},
 		},
 		{
 			name: "failed truncate through a deleted file's descriptor (ftruncate)",
 			ev: event{kind: filesystemAuditKindK_TRUNCATE_FAILED, comm: "python3", pathRet: int32(unix.EPERM), bases: 1, mode: 2, marks: markUnlinked | markDescriptor,
 				data: append([]byte("\x00"), comps("f", "tmp")...)},
-			want: record{Kind: "truncate", Comm: "python3", Path: "/tmp/f", Deleted: true, Err: int32(unix.EPERM), Failed: true},
+			want: record{Kind: "truncate", Comm: "python3", Path: "/tmp/f", Deleted: true, Err: int32(unix.EPERM), Failed: true, Resolved: true},
 		},
 		{
 			name: "failed chown through a descriptor (fchown)",
 			ev: event{kind: filesystemAuditKindK_CHOWN_FAILED, comm: "python3", pathRet: int32(unix.EROFS), bases: 1, marks: markDescriptor, mode: 2, flags: 1, gid: 2,
 				data: append([]byte("\x00"), comps("hosts", "etc")...)},
-			want: record{Kind: "chown", Comm: "python3", Path: "/etc/hosts", Owner: "1:2", Err: int32(unix.EROFS), Failed: true},
+			want: record{Kind: "chown", Comm: "python3", Path: "/etc/hosts", Owner: "1:2", Err: int32(unix.EROFS), Failed: true, Resolved: true},
 		},
 		{
 			name: "attr on a name under a deleted directory keeps it unmarked",

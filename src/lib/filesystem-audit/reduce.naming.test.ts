@@ -248,12 +248,12 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["R cat ./a", "D rm /sym/work"]);
   });
 
-  it("shows a failed access through a symlinked prefix where the link leads, and a failed rm or mv of the link by its name", () => {
+  it("shows a failed access by name where a symlinked prefix leads, and one the kernel resolved where it got to", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "open", comm: "cat", path: "/work/link/a", access: "r", failed: true, err: 13 },
         { kind: "chmod", comm: "chmod", path: "/work/link", failed: true, err: 1 },
-        { kind: "unlink", comm: "rm", path: "/work/link", failed: true, err: 13 },
+        { kind: "unlink", comm: "rm", path: "/work/link", failed: true, err: 13, resolved: true },
         {
           kind: "rename",
           comm: "mv",
@@ -261,13 +261,14 @@ describe("createAuditSummary: path names", () => {
           to: "/home/old",
           failed: true,
           err: 13,
+          resolved: true,
+          to_resolved: true,
         },
       ),
       {
         cwd: ["/work/link", "/work/real"],
         workspace: ["/work"],
         home: ["/home/u-link", "/home/u"],
-        links: ["/work/link", "/home/u-link"],
       },
     );
     expect(lines(md)).toEqual([
@@ -279,10 +280,81 @@ describe("createAuditSummary: path names", () => {
     ]);
   });
 
-  it("shows a failed access by the link's name once the step replaced a symlinked prefix", () => {
+  it("shows a missing name where the kernel looked for it, under the directory made in a link's place too", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { kind: "open", comm: "cat", path: "/work/link/a", access: "r", failed: true, err: 13 },
+        {
+          kind: "open",
+          comm: "cat",
+          path: "/work/real/a",
+          access: "r",
+          failed: true,
+          err: 2,
+          resolved: true,
+        },
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "mkdir", comm: "mkdir", path: "/work/link" },
+        {
+          kind: "open",
+          comm: "cat",
+          path: "/work/link/b",
+          access: "r",
+          failed: true,
+          err: 2,
+          resolved: true,
+        },
+      ),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual([
+      "r cat ./a",
+      "W mkdir $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "r cat $GITHUB_WORKSPACE/link/b",
+    ]);
+  });
+
+  // In the directory made in the link's place, the kernel resolved the name
+  // whose parent was missing; the other keeps its name.
+  it("places each name of a failed rename or link by what the kernel resolved of it", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
+        { kind: "unlink", comm: "rm", path: "/work/link" },
+        { kind: "mkdir", comm: "mkdir", path: "/work/link" },
+        {
+          kind: "rename",
+          comm: "mv",
+          path: "/work/link/nodir/a",
+          to: "/work/link/b",
+          failed: true,
+          err: 2,
+          resolved: true,
+        },
+        {
+          kind: "link",
+          comm: "ln",
+          path: "/work/link/c",
+          to: "/work/link/nodir/d",
+          failed: true,
+          err: 2,
+          to_resolved: true,
+        },
+      ),
+      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
+    );
+    expect(lines(md)).toEqual([
+      "w mv ./b",
+      "l ln ./c",
+      "W mkdir $GITHUB_WORKSPACE/link",
+      "D rm $GITHUB_WORKSPACE/link",
+      "m mv $GITHUB_WORKSPACE/link/nodir/a",
+      "w ln $GITHUB_WORKSPACE/link/nodir/d",
+    ]);
+  });
+
+  it("shows a failed access by name under the prefix's real path even after the step replaced the link", () => {
+    const md = renderFilesystemAuditSummary(
+      jsonl(
         { kind: "unlink", comm: "rm", path: "/work/link" },
         { kind: "mkdir", comm: "mkdir", path: "/work/link" },
         { kind: "open", comm: "cat", path: "/work/link/b", access: "r", failed: true, err: 13 },
@@ -290,22 +362,10 @@ describe("createAuditSummary: path names", () => {
       { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
     );
     expect(lines(md)).toEqual([
-      "r! cat ./a",
+      "r! cat ./b",
       "W mkdir $GITHUB_WORKSPACE/link",
       "D rm $GITHUB_WORKSPACE/link",
-      "r! cat $GITHUB_WORKSPACE/link/b",
     ]);
-  });
-
-  it("does not take a change to a symlinked prefix's own metadata as replacing it", () => {
-    const md = renderFilesystemAuditSummary(
-      jsonl(
-        { kind: "chown", comm: "chown", path: "/work/link" },
-        { kind: "open", comm: "cat", path: "/work/link/a", access: "r", failed: true, err: 13 },
-      ),
-      { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
-    );
-    expect(lines(md)).toEqual(["r! cat ./a", "A chown $GITHUB_WORKSPACE/link"]);
   });
 
   it("hides the kernel's read of a file a failed exec through a symlinked prefix ran", () => {
@@ -319,7 +379,7 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["x a ./bin"]);
   });
 
-  it("takes a failed rm of a prefix spelled through a symlink further up as going through it", () => {
+  it("moves a failed rm of a prefix spelled through a symlink further up onto its real path", () => {
     const md = renderFilesystemAuditSummary(
       jsonl({ kind: "unlink", comm: "rm", path: "/sym/work", failed: true, err: 13 }),
       { workspace: ["/sym/work", "/real/work"], home: ["/home/u"] },
@@ -327,53 +387,15 @@ describe("createAuditSummary: path names", () => {
     expect(lines(md)).toEqual(["d! rm ."]);
   });
 
-  it("does not take a run by a name the tracer could not resolve as replacing the link", () => {
+  it("shows a run by a name the tracer could not resolve under the prefix's real path", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "exec", pid: 2, comm: "tool", path: "/work/link/bin/tool" },
-        {
-          kind: "open",
-          pid: 2,
-          comm: "tool",
-          path: "/work/link/a",
-          access: "r",
-          failed: true,
-          err: 13,
-        },
+        { kind: "exec", pid: 3, comm: "tool", path: "/work/link/bin/x", name: "x" },
       ),
       { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
     );
-    expect(lines(md)).toEqual(["r! tool ./a", "X tool ./bin/tool"]);
-  });
-
-  it("takes a symlinked workspace replaced as replacing a working directory spelled under it", () => {
-    const md = renderFilesystemAuditSummary(
-      jsonl(
-        { kind: "unlink", comm: "rm", path: "/sym/work" },
-        { kind: "open", comm: "cat", path: "/sym/work/sub/a", access: "r", failed: true, err: 13 },
-      ),
-      {
-        cwd: ["/sym/work/sub", "/real/work/sub"],
-        workspace: ["/sym/work", "/real/work"],
-        home: ["/home/u"],
-      },
-    );
-    expect(lines(md)).toEqual(["D rm /sym/work", "r! cat /sym/work/sub/a"]);
-  });
-
-  it("takes a working directory replaced as replacing a symlinked workspace it was spelled under", () => {
-    const md = renderFilesystemAuditSummary(
-      jsonl(
-        { kind: "write", comm: "touch", path: "/sym/work/sub/x" },
-        { kind: "open", comm: "cat", path: "/sym/work/b", access: "r", failed: true, err: 13 },
-      ),
-      {
-        cwd: ["/sym/work/sub", "/real/work/sub"],
-        workspace: ["/sym/work", "/real/work"],
-        home: ["/home/u"],
-      },
-    );
-    expect(lines(md)).toEqual(["r! cat /sym/work/b", "W touch /sym/work/sub/x"]);
+    expect(lines(md)).toEqual(["X tool ./bin/tool", "X tool $GITHUB_WORKSPACE/link/bin/x"]);
   });
 
   it("hides the kernel's read of a file a failed exec ran in the directory made in a link's place", () => {
@@ -386,7 +408,7 @@ describe("createAuditSummary: path names", () => {
       ),
       { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },
     );
-    expect(lines(md)).toEqual(["WD rm $GITHUB_WORKSPACE/link", "x a $GITHUB_WORKSPACE/link/bin"]);
+    expect(lines(md)).toEqual(["x a ./bin", "WD rm $GITHUB_WORKSPACE/link"]);
   });
 
   it("takes / as a working directory like any other", () => {

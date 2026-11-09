@@ -11,6 +11,7 @@
 #include "event.h"
 
 struct qstr {
+	u64 hash_len;
 	const unsigned char *name;
 } __attribute__((preserve_access_index));
 
@@ -139,6 +140,16 @@ struct kernel_siginfo {
 
 struct filename {
 	const char *name;
+	const char *uptr; ///< the caller's copy, NULL for a name the kernel made; gone in 7.0
+} __attribute__((preserve_access_index));
+
+/** A name lookup in progress (fs/namei.c). */
+struct nameidata {
+	struct path path;
+	struct qstr last;
+	unsigned int depth;
+	int total_link_count; ///< symlinks the lookup followed
+	struct filename *name;
 } __attribute__((preserve_access_index));
 
 struct linux_binprm {

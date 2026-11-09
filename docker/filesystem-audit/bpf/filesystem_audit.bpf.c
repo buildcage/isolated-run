@@ -6,9 +6,9 @@
  * the path operations (create, move, delete, attribute change), successes and
  * failures alike. It runs on any BTF-enabled kernel from 6.1 on, 6.4 on arm64,
  * the first to let fentry attach to a kernel function there. The programs are
- * in process.h, ops.h, open.h and io.h by what they follow, and the syscall
- * exit that settles their calls is here; what they share is in the other
- * headers.
+ * in process.h, ops.h, open.h, io.h and namei.h by what they follow, and the
+ * syscall exit that settles their calls is here; what they share is in the
+ * other headers.
  */
 
 #include <linux/types.h>
@@ -49,6 +49,7 @@ ____##name(u32 slot, unsigned long long *ctx, ##args)
 #include "ops.h"
 #include "open.h"
 #include "io.h"
+#include "namei.h"
 
 /**
  * Sends the return of syscall @p nr, with @p bits (RESULT_*). A failed
@@ -99,9 +100,12 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 	struct path_call call = {}; // so no field reaches the stack unset
 	long nr = sys_nr(regs);
 	int watched = classify(nr, regs, &call);
+	int stopped = watched || is_open_nr(nr) ?
+			      stop_exit(slot, nr, ret, watched && call.kind == K_ATTR_FAILED) :
+			      0;
 	// Before the call's K_RESULT, which decides whether they stand.
 	if (watched)
-		op_exit(slot, &call, ret);
+		op_exit(slot, &call, ret, stopped);
 	if (ret == -EPERM && !watched && !is_open_nr(nr) && is_refusable(nr))
 		syscall_refused(slot, nr, 0);
 	if (is_open_nr(nr)) {
@@ -109,7 +113,7 @@ int BPF_PROG(on_sys_exit, struct pt_regs *regs, long ret)
 		// or tracer returning ENAMETOOLONG records one too.
 		if (ret == -ENAMETOOLONG)
 			open_name(slot, (const char *)sys_arg(regs, nr == nr_openat || nr == nr_openat2), 1);
-		send_result(slot, regs, nr, ret, RESULT_OPEN);
+		send_result(slot, regs, nr, ret, RESULT_OPEN | (stopped & 1 ? RESULT_STOP : 0));
 	} else if ((watched && call.kind != K_ATTR_FAILED) || other_hooked(nr)) {
 		u8 bits = watched ? RESULT_WATCHED : 0;
 		if (watched && ret < 0 && names_fd(&call))

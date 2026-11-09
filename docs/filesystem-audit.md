@@ -253,25 +253,27 @@ each has rows of its own.
 **Which path.**
 
 - A program is shown under the file it ran, with symlinks followed.
-- A failed access is shown under the name the command passed, joined to its working directory, or
-  the directory it passed by descriptor, without resolving `..`. One made through a file descriptor
-  alone, such as `fchmod`, is shown under that file's path.
-- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, an access through it
-  is shown where it leads, and so is one through the working directory as its input spells it,
-  symlinks and a leading `..` included. Other symlinks are not followed for this. A successful
-  access is recorded with symlinks resolved, so a failed access through the symlink and a
-  successful one to the same file share a row.
+- A failed access, and a time or xattr change, are shown where the kernel took them, with symlinks
+  followed, where the recording says so (`resolved`): under the file the kernel reached, as for a
+  `cat` refused for the file's mode; for an `rm`, `rmdir`, `mv`, `mkdir`, `mknod` or `ln` whose
+  directory was found, under that directory and the name it acts on, which these never follow, so
+  a failed `rmdir` of a symlink shows the link; and for a name the kernel could not finish looking
+  up, under the directory it found a name missing in or that refused it, followed by the rest of
+  the name. One the kernel took without following a symlink, which its name already places, one
+  that failed inside a symlink's target, as through a dangling symlink, and one refused by the
+  directory a relative name starts in are shown under the name the command passed, joined to its
+  working directory, or the directory it passed by descriptor, without resolving `..`. One made through a file descriptor alone, such as
+  `fchmod`, is shown under that file's path.
+- Where `$GITHUB_WORKSPACE`, `$HOME` or the working directory is a symlink, a failed access shown
+  by name through it is shown where it leads, and so is one through the working directory as its
+  input spells it, symlinks and a leading `..` included. Other symlinks are not followed for this.
   All three are resolved before the command runs, as are the tool cache and the runner files.
   `./` stays the directory the step started in, whatever the command does with `cd`, and swapping
   one of them for a symlink later does not change what `./` or `$GITHUB_WORKSPACE/` stands for.
-- Once the step removes or replaces such a symlink, an access at or below the symlink's path is
-  shown under that path instead of where the link led, even if the step makes a symlink there
-  again. An `rm`, `rmdir`, `mv` or `mkdir` of the symlink's own path, or an `ln` that makes it,
-  is shown there even before that, failed or not, since these never follow it. A call that
-  follows a symlink unless told not to, such as `chown` or `open`, is taken as following it.
   After `rm` of a `working-directory` link in the workspace and a `mkdir` of the same name, the
   `rm`, the `mkdir` and what is done in the new directory all show under
-  `$GITHUB_WORKSPACE/<link>`, not `./`.
+  `$GITHUB_WORKSPACE/<link>`, not `./`, as does a missing name looked for there. A failed access
+  there shown by name still shows under `./`, where the link led when the step started.
 - A command reading or writing a file it inherited or was passed, such as a shell's redirection, is
   shown on its own row under that file's path.
 - A directory has no row of its own where everything done to it was also done below it and none of
@@ -646,9 +648,9 @@ A host that falls short fails the step before the command runs, with the reason;
   program in a step without the audit.
 - **A small cost to the whole host.** A typical build, which spends little of its time in system
   calls, barely slows down. While the step runs, though, the tracer's hooks run on every system call
-  on the runner host, since a hook has to run to tell whose call it is. Each call takes roughly 60
-  to 250 nanoseconds longer, opening and closing a file the most. A GitHub-hosted runner runs one
-  job, so only that job pays. On a self-hosted runner shared by several jobs, they all do.
+  on the runner host, since a hook has to run to tell whose call it is, so each call takes a little
+  longer, opening a file or looking up a path the most. A GitHub-hosted runner runs one job, so
+  only that job pays. On a self-hosted runner shared by several jobs, they all do.
 
 ## Troubleshooting
 
@@ -786,10 +788,10 @@ the tracer learned the name:
 - **Failed calls.** A delete, move, mkdir, mknod, symlink, link, chmod, chown or truncate counts as
   done only if its syscall succeeds; one the kernel refuses is recorded as failed. A failed record
   means only that the call returned an error: the step can install its own seccomp filter to fail a
-  call before the kernel looks at the file. An open refused after the kernel reached its file is
-  recorded as failed with the path it resolved.
-- **Names the command passed.** Any other failed call, and an attribute change through
-  `utimensat`, `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded under the
+  call before the kernel looks at the file.
+- **Names the command passed.** A failed call, and an attribute change through `utimensat`,
+  `utime`, `utimes`, `futimesat`, `setxattr` or `lsetxattr`, are recorded where the kernel took
+  the name, as `resolved` marks. Where the tracer did not see that, they are recorded under the
   name the command passed, joined to its working directory or directory descriptor without
   resolving `..`. The artifact keeps that name as `name` where it differs from `path`. These names
   are best-effort, since they are read from the command's memory when the call returns. Before
@@ -899,43 +901,65 @@ Unlike the summary, it also lists a directory that was made and then written und
 
 ### Fields
 
-| Field        | On                                                              | Notes                                                                                                                                                                                                      |
-| ------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `t`          | every line but `end`                                            | ISO 8601 UTC, to the millisecond                                                                                                                                                                           |
-| `kind`       | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
-| `pid`        | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
-| `ppid`       | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
-| `nspid`      | `fork` and `exec`                                               | the process's number in its own PID namespace, which its `/proc` directory goes by in the sandbox                                                                                                          |
-| `comm`       | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
-| `program`    | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
-| `path`       | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
-| `to`         | `rename`, `link`, `symlink`                                     | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                                                                         |
-| `name`       | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
-| `to_name`    | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
-| `access`     | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
-| `flags`      | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` on an open that reached its file; absent on a failed one that asked for none                                                         |
-| `mode`       | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
-| `owner`      | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
-| `failed`     | a failed operation                                              | `true`                                                                                                                                                                                                     |
-| `err`        | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
-| `image`      | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
-| `memfd`      | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
-| `deleted`    | a deleted or never-named file                                   | a file deleted while it was open, or created without a name and never given one                                                                                                                            |
-| `exchange`   | `rename`                                                        | a swap of two paths, which shows `M` on both in the summary                                                                                                                                                |
-| `syscall`    | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
-| `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
-| `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
-| `rule`       | a line a rule matched, when `expected-filesystem-rules` is set  | where the rule that matched it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined its lines, such as outside a `\|` block |
-| `unexpected` | a line no rule matched, when `expected-filesystem-rules` is set | some access of the line, such as one side of a link or of a rename, that no rule matched                                                                                                                   |
+| Field         | On                                                              | Notes                                                                                                                                                                                                      |
+| ------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `t`           | every line but `end`                                            | ISO 8601 UTC, to the millisecond                                                                                                                                                                           |
+| `kind`        | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
+| `pid`         | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
+| `ppid`        | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
+| `nspid`       | `fork` and `exec`                                               | the process's number in its own PID namespace, which its `/proc` directory goes by in the sandbox                                                                                                          |
+| `comm`        | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
+| `program`     | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
+| `path`        | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
+| `to`          | `rename`, `link`, `symlink`                                     | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                                                                         |
+| `name`        | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
+| `to_name`     | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
+| `access`      | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
+| `flags`       | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` on an open that reached its file; absent on a failed one that asked for none                                                         |
+| `mode`        | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
+| `owner`       | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
+| `failed`      | a failed operation                                              | `true`                                                                                                                                                                                                     |
+| `err`         | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
+| `resolved`    | a failed operation or an `attr`, where known                    | `path` has its symlinks resolved, as a successful operation's has; see below                                                                                                                               |
+| `to_resolved` | a failed `rename` or `link`, where known                        | as `resolved`, for `to`                                                                                                                                                                                    |
+| `image`       | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
+| `memfd`       | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
+| `deleted`     | a deleted or never-named file                                   | a file deleted while it was open, or created without a name and never given one                                                                                                                            |
+| `exchange`    | `rename`                                                        | a swap of two paths, which shows `M` on both in the summary                                                                                                                                                |
+| `syscall`     | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
+| `compat`      | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
+| `killed`      | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
+| `rule`        | a line a rule matched, when `expected-filesystem-rules` is set  | where the rule that matched it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined its lines, such as outside a `\|` block |
+| `unexpected`  | a line no rule matched, when `expected-filesystem-rules` is set | some access of the line, such as one side of a link or of a rename, that no rule matched                                                                                                                   |
 
-A field is absent where it does not apply, and `failed`, `image`, `memfd`, `deleted`, `exchange`
-and `unexpected` are absent rather than `false`. Without `expected-filesystem-rules`, no line has
+A field is absent where it does not apply, and `failed`, `resolved`, `to_resolved`, `image`,
+`memfd`, `deleted`, `exchange` and `unexpected` are absent rather than `false`. Without `expected-filesystem-rules`, no line has
 `rule` or `unexpected`, and with them a line the rules are not matched against has neither.
 
 `path` is absolute except for a file in memory only (`memfd:…`), a pipe, socket or other file the
 kernel names without a path (such as `pipe:[1234]`), a path too deep to record in full (`…/…`), and
 the relative name of a failed call or an attribute change whose directory could not be read. A
 failed open's `path` and `name` end in `…` where its name was too long to record in full.
+
+The `path` of a failed call or an attribute change is the name it passed, joined to its directory
+when relative, unless `resolved` says where the kernel took it, with symlinks followed:
+
+- a file the kernel reached, as for an `open` refused for the file's mode or a `chmod` refused for
+  its owner: that file.
+- an `unlink`, `rmdir`, `rename`, `mkdir`, `mknod`, `symlink`, or a `link`'s new name, whose
+  directory was found: that directory followed by the last name, which these never follow.
+- a name the kernel could not finish looking up: the one it had stepped into when that refused it
+  (`EACCES`, `ENOTDIR`), or else the directory it was in, as when a name was missing (`ENOENT`), a
+  symlink led too deep (`ELOOP`), or an `open` could not create its file there, followed by the
+  rest of the name.
+- a call through a descriptor alone: that file.
+
+A name the kernel took without following a symlink already says where it went, so it is kept as
+passed and not marked. One that failed inside a symlink's target, as through a dangling symlink,
+keeps the name as passed too, and so does one refused by the directory a relative name starts in.
+Where `link` leads to `/real`, `cat link/missing` records `/real/missing`, `cat link/dir/x` where
+`dir` refuses a search records `/real/dir/x`, and a failed `rmdir link` records `link` itself, by
+name.
 
 A byte of a name that is not UTF-8 is written as a lone surrogate, `\udcff` for the byte `0xff`, as
 Python's `surrogateescape` does, so `os.fsencode` gives back the name's exact bytes. jq prints it as

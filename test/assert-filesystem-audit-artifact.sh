@@ -80,6 +80,20 @@ holds "An xattr set through a descriptor is recorded" \
 holds "A symlink's longest target is recorded whole" \
   'any(.[]; .kind == "symlink" and (.path | endswith("/long-link")) and (.to | length) == 4095)'
 
+# A name missing beneath a symlink is recorded where the kernel looked for it.
+for kind in open unlink rename; do
+  holds "A failed $kind of a name missing beneath a symlink is recorded where the link leads" \
+    "any(.[]; .kind == \"$kind\" and .err == 2 and .resolved and (.path | test(\"/linked/[a-z]+-beneath-link$\")) and (.name | test(\"/linked-link/[a-z]+-beneath-link$\")))"
+done
+holds "An open refused by a directory beneath a symlink is recorded where the link leads" \
+  'any(.[]; .kind == "open" and .err == 13 and .resolved and (.path | endswith("/linked/shut/refused-beneath-link")))'
+holds "An open refused a new file beneath a symlink is recorded where the link leads" \
+  'any(.[]; .kind == "open" and .err == 13 and .resolved and (.path | endswith("/linked/closed/made-beneath-link")))'
+holds "A time change through a symlink is recorded where the link leads" \
+  'any(.[]; .kind == "attr" and (.failed | not) and .resolved and (.path // "" | endswith("/linked/touched-beneath-link")) and (.name // "" | endswith("/linked-link/touched-beneath-link")))'
+holds "A failed rmdir of a symlink is recorded under the link itself" \
+  'any(.[]; .kind == "rmdir" and .err == 20 and (.path | endswith("/linked-link")))'
+
 # Refused after the tracer's hook: no mapping, and only the failed open.
 holds_not "A refused mapping is not recorded" \
   'any(.[]; .kind == "mmap" and (.path // "" | endswith("/ro-mapped.bin")))'

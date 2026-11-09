@@ -4,32 +4,35 @@ import { describe, it, expect } from "vitest";
 
 import { classify, type AuditRecord } from "./record.ts";
 
-const ok = (letter: string, path: string, named = false) => ({
+const ok = (letter: string, path: string) => ({
   letter,
   path,
   failed: false,
   perm: false,
-  named,
+  resolved: true,
 });
 
 describe("classify", () => {
   it.each([
-    ["read", "R", false],
-    ["write", "W", false],
-    ["exec", "X", false],
-    ["mkdir", "W", true],
-    ["mknod", "W", true],
-    ["truncate", "W", false],
-    ["symlink", "W", true],
-    ["unlink", "D", true],
-    ["rmdir", "D", true],
-    ["chmod", "A", false],
-    ["chown", "A", false],
-    ["attr", "A", false],
-  ])("names %s by %s, done or failed", (kind, letter, named) => {
-    expect(classify({ kind, path: "/a" })).toStrictEqual([ok(letter, "/a", named)]);
-    expect(classify({ kind, path: "/a", failed: true, err: 2 })).toStrictEqual([
-      { letter, path: "/a", failed: true, perm: false, named },
+    ["read", "R"],
+    ["write", "W"],
+    ["exec", "X"],
+    ["mkdir", "W"],
+    ["mknod", "W"],
+    ["truncate", "W"],
+    ["symlink", "W"],
+    ["unlink", "D"],
+    ["rmdir", "D"],
+    ["chmod", "A"],
+    ["chown", "A"],
+    ["attr", "A"],
+  ])("names %s by %s, done or failed", (kind, letter) => {
+    // A run's file is the one the tracer saw it run, with the name it was
+    // given, and a time or xattr change's where the tracer placed it.
+    const name = kind === "exec" ? { name: "a" } : kind === "attr" ? { resolved: true } : {};
+    expect(classify({ kind, path: "/a", ...name })).toStrictEqual([ok(letter, "/a")]);
+    expect(classify({ kind, path: "/a", ...name, failed: true, err: 2 })).toStrictEqual([
+      { letter, path: "/a", failed: true, perm: false, resolved: kind === "attr" },
     ]);
   });
 
@@ -44,16 +47,16 @@ describe("classify", () => {
     const failed = (access: string | undefined, err: number) =>
       classify({ kind: "open", path: "/a", access, failed: true, err });
     expect(failed("r", 2)).toStrictEqual([
-      { letter: "R", path: "/a", failed: true, perm: false, named: false },
+      { letter: "R", path: "/a", failed: true, perm: false, resolved: false },
     ]);
     expect(failed(undefined, 2)).toStrictEqual([
-      { letter: "R", path: "/a", failed: true, perm: false, named: false },
+      { letter: "R", path: "/a", failed: true, perm: false, resolved: false },
     ]);
     expect(failed("rw", 13)).toStrictEqual([
-      { letter: "RW", path: "/a", failed: true, perm: true, named: false },
+      { letter: "RW", path: "/a", failed: true, perm: true, resolved: false },
     ]);
     expect(failed("wc", 30)).toStrictEqual([
-      { letter: "W", path: "/a", failed: true, perm: true, named: false },
+      { letter: "W", path: "/a", failed: true, perm: true, resolved: false },
     ]);
   });
 
@@ -64,35 +67,35 @@ describe("classify", () => {
 
   it("moves a rename's source and writes its new name, and moves both paths of an exchange", () => {
     expect(classify({ kind: "rename", path: "/a", to: "/b" })).toStrictEqual([
-      ok("M", "/a", true),
-      ok("W", "/b", true),
+      ok("M", "/a"),
+      ok("W", "/b"),
     ]);
     expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 30 })).toStrictEqual(
       [
-        { letter: "M", path: "/a", failed: true, perm: true, named: true },
-        { letter: "W", path: "/b", failed: true, perm: true, named: true },
+        { letter: "M", path: "/a", failed: true, perm: true, resolved: false },
+        { letter: "W", path: "/b", failed: true, perm: true, resolved: false },
       ],
     );
     // Across mounts, which mv then copies instead.
     expect(classify({ kind: "rename", path: "/a", to: "/b", failed: true, err: 18 })).toStrictEqual(
       [
-        { letter: "M", path: "/a", failed: true, perm: false, named: true },
-        { letter: "W", path: "/b", failed: true, perm: false, named: true },
+        { letter: "M", path: "/a", failed: true, perm: false, resolved: false },
+        { letter: "W", path: "/b", failed: true, perm: false, resolved: false },
       ],
     );
     expect(classify({ kind: "rename", path: "/a", to: "/b", exchange: true })).toStrictEqual([
-      ok("M", "/a", true),
-      ok("M", "/b", true),
+      ok("M", "/a"),
+      ok("M", "/b"),
     ]);
   });
 
   it("writes a hard link's new name and links the file it names", () => {
     expect(classify({ kind: "link", path: "/a", to: "/b" })).toStrictEqual([
-      ok("W", "/b", true),
+      ok("W", "/b"),
       ok("L", "/a"),
     ]);
     expect(classify({ kind: "link", path: "/a", to: "/b", memfd: true })).toStrictEqual([
-      ok("W", "/b", true),
+      ok("W", "/b"),
     ]);
   });
 
@@ -100,13 +103,40 @@ describe("classify", () => {
     const link = (err: number) =>
       classify({ kind: "link", path: "/a", to: "/b", failed: true, err });
     expect(link(1)).toStrictEqual([
-      { letter: "W", path: "/b", failed: true, perm: false, named: true },
-      { letter: "L", path: "/a", failed: true, perm: true, named: false },
+      { letter: "W", path: "/b", failed: true, perm: false, resolved: false },
+      { letter: "L", path: "/a", failed: true, perm: true, resolved: false },
     ]);
     expect(link(13)).toStrictEqual([
-      { letter: "W", path: "/b", failed: true, perm: true, named: true },
-      { letter: "L", path: "/a", failed: true, perm: false, named: false },
+      { letter: "W", path: "/b", failed: true, perm: true, resolved: false },
+      { letter: "L", path: "/a", failed: true, perm: false, resolved: false },
     ]);
+  });
+
+  it("takes a failure's path as resolved where the tracer says so, each name by its own", () => {
+    const resolvedOf = (r: AuditRecord) => classify(r).map((c) => c.resolved);
+    expect(
+      resolvedOf({ kind: "unlink", path: "/a", failed: true, err: 2, resolved: true }),
+    ).toStrictEqual([true]);
+    for (const kind of ["rename", "link"]) {
+      const r = { kind, path: "/a", to: "/b", failed: true, err: 2 };
+      expect(resolvedOf({ ...r, to_resolved: true })).toStrictEqual(
+        kind === "rename" ? [false, true] : [true, false],
+      );
+      expect(resolvedOf({ ...r, resolved: true })).toStrictEqual(
+        kind === "rename" ? [true, false] : [false, true],
+      );
+    }
+  });
+
+  it("takes a time or xattr change as resolved only where the tracer says so", () => {
+    expect(classify({ kind: "attr", path: "/a" })[0]?.resolved).toBe(false);
+    expect(classify({ kind: "attr", path: "/a", resolved: true })[0]?.resolved).toBe(true);
+    expect(classify({ kind: "chmod", path: "/a" })[0]?.resolved).toBe(true);
+  });
+
+  it("takes a run as resolved only where the tracer saw its file", () => {
+    expect(classify({ kind: "exec", path: "/a", name: "a" })[0]?.resolved).toBe(true);
+    expect(classify({ kind: "exec", path: "/a" })[0]?.resolved).toBe(false);
   });
 
   it("leaves out a record with no letter or no path", () => {
@@ -139,6 +169,8 @@ const DECLARED: Record<keyof AuditRecord, true> = {
   access: true,
   err: true,
   failed: true,
+  resolved: true,
+  to_resolved: true,
   image: true,
   memfd: true,
   deleted: true,

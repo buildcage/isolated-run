@@ -1,5 +1,5 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute } from "node:path";
 
 import type { Annotation } from "#core/lib/actions/annotation.ts";
 import { errorMessage } from "#core/lib/errors.ts";
@@ -131,8 +131,6 @@ export interface AuditPrefixes {
   toolCache: string[];
   /** Where each runner file is written when not mediated. */
   runnerFiles: Record<MediatedVariable, string[]>;
-  /** The spellings above whose last component is itself a symlink. */
-  links: string[];
 }
 
 // The recorded paths are canonical; $GITHUB_WORKSPACE and $HOME may not be.
@@ -160,15 +158,6 @@ function inputSpellings(input: string, workspace: string[]): string[] {
   return isAbsolute(input) ? [tidy(input)] : workspace.map((w) => tidy(`${w}/${input}`));
 }
 
-// The spellings whose last component is itself a symlink, which rm and the
-// like act on rather than follow. Any other comes from a symlink further up.
-function links(spellings: string[], realpath: (p: string) => string): string[] {
-  const real = spellings.at(-1);
-  return spellings
-    .slice(0, -1)
-    .filter((s) => basename(s) !== ".." && join(realpath(dirname(s)), basename(s)) !== real);
-}
-
 /** The prefixes for `baseDir`, the working directory's real path. */
 export function resolveAuditPrefixes(
   env: NodeJS.ProcessEnv,
@@ -189,7 +178,6 @@ export function resolveAuditPrefixes(
     runnerFiles: Object.fromEntries(
       MEDIATED_VARIABLES.map((variable) => [variable, spellings(env[variable], realpath)]),
     ) as Record<MediatedVariable, string[]>,
-    links: [cwd, workspace, home].flatMap((s) => links(s, realpath)),
   };
 }
 
@@ -319,7 +307,6 @@ export function readStepFilesystemAudit(
     home: prefixes.home,
     toolCache: prefixes.toolCache,
     runnerFiles: runnerFiles(prefixes, mediated),
-    links: prefixes.links,
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     // Only a prepared directory takes the proposed rules.
     propose: prepared,
