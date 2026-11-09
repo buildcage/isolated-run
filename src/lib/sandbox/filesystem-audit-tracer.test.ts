@@ -283,7 +283,7 @@ describe("startFilesystemAudit", () => {
     // The detach grace never runs out here.
     const sleep = vi.fn((ms: number) => {
       if (ms > 1_000) return new Promise<void>(() => {});
-      tail += '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n';
+      tail += '{"kind":"end","dropped":0,"untracked":0,"hostMissed":0}\n';
       return Promise.resolve();
     });
 
@@ -324,7 +324,7 @@ describe("startFilesystemAudit", () => {
       remove,
       exec,
       readFile: tracerFiles("999\n"),
-      readTail: () => '{"kind":"end","dropped":0,"untracked":0,"host_missed":0}\n',
+      readTail: () => '{"kind":"end","dropped":0,"untracked":0,"hostMissed":0}\n',
     });
     await handle.stop();
 

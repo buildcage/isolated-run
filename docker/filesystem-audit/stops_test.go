@@ -152,7 +152,7 @@ func TestRecorderPlacesEachNameOfARenameItsExitSentAStopFor(t *testing.T) {
 		if got[0]["path"] != tc.path || got[0]["to"] != tc.to {
 			t.Fatalf("sent %d: lines = %v, want %s to %s", tc.sent, got, tc.path, tc.to)
 		}
-		if (got[0]["resolved"] == true) != (tc.sent&1 != 0) || (got[0]["to_resolved"] == true) != (tc.sent&2 != 0) {
+		if (got[0]["resolved"] == true) != (tc.sent&1 != 0) || (got[0]["toResolved"] == true) != (tc.sent&2 != 0) {
 			t.Fatalf("sent %d: lines = %v, want resolved only where moved", tc.sent, got)
 		}
 	}

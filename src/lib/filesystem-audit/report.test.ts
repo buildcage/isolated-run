@@ -43,7 +43,7 @@ describe("readStepFilesystemAudit", () => {
     const { deps: d, summaries } = deps({
       raw: [
         JSON.stringify({ kind: "write", comm: "node", path: "/work/a.txt" }),
-        JSON.stringify({ kind: "end", dropped: 0, untracked: 0, host_missed: 2 }),
+        JSON.stringify({ kind: "end", dropped: 0, untracked: 0, hostMissed: 2 }),
       ].join("\n"),
     });
 
@@ -109,7 +109,12 @@ describe("readStepFilesystemAudit", () => {
 
   it("counts the summary's times from the proxy's start", async () => {
     const { deps: d, summaries } = deps({
-      raw: JSON.stringify({ t: "2026-10-06T00:00:02.500Z", kind: "read", comm: "a", path: "/w/x" }),
+      raw: JSON.stringify({
+        time: "2026-10-06T00:00:02.500Z",
+        kind: "read",
+        comm: "a",
+        path: "/w/x",
+      }),
     });
 
     await reportStepFilesystemAudit(

@@ -119,7 +119,7 @@ describe("classify", () => {
     ).toStrictEqual([true]);
     for (const kind of ["rename", "link"]) {
       const r = { kind, path: "/a", to: "/b", failed: true, err: 2 };
-      expect(resolvedOf({ ...r, to_resolved: true })).toStrictEqual(
+      expect(resolvedOf({ ...r, toResolved: true })).toStrictEqual(
         kind === "rename" ? [false, true] : [true, false],
       );
       expect(resolvedOf({ ...r, resolved: true })).toStrictEqual(
@@ -156,7 +156,7 @@ const contract = readFileSync(
   .map((l) => JSON.parse(l) as Record<string, unknown>);
 
 const DECLARED: Record<keyof AuditRecord, true> = {
-  t: true,
+  time: true,
   kind: true,
   pid: true,
   ppid: true,
@@ -170,18 +170,18 @@ const DECLARED: Record<keyof AuditRecord, true> = {
   err: true,
   failed: true,
   resolved: true,
-  to_resolved: true,
+  toResolved: true,
   image: true,
   memfd: true,
   deleted: true,
   dropped: true,
   untracked: true,
-  host_missed: true,
+  hostMissed: true,
   exchange: true,
   syscall: true,
   killed: true,
 };
-const IGNORED = new Set(["to_name", "flags", "mode", "owner", "compat"]);
+const IGNORED = new Set(["toName", "flags", "mode", "owner", "compat"]);
 const NOT_ACCESS = new Set(["fork", "syscall", "end"]);
 
 describe("the tracer's recording", () => {

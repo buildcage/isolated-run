@@ -6,6 +6,7 @@
  * and realpath forms) and hands them in.
  */
 
+import { formatElapsedFixed } from "#core/lib/report/elapsed-time.ts";
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { fmtFlags, newAgg, type Access, type Agg } from "./agg.ts";
@@ -54,7 +55,8 @@ const SENSITIVE_IN_HOME = [".ssh", ".aws", ".config", ".docker", ".kube", ".gnup
 const SYSCALL_PREFIX = "syscall:";
 
 export interface SummaryOptions extends Prefixes {
-  /** The proxy's start, in epoch seconds. */
+  /** The proxy's start, in epoch seconds, which each line the sink takes
+   *  gives its elapsed time from. */
   startedAt?: number;
   /** expected-filesystem-rules, when given: each access is matched against them. */
   rules?: RuleMatcher;
@@ -442,7 +444,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
     if (r.kind === "end") {
       ended = true;
       lost = Boolean(r.dropped || r.untracked);
-      hostMissed = typeof r.host_missed === "number" ? r.host_missed : 0;
+      hostMissed = typeof r.hostMissed === "number" ? r.hostMissed : 0;
       return undefined;
     }
     // A refusal that did not kill the program is left to the artifact: many
@@ -454,7 +456,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       const path = `${SYSCALL_PREFIX}32-bit ${name} (killed)`;
       const comm = commandKey(r.pid, r.comm ?? "");
       const key = keyOf(comm, path);
-      const t = Date.parse(r.t ?? "");
+      const t = Date.parse(r.time ?? "");
       let row = killed.get(key);
       if (!row) {
         const { text, field } = commands.get(comm)!;
@@ -502,7 +504,7 @@ export function createAuditSummary(prefixes: SummaryOptions): {
       if (!c.failed && r.kind !== "exec" && !hasKnownStart(path)) continue;
       // A read of what the process loaded prints nothing.
       if (!c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
-      const t = Date.parse(r.t ?? "");
+      const t = Date.parse(r.time ?? "");
       const x: Access = {
         comm: commandKey(r.pid, r.comm ?? ""),
         path: walk(escaped(normalize(path, nsPids.get(r.pid)))),
@@ -672,6 +674,20 @@ function withMark(line: string, mark: RuleMark): string {
   return `${line.slice(0, -1)},${field}}`;
 }
 
+const TIME = '{"time":"';
+
+// The line with its time since the proxy started right after its time, which
+// the tracer writes first; the end line has none.
+function withElapsed(line: string, startedAt: number): string {
+  if (!line.startsWith(TIME)) return line;
+  // A kept line is JSON, so its time's string closes.
+  const end = line.indexOf('"', TIME.length);
+  const ms = Date.parse(line.slice(TIME.length, end));
+  if (Number.isNaN(ms)) return line;
+  const elapsed = formatElapsedFixed(ms / 1000 - startedAt);
+  return `${line.slice(0, end + 1)},"elapsed":"${elapsed}"${line.slice(end + 1)}`;
+}
+
 export interface ReducedRecording {
   /** Undefined when summarizing failed, for summaryError. */
   summary: AuditSummary | undefined;
@@ -730,7 +746,9 @@ export function reduceRecording(
     if (isRecord(r) && r.kind === "end") ended = true;
     const kept = stripper.filter(line, r);
     const mark = summarize(() => summary.add(kept ? kept.record : r, kept !== undefined));
-    if (kept) sink?.(mark ? withMark(kept.line, mark) : kept.line);
+    if (!kept || !sink) return;
+    const out = mark ? withMark(kept.line, mark) : kept.line;
+    sink(options.startedAt === undefined ? out : withElapsed(out, options.startedAt));
   });
   // The tracer has stopped, so the two reads see the same lines, which the
   // line positions the first pass found depend on.

@@ -229,7 +229,7 @@ describe("readStepFilesystemAudit: expected-filesystem-rules", () => {
   it("leaves the step alone when the kernel skipped hooks, which counts the whole host", () => {
     const note = annotation();
     const { deps: d } = deps({
-      raw: raw.replace('"untracked":0', '"untracked":0,"host_missed":2'),
+      raw: raw.replace('"untracked":0', '"untracked":0,"hostMissed":2'),
     });
 
     const read = readAudit(

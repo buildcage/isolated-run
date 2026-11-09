@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { feed, machinery, PREFIXES, SCRATCH_BASE, shell } from "../test/filesystem-audit.ts";
 import { createAuditSummary, reduceRecording, type SummaryOptions } from "./reduce.ts";
+import { RuleMatcher } from "./rules.ts";
 
 const step = JSON.stringify({ kind: "read", pid: 3, comm: "cat", path: "/work/a" });
 
@@ -58,6 +59,36 @@ describe("reduceRecording", () => {
       true,
     );
     expect(reduceRecording(feed(step), SCRATCH_BASE, PREFIXES).ended).toBe(false);
+  });
+
+  it("gives each line the sink takes its time since the proxy started, after its time", () => {
+    const at = (time: string) => JSON.stringify({ time, kind: "read", pid: 3, path: "/work/a" });
+    const end = JSON.stringify({ kind: "end", dropped: 0, untracked: 0 });
+    const kept = (options: SummaryOptions, ...lines: string[]): string[] => {
+      const out: string[] = [];
+      reduceRecording(feed(machinery, shell, ...lines), SCRATCH_BASE, options, () => (line) => {
+        out.push(line);
+      });
+      return out;
+    };
+    const startedAt = Date.parse("2026-01-01T00:00:00Z") / 1000;
+    expect(
+      kept(
+        { ...PREFIXES, startedAt, rules: new RuleMatcher([]) },
+        at("2026-01-01T01:02:03.456Z"),
+        at("2025-12-31T23:59:59.000Z"),
+        at("garbage"),
+        end,
+      ),
+    ).toStrictEqual([
+      '{"time":"2026-01-01T01:02:03.456Z","elapsed":"01:02:03.456","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
+      '{"time":"2025-12-31T23:59:59.000Z","elapsed":"00:00:00.000","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
+      '{"time":"garbage","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
+      end,
+    ]);
+    expect(kept(PREFIXES, at("2026-01-01T01:02:03.456Z"))).toStrictEqual([
+      at("2026-01-01T01:02:03.456Z"),
+    ]);
   });
 
   it("reduces with no sink", () => {

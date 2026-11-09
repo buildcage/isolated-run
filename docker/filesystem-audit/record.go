@@ -22,7 +22,7 @@ type record struct {
 	// directory. ToName is the same for To.
 	Name   string `json:"name,omitempty"`
 	To     string `json:"to,omitempty"`
-	ToName string `json:"to_name,omitempty"`
+	ToName string `json:"toName,omitempty"`
 	Access string `json:"access,omitempty"`
 	Flags  uint32 `json:"flags,omitempty"`
 	// Mode is a chmod's new mode in octal, and Owner a chown's new uid:gid.
@@ -36,7 +36,7 @@ type record struct {
 	// directory a removal, move or creation acted in followed by the name it
 	// acted on. ToResolved is the same for To.
 	Resolved   bool `json:"resolved,omitempty"`
-	ToResolved bool `json:"to_resolved,omitempty"`
+	ToResolved bool `json:"toResolved,omitempty"`
 	// Image marks a mapping the kernel made while starting a program: the
 	// program itself, its dynamic loader, or a script's interpreter.
 	Image bool `json:"image,omitempty"`
@@ -53,7 +53,7 @@ type record struct {
 	Compat  bool   `json:"compat,omitempty"`
 	Killed  bool   `json:"killed,omitempty"`
 	// boot is the event's CLOCK_BOOTTIME stamp in nanoseconds; the line's
-	// "t" is its wall-clock time.
+	// "time" is its wall-clock time.
 	boot uint64
 	// tid and nr are the thread and syscall an event was sent from.
 	tid uint32

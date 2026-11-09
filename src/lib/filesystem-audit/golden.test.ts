@@ -24,7 +24,7 @@ describe("filesystem audit: real recording golden", () => {
     const text = recording();
     // The recording does not carry the proxy's start; a few seconds before its
     // first record stands in for it.
-    const first = (JSON.parse(text.split("\n", 1)[0]) as { t: string }).t;
+    const first = (JSON.parse(text.split("\n", 1)[0]) as { time: string }).time;
     expectMatchesGolden(
       renderFilesystemAuditSummary(text, {
         workspace: ["/home/runner/work/isolated-run/isolated-run"],

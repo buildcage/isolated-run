@@ -526,11 +526,11 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     const { summary } = marked(
       { propose: true },
       { kind: "exec", pid: 3, comm: "npm", path: "/usr/bin/node" },
-      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", t: "2026-01-01T00:00:01Z" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", time: "2026-01-01T00:00:01Z" },
       { kind: "fork", pid: 4, ppid: 3, comm: "npm" },
       { kind: "exec", pid: 4, comm: "node", path: "/usr/bin/node" },
-      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", t: "2026-01-01T00:00:02Z" },
-      { kind: "write", pid: 3, comm: "npm", path: "/work/m/c", t: "2026-01-01T00:00:03Z" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", time: "2026-01-01T00:00:02Z" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/c", time: "2026-01-01T00:00:03Z" },
     );
     const folded = summary.proposed!.find((r) => r.path.path === "./m/**");
     expect(folded?.commands).toStrictEqual(["node[npm]", "node"]);
@@ -553,12 +553,12 @@ describe("createAuditSummary: expected-filesystem-rules", () => {
     const { summary } = marked(
       { rules: rulesOf("* W ./m/a\n* R ./m/b\n* X **") },
       { kind: "exec", pid: 3, comm: "npm", path: "/usr/bin/node" },
-      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", t: "2026-01-01T00:00:01Z" },
-      { kind: "read", pid: 3, comm: "npm", path: "/work/m/b", t: "2026-01-01T00:00:02Z" },
+      { kind: "write", pid: 3, comm: "npm", path: "/work/m/a", time: "2026-01-01T00:00:01Z" },
+      { kind: "read", pid: 3, comm: "npm", path: "/work/m/b", time: "2026-01-01T00:00:02Z" },
       { kind: "fork", pid: 4, ppid: 3, comm: "npm" },
       { kind: "exec", pid: 4, comm: "node", path: "/usr/bin/node" },
-      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", t: "2026-01-01T00:00:03Z" },
-      { kind: "write", pid: 4, comm: "node", path: "/work/m/c", t: "2026-01-01T00:00:04Z" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/b", time: "2026-01-01T00:00:03Z" },
+      { kind: "write", pid: 4, comm: "node", path: "/work/m/c", time: "2026-01-01T00:00:04Z" },
     );
     expect(summary.proposed!.map((r) => [r.path.path, r.flags, r.commands])).toStrictEqual([
       ["./m/b", "W", ["node"]],

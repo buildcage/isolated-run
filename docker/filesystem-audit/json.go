@@ -30,11 +30,11 @@ func (t *timeText) append(b []byte, ns int64) []byte {
 }
 
 // appendRecord appends r as one line of the recording, at ns nanoseconds
-// since the Unix epoch. It writes what encoding/json writes for r with "t"
+// since the Unix epoch. It writes what encoding/json writes for r with "time"
 // first, field for field, except that a name the step chose keeps a byte that
 // is not UTF-8 (see appendString).
 func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
-	b = append(b, `{"t":"`...)
+	b = append(b, `{"time":"`...)
 	b = t.append(b, ns)
 	b = append(b, `","kind":`...)
 	b = appendString(b, r.Kind, false)
@@ -51,7 +51,7 @@ func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 	b = appendName(b, `,"path":`, r.Path)
 	b = appendName(b, `,"name":`, r.Name)
 	b = appendName(b, `,"to":`, r.To)
-	b = appendName(b, `,"to_name":`, r.ToName)
+	b = appendName(b, `,"toName":`, r.ToName)
 	if r.Access != "" {
 		b = appendString(append(b, `,"access":`...), r.Access, false)
 	}
@@ -69,7 +69,7 @@ func appendRecord(b []byte, r *record, t *timeText, ns int64) []byte {
 	}
 	b = appendTrue(b, `,"failed":`, r.Failed)
 	b = appendTrue(b, `,"resolved":`, r.Resolved)
-	b = appendTrue(b, `,"to_resolved":`, r.ToResolved)
+	b = appendTrue(b, `,"toResolved":`, r.ToResolved)
 	b = appendTrue(b, `,"image":`, r.Image)
 	b = appendTrue(b, `,"memfd":`, r.Memfd)
 	b = appendTrue(b, `,"deleted":`, r.Deleted)
