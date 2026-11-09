@@ -561,8 +561,8 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     allowedUrlRules: rules.urlRules,
     knownBlockedRules: rules.knownBlockedRules,
   };
-  // First, for the proxy's start, which the filesystem audit's artifact times
-  // its lines from.
+  // Fetched first: the filesystem audit's artifact counts `elapsed` from the
+  // proxy's start, which the report holds.
   const report = await deps.fetchStepReport(
     containerName,
     parameters,

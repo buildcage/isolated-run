@@ -55,8 +55,8 @@ const SENSITIVE_IN_HOME = [".ssh", ".aws", ".config", ".docker", ".kube", ".gnup
 const SYSCALL_PREFIX = "syscall:";
 
 export interface SummaryOptions extends Prefixes {
-  /** The proxy's start, in epoch seconds, which each line the sink takes
-   *  gives its elapsed time from. */
+  /** The proxy's start, in epoch seconds. Each line the sink takes gets its
+   *  time since then as `elapsed`. */
   startedAt?: number;
   /** expected-filesystem-rules, when given: each access is matched against them. */
   rules?: RuleMatcher;
@@ -676,13 +676,13 @@ function withMark(line: string, mark: RuleMark): string {
 
 const TIME = '{"time":"';
 
-// The line with its time since the proxy started right after its time, which
-// the tracer writes first; the end line has none.
+// The line with `elapsed`, its time since the proxy started, after the `time`
+// the tracer writes first. The end line has no time and stays as it is.
 function withElapsed(line: string, startedAt: number): string {
   if (!line.startsWith(TIME)) return line;
-  // A kept line is JSON, so its time's string closes.
   const end = line.indexOf('"', TIME.length);
-  const ms = Date.parse(line.slice(TIME.length, end));
+  // A line cut off mid-write keeps none.
+  const ms = end === -1 ? NaN : Date.parse(line.slice(TIME.length, end));
   if (Number.isNaN(ms)) return line;
   const elapsed = formatElapsedFixed(ms / 1000 - startedAt);
   return `${line.slice(0, end + 1)},"elapsed":"${elapsed}"${line.slice(end + 1)}`;

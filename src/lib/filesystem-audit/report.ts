@@ -82,8 +82,8 @@ export interface FilesystemAuditReportOptions {
   rules?: ExpectedRules;
   /** fail-on-unexpected-file-access: an access no rule takes fails the step. */
   failOnUnexpected?: boolean;
-  /** The proxy's start, in epoch seconds, which each line of the artifact
-   *  gives its elapsed time from; undefined leaves it out. */
+  /** The proxy's start, in epoch seconds, which the artifact's `elapsed`
+   *  counts from; undefined leaves `elapsed` out. */
   startedAt?: number;
 }
 

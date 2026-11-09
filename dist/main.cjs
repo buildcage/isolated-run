@@ -73416,7 +73416,7 @@ function withMark(line, mark) {
 }
 function withElapsed(line, startedAt) {
 	if (!line.startsWith("{\"time\":\"")) return line;
-	let end = line.indexOf("\"", 9), ms = Date.parse(line.slice(9, end));
+	let end = line.indexOf("\"", 9), ms = end === -1 ? NaN : Date.parse(line.slice(9, end));
 	if (Number.isNaN(ms)) return line;
 	let elapsed = formatElapsedFixed(ms / 1e3 - startedAt);
 	return `${line.slice(0, end + 1)},"elapsed":"${elapsed}"${line.slice(end + 1)}`;

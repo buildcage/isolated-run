@@ -78,12 +78,14 @@ describe("reduceRecording", () => {
         at("2026-01-01T01:02:03.456Z"),
         at("2025-12-31T23:59:59.000Z"),
         at("garbage"),
+        '{"time":"2026-01-01T00:00:00.12',
         end,
       ),
     ).toStrictEqual([
       '{"time":"2026-01-01T01:02:03.456Z","elapsed":"01:02:03.456","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
       '{"time":"2025-12-31T23:59:59.000Z","elapsed":"00:00:00.000","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
       '{"time":"garbage","kind":"read","pid":3,"path":"/work/a","unexpected":true}',
+      '{"time":"2026-01-01T00:00:00.12',
       end,
     ]);
     expect(kept(PREFIXES, at("2026-01-01T01:02:03.456Z"))).toStrictEqual([
