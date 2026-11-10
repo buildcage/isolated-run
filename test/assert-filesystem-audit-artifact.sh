@@ -33,6 +33,8 @@ head -20 "$f"
 echo "::endgroup::"
 
 assert_file_has "$f" "A write is recorded" '"kind":"write"'
+holds "Every timed line carries its time since the proxy started" \
+  'all(.[] | select(.kind != "end"); (.time | type) == "string" and ((.elapsed // "") | test("^[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}$")))'
 # overlayfs opens a layer's directories with O_NOATIME (0o1000000) on its own
 # behalf; none of those may pass for the step's.
 holds_not "No O_NOATIME open is recorded" \

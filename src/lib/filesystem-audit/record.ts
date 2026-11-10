@@ -1,5 +1,5 @@
 export interface AuditRecord {
-  t?: string;
+  time?: string;
   kind: string;
   pid?: number;
   ppid?: number;
@@ -15,13 +15,13 @@ export interface AuditRecord {
   failed?: boolean;
   /** A failure whose path, or to, the kernel resolved as a success's. */
   resolved?: boolean;
-  to_resolved?: boolean;
+  toResolved?: boolean;
   image?: boolean;
   memfd?: boolean;
   deleted?: boolean;
   dropped?: number;
   untracked?: number;
-  host_missed?: number;
+  hostMissed?: number;
   exchange?: boolean;
   syscall?: string;
   killed?: boolean;
@@ -102,7 +102,7 @@ export function classify(r: AuditRecord): Classified[] {
       path: r.to,
       failed,
       perm,
-      resolved: resolvedBy(failed, r.to_resolved),
+      resolved: resolvedBy(failed, r.toResolved),
     });
   return out;
 }
@@ -127,7 +127,7 @@ function classifyLink(
       path: r.to,
       failed,
       perm: perm && !fileRefused,
-      resolved: resolvedBy(failed, r.to_resolved),
+      resolved: resolvedBy(failed, r.toResolved),
     });
   if (file)
     out.push({

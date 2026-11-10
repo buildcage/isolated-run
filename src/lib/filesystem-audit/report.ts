@@ -82,6 +82,9 @@ export interface FilesystemAuditReportOptions {
   rules?: ExpectedRules;
   /** fail-on-unexpected-file-access: an access no rule takes fails the step. */
   failOnUnexpected?: boolean;
+  /** The proxy's start, in epoch seconds, which the artifact's `elapsed`
+   *  counts from; undefined leaves `elapsed` out. */
+  startedAt?: number;
 }
 
 export interface FilesystemAuditReportDeps {
@@ -255,6 +258,7 @@ export function readStepFilesystemAudit(
     failClosed,
     rules: givenRules,
     failOnUnexpected = false,
+    startedAt,
   }: FilesystemAuditReportOptions,
   overrides: Partial<FilesystemAuditReportDeps> = {},
 ): ReadStepFilesystemAudit {
@@ -307,6 +311,7 @@ export function readStepFilesystemAudit(
     home: prefixes.home,
     toolCache: prefixes.toolCache,
     runnerFiles: runnerFiles(prefixes, mediated),
+    startedAt,
     ...(rules && { rules: new RuleMatcher(rules.rules) }),
     // Only a prepared directory takes the proposed rules.
     propose: prepared,

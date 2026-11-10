@@ -55,6 +55,8 @@ const realDeps: ReportStepDeps = {
 };
 
 export interface ReportStepOptions {
+  /** From fetchStepReport; undefined when it could not be built. */
+  report: Report | undefined;
   containerName: string;
   proxyEngine: ProxyEngine;
   /** Echoed into the report verbatim; see GenReportParameters. */
@@ -87,18 +89,42 @@ export interface ReportStepOptions {
 }
 
 /**
- * Fetch the proxy's report, write the Job Summary, and upload the traffic
+ * Fetch the proxy's report, or undefined when it could not be built, which
+ * fails the step in any mode: without it the step has nothing to show for its
+ * traffic. Never throws.
+ */
+export async function fetchStepReport(
+  containerName: string,
+  parameters: GenReportParameters,
+  proxyEngine: ProxyEngine,
+  annotation: Annotation,
+  overrides: Partial<ReportStepDeps> = {},
+): Promise<Report | undefined> {
+  const { fetchReport } = { ...realDeps, ...overrides };
+  try {
+    return await fetchReport(containerName, parameters, proxyEngine);
+  } catch (e) {
+    annotation.error(
+      `Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
+    );
+    process.exitCode = 1;
+    return undefined;
+  }
+}
+
+/**
+ * Write the Job Summary from the proxy's `report`, and upload the traffic
  * artifact if one was asked for. The rest of the summary, `moreBlocks`, is
  * written with the report, or under a title of its own when there is no report
  * to write.
  *
- * Never throws. A report it could not build fails the step in any mode. A
- * later failure is a warning naming the step that failed, and under `restrict`
- * with fail-on-blocked it also fails the step: a report that could not be
- * recorded cannot vouch that nothing was blocked.
+ * Never throws. A failure is a warning naming the step that failed, and under
+ * `restrict` with fail-on-blocked it also fails the step: a report that could
+ * not be recorded cannot vouch that nothing was blocked.
  */
 export async function reportStepTraffic(
   {
+    report,
     containerName,
     proxyEngine,
     parameters,
@@ -118,7 +144,6 @@ export async function reportStepTraffic(
   overrides: Partial<ReportStepDeps> = {},
 ): Promise<void> {
   const {
-    fetchReport,
     readActionVersion,
     writeReportSummary,
     writeSummaryBlocks,
@@ -128,17 +153,6 @@ export async function reportStepTraffic(
   } = { ...realDeps, ...overrides };
 
   const fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked);
-
-  let report: Report | undefined;
-  try {
-    report = await fetchReport(containerName, parameters, proxyEngine);
-  } catch (e) {
-    // Without a report the step has nothing to show for its traffic.
-    annotation.error(
-      `Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`,
-    );
-    process.exitCode = 1;
-  }
 
   // Written alone when there is no report or its write failed, so the report
   // cannot take the rest of the summary down with it.

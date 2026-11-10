@@ -22,7 +22,7 @@ const timeArb = fc.oneof(
 
 const recordArb = fc.record(
   {
-    t: timeArb,
+    time: timeArb,
     comm: fc.constantFrom("node", "cat", "bash", "sh"),
     kind: fc.constantFrom(
       "read",
@@ -79,7 +79,7 @@ describe("createAuditSummary: properties", () => {
   it("adds no rows for the times: the same rows print with or without them", () => {
     fc.assert(
       fc.property(recordsArb, (rs) => {
-        const untimed = rs.map(({ t: _t, ...r }) => r);
+        const untimed = rs.map(({ time: _t, ...r }) => r);
         const strip = (row: string): string => row.replace(TIME, "").trim().replace(/\s+/g, " ");
         const timed = detailsBlockRows(renderFilesystemAuditSummary(jsonl(...rs), PREFIXES)).map(
           strip,
@@ -98,11 +98,11 @@ describe("createAuditSummary: properties", () => {
     const risingArb = recordsArb.map((rs) => {
       const stamped = (t: string | undefined): t is string => t !== undefined && t !== "garbage";
       const times = rs
-        .map((r) => r.t)
+        .map((r) => r.time)
         .filter(stamped)
         .toSorted((a, b) => a.localeCompare(b));
       let i = 0;
-      return jsonl(...rs.map((r) => (stamped(r.t) ? { ...r, t: times[i++] } : r)));
+      return jsonl(...rs.map((r) => (stamped(r.time) ? { ...r, time: times[i++] } : r)));
     });
     fc.assert(
       fc.property(risingArb, (text) => {

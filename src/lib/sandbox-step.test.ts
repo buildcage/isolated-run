@@ -68,6 +68,7 @@ const mocks = {
   startSandboxProxy: vi.fn(),
   stopSandboxProxy: vi.fn(),
   runSandboxedCommand: vi.fn(),
+  fetchStepReport: vi.fn(),
   reportStepTraffic: vi.fn(),
   readStepFilesystemAudit: vi.fn(),
   mediateRunnerOutputFiles: vi.fn(),
@@ -165,6 +166,7 @@ beforeEach(() => {
   mocks.startSandboxProxy.mockResolvedValue(undefined);
   mocks.stopSandboxProxy.mockResolvedValue(undefined);
   mocks.runSandboxedCommand.mockResolvedValue(0);
+  mocks.fetchStepReport.mockResolvedValue({ startedAt: 1_700_000_000 });
   mocks.reportStepTraffic.mockResolvedValue(undefined);
   mocks.readStepFilesystemAudit.mockReturnValue(readAudit());
   mocks.onCancel.mockReturnValue(stopListening);
@@ -365,6 +367,32 @@ describe("runSandboxStep", () => {
     expect(read.blocks).toHaveBeenCalledWith(1_700_000_000, { name: "uploaded" }, "build");
     expect(read.upload).toHaveBeenCalledTimes(1);
     expect(orderOf(read.upload)).toBeLessThan(orderOf(mocks.reportStepTraffic));
+  });
+
+  it("fetches the traffic report first, timing the audit's artifact from the proxy's start", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+
+    await runSandboxStep(ENV, deps);
+
+    expect(orderOf(mocks.fetchStepReport)).toBeLessThan(orderOf(mocks.readStepFilesystemAudit));
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].startedAt).toBe(1_700_000_000);
+    expect(mocks.reportStepTraffic.mock.calls[0][0].report).toStrictEqual({
+      startedAt: 1_700_000_000,
+    });
+    expect(mocks.fetchStepReport.mock.calls[0][0]).toBe("buildcage-proxy-deadbeef");
+    expect(mocks.fetchStepReport.mock.calls[0][1]).toBe(
+      mocks.reportStepTraffic.mock.calls[0][0].parameters,
+    );
+  });
+
+  it("leaves the audit's artifact untimed when there is no report", async () => {
+    mocks.readFilesystemAuditInput.mockReturnValue("record");
+    mocks.fetchStepReport.mockResolvedValue(undefined);
+
+    await runSandboxStep(ENV, deps);
+
+    expect(mocks.readStepFilesystemAudit.mock.calls[0][0].startedAt).toBeUndefined();
+    expect(mocks.reportStepTraffic.mock.calls[0][0].report).toBeUndefined();
   });
 
   it("tells the report whether the tracer attached", async () => {

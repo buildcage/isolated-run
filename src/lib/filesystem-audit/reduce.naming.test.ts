@@ -262,7 +262,7 @@ describe("createAuditSummary: path names", () => {
           failed: true,
           err: 13,
           resolved: true,
-          to_resolved: true,
+          toResolved: true,
         },
       ),
       {
@@ -337,7 +337,7 @@ describe("createAuditSummary: path names", () => {
           to: "/work/link/nodir/d",
           failed: true,
           err: 2,
-          to_resolved: true,
+          toResolved: true,
         },
       ),
       { cwd: ["/work/link", "/work/real"], workspace: ["/work"], home: ["/home/u"] },

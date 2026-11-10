@@ -96,7 +96,7 @@ import {
   workingDirectoryOf,
 } from "./sandbox/working-directory.ts";
 import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
-import { reportStepTraffic } from "./step-report.ts";
+import { fetchStepReport, reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
 
@@ -176,6 +176,7 @@ const realDeps = {
   startSandboxProxy,
   stopSandboxProxy,
   runSandboxedCommand,
+  fetchStepReport,
   reportStepTraffic,
   readStepFilesystemAudit,
   mediateRunnerOutputFiles,
@@ -551,6 +552,23 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
       // says so.
     }
   }
+  const parameters = {
+    mode: proxyMode,
+    allowedHttpsRules: rules.httpsRules,
+    allowedHttpRules: rules.httpRules,
+    allowedIpRules: rules.ipRules,
+    allowedTlsRules: rules.tlsRules,
+    allowedUrlRules: rules.urlRules,
+    knownBlockedRules: rules.knownBlockedRules,
+  };
+  // Fetched first: the filesystem audit's artifact counts `elapsed` from the
+  // proxy's start, which the report holds.
+  const report = await deps.fetchStepReport(
+    containerName,
+    parameters,
+    inputs.proxyEngine,
+    annotation,
+  );
   const readAudit = deps.readStepFilesystemAudit({
     audit,
     attached: run.auditAttached(),
@@ -567,23 +585,17 @@ export async function finalizeStep(run: StepRun, deps: SandboxStepDeps): Promise
     failClosed: proxyMode !== "audit" && failOnBlocked,
     rules: inputs.expectedFilesystemRules,
     failOnUnexpected: inputs.failOnUnexpectedFileAccess,
+    startedAt: report?.startedAt,
   });
   // The runner kills a cancelled step seconds after cancelling it, and an
   // upload takes a while, so a cancelled step writes the whole summary first
   // and uploads after it. The summary then names the artifact before it exists.
   const artifact = cancelled ? readAudit.expected : await readAudit.upload();
   await deps.reportStepTraffic({
+    report,
     containerName,
     proxyEngine: inputs.proxyEngine,
-    parameters: {
-      mode: proxyMode,
-      allowedHttpsRules: rules.httpsRules,
-      allowedHttpRules: rules.httpRules,
-      allowedIpRules: rules.ipRules,
-      allowedTlsRules: rules.tlsRules,
-      allowedUrlRules: rules.urlRules,
-      knownBlockedRules: rules.knownBlockedRules,
-    },
+    parameters,
     annotation,
     actionRepo,
     actionRef: reportActionRef,

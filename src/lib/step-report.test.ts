@@ -5,6 +5,7 @@ import { reportParams } from "#core/lib/test/report-data.node.ts";
 import { LogsUnreadableError, ProxyStoppedError } from "./report-fetch.ts";
 import { COMMAND_SUMMARY_CUT_MESSAGE, missingReportFrame, summaryFooter } from "./report.ts";
 import {
+  fetchStepReport,
   reportStepTraffic,
   writeMoreSummary,
   type ReportStepDeps,
@@ -33,7 +34,9 @@ const annotation = { warning: vi.fn(), notice: vi.fn(), error: vi.fn() };
 
 const FOOTER = summaryFooter("buildcage/isolated-run");
 
-function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions {
+type Options = Omit<ReportStepOptions, "report">;
+
+function options(overrides: Partial<Options> = {}): Options {
   return {
     containerName: CONTAINER,
     env: {},
@@ -48,6 +51,18 @@ function options(overrides: Partial<ReportStepOptions> = {}): ReportStepOptions 
     trafficArtifact: { upload: false },
     ...overrides,
   };
+}
+
+// As the step runs them: the report fetched first, then written.
+async function fetchAndReport(o: Options, d: ReportStepDeps): Promise<void> {
+  const report = await fetchStepReport(
+    o.containerName,
+    o.parameters,
+    o.proxyEngine,
+    o.annotation,
+    d,
+  );
+  await reportStepTraffic({ ...o, report }, d);
 }
 
 let exitCode: typeof process.exitCode;
@@ -65,7 +80,7 @@ afterEach(() => {
 
 describe("reportStepTraffic", () => {
   it("fetches the report for the engine that ran, then writes the summary", async () => {
-    await reportStepTraffic(options(), deps);
+    await fetchAndReport(options(), deps);
 
     expect(mocks.fetchReport).toHaveBeenCalledWith(CONTAINER, options().parameters, "inspect");
     expect(mocks.writeReportSummary.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -78,7 +93,7 @@ describe("reportStepTraffic", () => {
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
     const moreBlocks = vi.fn(() => [block]);
 
-    await reportStepTraffic(options({ moreBlocks }), deps);
+    await fetchAndReport(options({ moreBlocks }), deps);
 
     expect(moreBlocks).toHaveBeenCalledWith(1_791_244_800, "build");
     expect(mocks.writeReportSummary.mock.calls[0][2].extraBlocks).toEqual([block, FOOTER]);
@@ -90,7 +105,7 @@ describe("reportStepTraffic", () => {
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
     const moreBlocks = vi.fn(() => [block]);
 
-    await reportStepTraffic(options({ moreBlocks }), deps);
+    await fetchAndReport(options({ moreBlocks }), deps);
 
     expect(moreBlocks).toHaveBeenCalledWith(undefined, "build");
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
@@ -104,7 +119,7 @@ describe("reportStepTraffic", () => {
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
 
-    await reportStepTraffic(
+    await fetchAndReport(
       options({
         moreBlocks: () => [block],
         parameters: reportParams({ mode: "audit" }),
@@ -123,7 +138,7 @@ describe("reportStepTraffic", () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("label read failed"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
 
-    await reportStepTraffic(options({ moreBlocks: () => [block] }), deps);
+    await fetchAndReport(options({ moreBlocks: () => [block] }), deps);
 
     expect(mocks.writeSummaryBlocks).toHaveBeenCalledWith(
       [missingReportFrame("Outbound Traffic Report — build", false), block, FOOTER],
@@ -135,7 +150,7 @@ describe("reportStepTraffic", () => {
   it("writes nothing when there is neither a report nor anything else", async () => {
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 
-    await reportStepTraffic(options(), deps);
+    await fetchAndReport(options(), deps);
 
     expect(mocks.writeSummaryBlocks).not.toHaveBeenCalled();
   });
@@ -145,7 +160,7 @@ describe("reportStepTraffic", () => {
     mocks.writeSummaryBlocks.mockRejectedValue(new Error("summary file is gone"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
 
-    await reportStepTraffic(options({ moreBlocks: () => [block] }), deps);
+    await fetchAndReport(options({ moreBlocks: () => [block] }), deps);
 
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to write the Job Summary: summary file is gone",
@@ -154,7 +169,7 @@ describe("reportStepTraffic", () => {
 
   it("hands the summary the step's own labelling and the inputs that shape it", async () => {
     const extraInputs = vi.fn(() => ["aws-key-check: true"]);
-    await reportStepTraffic(
+    await fetchAndReport(
       options({
         extraInputs,
         verdictItems: { warning: ["1 unexpected file access"] },
@@ -179,10 +194,10 @@ describe("reportStepTraffic", () => {
   });
 
   it("uploads the traffic artifact only when one was asked for", async () => {
-    await reportStepTraffic(options(), deps);
+    await fetchAndReport(options(), deps);
     expect(mocks.uploadTrafficArtifact).not.toHaveBeenCalled();
 
-    await reportStepTraffic(options({ trafficArtifact: { upload: true, retentionDays: 7 } }), deps);
+    await fetchAndReport(options({ trafficArtifact: { upload: true, retentionDays: 7 } }), deps);
     expect(mocks.uploadTrafficArtifact).toHaveBeenCalledWith(
       { engine: "inspect" },
       CONTAINER,
@@ -193,11 +208,11 @@ describe("reportStepTraffic", () => {
 
   it("does not count the command's own summary against the report, with it or alone", async () => {
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
-    await reportStepTraffic(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
+    await fetchAndReport(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
     expect(mocks.writeReportSummary.mock.calls[0][2].commandBytes).toBe(9);
 
     mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
-    await reportStepTraffic(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
+    await fetchAndReport(options({ moreBlocks: () => [block], commandSummaryBytes: 9 }), deps);
     expect(mocks.writeSummaryBlocks.mock.calls[0][2]).toStrictEqual({ commandBytes: 9 });
   });
 
@@ -210,7 +225,7 @@ describe("reportStepTraffic", () => {
     if (!c.write) mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
     const block = { priority: 5, level: 2, section: "fs", text: "x\n", cut: "lines" as const };
 
-    await reportStepTraffic(
+    await fetchAndReport(
       options({
         env: { GITHUB_STEP_SUMMARY: "/s" },
         moreBlocks: () => [block],
@@ -232,7 +247,7 @@ describe("reportStepTraffic", () => {
 
   it("warns when the command's summary was cut to fit", async () => {
     mocks.moveCommandSummaryLast.mockReturnValue(true);
-    await reportStepTraffic(options({ commandSummaryBytes: 9 }), deps);
+    await fetchAndReport(options({ commandSummaryBytes: 9 }), deps);
     expect(annotation.warning).toHaveBeenCalledWith(COMMAND_SUMMARY_CUT_MESSAGE);
   });
 
@@ -241,7 +256,7 @@ describe("reportStepTraffic", () => {
       throw new Error("EACCES");
     });
     await expect(
-      reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
+      fetchAndReport(options({ trafficArtifact: { upload: true } }), deps),
     ).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to move this step's own Job Summary after the report: EACCES",
@@ -250,7 +265,7 @@ describe("reportStepTraffic", () => {
   });
 
   it("uploads after the summary, so a failed upload cannot lose the summary", async () => {
-    await reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps);
+    await fetchAndReport(options({ trafficArtifact: { upload: true } }), deps);
 
     expect(mocks.uploadTrafficArtifact.mock.invocationCallOrder[0]).toBeGreaterThan(
       mocks.writeReportSummary.mock.invocationCallOrder[0],
@@ -269,7 +284,7 @@ describe("reportStepTraffic", () => {
     async ({ wants, engine, available }) => {
       mocks.fetchReport.mockResolvedValue({ engine });
 
-      await reportStepTraffic(options({ trafficArtifact: { upload: wants } }), deps);
+      await fetchAndReport(options({ trafficArtifact: { upload: wants } }), deps);
 
       expect(mocks.writeReportSummary.mock.calls[0][3]).toBe(available);
     },
@@ -289,7 +304,7 @@ describe("reportStepTraffic", () => {
       mocks.fetchReport.mockRejectedValue(new error("no logs"));
 
       await expect(
-        reportStepTraffic(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
+        fetchAndReport(options({ parameters: reportParams({ mode }), failOnBlocked }), deps),
       ).resolves.toBeUndefined();
 
       expect(annotation.error).toHaveBeenCalledWith(
@@ -304,7 +319,7 @@ describe("reportStepTraffic", () => {
   it("fails the step when writing the summary fails under restrict with fail-on-blocked", async () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    await expect(fetchAndReport(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to write the report summary: summary file is gone; failing the step under restrict with fail-on-blocked",
     );
@@ -315,7 +330,7 @@ describe("reportStepTraffic", () => {
     mocks.writeReportSummary.mockRejectedValue(new Error("summary file is gone"));
     mocks.uploadTrafficArtifact.mockResolvedValue("buildcage-traffic-deadbeef");
 
-    await reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps);
+    await fetchAndReport(options({ trafficArtifact: { upload: true } }), deps);
 
     expect(mocks.uploadTrafficArtifact).toHaveBeenCalledOnce();
     expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledExactlyOnceWith(
@@ -329,7 +344,7 @@ describe("reportStepTraffic", () => {
     mocks.uploadTrafficArtifact.mockRejectedValue(new Error("artifact service down"));
 
     await expect(
-      reportStepTraffic(options({ trafficArtifact: { upload: true } }), deps),
+      fetchAndReport(options({ trafficArtifact: { upload: true } }), deps),
     ).resolves.toBeUndefined();
     expect(annotation.warning).toHaveBeenCalledWith(
       "Failed to upload the traffic artifact: artifact service down",
@@ -356,7 +371,7 @@ describe("reportStepTraffic", () => {
       mocks.uploadTrafficArtifact.mockResolvedValue(uploaded);
       if (fetchFails) mocks.fetchReport.mockRejectedValue(new Error("container is gone"));
 
-      await reportStepTraffic(options({ trafficArtifact: { upload: wants } }), deps);
+      await fetchAndReport(options({ trafficArtifact: { upload: wants } }), deps);
 
       expect(mocks.setTrafficArtifactOutput).toHaveBeenCalledExactlyOnceWith(name);
     },
@@ -367,7 +382,7 @@ describe("reportStepTraffic", () => {
       throw new Error("Missing file at path: /github/output");
     });
 
-    await expect(reportStepTraffic(options(), deps)).resolves.toBeUndefined();
+    await expect(fetchAndReport(options(), deps)).resolves.toBeUndefined();
     expect(annotation.error).toHaveBeenCalledWith(
       "Failed to set the traffic-artifact-name output: Missing file at path: /github/output; failing the step under restrict with fail-on-blocked",
     );

@@ -25,7 +25,7 @@ describe("renderAuditSummaryBlocks: times", () => {
 
   it("names the columns without the proxy's start when it is unknown", () => {
     const md = renderFilesystemAuditSummary(
-      jsonl({ t: at(250), kind: "read", comm: "node", path: "/work/a" }),
+      jsonl({ time: at(250), kind: "read", comm: "node", path: "/work/a" }),
       PREFIXES,
     );
     expect(md).toContain("<sub>first-last access · flags · command · path</sub>");
@@ -34,9 +34,9 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("orders rows by first access and shows each row's first-last span", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(250), kind: "read", comm: "node", path: "/work/a" },
-        { t: at(1500), kind: "read", comm: "node", path: "/etc/hosts" },
-        { t: at(4000), kind: "write", comm: "node", path: "/work/a" },
+        { time: at(250), kind: "read", comm: "node", path: "/work/a" },
+        { time: at(1500), kind: "read", comm: "node", path: "/etc/hosts" },
+        { time: at(4000), kind: "write", comm: "node", path: "/work/a" },
       ),
       timed,
     );
@@ -49,8 +49,8 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("orders by the recording, not the clock, when the clock steps back", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(5000), kind: "read", comm: "a", path: "/work/first" },
-        { t: at(3000), kind: "write", comm: "a", path: "/work/second" },
+        { time: at(5000), kind: "read", comm: "a", path: "/work/first" },
+        { time: at(3000), kind: "write", comm: "a", path: "/work/second" },
       ),
       timed,
     );
@@ -60,9 +60,9 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("leaves a dropped library read out of the row's span", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(0), kind: "read", comm: "sh", path: "/lib/libc.so.6" },
-        { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
-        { t: at(5000), kind: "read", comm: "sh", path: "/lib/data" },
+        { time: at(0), kind: "read", comm: "sh", path: "/lib/libc.so.6" },
+        { time: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
+        { time: at(5000), kind: "read", comm: "sh", path: "/lib/data" },
       ),
       timed,
     );
@@ -72,8 +72,8 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("leaves a success under a relative name out of the failed row's span", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(1000), kind: "open", failed: true, comm: "a", path: "foo", err: 2 },
-        { t: at(30_000), kind: "read", comm: "a", path: "foo" },
+        { time: at(1000), kind: "open", failed: true, comm: "a", path: "foo", err: 2 },
+        { time: at(30_000), kind: "read", comm: "a", path: "foo" },
       ),
       timed,
     );
@@ -83,9 +83,9 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("pads a single time to the width of a span", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(0), kind: "read", comm: "a", path: "/work/x" },
-        { t: at(1000), kind: "read", comm: "a", path: "/work/x" },
-        { t: at(2000), kind: "read", comm: "a", path: "/work/y" },
+        { time: at(0), kind: "read", comm: "a", path: "/work/x" },
+        { time: at(1000), kind: "read", comm: "a", path: "/work/x" },
+        { time: at(2000), kind: "read", comm: "a", path: "/work/y" },
       ),
       timed,
     );
@@ -99,9 +99,9 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("spans every path folded into a directory row", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(100), kind: "read", comm: "go", path: "/work/d/1" },
-        { t: at(900), kind: "write", comm: "go", path: "/work/d/2" },
-        { t: at(500), kind: "read", comm: "go", path: "/work/d/3" },
+        { time: at(100), kind: "read", comm: "go", path: "/work/d/1" },
+        { time: at(900), kind: "write", comm: "go", path: "/work/d/2" },
+        { time: at(500), kind: "read", comm: "go", path: "/work/d/3" },
       ),
       timed,
     );
@@ -111,8 +111,8 @@ describe("renderAuditSummaryBlocks: times", () => {
   it("keeps recording order among rows first touched in the same millisecond", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
-        { t: at(0), kind: "exec", comm: "mv", path: "/usr/bin/mv" },
-        { t: at(0), kind: "rename", comm: "mv", path: "/work/b" },
+        { time: at(0), kind: "exec", comm: "mv", path: "/usr/bin/mv" },
+        { time: at(0), kind: "rename", comm: "mv", path: "/work/b" },
       ),
       timed,
     );
@@ -121,17 +121,17 @@ describe("renderAuditSummaryBlocks: times", () => {
 
   it("counts from the first access shown, not a dropped library read", () => {
     const md = render(
-      { t: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
-      { t: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
-      { t: at(3), kind: "read", comm: "sh", path: "/work/x" },
+      { time: at(0), kind: "read", comm: "sh", path: "/etc/ld.so.cache" },
+      { time: at(0), kind: "mmap", comm: "sh", path: "/lib/libc.so.6", access: "x" },
+      { time: at(3), kind: "read", comm: "sh", path: "/work/x" },
     );
     expect(lines(md)).toEqual(["00:00.000: R sh ./x"]);
   });
 
   it("counts from the first record when the proxy's start is unknown", () => {
     const md = render(
-      { t: at(61_234), kind: "read", comm: "a", path: "/work/x" },
-      { t: at(62_000), kind: "read", comm: "a", path: "/work/y" },
+      { time: at(61_234), kind: "read", comm: "a", path: "/work/x" },
+      { time: at(62_000), kind: "read", comm: "a", path: "/work/y" },
     );
     expect(lines(md)).toEqual(["00:00.000: R a ./x", "00:00.766: R a ./y"]);
   });
@@ -140,8 +140,8 @@ describe("renderAuditSummaryBlocks: times", () => {
     const md = renderFilesystemAuditSummary(
       jsonl(
         { kind: "read", comm: "a", path: "/work/a" },
-        { t: "not a time", kind: "read", comm: "a", path: "/work/b" },
-        { t: at(0), kind: "read", comm: "a", path: "/work/c" },
+        { time: "not a time", kind: "read", comm: "a", path: "/work/b" },
+        { time: at(0), kind: "read", comm: "a", path: "/work/c" },
       ),
       timed,
     );

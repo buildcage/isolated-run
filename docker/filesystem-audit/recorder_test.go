@@ -113,7 +113,7 @@ func TestRecorderLogsNothingTheSandboxNamed(t *testing.T) {
 	}
 }
 
-// Each line's "t" is its boot stamp plus the offset at that stamp.
+// Each line's "time" is its boot stamp plus the offset at that stamp.
 func TestRecorderTimesALineByItsOffset(t *testing.T) {
 	out := &bytes.Buffer{}
 	r := newRecorder(bufio.NewWriter(out), &bytes.Buffer{}, func(boot uint64) int64 {
@@ -129,8 +129,8 @@ func TestRecorderTimesALineByItsOffset(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := lines(t, out)
-	if got[0]["t"] != "2026-10-06T00:00:01.500Z" || got[1]["t"] != "2026-10-06T00:01:42.250Z" {
-		t.Fatalf("times = %v, %v", got[0]["t"], got[1]["t"])
+	if got[0]["time"] != "2026-10-06T00:00:01.500Z" || got[1]["time"] != "2026-10-06T00:01:42.250Z" {
+		t.Fatalf("times = %v, %v", got[0]["time"], got[1]["time"])
 	}
 }
 

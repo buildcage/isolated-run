@@ -72328,7 +72328,7 @@ function classify(r) {
 		path: r.to,
 		failed,
 		perm,
-		resolved: resolvedBy(failed, r.to_resolved)
+		resolved: resolvedBy(failed, r.toResolved)
 	}), out;
 }
 function classifyLink(r, letter, failed, perm) {
@@ -72338,7 +72338,7 @@ function classifyLink(r, letter, failed, perm) {
 		path: r.to,
 		failed,
 		perm: perm && !fileRefused,
-		resolved: resolvedBy(failed, r.to_resolved)
+		resolved: resolvedBy(failed, r.toResolved)
 	}), file && out.push({
 		letter: "L",
 		path: file,
@@ -73260,12 +73260,12 @@ function createAuditSummary(prefixes) {
 			runName === void 0 ? runNames.delete(r.pid) : runNames.set(r.pid, runName);
 		}
 		if (r.kind === "end") {
-			ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.host_missed == "number" ? r.host_missed : 0;
+			ended = !0, lost = !!(r.dropped || r.untracked), hostMissed = typeof r.hostMissed == "number" ? r.hostMissed : 0;
 			return;
 		}
 		if (r.kind === "syscall") {
 			if (!r.killed) return;
-			let path = `syscall:32-bit ${escapeForDisplay(r.syscall || "?")} (killed)`, comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.t ?? ""), row = killed.get(key);
+			let path = `syscall:32-bit ${escapeForDisplay(r.syscall || "?")} (killed)`, comm = commandKey(r.pid, r.comm ?? ""), key = keyOf(comm, path), t = Date.parse(r.time ?? ""), row = killed.get(key);
 			if (!row) {
 				let { text, field } = commands.get(comm);
 				row = {
@@ -73289,7 +73289,7 @@ function createAuditSummary(prefixes) {
 			for (let c of classify(r)) {
 				let own = canonical(c.path, prefixes, c.resolved), path = c.path === r.path ? marked(r, own) : own;
 				if (!c.failed && r.kind !== "exec" && !hasKnownStart(path) || !c.failed && c.letter === "R" && loaded.has(keyOf(proc, path))) continue;
-				let t = Date.parse(r.t ?? ""), x = {
+				let t = Date.parse(r.time ?? ""), x = {
 					comm: commandKey(r.pid, r.comm ?? ""),
 					path: walk(escaped(normalize$2(path, nsPids.get(r.pid)))),
 					bit: bitsOf(c.letter),
@@ -73414,6 +73414,12 @@ function withMark(line, mark) {
 	let field = "rule" in mark ? `"rule":${JSON.stringify(mark.rule)}` : "\"unexpected\":true";
 	return `${line.slice(0, -1)},${field}}`;
 }
+function withElapsed(line, r, startedAt) {
+	let time = isRecord(r) ? r.time : void 0;
+	if (typeof time != "string") return line;
+	let ms = Date.parse(time), head = `{"time":${JSON.stringify(time)}`;
+	return Number.isNaN(ms) || !line.startsWith(head) ? line : `${head},"elapsed":"${formatElapsedFixed(ms / 1e3 - startedAt)}"${line.slice(head.length)}`;
+}
 function reduceRecording(forEachLine, scratchBase, options, openSink, createSummary = createAuditSummary) {
 	let stripper = createStripper(scratchBase), summary = createSummary(options), summaryError, failedSummary = !1, summarize = (step) => {
 		if (!failedSummary) try {
@@ -73434,7 +73440,9 @@ function reduceRecording(forEachLine, scratchBase, options, openSink, createSumm
 		let r = parseLine(line);
 		isRecord(r) && r.kind === "end" && (ended = !0);
 		let kept = stripper.filter(line, r), mark = summarize(() => summary.add(kept ? kept.record : r, kept !== void 0));
-		kept && sink?.(mark ? withMark(kept.line, mark) : kept.line);
+		if (!kept || !sink) return;
+		let out = mark ? withMark(kept.line, mark) : kept.line;
+		sink(options.startedAt === void 0 ? out : withElapsed(out, kept.record, options.startedAt));
 	}), again !== lines || lengthAgain !== length) throw Error("the recording changed while it was being read");
 	let result;
 	return summarize(() => result = summary.finish()), {
@@ -73896,7 +73904,7 @@ function runnerFiles(prefixes, mediated) {
 	return out;
 }
 const NONE = { blocks: () => [] }, NO_RULES = { rules: [] }, filesystemAuditGuide = (actionRepo, actionRef) => `https://github.com/${actionRepo}/blob/${actionRef}/docs/filesystem-audit.md`;
-function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, prefixes, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1 }, overrides = {}) {
+function readStepFilesystemAudit({ audit, attached, cancelled, upload, retentionDays, containerName, annotation, env, prefixes, mediated, actionRepo, actionRef, failClosed, rules: givenRules, failOnUnexpected = !1, startedAt }, overrides = {}) {
 	let deps = {
 		...realDeps$3,
 		...overrides
@@ -73925,6 +73933,7 @@ function readStepFilesystemAudit({ audit, attached, cancelled, upload, retention
 		home: prefixes.home,
 		toolCache: prefixes.toolCache,
 		runnerFiles: runnerFiles(prefixes, mediated),
+		startedAt,
 		...rules && { rules: new RuleMatcher(rules.rules) },
 		propose: prepared
 	}, cwdNamed = prefixes.named && escapePath(relativize(prefixes.named, {
@@ -77533,17 +77542,23 @@ const realDeps$1 = {
 	uploadTrafficArtifact,
 	setTrafficArtifactOutput
 };
-async function reportStepTraffic({ containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, stepLabel, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
-	let { fetchReport, readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput } = {
+async function fetchStepReport(containerName, parameters, proxyEngine, annotation, overrides = {}) {
+	let { fetchReport } = {
 		...realDeps$1,
 		...overrides
-	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), report;
+	};
 	try {
-		report = await fetchReport(containerName, parameters, proxyEngine);
+		return await fetchReport(containerName, parameters, proxyEngine);
 	} catch (e) {
 		annotation.error(`Failed to build the sandbox report: ${errorMessage(e)}; failing the step whatever the mode`), process.exitCode = 1;
+		return;
 	}
-	let rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
+}
+async function reportStepTraffic({ report, containerName, proxyEngine, parameters, annotation, actionRepo, actionRef, runCommand, stepLabel, extraInputs, failOnBlocked, trafficArtifact, env, moreBlocks = () => [], verdictItems, commandSummaryBytes = 0 }, overrides = {}) {
+	let { readActionVersion, writeReportSummary, writeSummaryBlocks, moveCommandSummaryLast, uploadTrafficArtifact, setTrafficArtifactOutput } = {
+		...realDeps$1,
+		...overrides
+	}, fail = failOrWarn(annotation, parameters.mode !== "audit" && failOnBlocked), rest = moreBlocks(report?.startedAt, stepLabel), footer = [summaryFooter(actionRepo)], writeRest = () => writeMoreSummary(rest.length === 0 ? [] : [
 		missingReportFrame(reportTitle(stepLabel), parameters.mode === "audit"),
 		...rest,
 		...footer
@@ -77655,6 +77670,7 @@ const realDeps = {
 	startSandboxProxy,
 	stopSandboxProxy,
 	runSandboxedCommand,
+	fetchStepReport,
 	reportStepTraffic,
 	readStepFilesystemAudit,
 	mediateRunnerOutputFiles,
@@ -77807,7 +77823,15 @@ async function finalizeStep(run, deps) {
 	for (let set of [deps.setTrafficArtifactOutput, deps.setFilesystemAuditOutput]) try {
 		set("");
 	} catch {}
-	let readAudit = deps.readStepFilesystemAudit({
+	let parameters = {
+		mode: proxyMode,
+		allowedHttpsRules: rules.httpsRules,
+		allowedHttpRules: rules.httpRules,
+		allowedIpRules: rules.ipRules,
+		allowedTlsRules: rules.tlsRules,
+		allowedUrlRules: rules.urlRules,
+		knownBlockedRules: rules.knownBlockedRules
+	}, report = await deps.fetchStepReport(containerName, parameters, inputs.proxyEngine, annotation), readAudit = deps.readStepFilesystemAudit({
 		audit,
 		attached: run.auditAttached(),
 		cancelled,
@@ -77822,20 +77846,14 @@ async function finalizeStep(run, deps) {
 		actionRef: reportActionRef,
 		failClosed: proxyMode !== "audit" && failOnBlocked,
 		rules: inputs.expectedFilesystemRules,
-		failOnUnexpected: inputs.failOnUnexpectedFileAccess
+		failOnUnexpected: inputs.failOnUnexpectedFileAccess,
+		startedAt: report?.startedAt
 	}), artifact = cancelled ? readAudit.expected : await readAudit.upload();
 	return await deps.reportStepTraffic({
+		report,
 		containerName,
 		proxyEngine: inputs.proxyEngine,
-		parameters: {
-			mode: proxyMode,
-			allowedHttpsRules: rules.httpsRules,
-			allowedHttpRules: rules.httpRules,
-			allowedIpRules: rules.ipRules,
-			allowedTlsRules: rules.tlsRules,
-			allowedUrlRules: rules.urlRules,
-			knownBlockedRules: rules.knownBlockedRules
-		},
+		parameters,
 		annotation,
 		actionRepo,
 		actionRef: reportActionRef,

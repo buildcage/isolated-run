@@ -693,7 +693,7 @@ The summary can also open with a warning, or be missing:
   step log, such as one ending in `no space left on device` once the step filled the disk. A
   cancelled step does not add this error.
 
-- **❗ The kernel skipped the tracer's hooks N times.** `host_missed` on the end line is nonzero, so
+- **❗ The kernel skipped the tracer's hooks N times.** `hostMissed` on the end line is nonzero, so
   some accesses may be missing; see [Skipped hooks](#skipped-hooks).
 - **❗ The recording could not be read**, with a `Failed to read the filesystem audit recording`
   warning. The summary has none of the step's accesses, and no artifact is uploaded.
@@ -713,7 +713,7 @@ written; see [What the summary shows](#what-the-summary-shows).
 ### Skipped hooks
 
 On a GitHub-hosted runner there is nothing to do here. Read on only if a self-hosted runner shows a
-nonzero `host_missed`, or the note above.
+nonzero `hostMissed`, or the note above.
 
 On some kernels one of the tracer's hooks can be paused mid-run, and is then skipped when it is
 entered again. GitHub-hosted runners boot `-azure` kernels, 7.0 on `ubuntu-26.04`, and these do not
@@ -725,7 +725,7 @@ modes with the one in use in parentheses, such as `full (lazy)`, and hooks can b
 even so, the kernel cannot switch modes, and hooks can be skipped when `/boot/config-$(uname -r)`
 sets `CONFIG_PREEMPT_RCU=y`.
 
-`host_missed` counts skips anywhere on the host while the step ran, and a skip cannot be tied to the
+`hostMissed` counts skips anywhere on the host while the step ran, and a skip cannot be tied to the
 step: 0 means none of the step's accesses was skipped, and a nonzero count only that some may be,
 so it does not fail the step, even with `fail-on-unexpected-file-access: true`. For a complete
 record, use a kernel that does not pause the hooks, such as one booted with `preempt=voluntary`
@@ -874,9 +874,9 @@ With `upload-filesystem-audit-artifact: true`, the artifact named `buildcage-fil
 holds `filesystem-audit.jsonl`, and the proposed rules of [Expected accesses](#expected-accesses)
 beside it. The record is one JSON object per line, in the order the tracer caught the accesses.
 Opens and path changes are written when their call returns, so lines from different threads can be
-slightly out of `t` order. It holds only the step's own accesses, as the summary does: the sandbox's
-setup is left out, and the step's shell is named `bash`, with no `program`. A record marked
-incomplete can hold the setup too, in the summary as well. A few examples:
+slightly out of `time` order. It holds only the step's own accesses, as the summary does: the
+sandbox's setup is left out, and the step's shell is named `bash`, with no `program`. A record
+marked incomplete can hold the setup too, in the summary as well. A few examples:
 
 ```sh
 # Every path written, made or moved to
@@ -890,7 +890,7 @@ jq -r 'select(.failed | not)
   filesystem-audit.jsonl | sort -u
 
 # Who opened a credential file, and when
-jq -c 'select(.path // "" | endswith("/.npmrc")) | {t, comm, pid, ppid, kind}' filesystem-audit.jsonl
+jq -c 'select(.path // "" | endswith("/.npmrc")) | {time, elapsed, comm, pid, ppid, kind}' filesystem-audit.jsonl
 
 # Every refused open
 jq -c 'select(.kind == "open" and .failed and (.err == 1 or .err == 13 or .err == 30))' filesystem-audit.jsonl
@@ -901,38 +901,39 @@ Unlike the summary, it also lists a directory that was made and then written und
 
 ### Fields
 
-| Field         | On                                                              | Notes                                                                                                                                                                                                      |
-| ------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `t`           | every line but `end`                                            | ISO 8601 UTC, to the millisecond                                                                                                                                                                           |
-| `kind`        | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
-| `pid`         | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
-| `ppid`        | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
-| `nspid`       | `fork` and `exec`                                               | the process's number in its own PID namespace, which its `/proc` directory goes by in the sandbox                                                                                                          |
-| `comm`        | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
-| `program`     | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
-| `path`        | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
-| `to`          | `rename`, `link`, `symlink`                                     | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                                                                         |
-| `name`        | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
-| `to_name`     | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
-| `access`      | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
-| `flags`       | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` on an open that reached its file; absent on a failed one that asked for none                                                         |
-| `mode`        | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
-| `owner`       | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
-| `failed`      | a failed operation                                              | `true`                                                                                                                                                                                                     |
-| `err`         | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
-| `resolved`    | a failed operation or an `attr`, where known                    | `path` has its symlinks resolved, as a successful operation's has; see below                                                                                                                               |
-| `to_resolved` | a failed `rename` or `link`, where known                        | as `resolved`, for `to`                                                                                                                                                                                    |
-| `image`       | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
-| `memfd`       | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
-| `deleted`     | a deleted or never-named file                                   | a file deleted while it was open, or created without a name and never given one                                                                                                                            |
-| `exchange`    | `rename`                                                        | a swap of two paths, which shows `M` on both in the summary                                                                                                                                                |
-| `syscall`     | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
-| `compat`      | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
-| `killed`      | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
-| `rule`        | a line a rule matched, when `expected-filesystem-rules` is set  | where the rule that matched it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined its lines, such as outside a `\|` block |
-| `unexpected`  | a line no rule matched, when `expected-filesystem-rules` is set | some access of the line, such as one side of a link or of a rename, that no rule matched                                                                                                                   |
+| Field        | On                                                              | Notes                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `time`       | every line but `end`                                            | ISO 8601 UTC, to the millisecond                                                                                                                                                                           |
+| `elapsed`    | every line but `end`, where known                               | since the proxy started, fixed `HH:MM:SS.mmm`, as in the [traffic artifact](./reference.md#traffic-artifact); absent when the proxy's start could not be read                                              |
+| `kind`       | every line                                                      | what happened; see [Kinds](#kinds)                                                                                                                                                                         |
+| `pid`        | every line but `end`                                            | the process, as the runner host numbers it                                                                                                                                                                 |
+| `ppid`       | every line but `end`                                            | its parent at the time; on `fork`, the process that made it                                                                                                                                                |
+| `nspid`      | `fork` and `exec`                                               | the process's number in its own PID namespace, which its `/proc` directory goes by in the sandbox                                                                                                          |
+| `comm`       | every line but `end`                                            | the name the process gave itself, up to 15 bytes                                                                                                                                                           |
+| `program`    | every line but `end`, where known                               | the `path` of the process's last exec, or its parent's if it has run none; absent for the step's shell and what it forks without running anything                                                          |
+| `path`       | all but `fork`, `syscall`, `end`                                | the file acted on; on `rename` and `link` the old name; absent, with `err`, when it could not be read. See below for when it is not an absolute path                                                       |
+| `to`         | `rename`, `link`, `symlink`                                     | the new name; on `symlink`, the link's contents as written, absent on a failed one                                                                                                                         |
+| `name`       | where it differs from `path`, and every `exec`                  | the name the command passed; on `exec`, the name it was run by                                                                                                                                             |
+| `toName`     | where it differs from `to`                                      | as `name`, for `to`                                                                                                                                                                                        |
+| `access`     | `open`, `mmap`                                                  | what was asked for; see [Access letters](#access-letters)                                                                                                                                                  |
+| `flags`      | `open`                                                          | the `open(2)` flags as a number, which the kernel gives `O_LARGEFILE` on an open that reached its file; absent on a failed one that asked for none                                                         |
+| `mode`       | `chmod`                                                         | the new mode in octal, such as `"0755"`                                                                                                                                                                    |
+| `owner`      | `chown`                                                         | the new `uid:gid`, with `-1` for a side left as it was                                                                                                                                                     |
+| `failed`     | a failed operation                                              | `true`                                                                                                                                                                                                     |
+| `err`        | a failed operation                                              | the error number; see [Error numbers](#error-numbers). Without `failed`, a negative number: why an open file's path could not be read                                                                      |
+| `resolved`   | a failed operation or an `attr`, where known                    | `path` has its symlinks resolved, as a successful operation's has; see below                                                                                                                               |
+| `toResolved` | a failed `rename` or `link`, where known                        | as `resolved`, for `to`                                                                                                                                                                                    |
+| `image`      | `mmap`                                                          | a file the kernel mapped to start a program: the program, its loader or a script's interpreter                                                                                                             |
+| `memfd`      | a file in memory only                                           | `path` is `memfd:` and the name its creator chose                                                                                                                                                          |
+| `deleted`    | a deleted or never-named file                                   | a file deleted while it was open, or created without a name and never given one                                                                                                                            |
+| `exchange`   | `rename`                                                        | a swap of two paths, which shows `M` on both in the summary                                                                                                                                                |
+| `syscall`    | `syscall`                                                       | the system call's name, or its number where the tracer has no name for it                                                                                                                                  |
+| `compat`     | `syscall`                                                       | a 32-bit or x32 system call                                                                                                                                                                                |
+| `killed`     | `syscall`                                                       | seccomp killed the program for it, with `SIGSYS`; `err` is absent                                                                                                                                          |
+| `rule`       | a line a rule matched, when `expected-filesystem-rules` is set  | where the rule that matched it was written: `input:<line>` for the workflow's value, `config:<line>` for the config file's, or `config` where YAML may have joined its lines, such as outside a `\|` block |
+| `unexpected` | a line no rule matched, when `expected-filesystem-rules` is set | some access of the line, such as one side of a link or of a rename, that no rule matched                                                                                                                   |
 
-A field is absent where it does not apply, and `failed`, `resolved`, `to_resolved`, `image`,
+A field is absent where it does not apply, and `failed`, `resolved`, `toResolved`, `image`,
 `memfd`, `deleted`, `exchange` and `unexpected` are absent rather than `false`. Without `expected-filesystem-rules`, no line has
 `rule` or `unexpected`, and with them a line the rules are not matched against has neither.
 
@@ -1016,12 +1017,12 @@ The summary marks 1, 13 and 30 with `!`.
 ### The end line
 
 The last line is the end line, such as
-`{"kind":"end","dropped":0,"untracked":0,"host_missed":0}`, written only after every access the
+`{"kind":"end","dropped":0,"untracked":0,"hostMissed":0}`, written only after every access the
 tracer caught, and left out when it could not read these counts:
 
 - `dropped` counts accesses lost because the tracer's buffer was full.
 - `untracked` counts calls it could not follow, such as when too many files were open at once or a
   name could not be read, and calls whose return it never saw, such as one still waiting when it
   stopped.
-- `host_missed` counts hooks the kernel skipped anywhere on the host while the step ran; see
+- `hostMissed` counts hooks the kernel skipped anywhere on the host while the step ran; see
   [Skipped hooks](#skipped-hooks).

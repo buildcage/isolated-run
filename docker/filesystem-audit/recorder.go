@@ -260,7 +260,7 @@ type end struct {
 	Kind       string `json:"kind"`
 	Dropped    uint64 `json:"dropped"`
 	Untracked  uint64 `json:"untracked"`
-	HostMissed uint64 `json:"host_missed"`
+	HostMissed uint64 `json:"hostMissed"`
 }
 
 // fromExit reports whether kind is sent from its call's exit (op_exit() in

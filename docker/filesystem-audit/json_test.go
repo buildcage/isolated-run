@@ -58,12 +58,12 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 	if utf8.ValidString(r.Comm) && utf8.ValidString(r.Program) && utf8.ValidString(r.Path) &&
 		utf8.ValidString(r.Name) && utf8.ValidString(r.To) && utf8.ValidString(r.ToName) {
 		return json.Marshal(struct {
-			Time string `json:"t"`
+			Time string `json:"time"`
 			plain
 		}{l.t, plain(r)})
 	}
 	return json.Marshal(struct {
-		Time       string  `json:"t"`
+		Time       string  `json:"time"`
 		Kind       string  `json:"kind"`
 		PID        uint32  `json:"pid"`
 		PPID       uint32  `json:"ppid"`
@@ -73,7 +73,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		Path       rawName `json:"path,omitempty"`
 		Name       rawName `json:"name,omitempty"`
 		To         rawName `json:"to,omitempty"`
-		ToName     rawName `json:"to_name,omitempty"`
+		ToName     rawName `json:"toName,omitempty"`
 		Access     string  `json:"access,omitempty"`
 		Flags      uint32  `json:"flags,omitempty"`
 		Mode       string  `json:"mode,omitempty"`
@@ -81,7 +81,7 @@ func (l legacy) MarshalJSON() ([]byte, error) {
 		Err        int32   `json:"err,omitempty"`
 		Failed     bool    `json:"failed,omitempty"`
 		Resolved   bool    `json:"resolved,omitempty"`
-		ToResolved bool    `json:"to_resolved,omitempty"`
+		ToResolved bool    `json:"toResolved,omitempty"`
 		Image      bool    `json:"image,omitempty"`
 		Memfd      bool    `json:"memfd,omitempty"`
 		Deleted    bool    `json:"deleted,omitempty"`
@@ -103,7 +103,7 @@ func reference(r record, ns int64) []byte {
 	return buf.Bytes()
 }
 
-// timeLayout is the "t" a line must carry.
+// timeLayout is the "time" a line must carry.
 const timeLayout = "2006-01-02T15:04:05.000Z07:00"
 
 var testTime = time.Date(2026, 10, 6, 0, 0, 1, 500_000_000, time.UTC).UnixNano()
@@ -139,7 +139,7 @@ func TestTimeTextMatchesFormat(t *testing.T) {
 
 func TestRecordJSONKeepsBytesThatAreNotUTF8(t *testing.T) {
 	r := record{Kind: "open", Comm: "c\xff", Path: "/tmp/a\xfe\xc3\xa9<", To: "\xed\xb3\xbf"}
-	want := `{"t":"2026-10-06T00:00:01.500Z","kind":"open","pid":0,"ppid":0,"comm":"c\udcff","path":"/tmp/a\udcfeé\u003c","to":"\udced\udcb3\udcbf"}` + "\n"
+	want := `{"time":"2026-10-06T00:00:01.500Z","kind":"open","pid":0,"ppid":0,"comm":"c\udcff","path":"/tmp/a\udcfeé\u003c","to":"\udced\udcb3\udcbf"}` + "\n"
 	if got := string(appendRecord(nil, &r, &timeText{}, testTime)); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
