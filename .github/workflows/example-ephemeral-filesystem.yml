@@ -18,7 +18,7 @@ jobs:
       # with an empty allowlist blocks everything, and nothing is attempted.
       - name: Produce output with an ephemeral filesystem
         id: sandboxed
-        uses: buildcage/isolated-run@6e4a23d9fadd854988f3e498cd6570bcaa608716 # v2.6.1
+        uses: buildcage/isolated-run@6464f2d7f2fb487929acc12de63216692a224ba1 # v2.7.0
         with:
           filesystem-mode: ephemeral
           write-through: |
