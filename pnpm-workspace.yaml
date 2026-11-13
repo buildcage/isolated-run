@@ -19,6 +19,8 @@ minimumReleaseAgeExclude:
   - oxfmt
   - "@oxfmt/*"
   - "@oxc-project/*"
+  # Renovate security update: @hono/node-server@2.1.6
+  - "@hono/node-server@2.1.6"
 
 # Lets tsc/rolldown resolve these, even though they're only vite-plus's
 # transitive dependencies. chai/@types/chai are vitest's own expect()
