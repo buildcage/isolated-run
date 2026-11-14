@@ -34291,7 +34291,7 @@ var init_xml = __esmMin((() => {
 		function run(args) {
 			if (args ||= arguments_, runDependencies > 0 || (stackCheckInit(), preRun(), runDependencies > 0)) return;
 			function doRun() {
-				calledRun || (calledRun = !0, Module.calledRun = !0, !ABORT && (initRuntime(), readyPromiseResolve(Module), Module.onRuntimeInitialized && Module.onRuntimeInitialized(), assert(!Module._main, "compiled without a main, but one is present. if you added it from JS, use Module[\"onRuntimeInitialized\"]"), postRun()));
+				calledRun || (calledRun = !0, Module.calledRun = !0, ABORT || (initRuntime(), readyPromiseResolve(Module), Module.onRuntimeInitialized && Module.onRuntimeInitialized(), assert(!Module._main, "compiled without a main, but one is present. if you added it from JS, use Module[\"onRuntimeInitialized\"]"), postRun()));
 			}
 			Module.setStatus ? (Module.setStatus("Running..."), setTimeout(function() {
 				setTimeout(function() {
@@ -52962,7 +52962,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 			}
 			_this.push(null);
 		}), stream.on("data", function(chunk) {
-			debug("wrapped data"), state.decoder && (chunk = state.decoder.write(chunk)), !(state.objectMode && chunk == null) && (state.objectMode || chunk && chunk.length) && (_this.push(chunk) || (paused = !0, stream.pause()));
+			debug("wrapped data"), state.decoder && (chunk = state.decoder.write(chunk)), state.objectMode && chunk == null || (state.objectMode || chunk && chunk.length) && (_this.push(chunk) || (paused = !0, stream.pause()));
 		}), stream) this[i] === void 0 && typeof stream[i] == "function" && (this[i] = function(method) {
 			return function() {
 				return stream[method].apply(stream, arguments);
@@ -54583,7 +54583,7 @@ var __awaiter$9, init_blob_upload = __esmMin((() => {
 	function construct(stream, cb) {
 		if (typeof stream._construct != "function") return;
 		let r = stream._readableState, w = stream._writableState;
-		r && (r.constructed = !1), w && (w.constructed = !1), stream.once(kConstruct, cb), !(stream.listenerCount(kConstruct) > 1) && process.nextTick(constructNT, stream);
+		r && (r.constructed = !1), w && (w.constructed = !1), stream.once(kConstruct, cb), stream.listenerCount(kConstruct) > 1 || process.nextTick(constructNT, stream);
 	}
 	function constructNT(stream) {
 		let called = !1;
@@ -67034,7 +67034,7 @@ var init_github = __esmMin((() => {
 })), require_Set = __commonJSMin(((exports, module) => {
 	var $TypeError = require_type(), isObject = require_isObject$1(), isPropertyKey = require_isPropertyKey$1(), SameValue = require_SameValue(), noThrowOnStrictViolation = function() {
 		try {
-			return !0;
+			return delete [].length, !0;
 		} catch {
 			return !1;
 		}
@@ -72383,7 +72383,7 @@ function addCmd(a, cmd, seq) {
 	(a.cmds ??= new Map()).set(cmd, had === void 0 ? seq : Math.min(had, seq));
 }
 function apply(a, x) {
-	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, x.cmd !== void 0 && addCmd(a, x.cmd, x.seq), !Number.isNaN(x.t) && (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
+	x.failed ? (a.failed |= x.bit, x.perm && (a.perm |= x.bit)) : a.ok |= x.bit, x.cmd !== void 0 && addCmd(a, x.cmd, x.seq), Number.isNaN(x.t) || (a.first = Math.min(a.first, x.t), a.last = Math.max(a.last, x.t), a.seq = Math.min(a.seq, x.seq));
 }
 function fmtSpan(a, originMs) {
 	if (a.first === Infinity) return "";
@@ -72963,7 +72963,7 @@ var Lines = class {
 	gather(group, keys) {
 		let comm = commOf(group), had = this.climbing.get(group), agg = had ?? newAgg();
 		for (let key of keys) mergeAgg(agg, this.climbing.get(key)), this.climbing.delete(key), this.nodes--, this.count(-this.opts.rowBytes(pathOf(key), comm));
-		this.members.delete(group), !had && (this.climbing.set(group, agg), this.nodes++, this.count(this.opts.rowBytes(pathOf(group), comm)));
+		this.members.delete(group), had || (this.climbing.set(group, agg), this.nodes++, this.count(this.opts.rowBytes(pathOf(group), comm)));
 	}
 	loosen() {
 		this.loose = !0, this.loosening = !0;
@@ -72992,7 +72992,7 @@ var Lines = class {
 		node.bytes = bytes, this.count(delta);
 	}
 	count(bytes) {
-		this.bytes += bytes, !this.loosening && !this.loose && this.bytes > this.opts.loose && this.loosen();
+		this.bytes += bytes, this.loosening || !this.loose && this.bytes > this.opts.loose && this.loosen();
 	}
 	stop(cause) {
 		this.stopped = cause, this.trees = new Map(), this.climbing = new Map();
@@ -76207,7 +76207,7 @@ function followStderr() {
 			partial = lines.pop();
 			for (let line of lines) {
 				let text = line.trimEnd();
-				text === "::group::buildcage: filesystem audit totals" ? inTotals = !0 : text === "::endgroup::" && inTotals && totalsDone(), !text.startsWith("::") && (line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line));
+				text === "::group::buildcage: filesystem audit totals" ? inTotals = !0 : text === "::endgroup::" && inTotals && totalsDone(), text.startsWith("::") || (line.startsWith("filesystem-audit: fatal: ") ? fatal = line.slice(25) : line.trim() && (last = line));
 			}
 		},
 		value: () => fatal || last || partial.trim(),
