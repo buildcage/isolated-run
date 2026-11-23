@@ -23,8 +23,11 @@ import { checkRuleListSizesOrThrow, readRuleInputs } from "#core/lib/actions/rul
 import { deriveProjectName } from "#core/lib/docker/compose-project-name.ts";
 import { errorMessage } from "#core/lib/errors.ts";
 import { resolveBuildcageImageRef } from "#core/lib/provenance/image-ref.ts";
-import { verifyImageDigestOrThrow, type ResolvedImage } from "#core/lib/provenance/verify-image.ts";
-import type { VerifyImageIdentity } from "#core/lib/provenance/verify-policy.ts";
+import {
+  verifyImageDigestOrThrow,
+  type ResolvedImage,
+  type VerifyImageDigestOptions,
+} from "#core/lib/provenance/verify-image.ts";
 import { STEP_SUMMARY_LIMIT_BYTES } from "#core/lib/report/render/fit-step-summary.ts";
 
 import { buildComposeEnv, PROXY_RULE_INPUTS } from "./compose-env.ts";
@@ -99,6 +102,7 @@ import { WRITE_THROUGH_ALL } from "./sandbox/write-through.ts";
 import { fetchStepReport, reportStepTraffic } from "./step-report.ts";
 import { checkPasswordlessSudo } from "./sudo-preflight.ts";
 import { setTrafficArtifactOutput } from "./traffic-artifact.ts";
+import { ACTION_VERSION } from "./version.ts";
 
 /**
  * Display fallback for the report's `uses:` example when the runner names no
@@ -204,10 +208,11 @@ const realDeps = {
 export type SandboxStepDeps = typeof realDeps;
 
 async function resolveVerifiedImage(
-  { actionRef, actionRepo, proxyEngine }: VerifyImageIdentity & { proxyEngine: ProxyEngine },
+  options: VerifyImageDigestOptions & { proxyEngine: ProxyEngine },
   { verifyImageDigestOrThrow, log }: Pick<SandboxStepDeps, "verifyImageDigestOrThrow" | "log">,
 ): Promise<ResolvedImage> {
-  const digest = await verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine });
+  const { actionRef, actionRepo } = options;
+  const digest = await verifyImageDigestOrThrow(options);
   log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`);
   return {
     imageRef: resolveBuildcageImageRef({ imageDigest: digest, actionRepository: actionRepo }),
@@ -484,7 +489,11 @@ async function resolveProxyImage(
 }> {
   const localOverride = await deps.readLocalImageOverride(env);
   const { imageRef, pullPolicy } =
-    localOverride ?? (await resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, deps));
+    localOverride ??
+    (await resolveVerifiedImage(
+      { actionRef, actionRepo, actionVersion: ACTION_VERSION, proxyEngine },
+      deps,
+    ));
   deps.log(`buildcage: proxy image: ${imageRef}`);
   return { imageRef, pullPolicy, composeFiles: resolveComposeFiles(localOverride) };
 }

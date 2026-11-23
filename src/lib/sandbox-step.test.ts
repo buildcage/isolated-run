@@ -17,6 +17,7 @@ import {
 } from "./sandbox-step.ts";
 import { filesystemAuditPaths } from "./sandbox/filesystem-audit-paths.ts";
 import { SANDBOX_SCRATCH_BASE } from "./sandbox/scratch-dir.ts";
+import { ACTION_VERSION } from "./version.ts";
 
 // Assembled at runtime: a literal shaped like an AWS access key ID trips
 // secret scanning on push.
@@ -777,6 +778,7 @@ describe("runSandboxStep", () => {
     expect(mocks.verifyImageDigestOrThrow).toHaveBeenCalledWith({
       actionRef: "v1.2.3",
       actionRepo: "buildcage/isolated-run",
+      actionVersion: ACTION_VERSION,
       proxyEngine: "universal",
     });
     expect(mocks.startSandboxProxy.mock.calls[0][0]).toMatchObject({
