@@ -55,9 +55,9 @@ let node_path = require("node:path");
 node_path = __toESM(node_path, 1);
 let buffer = require("buffer"), node_os = require("node:os");
 node_os = __toESM(node_os, 1);
-let node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
+let node_child_process = require("node:child_process"), node_fs_promises = require("node:fs/promises"), fs_promises = require("fs/promises");
 fs_promises = __toESM(fs_promises, 1);
-let node_child_process = require("node:child_process"), node_process = require("node:process");
+let node_process = require("node:process");
 node_process = __toESM(node_process, 1);
 let node_https = require("node:https");
 node_https = __toESM(node_https, 1);
@@ -16487,21 +16487,20 @@ function readGhcrBasicAuth(_env = process.env, _readFileSync = node_fs.readFileS
 }
 // src/core/lib/provenance/errors.ts
 var VerifyImageError = class extends ActionError {}, ProvenanceError = class extends ActionError {};
+// src/core/lib/provenance/image-tag.ts
 function engineTagSuffix(proxyEngine) {
 	return `-${proxyEngine}`;
 }
-function imageTagFromRef(actionRef, proxyEngine = "inspect") {
-	if (!actionRef) return "";
-	let base;
-	return base = /^[0-9a-f]{40}$/i.test(actionRef) ? `sha-${actionRef.toLowerCase()}` : actionRef.startsWith("v") ? actionRef.slice(1) : actionRef, `${base}${engineTagSuffix(proxyEngine)}`;
+function imageTagForCommit(commit, proxyEngine) {
+	return `sha-${commit}${engineTagSuffix(proxyEngine)}`;
 }
 // src/core/lib/provenance/engine-label.ts
-const IMAGE_VERSION_LABEL = "org.opencontainers.image.version", RELEASE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
+const IMAGE_VERSION_LABEL = "org.opencontainers.image.version", RELEASE_VERSION$1 = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/;
 function checkImageEngine({ labels, proxyEngine, imageTag }) {
 	let label = labels[IMAGE_VERSION_LABEL];
 	if (!label) throw new VerifyImageError(`Image ${imageTag} carries no ${IMAGE_VERSION_LABEL} label, so the proxy engine it was published for cannot be confirmed.`, "VERIFY_FAILED");
 	let suffix = engineTagSuffix(proxyEngine);
-	if (!(label.endsWith(suffix) && RELEASE_VERSION.test(label.slice(0, label.length - suffix.length)))) throw new VerifyImageError(`Image ${imageTag} was not published for proxy engine ${proxyEngine} (${IMAGE_VERSION_LABEL}: ${label}), so the rules this run was given would not be enforced.`, "VERIFY_FAILED");
+	if (!(label.endsWith(suffix) && RELEASE_VERSION$1.test(label.slice(0, label.length - suffix.length)))) throw new VerifyImageError(`Image ${imageTag} was not published for proxy engine ${proxyEngine} (${IMAGE_VERSION_LABEL}: ${label}), so the rules this run was given would not be enforced.`, "VERIFY_FAILED");
 }
 // src/core/lib/provenance/oci-registry.ts
 const MANIFEST_MEDIA_TYPES = ["application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json"], INDEX_MEDIA_TYPES = ["application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"];
@@ -16663,6 +16662,55 @@ async function bundleBlob(client, blobDigest) {
 		onFailure: "NOT_FOUND",
 		absentOn404: !1
 	});
+}
+// src/core/lib/provenance/release-commit.ts
+const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, COMMIT_SHA = /^[0-9a-f]{40}$/, runGit = (args, { env, cwd }) => new Promise((resolve, reject) => {
+	(0, node_child_process.execFile)("git", args, {
+		env,
+		cwd,
+		encoding: "utf8",
+		timeout: 6e4
+	}, (err, stdout, stderr) => err ? reject(Object.assign(err, { stderr })) : resolve(stdout));
+});
+function gitEnv(env) {
+	return {
+		PATH: env.PATH ?? "",
+		GIT_CONFIG_NOSYSTEM: "1",
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_TERMINAL_PROMPT: "0"
+	};
+}
+function lsRemoteError(e, actionRepo) {
+	let { code, killed, stderr } = Object(e);
+	if (code === "ENOENT") return new VerifyImageError("git is not on PATH; the action needs it to read its release tag.", "VERIFY_FAILED");
+	let detail = typeof stderr == "string" ? stderr.trim().split("\n").at(-1) : void 0;
+	return detail?.includes("could not read Username") ? new VerifyImageError(`Found no public repository ${actionRepo}.`, "NOT_FOUND") : new VerifyImageError(`Transient error reading the tags of ${actionRepo}: ` + (killed ? "git ls-remote timed out" : detail || errorMessage(e)), "TRANSIENT");
+}
+async function resolveReleaseCommit({ actionRepo, actionVersion }, _runGit = runGit, env = process.env) {
+	if (!REPO_NAME.test(actionRepo)) throw new VerifyImageError(`Malformed action repository: ${JSON.stringify(actionRepo)}`, "VERIFY_FAILED");
+	let tag = `v${actionVersion}`, ref = `refs/tags/${tag}`, output;
+	try {
+		output = await _runGit([
+			"ls-remote",
+			`https://github.com/${actionRepo}.git`,
+			ref,
+			`${ref}^{}`
+		], {
+			env: gitEnv(env),
+			cwd: "/"
+		});
+	} catch (e) {
+		throw lsRemoteError(e, actionRepo);
+	}
+	let refs = new Map();
+	for (let line of output.split("\n")) {
+		let [sha, name] = line.split("	");
+		name !== void 0 && refs.set(name, sha);
+	}
+	let sha = refs.get(`${ref}^{}`) ?? refs.get(ref);
+	if (sha === void 0) throw new VerifyImageError(`Found no tag ${tag} in ${actionRepo}.`, "NOT_FOUND");
+	if (!COMMIT_SHA.test(sha)) throw new VerifyImageError(`Malformed object SHA for tag ${tag}: ${JSON.stringify(sha)}`, "VERIFY_FAILED");
+	return sha;
 }
 // node_modules/.pnpm/@sigstore+protobuf-specs@0.5.2/node_modules/@sigstore/protobuf-specs/dist/__generated__/envelope.js
 var require_envelope = __commonJSMin(((exports) => {
@@ -23097,31 +23145,50 @@ async function verifyBundle(bundleJson, options, expectedDigest) {
 	assertSignedDigest(bundle.content.dsseEnvelope, expectedDigest);
 }
 // src/core/lib/provenance/verify-policy.ts
-const RELEASE_REF = /^v\d+(\.\d+(\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?)?)?$/, escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseInsensitive = (s) => escapeRegex(s).replace(/[A-Za-z]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
-function buildVerifyOptions({ actionRef, actionRepo }) {
-	let sanPrefix = `^${escapeRegex("https://github.com/")}${caseInsensitive(actionRepo)}${escapeRegex("/.github/workflows/docker-publish.yml@refs/tags/")}`, base = {
+const SHA_REF = /^[0-9a-f]{40}$/i, RELEASE_REF = /^v(\d+(?:\.\d+(?:\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)?)?)$/, RELEASE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$/, escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseInsensitive = (s) => escapeRegex(s).replace(/[A-Za-z]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+function releaseTarget({ actionRef, actionVersion }) {
+	if (actionVersion.length > 100 || !RELEASE_VERSION.test(actionVersion)) throw new VerifyImageError(`This build has no release version (package.json version ${JSON.stringify(actionVersion)}).`, "VERIFY_FAILED");
+	if (SHA_REF.test(actionRef)) return {
+		kind: "commit",
+		commit: actionRef.toLowerCase()
+	};
+	let match = RELEASE_REF.exec(actionRef);
+	if (!match) return null;
+	let requested = match[1], full = /^\d+\.\d+\.\d+/.test(requested);
+	if (!(full ? actionVersion === requested : actionVersion.startsWith(`${requested}.`) && !actionVersion.includes("-"))) throw new VerifyImageError(`The action ref ${actionRef} does not cover this action's version v${actionVersion}` + (full ? "." : ", or that version is a prerelease."), "VERIFY_FAILED");
+	return { kind: "tag" };
+}
+function buildVerifyOptions({ actionRepo, actionVersion, commit }) {
+	let tagRef = `refs/tags/v${actionVersion}`;
+	return {
 		certificateIssuer: "https://token.actions.githubusercontent.com",
+		certificateIdentityURI: `^${escapeRegex("https://github.com/")}${caseInsensitive(actionRepo)}${escapeRegex(`/.github/workflows/docker-publish.yml@${tagRef}`)}$`,
+		certificateOIDs: {
+			"1.3.6.1.4.1.57264.1.11": derUtf8("github-hosted"),
+			"1.3.6.1.4.1.57264.1.13": derUtf8(commit),
+			"1.3.6.1.4.1.57264.1.14": derUtf8(tagRef),
+			"1.3.6.1.4.1.57264.1.19": derUtf8(commit)
+		},
 		tlogThreshold: 1,
 		ctLogThreshold: 1
 	};
-	return /^[0-9a-f]{40}$/i.test(actionRef) ? {
-		...base,
-		certificateIdentityURI: `${sanPrefix}v`,
-		certificateOIDs: { "1.3.6.1.4.1.57264.1.13": derUtf8(actionRef.toLowerCase()) }
-	} : RELEASE_REF.test(actionRef) ? {
-		...base,
-		certificateIdentityURI: `${sanPrefix}${escapeRegex(actionRef)}(\\.|$)`
-	} : null;
 }
 // src/core/lib/provenance/verify-image.ts
 const REGISTRY = "ghcr.io";
-async function verifyImageDigest({ actionRef, actionRepo, proxyEngine = "inspect" }) {
-	let repoPath = actionRepo.toLowerCase(), verifyOptions = buildVerifyOptions({
+async function verifyImageDigest({ actionRef, actionRepo, actionVersion, proxyEngine = "inspect" }) {
+	let repoPath = actionRepo.toLowerCase(), target = releaseTarget({
 		actionRef,
-		actionRepo
+		actionVersion
 	});
-	if (!verifyOptions) return null;
-	let tag = imageTagFromRef(actionRef, proxyEngine), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken), bundle = await fetchBundle(REGISTRY, repoPath, digest, regToken), labels = await fetchImageConfigLabels(REGISTRY, repoPath, digest, regToken);
+	if (!target) return null;
+	let commit = target.kind === "commit" ? target.commit : await resolveReleaseCommit({
+		actionRepo,
+		actionVersion
+	}), verifyOptions = buildVerifyOptions({
+		actionRepo,
+		actionVersion,
+		commit
+	}), tag = imageTagForCommit(commit, proxyEngine), regToken = await fetchRegistryToken(REGISTRY, repoPath, readGhcrBasicAuth()), digest = await fetchManifestDigest(REGISTRY, repoPath, tag, regToken), bundle = await fetchBundle(REGISTRY, repoPath, digest, regToken), labels = await fetchImageConfigLabels(REGISTRY, repoPath, digest, regToken);
 	return await verifyBundle(bundle, verifyOptions, digest), checkImageEngine({
 		labels,
 		proxyEngine,
@@ -23135,14 +23202,10 @@ function requireDigest(digest, actionRef) {
 	if (digest === null) throw new ProvenanceError(`Cannot verify image provenance for ref: ${JSON.stringify(actionRef)}. Pin the action to a version tag (e.g. @v2.1.0) or a commit SHA.`, "UNVERIFIABLE_REF");
 	return digest;
 }
-async function verifyImageDigestOrThrow({ actionRef, actionRepo, proxyEngine }) {
-	let digest;
+async function verifyImageDigestOrThrow(options) {
+	let { actionRef } = options, digest;
 	try {
-		digest = await verifyImageDigest({
-			actionRef,
-			actionRepo,
-			proxyEngine
-		});
+		digest = await verifyImageDigest(options);
 	} catch (e) {
 		throw toProvenanceError(e);
 	}
@@ -42670,7 +42733,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 			} }
 		}
 	};
-})), contentType, blobServiceProperties, accept, url, restype, comp, timeoutInSeconds, version, requestId, accept1, comp1, comp2, prefix, marker, maxPageSize, include, keyInfo, comp3, restype1, body, comp4, contentLength, multipartContentType, comp5, where, restype2, metadata, access, defaultEncryptionScope, preventEncryptionScopeOverride, leaseId, ifModifiedSince, ifUnmodifiedSince, comp6, comp7, containerAcl, comp8, deletedContainerName, deletedContainerVersion, comp9, sourceContainerName, sourceLeaseId, comp10, action, duration, proposedLeaseId, action1, leaseId1, action2, action3, breakPeriod, action4, proposedLeaseId1, include1, startFrom, accept2, endBefore, delimiter$1, snapshot, versionId, range, rangeGetContentMD5, rangeGetContentCRC64, structuredBodyType, encryptionKey, encryptionKeySha256, encryptionAlgorithm, ifMatch, ifNoneMatch, ifTags, deleteSnapshots, blobDeleteType, accessTierIfModifiedSince, accessTierIfUnmodifiedSince, comp11, expiryOptions, expiresOn, blobCacheControl, blobContentType, blobContentMD5, blobContentEncoding, blobContentLanguage, blobContentDisposition, comp12, immutabilityPolicyExpiry, immutabilityPolicyMode, comp13, legalHold, encryptionScope, comp14, tier, rehydratePriority, sourceIfModifiedSince, sourceIfUnmodifiedSince, sourceIfMatch, sourceIfNoneMatch, sourceIfTags, copySource, blobTagsString, sealBlob, legalHold1, xMsRequiresSync, sourceContentMD5, copySourceAuthorization, copySourceTags, fileRequestIntent, comp15, copyActionAbortConstant, copyId, comp16, tier1, queryRequest, comp17, comp18, ifModifiedSince1, ifUnmodifiedSince1, ifMatch1, ifNoneMatch1, tags, transactionalContentMD5, transactionalContentCrc64, blobType, blobContentLength, blobSequenceNumber, contentType1, body1, accept3, comp19, pageWrite, ifSequenceNumberLessThanOrEqualTo, ifSequenceNumberLessThan, ifSequenceNumberEqualTo, structuredContentLength, pageWrite1, sourceUrl, sourceRange, sourceContentCrc64, range1, sourceEncryptionKey, sourceEncryptionKeySha256, sourceEncryptionAlgorithm, comp20, prevsnapshot, prevSnapshotUrl, sequenceNumberAction, comp21, blobType1, comp22, maxSize, appendPosition, sourceRange1, comp23, blobType2, copySourceBlobProperties, comp24, blockId, blocks, comp25, listType, init_parameters = __esmMin((() => {
+})), contentType, blobServiceProperties, accept, url, restype, comp, timeoutInSeconds, version$1, requestId, accept1, comp1, comp2, prefix, marker, maxPageSize, include, keyInfo, comp3, restype1, body, comp4, contentLength, multipartContentType, comp5, where, restype2, metadata, access, defaultEncryptionScope, preventEncryptionScopeOverride, leaseId, ifModifiedSince, ifUnmodifiedSince, comp6, comp7, containerAcl, comp8, deletedContainerName, deletedContainerVersion, comp9, sourceContainerName, sourceLeaseId, comp10, action, duration, proposedLeaseId, action1, leaseId1, action2, action3, breakPeriod, action4, proposedLeaseId1, include1, startFrom, accept2, endBefore, delimiter$1, snapshot, versionId, range, rangeGetContentMD5, rangeGetContentCRC64, structuredBodyType, encryptionKey, encryptionKeySha256, encryptionAlgorithm, ifMatch, ifNoneMatch, ifTags, deleteSnapshots, blobDeleteType, accessTierIfModifiedSince, accessTierIfUnmodifiedSince, comp11, expiryOptions, expiresOn, blobCacheControl, blobContentType, blobContentMD5, blobContentEncoding, blobContentLanguage, blobContentDisposition, comp12, immutabilityPolicyExpiry, immutabilityPolicyMode, comp13, legalHold, encryptionScope, comp14, tier, rehydratePriority, sourceIfModifiedSince, sourceIfUnmodifiedSince, sourceIfMatch, sourceIfNoneMatch, sourceIfTags, copySource, blobTagsString, sealBlob, legalHold1, xMsRequiresSync, sourceContentMD5, copySourceAuthorization, copySourceTags, fileRequestIntent, comp15, copyActionAbortConstant, copyId, comp16, tier1, queryRequest, comp17, comp18, ifModifiedSince1, ifUnmodifiedSince1, ifMatch1, ifNoneMatch1, tags, transactionalContentMD5, transactionalContentCrc64, blobType, blobContentLength, blobSequenceNumber, contentType1, body1, accept3, comp19, pageWrite, ifSequenceNumberLessThanOrEqualTo, ifSequenceNumberLessThan, ifSequenceNumberEqualTo, structuredContentLength, pageWrite1, sourceUrl, sourceRange, sourceContentCrc64, range1, sourceEncryptionKey, sourceEncryptionKeySha256, sourceEncryptionAlgorithm, comp20, prevsnapshot, prevSnapshotUrl, sequenceNumberAction, comp21, blobType1, comp22, maxSize, appendPosition, sourceRange1, comp23, blobType2, copySourceBlobProperties, comp24, blockId, blocks, comp25, listType, init_parameters = __esmMin((() => {
 	init_mappers(), contentType = {
 		parameterPath: ["options", "contentType"],
 		mapper: {
@@ -42723,7 +42786,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 			xmlName: "timeout",
 			type: { name: "Number" }
 		}
-	}, version = {
+	}, version$1 = {
 		parameterPath: "version",
 		mapper: {
 			defaultValue: "2026-10-06",
@@ -44152,7 +44215,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId
 		],
 		isXML: !0,
@@ -44179,7 +44242,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44205,7 +44268,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44234,7 +44297,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44263,7 +44326,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId
 		],
 		isXML: !0,
@@ -44287,7 +44350,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44314,7 +44377,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		urlParameters: [url],
 		headerParameters: [
 			accept,
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			multipartContentType
@@ -44345,7 +44408,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44455,7 +44518,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, restype2],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -44478,7 +44541,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, restype2],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId
@@ -44498,7 +44561,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, restype2],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -44524,7 +44587,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -44565,7 +44628,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId
@@ -44592,7 +44655,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId,
 			access,
 			leaseId,
@@ -44620,7 +44683,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			deletedContainerName,
@@ -44645,7 +44708,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			sourceContainerName,
@@ -44678,7 +44741,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		urlParameters: [url],
 		headerParameters: [
 			accept,
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			multipartContentType
@@ -44710,7 +44773,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44733,7 +44796,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -44761,7 +44824,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -44788,7 +44851,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -44815,7 +44878,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -44842,7 +44905,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -44878,7 +44941,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44913,7 +44976,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept2
 		],
@@ -44945,7 +45008,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -44981,7 +45044,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept2
 		],
@@ -45004,7 +45067,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -45147,7 +45210,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45183,7 +45246,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45216,7 +45279,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45244,7 +45307,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp8],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -45263,7 +45326,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp11],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			expiryOptions,
@@ -45284,7 +45347,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [comp, timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45320,7 +45383,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifUnmodifiedSince,
@@ -45347,7 +45410,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -45371,7 +45434,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			legalHold
@@ -45391,7 +45454,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp6],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -45421,7 +45484,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp10],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -45448,7 +45511,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp10],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -45474,7 +45537,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp10],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -45500,7 +45563,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp10],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -45527,7 +45590,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp10],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -45553,7 +45616,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp14],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -45583,7 +45646,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -45622,7 +45685,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			metadata,
@@ -45668,7 +45731,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45695,7 +45758,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45722,7 +45785,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1
 		],
@@ -45761,7 +45824,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId,
 			leaseId,
 			ifModifiedSince,
@@ -45798,7 +45861,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -45830,7 +45893,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId,
 			leaseId,
 			ifTags,
@@ -45918,7 +45981,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -45964,7 +46027,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp19],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			leaseId,
@@ -46006,7 +46069,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp19],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46041,7 +46104,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp19],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46098,7 +46161,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -46134,7 +46197,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -46161,7 +46224,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [comp, timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -46191,7 +46254,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [comp, timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -46218,7 +46281,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp21],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			ifModifiedSince,
@@ -46273,7 +46336,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46316,7 +46379,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp22],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			leaseId,
@@ -46355,7 +46418,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp22],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46401,7 +46464,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds, comp23],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -46476,7 +46539,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			metadata,
@@ -46526,7 +46589,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		queryParameters: [timeoutInSeconds],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46586,7 +46649,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			contentLength,
 			leaseId,
@@ -46622,7 +46685,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			contentLength,
@@ -46663,7 +46726,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		headerParameters: [
 			contentType,
 			accept,
-			version,
+			version$1,
 			requestId,
 			metadata,
 			leaseId,
@@ -46715,7 +46778,7 @@ var Pipeline, init_Pipeline = __esmMin((() => {
 		],
 		urlParameters: [url],
 		headerParameters: [
-			version,
+			version$1,
 			requestId,
 			accept1,
 			leaseId,
@@ -77753,12 +77816,8 @@ const realDeps = {
 	notice: annotate.notice,
 	warn: annotate.warning
 };
-async function resolveVerifiedImage({ actionRef, actionRepo, proxyEngine }, { verifyImageDigestOrThrow, log }) {
-	let digest = await verifyImageDigestOrThrow({
-		actionRef,
-		actionRepo,
-		proxyEngine
-	});
+async function resolveVerifiedImage(options, { verifyImageDigestOrThrow, log }) {
+	let { actionRef, actionRepo } = options, digest = await verifyImageDigestOrThrow(options);
 	return log(`Image provenance verified for ref: ${JSON.stringify(actionRef)} (digest ${digest}).`), {
 		imageRef: resolveBuildcageImageRef({
 			imageDigest: digest,
@@ -77860,6 +77919,7 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 	let localOverride = await deps.readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 		actionRef,
 		actionRepo,
+		actionVersion: "2.7.0",
 		proxyEngine
 	}, deps);
 	return deps.log(`buildcage: proxy image: ${imageRef}`), {
