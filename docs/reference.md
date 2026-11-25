@@ -186,6 +186,9 @@ known-blocked-rules: |
 Each is also set under its name spelled with underscores, `traffic_artifact_name` and
 `filesystem_audit_artifact_name`.
 
+The step waits, up to 30 seconds, until GitHub lists an artifact it uploaded, so
+`actions/download-artifact` can fetch it by name later in the same job.
+
 ## Operation modes
 
 | `proxy-mode` | What it does                                                      | When to use it                                            |
