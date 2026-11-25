@@ -207,7 +207,7 @@ jobs:
           ./test/assert-filesystem-audit.sh
 
       - name: Download and check the filesystem audit artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.audit.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/audit
@@ -375,7 +375,7 @@ jobs:
 
       - name: Download the proposed rules
         if: matrix.enforcement
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.rules_record.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/rules
@@ -687,7 +687,7 @@ jobs:
       # matching buildcage-traffic-* by pattern, proves the output itself is
       # both set and correct.
       - name: Download the traffic artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.sandbox.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/buildcage-traffic
@@ -975,7 +975,7 @@ jobs:
           fi
 
       - name: Download the traffic artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.restrict.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/aws-traffic
