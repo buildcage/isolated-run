@@ -98,6 +98,7 @@ jobs:
     # hours.
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
     name: "e2e: test (filesystem_audit, ${{ matrix.filesystem_mode }}${{ matrix.audit_mode && ', audit mode' || '' }}${{ matrix.runner_read_only && ', runner read-only' || '' }}${{ matrix.enforcement && ', enforcement, config_file' || '' }}${{ matrix.concurrency && ', concurrency' || '' }}, ${{ matrix.runner }})"
 
@@ -207,7 +208,7 @@ jobs:
           ./test/assert-filesystem-audit.sh
 
       - name: Download and check the filesystem audit artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.audit.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/audit
@@ -375,7 +376,7 @@ jobs:
 
       - name: Download the proposed rules
         if: matrix.enforcement
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.rules_record.outputs.filesystem-audit-artifact-name }}
           path: ${{ runner.temp }}/rules
@@ -606,6 +607,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
     name: "e2e: test (sandbox, inspect engine, concurrency, ${{ matrix.runner }})"
 
@@ -687,7 +689,7 @@ jobs:
       # matching buildcage-traffic-* by pattern, proves the output itself is
       # both set and correct.
       - name: Download the traffic artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.sandbox.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/buildcage-traffic
@@ -854,6 +856,7 @@ jobs:
     # assuming a second role, which has none.
     environment: aws-e2e
     permissions:
+      actions: read
       contents: read
       id-token: write
     name: "e2e: test (sandbox, inspect engine, AWS access key check)"
@@ -975,7 +978,7 @@ jobs:
           fi
 
       - name: Download the traffic artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: ./.github/actions/download-artifact
         with:
           name: ${{ steps.restrict.outputs.traffic-artifact-name }}
           path: ${{ runner.temp }}/aws-traffic
