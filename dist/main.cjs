@@ -77919,7 +77919,7 @@ async function resolveProxyImage({ actionRef, actionRepo, proxyEngine }, env, de
 	let localOverride = await deps.readLocalImageOverride(env), { imageRef, pullPolicy } = localOverride ?? await resolveVerifiedImage({
 		actionRef,
 		actionRepo,
-		actionVersion: "2.7.0",
+		actionVersion: "2.8.0-rc1",
 		proxyEngine
 	}, deps);
 	return deps.log(`buildcage: proxy image: ${imageRef}`), {
