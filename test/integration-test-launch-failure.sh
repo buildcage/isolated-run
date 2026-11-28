@@ -12,7 +12,7 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/driver-helpers.sh"
 
 # renovate: datasource=docker depName=alpine
-ALPINE_IMAGE="alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+ALPINE_IMAGE="alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf"
 
 SUFFIX="launch-test-$$"
 CONTAINER_NAME="buildcage-proxy-${SUFFIX}"

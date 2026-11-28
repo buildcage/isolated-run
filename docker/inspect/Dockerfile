@@ -20,7 +20,7 @@ ARG HAPROXY_BRANCH=3.4
 # statically linked (including libseccomp), so no compilation is needed,
 # only a checksum-pinned download, same as docker/universal/Dockerfile.
 # CoreDNS ships the same way.
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS deps
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS deps
 ARG RUNC_VERSION
 ARG RUNC_SHA256_AMD64
 ARG RUNC_SHA256_ARM64
@@ -97,7 +97,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm run build:qjs
 
 # Final image
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 LABEL org.opencontainers.image.title="isolated-run-inspect-proxy" \
       org.opencontainers.image.description="Network-isolated, method/path-inspecting proxy for arbitrary GitHub Actions commands" \
